@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "BLE", "S110", "S608", "S701", "B", "SIM", "UP"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+"tests/*" = ["S", "BLE"]
+"*_generated.py" = ["ALL"]

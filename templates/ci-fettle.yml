@@ -1,0 +1,28 @@
+name: Fettle Quality Gate
+on:
+  pull_request:
+    paths: ['**.py']
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: pip install ruff semgrep
+
+      - name: Ruff check
+        run: ruff check --output-format=github .
+
+      - name: Semgrep check
+        run: semgrep --config .fettle/llm-antipatterns.yml --error .
+
+      - name: Quality scan (if baseline exists)
+        if: hashFiles('.fettle/baseline.json') != ''
+        run: python3 .fettle/quality_scan.py --root . --baseline .fettle/baseline.json
