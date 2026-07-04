@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Removed `effectiveness_report.py`: it depended on a private logging tool
+  no public install has; the tool's name joined the scrub-audit pattern.
+  The effectiveness loop returns in v0.4.0 built on Fettle's own trace files.
+- Rust/shell gate tests now run on ubuntu CI (cargo + shellcheck installed);
+  cargo is resolved from PATH instead of a hardcoded Linux toolchain path.
+- README documents the seven plugin slash commands.
+
 ## v0.2.1 (2026-07-04)
 
 Fixes surfaced by dogfooding the project scan on a real repo (AlphaAgent):
