@@ -80,6 +80,18 @@ claude plugin install fettle@fettle-marketplace
 Then run `bash scripts/run.sh doctor.py` from the plugin or repo directory to
 verify the environment.
 
+## Slash commands
+
+Installing the plugin adds these commands to Claude Code:
+
+| Command | Purpose |
+|---|---|
+| `/fettle:quality` | Full project quality scan |
+| `/fettle:preflight` | Pre-deployment FMEA checklist for a service or agent |
+| `/fettle:ops-review` | Operational readiness review checklist |
+| `/fettle:plan-activate` / `/fettle:plan-complete` | Plan lifecycle for the plan-before-edit gate |
+| `/fettle:mcp-approve` / `/fettle:mcp-revoke` | Zero-trust allowlist ledger for MCP packages |
+
 ## Enforcement modes
 
 Set per project in `.fettle.toml` (see [docs/CONFIG.md](docs/CONFIG.md)):
