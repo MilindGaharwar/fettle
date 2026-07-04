@@ -3,7 +3,6 @@
 import ast
 import os
 import sys
-from pathlib import Path
 
 STDLIB_TOP_LEVEL = frozenset(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else frozenset()
 
@@ -21,10 +20,9 @@ def _parse_imports(file_path: str) -> list[dict]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imports.append({"type": "import", "module": alias.name, "names": [], "line": node.lineno})
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and node.level == 0:
-                names = [a.name for a in node.names] if node.names else []
-                imports.append({"type": "from", "module": node.module, "names": names, "line": node.lineno})
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names = [a.name for a in node.names] if node.names else []
+            imports.append({"type": "from", "module": node.module, "names": names, "line": node.lineno})
     return imports
 
 
@@ -84,9 +82,7 @@ def _exported_names(file_path: str) -> set[str]:
 
     names = set()
     for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            names.add(node.name)
-        elif isinstance(node, ast.ClassDef):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
         elif isinstance(node, ast.Assign):
             for target in node.targets:
