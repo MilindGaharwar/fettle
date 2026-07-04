@@ -68,8 +68,15 @@ Run a project scan directly:
 python3 ~/tools/fettle/scripts/quality_scan.py --root . --json
 ```
 
-Claude Code plugin installation with automatic hook wiring ships in v0.2.0
-(WP-4/WP-6 in the roadmap).
+### As a Claude Code plugin (hooks wire automatically)
+
+```bash
+claude plugin marketplace add MilindGaharwar/fettle
+claude plugin install fettle@fettle-marketplace
+```
+
+Then run `python3 ~/.claude/plugins/*/fettle/scripts/doctor.py` (or
+`scripts/run.sh doctor.py` from the repo) to verify the environment.
 
 ## Enforcement modes
 

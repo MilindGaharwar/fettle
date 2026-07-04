@@ -87,8 +87,13 @@ def _is_test_file(path: str) -> bool:
     )
 
 
-def _is_implementation_file(path: str) -> bool:
-    """Determine if a file is implementation code that requires a plan."""
+def _is_implementation_file(path: str, cwd: str = "") -> bool:
+    """Determine if a file is implementation code that requires a plan.
+
+    Files outside the project root (scratch files, /tmp experiments) are
+    exempt — "is it under cwd" generalizes the old hardcoded /tmp prefixes,
+    which wrongly exempted whole projects on systems where tmp IS /tmp.
+    """
     if not path:
         return False
     _, ext = os.path.splitext(path)
@@ -96,7 +101,11 @@ def _is_implementation_file(path: str) -> bool:
         return False
     if ext not in IMPL_EXTENSIONS:
         return False
-    if any(path.startswith(p) for p in EXEMPT_PATH_PREFIXES):
+    if cwd and os.path.isabs(path):
+        root = os.path.abspath(cwd)
+        if not os.path.abspath(path).startswith(root + os.sep):
+            return False
+    elif any(path.startswith(p) for p in EXEMPT_PATH_PREFIXES):
         return False
     if any(s in path for s in EXEMPT_PATH_CONTAINS):
         return False
@@ -159,7 +168,7 @@ def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> lis
     plan_dir_name = str(cfg.get("plan_dir", "docs"))
     max_age_s = float(cfg.get("max_age_hours", 1)) * 3600
 
-    if not _is_implementation_file(file_path):
+    if not _is_implementation_file(file_path, cwd):
         return []
 
     session = _load_tracking()
@@ -201,6 +210,7 @@ def scan_tests_before_commit(command: str) -> list[str]:
 
 def scan_stop_untested(data: dict) -> list[str]:
     """BLOCKING (Stop): Block response if implementation files edited but not tested."""
+    cwd = data.get("cwd", "")
     entries = _load_edit_tracking()
     if not entries:
         return []
@@ -210,7 +220,7 @@ def scan_stop_untested(data: dict) -> list[str]:
     untested = []
     for entry in entries:
         fpath = str(entry.get("file", ""))
-        if _is_implementation_file(fpath) and not entry.get("tested", False):
+        if _is_implementation_file(fpath, cwd) and not entry.get("tested", False):
             untested.append(fpath)
 
     if untested:
