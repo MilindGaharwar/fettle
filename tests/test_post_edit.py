@@ -59,7 +59,7 @@ def test_advisory_mode_exit_0():
     try:
         stdout, stderr, rc = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
         assert rc == 0
@@ -77,7 +77,7 @@ def test_soft_mode_errors_exit_2():
     try:
         stdout, stderr, rc = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "soft"},
+            extra_env={"FETTLE_GATE_MODE": "soft"},
             cwd=tmpdir,
         )
         assert rc == 2
@@ -94,7 +94,7 @@ def test_output_json_valid():
     try:
         stdout, stderr, rc = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "soft"},
+            extra_env={"FETTLE_GATE_MODE": "soft"},
             cwd=tmpdir,
         )
         parsed = json.loads(stdout.strip())
@@ -125,7 +125,7 @@ def test_critical_directive_in_error_output():
     try:
         stdout, stderr, rc = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "soft"},
+            extra_env={"FETTLE_GATE_MODE": "soft"},
             cwd=tmpdir,
         )
         assert rc == 2
@@ -143,13 +143,13 @@ def test_jsonl_dedup_prevents_repeat():
         # First run — creates trace entries
         run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
         # Second run — should hit dedup
         run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
 
@@ -175,7 +175,7 @@ def test_semgrep_skipped_for_non_scoped_path():
     try:
         run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
         trace_path = os.path.join(tmpdir, ".fettle", "trace.jsonl")
@@ -207,7 +207,7 @@ def test_semgrep_runs_for_scoped_path(tmp_path):
 
         run_hook(
             {"tool_input": {"file_path": test_file}, "cwd": str(proj)},
-            extra_env={"QUALITY_GATE_MODE": "advisory", "FETTLE_TRACE_DIR": trace_dir},
+            extra_env={"FETTLE_GATE_MODE": "advisory", "FETTLE_TRACE_DIR": trace_dir},
         )
         with open(trace_path) as fh:
             lines = fh.readlines()
@@ -244,7 +244,7 @@ def test_jsonl_rotation_at_10k_lines():
 
         run_hook(
             {"tool_input": {"file_path": test_file}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
 
@@ -285,7 +285,7 @@ def test_escalation_ladder_after_3_repeats():
 
         stdout, stderr, rc = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "soft"},
+            extra_env={"FETTLE_GATE_MODE": "soft"},
             cwd=tmpdir,
         )
         assert rc == 2
@@ -303,7 +303,7 @@ def test_metric_entry_logged_to_jsonl():
     try:
         run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
         trace_path = os.path.join(tmpdir, ".fettle", "trace.jsonl")

@@ -36,6 +36,7 @@ DEFAULTS: dict[str, Any] = {
                        "test", ".test.", ".spec."],
         },
         "ui_colors": {"enabled": False, "allowed_hex": []},
+        "docs": {"enabled": False, "mode": "soft"},  # doc-update-before-push check
         "tests": {"enabled": False, "browser_test_window_s": 1800},
         "mcp_trust": {"enabled": False},
     },
@@ -83,12 +84,16 @@ def load_config(cwd: str | None = None) -> dict[str, Any]:
             import sys
             print(f"fettle: could not parse {config_path}: {e} — using defaults", file=sys.stderr)
 
-    # Emergency env overrides
+    # Emergency env overrides. Mode values change how enabled gates behave;
+    # "off" is the kill switch for every gate with an enabled flag.
     mode = os.environ.get("FETTLE_GATE_MODE", "").strip().lower()
     if mode in ("advisory", "soft", "enforce"):
         cfg["gates"]["lint"]["mode"] = mode
+        cfg["gates"]["docs"]["mode"] = mode
     elif mode == "off":
-        cfg["gates"]["lint"]["enabled"] = False
+        for gate in cfg["gates"].values():
+            if "enabled" in gate:
+                gate["enabled"] = False
 
     return cfg
 

@@ -9,9 +9,9 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: pre-release (v0.2.0-dev).** The codebase is being restructured for its
-first public release — see [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan,
-work packages, and release slicing. Expect breaking changes until v0.2.0 is tagged.
+**Status: v0.2.0** — first public release: core lint gates, portable and
+configurable. See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next
+(generalized process gates in v0.3.0, the intelligence layer in v0.4.0).
 
 ## Why Fettle
 
@@ -30,8 +30,9 @@ that converts every new postmortem into a tested, cited rule automatically.
   reports only findings new since the baseline (incremental adoption).
 - **Cross-file Stop gate** — import/contract resolution checks before a response
   is delivered.
-- **Process gates** (being generalized in v0.3.0) — plan-before-edit, test-freshness,
-  UX-spec, and package-install trust gates.
+- **Process gates, opt-in** (being generalized in v0.3.0) — plan-before-edit,
+  doc-update-before-push, test-freshness, UX-spec, and package-install trust
+  gates. All default **off**; enable per project in `.fettle.toml`.
 - **LLM-antipattern rule pack** — 9 semgrep rules targeting failure modes specific
   to AI-generated code (see `rules/llm-antipatterns.yml`).
 
@@ -80,11 +81,20 @@ Then run `python3 ~/.claude/plugins/*/fettle/scripts/doctor.py` (or
 
 ## Enforcement modes
 
-| Mode (`QUALITY_GATE_MODE`) | Behavior |
+Set per project in `.fettle.toml` (see [docs/CONFIG.md](docs/CONFIG.md)):
+
+```toml
+[gates.lint]
+mode = "advisory"   # advisory | soft | enforce
+```
+
+| Mode | Behavior |
 |---|---|
 | `advisory` (default) | Findings displayed, never blocks |
-| `soft` | Errors displayed prominently; edits still allowed |
-| `enforce` | New errors block the edit |
+| `soft` / `enforce` | Error-severity findings block with a mandatory fix directive (the two modes are equivalent in v0.2; stricter pre-edit blocking for `enforce` lands with the v0.3.0 gate generalization) |
+
+`FETTLE_GATE_MODE` is the emergency env override (`advisory`/`soft`/`enforce`,
+or `off` to disable every gate).
 
 Recommended rollout: baseline in advisory -> fix errors in soft -> steady-state
 enforce. Suppress individual findings with `# noqa: RULE` (ruff),
