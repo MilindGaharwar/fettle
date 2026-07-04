@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Fixes surfaced by dogfooding the project scan on a real repo (AlphaAgent):
+
+- `quality_scan.py` findings and baselines now use root-relative paths, so a
+  committed baseline matches on CI and other machines. Legacy absolute-path
+  baselines are normalized on load and keep working.
+- `.fettle-ignore` patterns now actually filter project-scan findings (they
+  were only applied to the file count).
+- File discovery prunes hidden dirs, `node_modules`, `venv`, `build`, `dist`
+  (a `.venv` inflated the scanned-file count 40x).
+- The project scan reads `[severity]` from `.fettle.toml` instead of
+  hardcoded rule sets — CONFIG.md's "single source" claim is now true.
+- New test suite for `quality_scan.py` (10 tests: baselines, portability,
+  ignores, severity config, exit codes).
+
 ## v0.2.0 (2026-07-04)
 
 First public release. Fettle began as a private quality-enforcement plugin;
