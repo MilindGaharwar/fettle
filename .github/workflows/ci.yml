@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools (pinned)
+        run: |
+          python -m pip install --quiet pytest ruff==0.15.20 semgrep==1.168.0
+
+      - name: Scrub audit (no private strings)
+        run: bash scripts/scrub_audit.sh
+
+      - name: Doctor
+        run: python scripts/doctor.py
+
+      - name: Tests
+        run: python -m pytest tests/ scripts/tests/ -q
+
+      - name: Self-scan (dogfood)
+        run: python scripts/quality_scan.py --root scripts --json > /dev/null

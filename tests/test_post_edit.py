@@ -191,23 +191,23 @@ def test_semgrep_skipped_for_non_scoped_path():
 
 
 # ─── 10. test_semgrep_runs_for_scoped_path ───────────────────────────────────
-def test_semgrep_runs_for_scoped_path():
-    # Semgrep now runs on all non-excluded .py files.
-    # Use a path outside /tmp/ to avoid the exclusion filter.
-    test_file = "/tmp/fettle-test/health_semgrep_scope_test.py"
+def test_semgrep_runs_for_scoped_path(tmp_path):
+    # Semgrep runs on all non-excluded .py files; /tmp paths are excluded,
+    # so use a project dir outside the exclusion filter.
+    proj = tmp_path / "workdir"
+    proj.mkdir()
+    test_file = str(proj / "health_semgrep_scope_test.py")
     try:
         with open(test_file, "w") as fh:
             fh.write("x = 1\n")
 
-        trace_dir = os.path.join(os.path.expanduser(
-            "~/.claude/plugins/fettle"
-        ), ".fettle")
+        trace_dir = str(tmp_path / "trace")
         os.makedirs(trace_dir, exist_ok=True)
         trace_path = os.path.join(trace_dir, "trace.jsonl")
 
         run_hook(
-            {"tool_input": {"file_path": test_file}, "cwd": "/tmp/fettle"},
-            extra_env={"QUALITY_GATE_MODE": "advisory"},
+            {"tool_input": {"file_path": test_file}, "cwd": str(proj)},
+            extra_env={"QUALITY_GATE_MODE": "advisory", "FETTLE_TRACE_DIR": trace_dir},
         )
         with open(trace_path) as fh:
             lines = fh.readlines()
