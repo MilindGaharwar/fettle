@@ -1,0 +1,13 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff
+        args: [check, --config, .fettle/ruff.toml]
+      - id: ruff-format
+
+  - repo: https://github.com/semgrep/semgrep
+    rev: v1.159.0
+    hooks:
+      - id: semgrep
+        args: [--config, .fettle/llm-antipatterns.yml, --error]

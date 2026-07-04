@@ -1,0 +1,197 @@
+rules:
+  - id: regex-llm-output
+    languages: [python]
+    severity: ERROR
+    paths:
+      include:
+        - "pipeline/"
+        - "agents/"
+    patterns:
+      - pattern-either:
+          - pattern: re.search($PATTERN, ...)
+          - pattern: re.findall($PATTERN, ...)
+      - metavariable-regex:
+          metavariable: $PATTERN
+          regex: ".*[\\[\\{].*"
+    message: >-
+      Regex parsing of LLM output is fragile and produces invalid results.
+      Fix: Use Anthropic tool_use for structured output, or 'pip install instructor'
+      and use Instructor with Pydantic models.
+      Example: response = client.messages.create(..., tools=[tool_def])
+
+  - id: bare-except-swallow
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern: |
+          try:
+              ...
+          except:
+              pass
+    message: >-
+      Bare except with pass swallows all errors silently.
+      Fix: Catch specific exceptions: 'except (ValueError, KeyError) as e:
+      logger.warning("Handled: %s", e)'
+
+  - id: broad-except-no-reraise
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except Exception as $E:
+                  $BODY
+          - pattern: |
+              try:
+                  ...
+              except BaseException as $E:
+                  $BODY
+      - pattern-not: |
+          try:
+              ...
+          except Exception as $E:
+              ...
+              raise
+      - pattern-not: |
+          try:
+              ...
+          except Exception as $E:
+              ...
+              raise ...
+      - pattern-not: |
+          try:
+              ...
+          except BaseException as $E:
+              ...
+              raise
+      - pattern-not: |
+          try:
+              ...
+          except BaseException as $E:
+              ...
+              raise ...
+      - pattern-not: |
+          try:
+              ...
+          except Exception as $E:
+              ...
+              logging.$METHOD(...)
+      - pattern-not: |
+          try:
+              ...
+          except BaseException as $E:
+              ...
+              logging.$METHOD(...)
+      - pattern-not: |
+          try:
+              ...
+          except Exception as $E:
+              ...
+              logger.$METHOD(...)
+      - pattern-not: |
+          try:
+              ...
+          except BaseException as $E:
+              ...
+              logger.$METHOD(...)
+    message: >-
+      Broad Exception caught without re-raise or logging hides failures.
+      Fix: Add 'logger.error("Failed: %s", e, exc_info=True)' or catch specific exceptions.
+
+  - id: missing-httpx-timeout
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: httpx.AsyncClient(...)
+          - pattern: httpx.Client(...)
+      - pattern-not: httpx.AsyncClient(..., timeout=..., ...)
+      - pattern-not: httpx.Client(..., timeout=..., ...)
+    message: >-
+      httpx client without timeout will hang on unresponsive servers.
+      Fix: httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+
+  - id: sql-fstring
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern-regex: "(?i)f[\"'].*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\\s.*\\{.*\\}.*[\"']"
+    message: >-
+      SQL via f-string is injection-vulnerable.
+      Fix: Use parameterized queries: cursor.execute('SELECT * FROM table WHERE id = ?', (user_id,))
+
+  - id: datetime-now-pipeline
+    languages: [python]
+    severity: WARNING
+    paths:
+      include:
+        - "pipeline/"
+        - "sources/"
+    pattern-either:
+      - pattern: datetime.now()
+      - pattern: datetime.datetime.now()
+    message: >-
+      datetime.now() in pipeline code breaks backfill and testing.
+      Fix: Accept a 'clock: Callable[[], datetime] = datetime.now' parameter
+      and call clock() instead.
+
+  - id: health-score-inversion
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: |
+          if $X <= 0.0:
+              return 1.0
+      - pattern: |
+          if $X <= 0:
+              return 1.0
+      - pattern: |
+          if $X == 0.0:
+              return 1.0
+      - pattern: |
+          if $X == 0:
+              return 1.0
+      - pattern: |
+          if not $X:
+              return 1.0
+      - pattern: return 1.0 if $X <= 0.0 else $Y
+      - pattern: return 1.0 if $X <= 0 else $Y
+      - pattern: return 1.0 if not $X else $Y
+    message: >-
+      Health score returns 1.0 (perfect) when metric is zero or absent.
+      "No data" must never map to the best possible score — it must return
+      None (unmeasured) or 0.0 (degraded), not 1.0.
+      Fix: return None when no measurement is available; let the composite
+      skip unmeasured dimensions and set status=unknown.
+      Incident: incident INC-2026-0501-A.responsiveness,
+      KHI.accuracy, KHI.behavioral_consistency all had this pattern.
+
+  - id: orphaned-queue-flag
+    languages: [python]
+    severity: ERROR
+    pattern-regex: "(?m)processed\\s*=\\s*0(?!.*#\\s*fettle:queue-consumer-verified)"
+    message: >-
+      Queue flag (processed=0) written without a fettle:queue-consumer-verified
+      annotation. This risks a write-only queue — rows accumulate with no
+      consumer to process them.
+      Fix: ensure a consumer exists that calls get_unprocessed_* and marks
+      rows processed=1, then annotate the write site:
+        # fettle:queue-consumer-verified consumer=<consumer_file.py>
+      Incident: incident INC-2026-0501-B
+      written with processed=0; no consumer ever called get_unprocessed_episodes.
+
+  - id: non-atomic-write-output
+    languages: [python]
+    severity: WARNING
+    paths:
+      include:
+        - "pipeline/"
+        - "output/"
+    patterns:
+      - pattern: $PATH.write_text(...)
+    message: >-
+      Direct file write is not atomic — crash produces corrupt output.
+      Fix: import tempfile, os; fd, tmp = tempfile.mkstemp(dir=path.parent);
+      os.write(fd, content.encode()); os.close(fd); os.replace(tmp, path)

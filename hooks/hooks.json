@@ -1,0 +1,17 @@
+{
+  "description": "Fettle enforcement hooks",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/post-edit.sh",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}
