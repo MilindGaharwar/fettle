@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.1 (2026-07-04)
 
 Fixes surfaced by dogfooding the project scan on a real repo (AlphaAgent):
 
