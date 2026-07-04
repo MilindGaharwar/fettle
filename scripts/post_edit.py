@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fettle PostToolUse hook — runs Ruff (+ lazy Semgrep) on edited Python files."""
 
+import contextlib
 import fnmatch
 import json
 import os
@@ -213,10 +214,8 @@ def main() -> None:
             with open(trace_path) as fh:
                 all_lines = fh.readlines()
             for line in all_lines[-200:]:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     recent_entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
     except OSError:
         pass
 

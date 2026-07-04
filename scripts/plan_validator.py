@@ -116,7 +116,7 @@ def _parse_wps(text: str) -> list[tuple[str, str]]:
 # Keywords that signal a WP introduces a queue/pipeline flag.
 _QUEUE_FLAG_KEYWORDS: frozenset[str] = frozenset({  # fettle:queue-consumer-verified consumer=N/A
     "processed", "queued", "pending", "status='new'", 'status="new"',
-    "processed=0", "processed = 0",
+    "processed=0", "processed = 0",  # nosemgrep: orphaned-queue-flag — string literals in a keyword list, not a queue write
 })
 
 # Keywords that a LIVE task must mention to prove state transition was tested.
