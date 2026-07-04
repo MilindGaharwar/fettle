@@ -9,6 +9,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
+
 
 def _resolve_tool(name: str) -> str | None:
     local = os.path.expanduser(f"~/.local/bin/{name}")
@@ -36,6 +39,10 @@ def main() -> None:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
 
+    cfg = load_config(cwd)
+    if not cfg["gates"]["lint"]["enabled"]:
+        sys.exit(0)
+
     gate_errors: list[str] = []
 
     # ── Guards ───────────────────────────────────────────────────────────
@@ -46,7 +53,9 @@ def main() -> None:
         sys.exit(0)
 
     # ── Edit tracking for live_test_gate.py ─────────────────────────────
-    tracking_path: str = os.environ.get("FETTLE_EDIT_TRACKING", "/tmp/fettle-edits.jsonl")
+    tracking_path: str = os.environ.get(
+        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
+    )
     try:
         tool_name: str = data.get("tool_name", "Edit")
         with open(tracking_path, "a") as fh:
@@ -70,7 +79,7 @@ def main() -> None:
 
     # ── Ruff phase ───────────────────────────────────────────────────────
     ruff_bin = _resolve_tool("ruff")
-    ruff_config = os.path.join(PLUGIN_ROOT, "rules", ".ruff.toml")
+    ruff_config = str(cfg["paths"]["ruff_config"]) or os.path.join(PLUGIN_ROOT, "rules", ".ruff.toml")
     ruff_start = time.monotonic_ns()
     ruff_findings: list[dict[str, object]] = []
     if not ruff_bin:
@@ -149,8 +158,8 @@ def main() -> None:
     findings: list[dict[str, object]] = ruff_findings + semgrep_findings
 
     # ── Severity mapping ─────────────────────────────────────────────────
-    ERROR_RULES = {"BLE001", "S110", "S608", "S701"}
-    WARNING_PREFIXES = ("SIM", "UP")
+    ERROR_RULES = set(cfg["severity"]["error_rules"])
+    WARNING_PREFIXES = tuple(cfg["severity"]["warning_prefixes"])
 
     def severity_of(finding: dict[str, object]) -> str:
         rule = str(finding.get("rule", ""))
@@ -169,12 +178,15 @@ def main() -> None:
     warning_findings: list[dict[str, object]] = [f for f in findings if f["severity"] == "warning"]
 
     # ── Quality gate mode ────────────────────────────────────────────────
-    mode: str = os.environ.get("QUALITY_GATE_MODE", "advisory")
+    mode: str = os.environ.get("QUALITY_GATE_MODE") or str(cfg["gates"]["lint"]["mode"])
 
     # ── JSONL trace directory ────────────────────────────────────────────
-    trace_dir: str = os.environ.get("FETTLE_TRACE_DIR", os.path.join(PLUGIN_ROOT, ".fettle"))
-    os.makedirs(trace_dir, exist_ok=True)
-    trace_path: str = os.path.join(trace_dir, "trace.jsonl")
+    env_trace_dir = os.environ.get("FETTLE_TRACE_DIR", "")
+    if env_trace_dir:
+        os.makedirs(env_trace_dir, exist_ok=True)
+        trace_path: str = os.path.join(env_trace_dir, "trace.jsonl")
+    else:
+        trace_path = str(project_trace_path(cfg, cwd))
 
     # ── Rotation ─────────────────────────────────────────────────────────
     try:

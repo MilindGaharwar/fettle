@@ -17,6 +17,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import state_dir  # noqa: E402
+
 _GIT_PUSH_RE = re.compile(r"\bgit\s+push\b")
 
 _IMPL_EXTENSIONS = {".py", ".rs", ".sh", ".js", ".ts"}
@@ -46,7 +49,7 @@ def main() -> None:
         sys.exit(0)
 
     tracking_path: str = os.environ.get(
-        "FETTLE_EDIT_TRACKING", "/tmp/fettle-edits.jsonl"
+        "FETTLE_EDIT_TRACKING", str(state_dir(data.get("session_id", "unknown")) / "edits.jsonl")
     )
     mode: str = os.environ.get("QUALITY_GATE_MODE", "soft")
 

@@ -13,6 +13,7 @@ import sys
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
+from config import state_dir  # noqa: E402
 
 from import_graph import check_imports, check_contracts
 
@@ -73,7 +74,9 @@ def main() -> None:
     if data.get("stop_hook_active") is True:
         sys.exit(0)
 
-    tracking_path: str = os.environ.get("FETTLE_EDIT_TRACKING", "/tmp/fettle-edits.jsonl")  # shared with post_edit.py and quality_gate.py
+    tracking_path: str = os.environ.get(
+        "FETTLE_EDIT_TRACKING", str(state_dir(data.get("session_id", "unknown")) / "edits.jsonl")
+    )  # shared with post_edit.py and quality_gate.py
 
     entries: list[dict[str, object]] = []
     try:
