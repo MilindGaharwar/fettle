@@ -33,13 +33,13 @@ def _version_of(binary: str, args: list[str] | None = None) -> str | None:
 def check_environment() -> list[dict]:
     checks: list[dict] = []
 
-    py_ok = sys.version_info >= (3, 10)
+    py_ok = sys.version_info >= (3, 11)
     checks.append({
         "name": "python",
         "required": True,
         "ok": py_ok,
         "detail": f"{sys.version.split()[0]} at {sys.executable}"
-                  + ("" if py_ok else " — need >= 3.10 (set FETTLE_PYTHON)"),
+                  + ("" if py_ok else " — need >= 3.11 (set FETTLE_PYTHON)"),
     })
 
     tools = [

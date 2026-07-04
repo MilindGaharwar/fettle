@@ -54,7 +54,7 @@ Plus ruff rule selections (`BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`,
 
 ## Installation (pre-release)
 
-Requires Python >= 3.10, plus `ruff` and (optionally) `semgrep` on PATH:
+Requires Python >= 3.11, plus `ruff` and (optionally) `semgrep` on PATH:
 
 ```bash
 git clone https://github.com/MilindGaharwar/fettle ~/tools/fettle

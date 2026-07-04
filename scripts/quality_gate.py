@@ -20,6 +20,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import load_config, state_dir  # noqa: E402
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 FRONTEND_PATHS = ["frontend/src/pages/", "frontend/src/components/", "src/pages/", "src/components/"]
@@ -31,8 +34,9 @@ EXEMPT_EXTS = {".md", ".toml", ".json", ".yml", ".yaml", ".txt", ".cfg", ".ini",
 EXEMPT_PATH_PREFIXES = ("/tmp/", "/var/tmp/")
 EXEMPT_PATH_CONTAINS = ("/tests/", "/test/", "/.fettle/", "/memory/", "/__pycache__/", "/node_modules/", "/.venv/", "/alembic/versions/")
 
-TRACKING_FILE = "/tmp/fettle-session-edits.json"
-EDIT_TRACKING_FILE = "/tmp/fettle-edits.jsonl"
+# Session-scoped state paths — set by _init_state(session_id) in main().
+TRACKING_FILE = ""
+EDIT_TRACKING_FILE = ""
 
 # From post_bash_test_detect.py — comprehensive test pattern detection
 TEST_PATTERNS = [
@@ -54,7 +58,7 @@ TEST_PATTERNS = [
     r"page\.\w+",
 ]
 
-BROWSER_TEST_MARKER = "/tmp/fettle-browser-tested.timestamp"
+BROWSER_TEST_MARKER = ""  # set by _init_state()
 FRONTEND_EXTENSIONS = {".tsx", ".ts", ".jsx", ".js", ".css"}
 _TEST_RE = re.compile("|".join(TEST_PATTERNS), re.IGNORECASE)
 
@@ -112,17 +116,18 @@ def scan_ux(file_path: str, cwd: str) -> list[str]:
 
     docs_dir = Path(cwd) / "docs"
     if not docs_dir.exists():
-        return [f"UX: No docs/ directory. Create a UX spec before editing {Path(file_path).name}"]
+        return [f"UX: No docs/ directory. Create a UX spec before editing {Path(file_path).name} (disable via [gates.ux_spec] enabled=false)"]
 
     specs = list(docs_dir.glob("*.ux-spec.md")) + list(docs_dir.glob("UX-*.md"))
     if not specs:
-        return ["UX: No .ux-spec.md found. Create docs/[feature].ux-spec.md before frontend work"]
+        return ["UX: No .ux-spec.md found. Create docs/[feature].ux-spec.md before frontend work (disable via [gates.ux_spec] enabled=false)"]
 
     return []
 
 
-def scan_ui(file_path: str, content: str) -> list[str]:
+def scan_ui(file_path: str, content: str, ui_cfg: dict | None = None) -> list[str]:
     """WARNING: Check for hardcoded colors in frontend files."""
+    allowed_hex = {h.lower() for h in (ui_cfg or {}).get("allowed_hex", [])} or ALLOWED_HEX
     is_frontend = any(p in file_path for p in FRONTEND_PATHS)
     if not is_frontend:
         return []
@@ -138,7 +143,7 @@ def scan_ui(file_path: str, content: str) -> list[str]:
             continue
         for pattern, message in HARDCODED_PATTERNS:
             for match in re.findall(pattern, line):
-                if match.lower() in ALLOWED_HEX:
+                if match.lower() in allowed_hex:
                     continue
                 if "var(--" in line:
                     continue
@@ -147,8 +152,13 @@ def scan_ui(file_path: str, content: str) -> list[str]:
     return findings[:5]
 
 
-def scan_planning(file_path: str, cwd: str) -> list[str]:
-    """BLOCKING (3+ files): Enforce plan for multi-file changes."""
+def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> list[str]:
+    """BLOCKING (threshold+ files): Enforce plan for multi-file changes."""
+    cfg = plan_cfg or {}
+    threshold = int(cfg.get("threshold", 3))
+    plan_dir_name = str(cfg.get("plan_dir", "docs"))
+    max_age_s = float(cfg.get("max_age_hours", 1)) * 3600
+
     if not _is_implementation_file(file_path):
         return []
 
@@ -157,16 +167,19 @@ def scan_planning(file_path: str, cwd: str) -> list[str]:
         session.append(file_path)
     _save_tracking(session)
 
-    if len(session) < 3:
+    if len(session) < threshold:
         return []
 
-    docs_dir = Path(cwd) / "docs"
+    docs_dir = Path(cwd) / plan_dir_name
     if docs_dir.is_dir():
         for f in docs_dir.iterdir():
-            if "plan" in f.name.lower() and f.suffix == ".md" and time.time() - f.stat().st_mtime < 3600:
+            if "plan" in f.name.lower() and f.suffix == ".md" and time.time() - f.stat().st_mtime < max_age_s:
                 return []
 
-    return [f"PLANNING: {len(session)} implementation files edited without a recent plan in docs/"]
+    return [
+        f"PLANNING: {len(session)} implementation files edited without a recent plan in {plan_dir_name}/ "
+        f"(disable via [gates.plan] enabled=false in .fettle.toml)"
+    ]
 
 
 def scan_tests_before_commit(command: str) -> list[str]:
@@ -296,6 +309,15 @@ def _save_edit_tracking(entries: list[dict]):
         pass
 
 
+def _init_state(session_id: str) -> None:
+    """Bind tracking files to this session's state directory (no /tmp bleed)."""
+    global TRACKING_FILE, EDIT_TRACKING_FILE, BROWSER_TEST_MARKER
+    sdir = state_dir(session_id)
+    TRACKING_FILE = str(sdir / "session-edits.json")
+    EDIT_TRACKING_FILE = str(sdir / "edits.jsonl")
+    BROWSER_TEST_MARKER = str(sdir / "browser-tested.timestamp")
+
+
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 
@@ -310,12 +332,17 @@ def main():
     cwd = data.get("cwd", ".")
     hook_event = data.get("hook_event", "")
 
+    _init_state(data.get("session_id", "unknown"))
+    cfg = load_config(cwd)
+    gates = cfg["gates"]
+
     blocking_findings = []
     warning_findings = []
 
     # ─── Stop Hook: test enforcement ─────────────────────────────────────
     if hook_event == "Stop" or data.get("stop_hook_active") is not None:
-        blocking_findings.extend(scan_stop_untested(data))
+        if gates["tests"]["enabled"]:
+            blocking_findings.extend(scan_stop_untested(data))
 
     # ─── Write/Edit: UX (block) + UI (warn) + Planning (block at 3+) ────
     elif tool_name in ("Write", "Edit"):
@@ -327,18 +354,18 @@ def main():
         is_pre = hook_event == "PreToolUse"
 
         # UX spec check — BLOCKING on Pre, WARNING on Post
-        ux_findings = scan_ux(file_path, cwd)
+        ux_findings = scan_ux(file_path, cwd) if gates["ux_spec"]["enabled"] else []
         if is_pre:
             blocking_findings.extend(ux_findings)
         else:
             warning_findings.extend(ux_findings)
 
         # UI token check — always WARNING
-        ui_findings = scan_ui(file_path, content)
+        ui_findings = scan_ui(file_path, content, gates["ui_colors"]) if gates["ui_colors"]["enabled"] else []
         warning_findings.extend(ui_findings)
 
         # Planning check — BLOCKING on Pre (3+ files), WARNING on Post
-        plan_findings = scan_planning(file_path, cwd)
+        plan_findings = scan_planning(file_path, cwd, gates["plan"]) if gates["plan"]["enabled"] else []
         if is_pre:
             blocking_findings.extend(plan_findings)
         else:
@@ -348,7 +375,8 @@ def main():
     elif tool_name == "Bash":
         command = tool_input.get("command", "")
         stamp_tests(command)
-        warning_findings.extend(scan_tests_before_commit(command))
+        if gates["tests"]["enabled"]:
+            warning_findings.extend(scan_tests_before_commit(command))
 
     # ─── Output warnings (never block) ──────────────────────────────────
     if warning_findings:
