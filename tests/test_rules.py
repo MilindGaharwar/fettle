@@ -10,9 +10,7 @@ import shutil
 import os
 import textwrap
 
-PLUGIN_DIR = os.path.expanduser(
-    "~/.claude/plugins/fettle"
-)
+PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RULES_FILE = os.path.join(PLUGIN_DIR, "rules", "llm-antipatterns.yml")
 FIXTURES_DIR = os.path.join(PLUGIN_DIR, "tests", "fixtures", "violations")
 

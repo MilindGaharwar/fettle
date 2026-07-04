@@ -191,6 +191,17 @@ def main() -> None:
 
     tool_name: str = data.get("tool_name", "")
     tool_input: dict[str, str] = data.get("tool_input", {})
+
+    # Opt-in gate: with an empty default allowlist this gate would block ALL
+    # package installs — it must never run unless explicitly enabled.
+    import os as _os
+    import sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from config import load_config
+    cfg = load_config(data.get("cwd", "."))
+    if not cfg["gates"]["mcp_trust"]["enabled"]:
+        sys.exit(0)
+
     allowlist = load_allowlist()
 
     if tool_name == "Bash":
