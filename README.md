@@ -63,10 +63,11 @@ uv tool install ruff
 uv tool install semgrep   # optional; semgrep rules skipped if absent
 ```
 
-Run a project scan directly:
+Run a project scan directly (`run.sh` finds a Python >= 3.11 even when
+`python3` is older, as on stock macOS):
 
 ```bash
-python3 ~/tools/fettle/scripts/quality_scan.py --root . --json
+bash ~/tools/fettle/scripts/run.sh quality_scan.py --root . --json
 ```
 
 ### As a Claude Code plugin (hooks wire automatically)
@@ -76,8 +77,8 @@ claude plugin marketplace add MilindGaharwar/fettle
 claude plugin install fettle@fettle-marketplace
 ```
 
-Then run `python3 ~/.claude/plugins/*/fettle/scripts/doctor.py` (or
-`scripts/run.sh doctor.py` from the repo) to verify the environment.
+Then run `bash scripts/run.sh doctor.py` from the plugin or repo directory to
+verify the environment.
 
 ## Enforcement modes
 
