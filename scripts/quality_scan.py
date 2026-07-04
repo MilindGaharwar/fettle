@@ -10,12 +10,16 @@ Usage:
 """
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import load_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -25,9 +29,12 @@ PLUGIN_ROOT = os.environ.get(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 )
 
+# Populated from [severity] config in main(); defaults match config.DEFAULTS.
 ERROR_RULES = {"BLE001", "S110", "S608", "S701"}
-ERROR_PREFIXES = set()  # exact-match only for errors
 WARNING_PREFIXES = {"SIM", "UP"}
+
+# Directories that are never part of the project's own code.
+_SKIP_DIRS = {"node_modules", "__pycache__", "venv", "build", "dist"}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,18 +63,21 @@ def _load_ignore(root: str) -> list[str]:
 
 
 def _collect_py_files(root: str, ignore_patterns: list[str]) -> list[str]:
-    import fnmatch
-
     results: list[str] = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _SKIP_DIRS]
         for fn in filenames:
             if not fn.endswith(".py"):
                 continue
             rel = os.path.relpath(os.path.join(dirpath, fn), root)
-            if any(fnmatch.fnmatch(rel, pat) for pat in ignore_patterns):
+            if _is_ignored(rel, ignore_patterns):
                 continue
             results.append(os.path.join(dirpath, fn))
     return results
+
+
+def _is_ignored(rel_path: str, ignore_patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(rel_path, pat) for pat in ignore_patterns)
 
 
 def _classify(rule_id: str, tool_severity: str = "") -> str:
@@ -174,11 +184,15 @@ def run_semgrep(root: str) -> list[dict]:
 # Baseline
 # ---------------------------------------------------------------------------
 
-def _load_baseline(path: str) -> dict[str, dict]:
+def _load_baseline(path: str, root: str) -> dict[str, dict]:
     if not os.path.isfile(path):
         return {}
     with open(path) as fh:
         items = json.load(fh)
+    # Legacy baselines stored absolute paths; normalize so they keep matching.
+    for f in items:
+        if os.path.isabs(f.get("file", "")):
+            f["file"] = os.path.relpath(f["file"], root)
     return {_finding_key(f): f for f in items}
 
 
@@ -239,12 +253,26 @@ def main() -> int:
     args = parser.parse_args()
 
     root = os.path.abspath(args.root)
+
+    # [severity] config is the single source; constants are the fallback defaults.
+    cfg = load_config(root)
+    global ERROR_RULES, WARNING_PREFIXES
+    ERROR_RULES = set(cfg["severity"]["error_rules"])
+    WARNING_PREFIXES = set(cfg["severity"]["warning_prefixes"])
+
     ignore_patterns = _load_ignore(root)
     py_files = _collect_py_files(root, ignore_patterns)
     file_count = len(py_files)
 
     # Run tools on the whole directory (they handle file discovery internally)
     findings = run_ruff(root) + run_semgrep(root)
+
+    # Root-relative paths: keeps committed baselines portable across machines
+    # and checkout locations.
+    for f in findings:
+        if os.path.isabs(f["file"]):
+            f["file"] = os.path.relpath(f["file"], root)
+    findings = [f for f in findings if not _is_ignored(f["file"], ignore_patterns)]
 
     # Deduplicate (same file+line+rule)
     seen: dict[str, dict] = {}
@@ -259,7 +287,7 @@ def main() -> int:
 
     # Baseline diff
     if args.baseline and not args.update_baseline:
-        baseline = _load_baseline(args.baseline)
+        baseline = _load_baseline(args.baseline, root)
         findings = [f for f in findings if _finding_key(f) not in baseline]
 
     # Save baseline
