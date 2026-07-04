@@ -266,7 +266,9 @@ def main() -> int:
     # Save baseline
     if args.update_baseline:
         bl_path = args.baseline or os.path.join(root, ".fettle", "baseline.json")
-        os.makedirs(os.path.dirname(bl_path), exist_ok=True)
+        bl_dir = os.path.dirname(bl_path)
+        if bl_dir:
+            os.makedirs(bl_dir, exist_ok=True)
         _save_baseline(bl_path, findings)
         print(f"Baseline saved: {bl_path} ({len(findings)} findings)", file=sys.stderr)
 
