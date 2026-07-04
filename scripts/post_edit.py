@@ -111,9 +111,13 @@ def main() -> None:
     ruff_duration_ms: float = (time.monotonic_ns() - ruff_start) / 1_000_000
 
     # ── Lazy Semgrep phase ───────────────────────────────────────────────
-    semgrep_exclude_dirs = ("/tests/", "/test/", "/__pycache__/", "/tmp/", "/var/tmp/")
-    semgrep_in_scope: bool = file_path.endswith(".py") and not any(
-        d in file_path for d in semgrep_exclude_dirs
+    semgrep_exclude_dirs = ("/tests/", "/test/", "/__pycache__/")
+    _root = os.path.abspath(cwd)
+    _in_project = (not os.path.isabs(file_path)) or os.path.abspath(file_path).startswith(_root + os.sep)
+    semgrep_in_scope: bool = (
+        file_path.endswith(".py")
+        and _in_project
+        and not any(d in file_path for d in semgrep_exclude_dirs)
     )
     semgrep_findings: list[dict[str, object]] = []
     semgrep_skipped: bool = not semgrep_in_scope
