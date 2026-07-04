@@ -35,7 +35,7 @@ with open(sys.argv[2], "a") as f:
     f.write(json.dumps(entry) + chr(10))
 PYEOF
 
-TOOLCHAIN_BIN="${HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin"
+TOOLCHAIN_BIN="$(dirname "$(command -v cargo 2>/dev/null || echo "${HOME}/.cargo/bin/cargo")")"
 if [[ -d "$TOOLCHAIN_BIN" ]]; then
     export PATH="${TOOLCHAIN_BIN}:${PATH}"
     CARGO_BIN="${TOOLCHAIN_BIN}/cargo"

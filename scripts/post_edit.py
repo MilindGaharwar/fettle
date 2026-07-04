@@ -36,6 +36,8 @@ def main() -> None:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
 
+    gate_errors: list[str] = []
+
     # ── Guards ───────────────────────────────────────────────────────────
     if not file_path.endswith(".py"):
         sys.exit(0)
@@ -71,6 +73,8 @@ def main() -> None:
     ruff_config = os.path.join(PLUGIN_ROOT, "rules", ".ruff.toml")
     ruff_start = time.monotonic_ns()
     ruff_findings: list[dict[str, object]] = []
+    if not ruff_bin:
+        gate_errors.append("ruff not found on PATH — lint layer skipped")
     if ruff_bin:
         try:
             result = subprocess.run(
@@ -93,8 +97,8 @@ def main() -> None:
                         "message": item.get("message", ""),
                         "source": "ruff",
                     })
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError):
-            pass
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError) as e:
+            gate_errors.append(f"ruff invocation failed: {type(e).__name__}")
     ruff_duration_ms: float = (time.monotonic_ns() - ruff_start) / 1_000_000
 
     # ── Lazy Semgrep phase ───────────────────────────────────────────────
@@ -110,6 +114,8 @@ def main() -> None:
         semgrep_bin = _resolve_tool("semgrep")
         semgrep_rules = os.path.join(PLUGIN_ROOT, "rules", "llm-antipatterns.yml")
         semgrep_start = time.monotonic_ns()
+        if not semgrep_bin:
+            gate_errors.append("semgrep not found on PATH — antipattern layer skipped")
         if semgrep_bin:
             try:
                 result = subprocess.run(
@@ -136,8 +142,8 @@ def main() -> None:
                                 "message": msg,
                                 "source": "semgrep",
                             })
-            except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError):
-                pass
+            except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError) as e:
+                gate_errors.append(f"semgrep invocation failed: {type(e).__name__}")
         semgrep_duration_ms = (time.monotonic_ns() - semgrep_start) / 1_000_000
 
     findings: list[dict[str, object]] = ruff_findings + semgrep_findings
@@ -253,6 +259,23 @@ def main() -> None:
     except OSError:
         pass
 
+    # ── Fail-visible: a broken gate must never look like a clean pass ───
+    if gate_errors:
+        for msg in gate_errors:
+            print(f"fettle gate warning: {msg}", file=sys.stderr)
+        try:
+            with open(trace_path, "a") as fh:
+                for msg in gate_errors:
+                    fh.write(json.dumps({
+                        "type": "gate_error",
+                        "ts": now_ts,
+                        "session_id": session_id,
+                        "file": file_path,
+                        "message": msg,
+                    }) + "\n")
+        except OSError:
+            print("fettle gate warning: trace file unwritable", file=sys.stderr)
+
     # ── Append metric entry ──────────────────────────────────────────────
     hook_duration_ms: float = (time.monotonic_ns() - hook_start) / 1_000_000
     metric: dict[str, object] = {
@@ -268,7 +291,7 @@ def main() -> None:
         "error_count": len(error_findings),
         "warning_count": len(warning_findings),
         "dedup_suppressed": dedup_suppressed,
-        "logact_bus_path": f"~/.claude/logact/buses/{session_id}.db",
+        "gate_errors": len(gate_errors),
     }
     try:
         with open(trace_path, "a") as fh:
@@ -339,5 +362,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (json.JSONDecodeError, OSError, ValueError):
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        # Environment problems must not block the session, but must be seen.
+        print(f"fettle gate warning: post_edit hook failed: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(0)

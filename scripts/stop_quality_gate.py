@@ -31,11 +31,11 @@ def _cargo_check(rs_path: str) -> list[str]:
     if not cargo_toml:
         return []
 
-    cargo_bin = os.path.expanduser(
-        "~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo"
-    )
-    if not os.path.isfile(cargo_bin):
-        return []
+    import shutil
+
+    cargo_bin = shutil.which("cargo") or os.path.expanduser("~/.cargo/bin/cargo")
+    if not (os.path.isfile(cargo_bin) and os.access(cargo_bin, os.X_OK)):
+        return []  # no Rust toolchain — skip cleanly
 
     manifest_dir = os.path.dirname(cargo_toml)
     try:
