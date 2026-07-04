@@ -11,11 +11,11 @@ import pytest
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPT = os.path.join(PLUGIN_DIR, "scripts", "post_edit_rust.sh")
-CARGO_BIN = os.path.expanduser("~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo")
+CARGO_BIN = shutil.which("cargo") or os.path.expanduser("~/.cargo/bin/cargo")
 
 ENV_BASE = {
     **os.environ,
-    "PATH": os.path.expanduser("~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin")
+    "PATH": os.path.expanduser("~/.cargo/bin")
             + ":" + os.path.expanduser("~/.local/bin")
             + ":" + os.environ.get("PATH", ""),
     "CLAUDE_PLUGIN_ROOT": PLUGIN_DIR,
