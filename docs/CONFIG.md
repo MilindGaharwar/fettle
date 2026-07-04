@@ -23,6 +23,10 @@ enabled = false
 enabled = false
 allowed_hex = ["#2563eb"]   # your brand palette
 
+[gates.docs]          # git push requires a doc update after impl edits — OFF by default
+enabled = false
+mode = "soft"         # advisory | soft | enforce
+
 [gates.tests]         # untested-code Stop gate + pre-commit warning — OFF by default
 enabled = false
 
@@ -39,7 +43,7 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 
 | Variable | Effect |
 |---|---|
-| `FETTLE_GATE_MODE` | Emergency override: `advisory` / `soft` / `enforce` / `off` |
+| `FETTLE_GATE_MODE` | Emergency override: `advisory`/`soft`/`enforce` set the mode of enabled gates; `off` disables every gate |
 | `FETTLE_PYTHON` | Interpreter used by the hook launcher (needs >= 3.11) |
 | `FETTLE_STATE_DIR` | Base dir for per-session state (default `$XDG_STATE_HOME/fettle`) |
 | `FETTLE_EDIT_TRACKING` | Override the per-session edit-tracking file path |

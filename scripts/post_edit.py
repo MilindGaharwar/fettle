@@ -182,8 +182,8 @@ def main() -> None:
     error_findings: list[dict[str, object]] = [f for f in findings if f["severity"] == "error"]
     warning_findings: list[dict[str, object]] = [f for f in findings if f["severity"] == "warning"]
 
-    # ── Quality gate mode ────────────────────────────────────────────────
-    mode: str = os.environ.get("QUALITY_GATE_MODE") or str(cfg["gates"]["lint"]["mode"])
+    # ── Quality gate mode (FETTLE_GATE_MODE override applied in load_config) ─
+    mode: str = str(cfg["gates"]["lint"]["mode"])
 
     # ── JSONL trace directory ────────────────────────────────────────────
     env_trace_dir = os.environ.get("FETTLE_TRACE_DIR", "")

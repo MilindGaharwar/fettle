@@ -12,7 +12,8 @@ PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPT = os.path.join(PLUGIN_DIR, "scripts", "post_bash_doc_check.py")
 
 
-def run_hook(command: str, tracking_entries: list[dict] | None = None, mode: str = "soft"):
+def run_hook(command: str, tracking_entries: list[dict] | None = None, mode: str = "soft",
+             enabled: bool = True):
     """Run post_bash_doc_check.py with a crafted tracking file and return (stdout, stderr, rc)."""
     tmpdir = tempfile.mkdtemp()
     try:
@@ -22,12 +23,16 @@ def run_hook(command: str, tracking_entries: list[dict] | None = None, mode: str
                 for entry in tracking_entries:
                     fh.write(json.dumps(entry) + "\n")
 
-        stdin_data = {"tool_input": {"command": command}}
+        if enabled:
+            with open(os.path.join(tmpdir, ".fettle.toml"), "w") as fh:
+                fh.write(f'[gates.docs]\nenabled = true\nmode = "{mode}"\n')
+
+        stdin_data = {"tool_input": {"command": command}, "cwd": tmpdir}
         env = {
             **os.environ,
-            "QUALITY_GATE_MODE": mode,
             "FETTLE_EDIT_TRACKING": tracking_path,
         }
+        env.pop("FETTLE_GATE_MODE", None)
 
         proc = subprocess.run(
             [sys.executable, SCRIPT],
@@ -56,14 +61,30 @@ def test_non_push_command_ignored():
 # ─── 2. Push with no tracking file exits 0 ──────────────────────────────────
 def test_push_no_tracking_file():
     """No tracking file means nothing to enforce."""
-    stdin_data = {"tool_input": {"command": "git push origin main"}}
-    env = {**os.environ, "QUALITY_GATE_MODE": "soft", "FETTLE_EDIT_TRACKING": "/tmp/nonexistent_fettle_xyz.jsonl"}
-    proc = subprocess.run(
-        [sys.executable, SCRIPT],
-        input=json.dumps(stdin_data),
-        capture_output=True, text=True, timeout=10, env=env,
-    )
-    assert proc.returncode == 0
+    tmpdir = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmpdir, ".fettle.toml"), "w") as fh:
+            fh.write('[gates.docs]\nenabled = true\nmode = "soft"\n')
+        stdin_data = {"tool_input": {"command": "git push origin main"}, "cwd": tmpdir}
+        env = {**os.environ, "FETTLE_EDIT_TRACKING": os.path.join(tmpdir, "nonexistent.jsonl")}
+        env.pop("FETTLE_GATE_MODE", None)
+        proc = subprocess.run(
+            [sys.executable, SCRIPT],
+            input=json.dumps(stdin_data),
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        assert proc.returncode == 0
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ─── 2b. Gate is off by default — push never blocked without opt-in ─────────
+def test_gate_off_by_default():
+    """Opinionated process gates default OFF: no .fettle.toml, no blocking."""
+    entries = [make_entry("/project/scripts/post_edit.py")]
+    stdout, stderr, rc = run_hook("git push origin main", entries, enabled=False)
+    assert rc == 0
+    assert stdout == ""
 
 
 # ─── 3. Push with empty tracking file exits 0 ───────────────────────────────

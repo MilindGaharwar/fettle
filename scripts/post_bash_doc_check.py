@@ -6,8 +6,9 @@ Fires on every Bash tool use. When a `git push` command is detected:
   2. Checks whether any .md file was edited after the most recent implementation edit.
   3. If no doc update preceded the push, blocks with a CRITICAL directive.
 
-Advisory mode (QUALITY_GATE_MODE=advisory): always exit 0, but emit warning JSON.
-Soft/enforce mode: exit 2 to block on missing doc update.
+Opt-in: enable with `[gates.docs] enabled = true` in .fettle.toml (default off).
+`mode = "advisory"` always exits 0 but emits warning JSON; soft/enforce exit 2
+to block on a missing doc update.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import state_dir  # noqa: E402
+from config import load_config, state_dir  # noqa: E402
 
 _GIT_PUSH_RE = re.compile(r"\bgit\s+push\b")
 
@@ -48,10 +49,14 @@ def main() -> None:
     if not command or not _GIT_PUSH_RE.search(command):
         sys.exit(0)
 
+    cfg = load_config(data.get("cwd"))
+    if not cfg["gates"]["docs"]["enabled"]:
+        sys.exit(0)
+    mode: str = str(cfg["gates"]["docs"]["mode"])
+
     tracking_path: str = os.environ.get(
         "FETTLE_EDIT_TRACKING", str(state_dir(data.get("session_id", "unknown")) / "edits.jsonl")
     )
-    mode: str = os.environ.get("QUALITY_GATE_MODE", "soft")
 
     try:
         with open(tracking_path) as fh:
