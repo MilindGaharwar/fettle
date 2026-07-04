@@ -38,16 +38,26 @@ LEDGER = {
 }
 
 
+_PROJECT_DIR = ""
+
+
 @pytest.fixture(autouse=True)
 def ledger_file(tmp_path):
+    global _PROJECT_DIR
     path = tmp_path / "allowlist.json"
     path.write_text(json.dumps(LEDGER))
     os.environ["MCP_ALLOWLIST_PATH"] = str(path)
+    # The gate is opt-in (defaults off) — tests run against a project that enables it.
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / ".fettle.toml").write_text("[gates.mcp_trust]\nenabled = true\n")
+    _PROJECT_DIR = str(proj)
     yield path
     os.environ.pop("MCP_ALLOWLIST_PATH", None)
 
 
 def run_gate(stdin_data: dict):
+    stdin_data.setdefault("cwd", _PROJECT_DIR)
     env = {
         **os.environ,
         "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", ""),
@@ -252,7 +262,7 @@ def test_mv_to_protected_path_blocked():
 
 
 def test_install_to_protected_path_blocked():
-    path = "/etc/mcp-" + "allowlist.json"
+    path = "~/.config/fettle/mcp-" + "allowlist.json"
     stdout, _, rc = run_gate(
         {"tool_name": "Bash", "tool_input": {"command": f"sudo install -m 755 /tmp/evil.sh {path}"}}
     )

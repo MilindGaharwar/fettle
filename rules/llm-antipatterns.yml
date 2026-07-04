@@ -1,5 +1,8 @@
 rules:
   - id: regex-llm-output
+    metadata:
+      origin: llm-antipattern
+      citation: "Structured tool_use replaced regex parsing of model output across our agents"
     languages: [python]
     severity: ERROR
     paths:
@@ -20,6 +23,9 @@ rules:
       Example: response = client.messages.create(..., tools=[tool_def])
 
   - id: bare-except-swallow
+    metadata:
+      origin: classic
+      citation: "Swallowed exceptions repeatedly hid real failures in AI-generated code"
     languages: [python]
     severity: ERROR
     patterns:
@@ -34,6 +40,9 @@ rules:
       logger.warning("Handled: %s", e)'
 
   - id: broad-except-no-reraise
+    metadata:
+      origin: classic
+      citation: "Broad catches without logging made production failures invisible"
     languages: [python]
     severity: ERROR
     patterns:
@@ -101,6 +110,9 @@ rules:
       Fix: Add 'logger.error("Failed: %s", e, exc_info=True)' or catch specific exceptions.
 
   - id: missing-httpx-timeout
+    metadata:
+      origin: llm-antipattern
+      citation: "AI-generated HTTP clients repeatedly shipped without timeouts"
     languages: [python]
     severity: ERROR
     patterns:
@@ -114,6 +126,9 @@ rules:
       Fix: httpx.AsyncClient(timeout=httpx.Timeout(30.0))
 
   - id: sql-fstring
+    metadata:
+      origin: security
+      citation: "OWASP: SQL injection via string-built queries"
     languages: [python]
     severity: ERROR
     patterns:
@@ -123,6 +138,9 @@ rules:
       Fix: Use parameterized queries: cursor.execute('SELECT * FROM table WHERE id = ?', (user_id,))
 
   - id: datetime-now-pipeline
+    metadata:
+      origin: pipeline
+      citation: "Wall-clock reads in pipelines broke historical backfills"
     languages: [python]
     severity: WARNING
     paths:
@@ -138,6 +156,9 @@ rules:
       and call clock() instead.
 
   - id: health-score-inversion
+    metadata:
+      origin: incident
+      citation: "INC-2026-0501-A: health dimension returned 1.0 on absent data, masking an outage"
     languages: [python]
     severity: ERROR
     pattern-either:
@@ -169,6 +190,9 @@ rules:
       KHI.accuracy, KHI.behavioral_consistency all had this pattern.
 
   - id: orphaned-queue-flag
+    metadata:
+      origin: incident
+      citation: "INC-2026-0501-B: write-only queue shipped with no verified consumer"
     languages: [python]
     severity: ERROR
     pattern-regex: "(?m)processed\\s*=\\s*0(?!.*#\\s*fettle:queue-consumer-verified)"
@@ -183,6 +207,9 @@ rules:
       written with processed=0; no consumer ever called get_unprocessed_episodes.
 
   - id: non-atomic-write-output
+    metadata:
+      origin: pipeline
+      citation: "Partial writes corrupted downstream readers on crash"
     languages: [python]
     severity: WARNING
     paths:
