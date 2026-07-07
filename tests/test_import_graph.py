@@ -250,3 +250,40 @@ def test_submodule_leniency_keeps_missing_names_blocked(project_dir):
     errors = check_contracts(a_path, project_dir)
     assert len(errors) == 1
     assert errors[0]["name"] == "ghost"
+
+
+def test_src_layout_package_resolves(project_dir):
+    """Regression (2026-07-07, acumen): src-layout (`src/<pkg>/`) is the
+    standard packaging layout — `import <pkg>` must resolve against src/."""
+    pkg = os.path.join(project_dir, "src", "mypkg")
+    os.makedirs(pkg)
+    open(os.path.join(pkg, "__init__.py"), "w").close()
+    with open(os.path.join(pkg, "mod.py"), "w") as f:
+        f.write("x = 1\n")
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("import mypkg\nfrom mypkg.mod import x\n")
+    assert check_imports(a_path, project_dir) == []
+
+
+def test_declared_dependency_is_skipped(project_dir):
+    """Regression (2026-07-07, acumen): pytest ran via an ephemeral
+    `uv run --with pytest` env — no .venv to probe — but it IS declared in
+    pyproject.toml. Declared dependencies are the project's business."""
+    with open(os.path.join(project_dir, "pyproject.toml"), "w") as f:
+        f.write('[project]\nname = "x"\n[project.optional-dependencies]\ndev = ["pytest>=7.0"]\n')
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("import pytest\n")
+    assert check_imports(a_path, project_dir) == []
+
+
+def test_undeclared_unknown_module_still_flagged(project_dir):
+    """The declared-dep rule must not blind the checker to real typos."""
+    with open(os.path.join(project_dir, "pyproject.toml"), "w") as f:
+        f.write('[project]\nname = "x"\ndependencies = ["requests"]\n')
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("import definitely_not_a_module_xyz\n")
+    errors = check_imports(a_path, project_dir)
+    assert len(errors) == 1

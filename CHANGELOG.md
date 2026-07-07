@@ -33,6 +33,10 @@
 
 ## Unreleased
 
+- Stop-hook import checks understand src-layout packages (`src/<pkg>/`)
+  and skip dependencies declared in pyproject/requirements even when no
+  .venv exists to probe (ephemeral `uv run --with` envs) — second
+  false-positive round, caught on acumen 2026-07-07.
 - Stop-hook cross-file checks no longer flood real projects with false
   positives (61 findings on one AlphaAgent response, 2026-07-07):
   `stop_quality_gate.py` discovers the project root by walking up to
