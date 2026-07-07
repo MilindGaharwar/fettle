@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Stop-hook cross-file checks no longer flood real projects with false
+  positives (61 findings on one AlphaAgent response, 2026-07-07):
+  `stop_quality_gate.py` discovers the project root by walking up to
+  `pyproject.toml`/`setup.py`/`.git` instead of using the edited file's own
+  directory; `check_imports` recognizes packages installed in the project's
+  `.venv` (the hook's interpreter can't import them); `check_contracts`
+  accepts `from pkg import submodule` without an `__init__` re-export.
+
 - Removed `effectiveness_report.py`: it depended on a private logging tool
   no public install has; the tool's name joined the scrub-audit pattern.
   The effectiveness loop returns in v0.4.0 built on Fettle's own trace files.

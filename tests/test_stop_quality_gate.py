@@ -266,3 +266,35 @@ def test_non_python_non_rust_pass():
         assert rc == 0
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_project_root_discovered_from_pyproject():
+    """Default root walks up to the nearest pyproject.toml, not the file's dir.
+
+    Regression (2026-07-07): backend/tests/test_x.py couldn't resolve the
+    project's api.* packages because project_root defaulted to .../tests,
+    producing 61 false findings in alpha-agent.
+    """
+    tmpdir = tempfile.mkdtemp()
+    try:
+        open(os.path.join(tmpdir, "pyproject.toml"), "w").close()
+        pkg = os.path.join(tmpdir, "api")
+        os.makedirs(pkg)
+        open(os.path.join(pkg, "__init__.py"), "w").close()
+        with open(os.path.join(pkg, "mod.py"), "w") as f:
+            f.write("x = 1\n")
+        tests_dir = os.path.join(tmpdir, "tests")
+        os.makedirs(tests_dir)
+        t_path = os.path.join(tests_dir, "test_a.py")
+        with open(t_path, "w") as f:
+            f.write("from api.mod import x\n")
+        tracking = make_tracking_file(tmpdir, [
+            {"file": t_path, "ts": time.time(), "tool": "Edit", "tested": False},
+        ])
+        stdout, stderr, rc = run_gate(
+            {"stop_hook_active": False},
+            extra_env={"FETTLE_EDIT_TRACKING": tracking},  # no FETTLE_PROJECT_ROOT
+        )
+        assert rc == 0, f"expected pass, got: {stdout} {stderr}"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)

@@ -18,6 +18,27 @@ from config import state_dir  # noqa: E402
 from import_graph import check_imports, check_contracts
 
 
+_ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".git")
+
+
+def _find_project_root(py_file: str) -> str:
+    """Walk up from the file to the nearest project marker.
+
+    Defaulting to the file's own directory made tests/ subdirectories their
+    own import root — 61 false findings in alpha-agent (2026-07-07).
+    """
+    d = os.path.dirname(os.path.abspath(py_file))
+    home = os.path.expanduser("~")
+    while d not in ("/", home):
+        if any(os.path.exists(os.path.join(d, m)) for m in _ROOT_MARKERS):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return os.path.dirname(os.path.abspath(py_file))
+
+
 def _find_cargo_toml(rs_path: str) -> str | None:
     d = os.path.dirname(os.path.abspath(rs_path))
     while d != "/":
@@ -104,7 +125,7 @@ def main() -> None:
     all_findings: list[str] = []
 
     for py_file in py_files:
-        project_root: str = os.environ.get("FETTLE_PROJECT_ROOT", os.path.dirname(py_file))
+        project_root: str = os.environ.get("FETTLE_PROJECT_ROOT") or _find_project_root(py_file)
         import_errors: list[dict[str, str]] = check_imports(py_file, project_root)
         for err in import_errors:
             all_findings.append(
