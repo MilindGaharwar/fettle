@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.0 — Intelligence + Extensibility (2026-07-07)
+
+- **TypeScript/JS rules** (`rules/ts-antipatterns.yml`): 5 semgrep rules for TS/JS
+- **Cross-review** (`review.py`): provider-agnostic LLM code review
+- **SARIF output** (`sarif.py`): GitHub code scanning format
+- **Result caching** (`cache.py`): skip re-scanning unchanged files
+- **Autofix** (`autofix.py`): safe ruff fixes with trace logging
+- **Checker protocol** (`checker.py`): formal ABC for tool plugins (Ruff, Semgrep built-in)
+- **Policy engine** (`policy.py`): central decision point for hook behavior
+- **Event model** (`event.py`): typed FettleEvent replaces raw JSON
+- **Install UX** (`install.py`): `fettle install config|hooks|ignore|all|status`
+- **TS hook** (`post_edit_ts.py`): wired in hooks.json for TS/JS files
+
 ## v0.3.0 — Foundation for v0.3/v0.4 roadmap
 
 ### New modules
