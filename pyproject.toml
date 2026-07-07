@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fettle"
+version = "0.3.0"
+description = "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived rules for Claude Code"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Milind Gaharwar"}]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4.0"]
+semgrep = ["semgrep>=1.50"]
+
+[project.scripts]
+fettle = "fettle.cli:main"
+
+[project.urls]
+Repository = "https://github.com/MilindGaharwar/fettle"
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+include = ["fettle*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
