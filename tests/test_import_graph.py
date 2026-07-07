@@ -201,3 +201,52 @@ def test_stdlib_imports_skipped(project_dir):
     a_path = os.path.join(project_dir, "a.py")
     errors = check_imports(a_path, project_dir)
     assert errors == []
+
+
+# --- Regressions: 2026-07-07 alpha-agent false-positive storm (61 findings) ---
+
+def test_third_party_in_project_venv_is_skipped(project_dir):
+    """A package in the project's .venv but not the hook's python must pass.
+
+    Regression (2026-07-07): pytest/fastapi/httpx flagged as unresolvable in
+    alpha-agent because the Stop hook runs under its own interpreter and
+    importlib can't see the project venv.
+    """
+    sp = os.path.join(project_dir, ".venv", "lib", "python3.14", "site-packages", "notinhookenv")
+    os.makedirs(sp)
+    open(os.path.join(sp, "__init__.py"), "w").close()
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("import notinhookenv\nfrom notinhookenv.sub import thing\n")
+    assert check_imports(a_path, project_dir) == []
+
+
+def test_check_contracts_submodule_import_is_valid(project_dir):
+    """`from pkg import submodule` is valid even without __init__ re-export.
+
+    Regression (2026-07-07): `from api.routes import analysis` flagged as
+    "'analysis' not found in 'api.routes'" in alpha-agent's main.py.
+    """
+    pkg = os.path.join(project_dir, "pkg")
+    os.makedirs(pkg)
+    open(os.path.join(pkg, "__init__.py"), "w").close()
+    with open(os.path.join(pkg, "sub.py"), "w") as f:
+        f.write("x = 1\n")
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("from pkg import sub\n")
+    assert check_contracts(a_path, project_dir) == []
+
+
+def test_submodule_leniency_keeps_missing_names_blocked(project_dir):
+    """The submodule rule must not mask names that truly don't exist."""
+    pkg = os.path.join(project_dir, "pkg")
+    os.makedirs(pkg)
+    with open(os.path.join(pkg, "__init__.py"), "w") as f:
+        f.write("real = 1\n")
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("from pkg import ghost\n")
+    errors = check_contracts(a_path, project_dir)
+    assert len(errors) == 1
+    assert errors[0]["name"] == "ghost"

@@ -72,6 +72,19 @@ def _is_installed(module_name: str) -> bool:
         return False
 
 
+def _in_project_venv(module_name: str, project_root: str) -> bool:
+    """True if the top-level package exists in the project's own virtualenv.
+
+    Hooks run under their own interpreter, so importlib cannot see packages
+    installed only in the project venv — without this check every project
+    dependency reads as an unresolvable import (alpha-agent, 2026-07-07).
+    """
+    import glob
+    top = _top_level_module(module_name)
+    pattern = os.path.join(project_root, ".venv", "lib", "python*", "site-packages", top)
+    return bool(glob.glob(pattern) or glob.glob(pattern + ".py"))
+
+
 def _exported_names(file_path: str) -> set[str]:
     """Return the set of top-level names defined in a Python file."""
     try:
@@ -159,6 +172,8 @@ def check_imports(file_path: str, project_root: str) -> list[dict]:
             continue
         if _is_installed(module):
             continue
+        if _in_project_venv(module, project_root):
+            continue
         if _is_local_module(module, project_root):
             continue
         if _is_local_module(top, project_root):
@@ -191,6 +206,8 @@ def check_contracts(file_path: str, project_root: str) -> list[dict]:
         for name in imp["names"]:
             if name == "*":
                 continue
+            if _resolve_module(f"{module}.{name}", project_root):
+                continue  # `from pkg import submodule` needs no __init__ re-export
             if name not in exported:
                 errors.append({
                     "file": file_path,
