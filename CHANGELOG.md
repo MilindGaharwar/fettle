@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.0 — Foundation for v0.3/v0.4 roadmap
+
+### New modules
+- **Result taxonomy** (`scripts/result.py`): PASS, VIOLATION, TOOL_ERROR, CONFIG_ERROR, SKIPPED. Finding dataclass with tool/severity/path/line/code/message/fixable.
+- **Path resolver** (`scripts/paths.py`): centralized resolution, traversal protection, repo boundary checks, symlink safety.
+- **CLI** (`scripts/cli.py`): `fettle check`, `fettle config --print-effective`, `fettle explain`, `fettle baseline`, `fettle doctor`.
+- **Trace** (`scripts/trace.py`): persistent JSONL logging of all hook decisions.
+- **Explain** (`scripts/explain.py`): human-readable explanation of last hook decision.
+- **Baseline** (`scripts/baseline.py`): snapshot violations for incremental enforcement.
+- **Learn** (`scripts/learn.py`): LLM-generated semgrep rules from incident descriptions.
+- `pyproject.toml`: package metadata + console script `fettle`.
+- 3 new slash commands: `/fettle:learn`, `/fettle:explain`, `/fettle:baseline`.
+- `rules/learned/` directory for incident-derived rules.
+- 33 new tests (test_result, test_paths, test_trace, test_baseline, test_learn, test_cli).
+
+### GPT 5.5 audit
+- `docs/AUDIT-GPT55.md`: independent code audit with prioritized TODO.
+
 ## Unreleased
 
 - Stop-hook cross-file checks no longer flood real projects with false
