@@ -1,0 +1,81 @@
+rules:
+  - id: empty-catch-block
+    patterns:
+      - pattern: |
+          catch ($ERR) { }
+      - pattern: |
+          catch { }
+    message: "Empty catch block swallows errors silently. Log or handle the error."
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      origin: fettle-v0.4.0
+      citation: "Common AI-generated pattern: try/catch without error handling"
+      fix: "Add error logging: catch (e) { console.error('Context:', e); throw e; }"
+
+  - id: unawaited-promise
+    pattern: |
+      $FN(...)
+    pattern-not-inside: |
+      await $FN(...)
+    pattern-not-inside: |
+      return $FN(...)
+    pattern-not-inside: |
+      const $X = $FN(...)
+    pattern-not-inside: |
+      let $X = $FN(...)
+    message: "Possible unawaited promise. Add await or handle the return value."
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      origin: fettle-v0.4.0
+      citation: "Fire-and-forget async calls lose errors and create race conditions"
+      fix: "Add await: const result = await fn()"
+
+  - id: fetch-without-timeout
+    patterns:
+      - pattern: |
+          fetch($URL)
+      - pattern: |
+          fetch($URL, { ... })
+    pattern-not-inside: |
+      fetch($URL, { ..., signal: $SIGNAL, ... })
+    message: "fetch() without AbortSignal timeout. Network calls can hang indefinitely."
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      origin: fettle-v0.4.0
+      citation: "AI-generated fetch calls rarely include timeouts — causes hung processes"
+      fix: "Add signal: fetch(url, { signal: AbortSignal.timeout(10000) })"
+
+  - id: string-built-sql-ts
+    patterns:
+      - pattern: |
+          `SELECT ... ${$VAR} ...`
+      - pattern: |
+          `INSERT ... ${$VAR} ...`
+      - pattern: |
+          `UPDATE ... ${$VAR} ...`
+      - pattern: |
+          `DELETE ... ${$VAR} ...`
+    message: "SQL query built with template literal interpolation — use parameterized queries."
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      origin: fettle-v0.4.0
+      citation: "SQL injection via template literals in AI-generated database code"
+      fix: "Use parameterized queries: db.query('SELECT * FROM t WHERE id = $1', [id])"
+
+  - id: regex-llm-output-ts
+    patterns:
+      - pattern: |
+          $X.match($REGEX)
+      - pattern: |
+          $REGEX.exec($X)
+    message: "Regex parsing of what may be LLM output. Use structured output (JSON, tool_use) instead."
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      origin: fettle-v0.4.0
+      citation: "LLM output is non-deterministic; regex parsing breaks on format drift"
+      fix: "Use structured output: JSON.parse() on tool_use response, or response_format: json"
