@@ -9,8 +9,8 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v0.3.0** — core lint gates + process gates + intelligence layer foundation.
-8,211 lines, 80+ files, 30+ tests.
+**Status: v0.4.0** — core lint + process gates + intelligence layer + TS/JS rules + checker protocol.
+9,500+ lines, 90+ files, 38+ new tests (plus original test suite).
 
 ## What It Does
 
@@ -159,26 +159,54 @@ Every hook returns one of:
 4. **Single config source** — `.fettle.toml`, no scattered env vars
 5. **No shared global state** — per-session state dirs
 
+## Extensibility
+
+### Checker Protocol (`scripts/checker.py`)
+
+```python
+class Checker(ABC):
+    name: str
+    file_extensions: set[str]
+    def is_available(self) -> AvailabilityResult: ...
+    def check(self, context: CheckContext) -> list[Finding]: ...
+    def can_fix(self) -> bool: ...
+```
+
+Built-in: `RuffChecker`, `SemgrepChecker`. Register custom: `register_checker(MyChecker())`.
+
+### Policy Engine (`scripts/policy.py`)
+
+```python
+decision = evaluate_policy("PostToolUse", "src/app.py", config)
+# → PolicyDecision(should_check=True, checkers=['ruff', 'semgrep'], block_on_error=False)
+```
+
+### Event Model (`scripts/event.py`)
+
+```python
+event = FettleEvent.from_stdin(HookType.POST_TOOL_USE)
+# → typed, normalized: event.is_python, event.file_extension, event.repo_root
+```
+
+### Result Caching (`scripts/cache.py`)
+
+Cache key = file content hash + config hash. Skips re-scanning unchanged files.
+
 ## Roadmap
 
 | Version | Theme | Status |
 |---------|-------|--------|
 | v0.2.0 | Core lint gates | **Shipped** |
 | v0.3.0 | Process gates + intelligence foundation | **Shipped** |
-| v0.4.0 | Cross-review provider, effectiveness loop completion | Planned |
-| v0.5.0 | TypeScript/JS rule pack | Planned |
-| v0.6.0 | SARIF output, caching, autofix | Planned |
+| v0.4.0 | TS/JS rules, cross-review, SARIF, caching, autofix, checker protocol | **Shipped** |
+| v0.5.0 | Rule suppression with expiry, false-positive stamps | Planned |
 
-### Planned Enhancements (v0.4.0+)
+### Remaining Planned Enhancements
 
-- **Provider-agnostic cross-review** (WP-11): `claude -p` or OpenAI-compatible endpoint reviews code independently
-- **Effectiveness loop completion** (WP-13): false-positive stamps, rule retirement, recalibration recommendations
-- **TypeScript/JS rules** (WP-14): empty `catch {}`, unawaited promises, fetch without timeout, regex-parsed LLM output
-- **SARIF output**: GitHub code scanning integration
-- **Result caching**: skip re-scanning unchanged files (by content hash + tool version)
 - **Rule suppression with expiry**: `[[suppressions]]` in .fettle.toml with reason + expires date
-- **Autofix**: `fettle check --fix` applies safe ruff fixes automatically
-- **`fettle install-hooks`**: one-command setup for new projects
+- **False-positive stamps**: mark findings as FP in trace, feed into effectiveness report
+- **More checkers**: mypy, pyright, eslint, bandit, gitleaks (via checker protocol)
+- **`fettle upgrade`**: self-update command
 
 ## License
 
