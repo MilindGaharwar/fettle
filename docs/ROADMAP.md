@@ -8,12 +8,12 @@ This roadmap is committed before implementation begins and updated as releases s
 
 ## Release plan
 
-| Release | Theme | Work packages |
-|---|---|---|
-| v0.2.0 | Core lint gates — portable, configurable, installable | WP-0..WP-6 |
-| v0.3.0 | Process gates, generalized & opt-in | WP-7..WP-10 |
-| v0.4.0 | Intelligence layer (cross-review, `/fettle:learn`, effectiveness loop) | WP-11..WP-13 |
-| v0.5.0 | TypeScript/JS rule pack | WP-14 |
+| Release | Theme | Work packages | Status |
+|---|---|---|---|
+| v0.2.0 | Core lint gates — portable, configurable, installable | WP-0..WP-6 | **Shipped** |
+| v0.3.0 | Process gates + intelligence foundation | WP-7..WP-13 | **Shipped** |
+| v0.4.0 | Cross-review provider, effectiveness loop, TypeScript rules | WP-14..WP-16 | Planned |
+| v0.5.0 | SARIF, caching, autofix, install UX | WP-17..WP-20 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 
