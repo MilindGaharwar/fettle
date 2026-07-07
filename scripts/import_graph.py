@@ -27,11 +27,17 @@ def _parse_imports(file_path: str) -> list[dict]:
 
 
 def _resolve_module(module_name: str, project_root: str) -> str | None:
-    """Resolve a dotted module name to a file path within the project, or None."""
+    """Resolve a dotted module name to a file path within the project, or None.
+
+    Checks both flat layout and src-layout (src/<pkg>/ is the standard
+    packaging layout — missed it on acumen, 2026-07-07).
+    """
     parts = module_name.split(".")
     candidates = [
         os.path.join(project_root, *parts) + ".py",
         os.path.join(project_root, *parts, "__init__.py"),
+        os.path.join(project_root, "src", *parts) + ".py",
+        os.path.join(project_root, "src", *parts, "__init__.py"),
     ]
     for c in candidates:
         if os.path.isfile(c):
@@ -70,6 +76,26 @@ def _is_installed(module_name: str) -> bool:
         return importlib.util.find_spec(_top_level_module(module_name)) is not None
     except (ModuleNotFoundError, ValueError):
         return False
+
+
+def _declared_dependency(module_name: str, project_root: str) -> bool:
+    """True if the top-level module is named in the project's dependency
+    manifests. Ephemeral envs (uv run --with X) leave no .venv to probe,
+    but a declared dependency is the project's business, not a broken
+    import (acumen/pytest, 2026-07-07).
+    """
+    import re
+    top = _top_level_module(module_name)
+    pattern = re.compile(r"[\"'\s=\[,;]" + re.escape(top) + r"[\"'\s><=\[\],;.]", re.IGNORECASE)
+    for manifest in ("pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.cfg"):
+        path = os.path.join(project_root, manifest)
+        try:
+            with open(path) as f:
+                if pattern.search(" " + f.read() + " "):
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def _in_project_venv(module_name: str, project_root: str) -> bool:
@@ -173,6 +199,8 @@ def check_imports(file_path: str, project_root: str) -> list[dict]:
         if _is_installed(module):
             continue
         if _in_project_venv(module, project_root):
+            continue
+        if _declared_dependency(module, project_root):
             continue
         if _is_local_module(module, project_root):
             continue
