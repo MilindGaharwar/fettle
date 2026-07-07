@@ -9,37 +9,34 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v0.2.0** — first public release: core lint gates, portable and
-configurable. See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next
-(generalized process gates in v0.3.0, the intelligence layer in v0.4.0).
+**Status: v0.3.0** — core lint gates + process gates + intelligence layer foundation.
+8,211 lines, 80+ files, 30+ tests.
 
-## Why Fettle
+## What It Does
 
-AI coding assistants produce code fast — including fast copies of the same
-failure patterns: swallowed exceptions, regex-parsed LLM output, HTTP clients
-without timeouts, SQL built with f-strings, health checks that report perfect
-when they have no data. Fettle's rules exist because each of these caused a
-real incident somewhere. The long-term goal (`/fettle:learn`, v0.4.0) is a tool
-that converts every new postmortem into a tested, cited rule automatically.
+| Layer | Hook | What runs |
+|-------|------|-----------|
+| **Per-edit lint** | PostToolUse (Write/Edit) | ruff + semgrep on every Python edit |
+| **Pre-write gate** | PreToolUse (Write/Edit) | quality_gate.py (mode-dependent block) |
+| **MCP trust** | PreToolUse (Bash) | Package install allowlist |
+| **Doc freshness** | PostToolUse (Bash) | Warns if implementation changed but no docs updated |
+| **Cross-file** | Stop | Import/contract resolution before response delivery |
+| **UX spec gate** | PreToolUse | Blocks frontend edits without UX spec (opt-in) |
+| **UI colors gate** | PostToolUse | Warns on hardcoded hex outside palette (opt-in) |
 
-## What it does today
+## Intelligence Layer (v0.3.0+)
 
-- **Per-edit scanning** — a PostToolUse hook runs ruff + semgrep on every Python
-  file Claude writes or edits, with advisory / soft / enforce modes.
-- **Project scan with baselines** — `quality_scan.py --root . --baseline FILE`
-  reports only findings new since the baseline (incremental adoption).
-- **Cross-file Stop gate** — import/contract resolution checks before a response
-  is delivered.
-- **Process gates, opt-in** (being generalized in v0.3.0) — plan-before-edit,
-  doc-update-before-push, test-freshness, UX-spec, and package-install trust
-  gates. All default **off**; enable per project in `.fettle.toml`.
-- **LLM-antipattern rule pack** — 9 semgrep rules targeting failure modes specific
-  to AI-generated code (see `rules/llm-antipatterns.yml`).
+| Feature | Command | Description |
+|---------|---------|-------------|
+| **Learn** | `/fettle:learn` | Incident text → LLM-generated semgrep rule + fixtures + citation |
+| **Explain** | `/fettle:explain` | Why did the last hook block? Human-readable trace |
+| **Baseline** | `/fettle:baseline` | Snapshot violations for incremental adoption |
+| **Report** | `/fettle:report` | Effectiveness metrics (pass/violation rates, top violations) |
 
-## Rules catalog (semgrep)
+## Rules Catalog (semgrep)
 
 | Rule | Severity | Catches |
-|---|---|---|
+|------|----------|---------|
 | `regex-llm-output` | ERROR | Regex-parsing LLM output instead of structured tool use |
 | `bare-except-swallow` | ERROR | `except: pass` swallowing all errors |
 | `broad-except-no-reraise` | ERROR | `except Exception` without re-raise or logging |
@@ -50,68 +47,138 @@ that converts every new postmortem into a tested, cited rule automatically.
 | `datetime-now-pipeline` | WARNING | `datetime.now()` in pipeline code (breaks backfill) |
 | `non-atomic-write-output` | WARNING | Non-atomic writes in pipeline output paths |
 
-Plus ruff rule selections (`BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`,
-`UP*` as warnings) — see `rules/.ruff.toml`.
+Plus ruff: `BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`, `UP*` as warnings.
 
-## Installation (pre-release)
-
-Requires Python >= 3.11, plus `ruff` and (optionally) `semgrep` on PATH:
+## Installation
 
 ```bash
-git clone https://github.com/MilindGaharwar/fettle ~/tools/fettle
+# Clone as Claude Code plugin
+git clone https://github.com/MilindGaharwar/fettle ~/.claude/plugins/fettle
+
+# Install tools
 uv tool install ruff
-uv tool install semgrep   # optional; semgrep rules skipped if absent
+uv tool install semgrep   # optional
+
+# Verify
+bash ~/.claude/plugins/fettle/scripts/run.sh doctor.py
 ```
 
-Run a project scan directly (`run.sh` finds a Python >= 3.11 even when
-`python3` is older, as on stock macOS):
+Hooks auto-activate via `hooks/hooks.json` when installed in `~/.claude/plugins/`.
+
+## CLI
 
 ```bash
-bash ~/tools/fettle/scripts/run.sh quality_scan.py --root . --json
+fettle check [--all] [--changed] [--json] [--fix] [--baseline]
+fettle config --print-effective
+fettle explain [--last N]
+fettle baseline create|update
+fettle doctor
 ```
 
-### As a Claude Code plugin (hooks wire automatically)
-
-```bash
-claude plugin marketplace add MilindGaharwar/fettle
-claude plugin install fettle@fettle-marketplace
-```
-
-Then run `bash scripts/run.sh doctor.py` from the plugin or repo directory to
-verify the environment.
-
-## Slash commands
-
-Installing the plugin adds these commands to Claude Code:
+## Slash Commands (12)
 
 | Command | Purpose |
-|---|---|
-| `/fettle:quality` | Full project quality scan |
-| `/fettle:preflight` | Pre-deployment FMEA checklist for a service or agent |
-| `/fettle:ops-review` | Operational readiness review checklist |
-| `/fettle:plan-activate` / `/fettle:plan-complete` | Plan lifecycle for the plan-before-edit gate |
-| `/fettle:mcp-approve` / `/fettle:mcp-revoke` | Zero-trust allowlist ledger for MCP packages |
+|---------|---------|
+| `/fettle:quality` | Full project scan |
+| `/fettle:preflight` | Pre-deployment FMEA checklist |
+| `/fettle:ops-review` | Operational readiness review |
+| `/fettle:plan-activate` | Start a plan (required before edits in enforce mode) |
+| `/fettle:plan-complete` | Mark plan done |
+| `/fettle:mcp-approve` | Approve an MCP package |
+| `/fettle:mcp-revoke` | Revoke MCP package trust |
+| `/fettle:learn` | Generate rule from incident |
+| `/fettle:explain` | Explain last hook decision |
+| `/fettle:baseline` | Manage violation baselines |
+| `/fettle:report` | Effectiveness metrics |
 
-## Enforcement modes
+## Configuration
 
-Set per project in `.fettle.toml` (see [docs/CONFIG.md](docs/CONFIG.md)):
+`.fettle.toml` at project root. Full reference: [docs/CONFIG.md](docs/CONFIG.md).
 
 ```toml
 [gates.lint]
+enabled = true
 mode = "advisory"   # advisory | soft | enforce
+
+[gates.ux_spec]
+enabled = false     # Blocks frontend edits without UX spec
+
+[gates.ui_colors]
+enabled = false
+allowed_hex = ["#1a1a1a", "#ffffff"]
+
+[gates.plan]
+enabled = false
+threshold = 3       # Files changed before plan required
+
+[gates.mcp_trust]
+enabled = false
+
+[severity]
+error_rules = ["BLE001", "S110", "S608", "S701"]
+warning_prefixes = ["SIM", "UP"]
 ```
 
-| Mode | Behavior |
-|---|---|
-| `advisory` (default) | Findings displayed, never blocks |
-| `soft` / `enforce` | Error-severity findings block with a mandatory fix directive (the two modes are equivalent in v0.2; stricter pre-edit blocking for `enforce` lands with the v0.3.0 gate generalization) |
+## Architecture
 
-`FETTLE_GATE_MODE` is the emergency env override (`advisory`/`soft`/`enforce`,
-or `off` to disable every gate).
+```
+Claude Code Tool Call
+    │
+    ▼
+PreToolUse ──→ quality_gate.py (mode check)
+             → mcp_trust_gate.py (Bash only)
+             → ux_spec_gate.py (frontend only, opt-in)
+    │
+    ▼ (tool executes)
+    │
+PostToolUse ──→ post_edit.py (ruff + semgrep on .py files)
+              → ui_colors_gate.py (opt-in)
+              → post_bash_doc_check.py (Bash only)
+    │
+    ▼
+Stop ──→ stop_quality_gate.py (cross-file import/contract checks)
+```
 
-Recommended rollout: baseline in advisory -> fix errors in soft -> steady-state
-enforce. Suppress individual findings with `# noqa: RULE` (ruff),
-`# nosemgrep: rule-id` (semgrep), or glob patterns in `.fettle-ignore`.
+## Result Taxonomy
+
+Every hook returns one of:
+
+| Status | Meaning | User action |
+|--------|---------|-------------|
+| `PASS` | No issues | None |
+| `VIOLATION` | Code quality issue | Fix the code |
+| `TOOL_ERROR` | ruff/semgrep missing or crashed | Run `fettle doctor` |
+| `CONFIG_ERROR` | Invalid .fettle.toml | Fix config |
+| `SKIPPED` | File not in scope | None |
+
+## Key Design Principles
+
+1. **Advisory by default** — opinionated gates default off; lint is advisory; every block names its disable key
+2. **Fail visible** — tool crashes surface as warnings, never as silent passes
+3. **Rules carry receipts** — every rule has origin + citation; `/fettle:learn` rules cite their incident
+4. **Single config source** — `.fettle.toml`, no scattered env vars
+5. **No shared global state** — per-session state dirs
+
+## Roadmap
+
+| Version | Theme | Status |
+|---------|-------|--------|
+| v0.2.0 | Core lint gates | **Shipped** |
+| v0.3.0 | Process gates + intelligence foundation | **Shipped** |
+| v0.4.0 | Cross-review provider, effectiveness loop completion | Planned |
+| v0.5.0 | TypeScript/JS rule pack | Planned |
+| v0.6.0 | SARIF output, caching, autofix | Planned |
+
+### Planned Enhancements (v0.4.0+)
+
+- **Provider-agnostic cross-review** (WP-11): `claude -p` or OpenAI-compatible endpoint reviews code independently
+- **Effectiveness loop completion** (WP-13): false-positive stamps, rule retirement, recalibration recommendations
+- **TypeScript/JS rules** (WP-14): empty `catch {}`, unawaited promises, fetch without timeout, regex-parsed LLM output
+- **SARIF output**: GitHub code scanning integration
+- **Result caching**: skip re-scanning unchanged files (by content hash + tool version)
+- **Rule suppression with expiry**: `[[suppressions]]` in .fettle.toml with reason + expires date
+- **Autofix**: `fettle check --fix` applies safe ruff fixes automatically
+- **`fettle install-hooks`**: one-command setup for new projects
 
 ## License
 
