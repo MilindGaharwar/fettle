@@ -36,6 +36,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_edit.py",
             "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_edit_ts.py",
+            "timeout": 15000
           }
         ]
       },
