@@ -12,7 +12,7 @@ Configuration in .fettle.toml:
     [review]
     provider = "ollama"           # ollama | proxy | openai
     endpoint = "http://localhost:11434/v1"
-    model = "sam860/LFM2:8b"
+    model = "llama3.2"
 """
 
 import argparse
@@ -43,7 +43,7 @@ def _call_review_llm(code: str, cfg: dict) -> str | None:
     review_cfg = cfg.get("review", {})
     provider = review_cfg.get("provider", "ollama")
     endpoint = review_cfg.get("endpoint", "http://localhost:11434/v1")
-    model = review_cfg.get("model", "sam860/LFM2:8b")
+    model = review_cfg.get("model", "llama3.2")
 
     if provider == "proxy":
         endpoint = review_cfg.get("endpoint", endpoint)

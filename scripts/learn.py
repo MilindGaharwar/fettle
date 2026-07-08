@@ -56,7 +56,7 @@ def _generate_rule_from_incident(incident_text: str) -> dict | None:
 
         # Try Ollama first (most likely available locally)
         ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434/v1")
-        model = os.environ.get("FETTLE_LEARN_MODEL", "sam860/LFM2:8b")
+        model = os.environ.get("FETTLE_LEARN_MODEL", "llama3.2")
 
         payload = json.dumps({
             "model": model,
