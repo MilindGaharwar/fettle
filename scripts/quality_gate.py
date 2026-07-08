@@ -37,6 +37,7 @@ EXEMPT_PATH_CONTAINS = ("/tests/", "/test/", "/.fettle/", "/memory/", "/__pycach
 # Session-scoped state paths — set by _init_state(session_id) in main().
 TRACKING_FILE = ""
 EDIT_TRACKING_FILE = ""
+BOOTSTRAP_WARNED_MARKER = ""
 
 # From post_bash_test_detect.py — comprehensive test pattern detection
 TEST_PATTERNS = [
@@ -191,6 +192,21 @@ def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> lis
     ]
 
 
+def scan_bootstrap(file_path: str, cwd: str) -> list[str]:
+    """CI must be set up before development: fire on an impl-file edit in a
+    repo with no Fettle CI workflow. The caller decides block vs warn by mode."""
+    if not _is_implementation_file(file_path, cwd):
+        return []
+    workflow = Path(cwd) / ".github" / "workflows" / "fettle.yml"
+    if workflow.is_file():
+        return []
+    return [
+        "CI-BOOTSTRAP: this package has no Fettle CI workflow — run `fettle ci init` "
+        "to set up boundary/secret + quality enforcement before developing "
+        "(strict-block via [gates.ci_bootstrap] mode=strict; disable via enabled=false)"
+    ]
+
+
 def scan_tests_before_commit(command: str) -> list[str]:
     """WARNING: Check test freshness before git commit/push."""
     if "git commit" not in command and "git push" not in command:
@@ -321,11 +337,35 @@ def _save_edit_tracking(entries: list[dict]):
 
 def _init_state(session_id: str) -> None:
     """Bind tracking files to this session's state directory (no /tmp bleed)."""
-    global TRACKING_FILE, EDIT_TRACKING_FILE, BROWSER_TEST_MARKER
+    global TRACKING_FILE, EDIT_TRACKING_FILE, BROWSER_TEST_MARKER, BOOTSTRAP_WARNED_MARKER
     sdir = state_dir(session_id)
     TRACKING_FILE = str(sdir / "session-edits.json")
     EDIT_TRACKING_FILE = str(sdir / "edits.jsonl")
     BROWSER_TEST_MARKER = str(sdir / "browser-tested.timestamp")
+    BOOTSTRAP_WARNED_MARKER = str(sdir / "ci-bootstrap-warned.json")
+
+
+def _bootstrap_already_warned(cwd: str) -> bool:
+    """True if this repo was already nudged this session — advisory warns once."""
+    if not BOOTSTRAP_WARNED_MARKER:
+        return False
+    key = os.path.abspath(cwd)
+    warned: list[str] = []
+    try:
+        if os.path.isfile(BOOTSTRAP_WARNED_MARKER):
+            with open(BOOTSTRAP_WARNED_MARKER) as f:
+                warned = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        warned = []
+    if key in warned:
+        return True
+    warned.append(key)
+    try:
+        with open(BOOTSTRAP_WARNED_MARKER, "w") as f:
+            json.dump(warned, f)
+    except OSError:
+        pass
+    return False
 
 
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
@@ -380,6 +420,15 @@ def main():
             blocking_findings.extend(plan_findings)
         else:
             warning_findings.extend(plan_findings)
+
+        # CI bootstrap — strict BLOCKS on Pre; advisory warns once per session.
+        boot_cfg = gates.get("ci_bootstrap", {})
+        if boot_cfg.get("enabled"):
+            boot_findings = scan_bootstrap(file_path, cwd)
+            if boot_findings and is_pre and boot_cfg.get("mode") == "strict":
+                blocking_findings.extend(boot_findings)
+            elif boot_findings and not _bootstrap_already_warned(cwd):
+                warning_findings.extend(boot_findings)
 
     # ─── Bash: test stamping + commit warning ────────────────────────────
     elif tool_name == "Bash":
