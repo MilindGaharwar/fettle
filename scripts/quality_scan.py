@@ -244,6 +244,48 @@ def _print_json(findings: list[dict], file_count: int) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def scan_project(root: str, config: dict | None = None, json_output: bool = False) -> dict:
+    """Scan a project and return {"findings": [...], "file_count": N}.
+
+    Findings are normalized for programmatic callers (the CLI): `code` alias
+    for the rule id and a lowercase `severity`. Pure of argv/exit — main()
+    handles CLI concerns.
+    """
+    root = os.path.abspath(root)
+    cfg = config or load_config(root)
+    global ERROR_RULES, WARNING_PREFIXES
+    ERROR_RULES = set(cfg["severity"]["error_rules"])
+    WARNING_PREFIXES = set(cfg["severity"]["warning_prefixes"])
+
+    ignore_patterns = _load_ignore(root)
+    file_count = len(_collect_py_files(root, ignore_patterns))
+
+    findings = run_ruff(root) + run_semgrep(root)
+    for f in findings:
+        if os.path.isabs(f.get("file", "")):
+            f["file"] = os.path.relpath(f["file"], root)
+    findings = [f for f in findings if not _is_ignored(f.get("file", ""), ignore_patterns)]
+
+    seen: dict[str, dict] = {}
+    for f in findings:
+        seen.setdefault(_finding_key(f), f)
+    findings = list(seen.values())
+    findings.sort(key=lambda f: (_severity_order(f["severity"]), f["file"], f["line"]))
+
+    normalized = [
+        {
+            "file": f.get("file", ""),
+            "line": f.get("line", 0),
+            "code": f.get("rule", f.get("code", "")),
+            "message": f.get("message", ""),
+            "severity": str(f.get("severity", "info")).lower(),
+            "tool": f.get("tool", ""),
+        }
+        for f in findings
+    ]
+    return {"findings": normalized, "file_count": file_count}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle full-project quality scan")
     parser.add_argument("--root", default=os.getcwd(), help="Project root (default: cwd)")

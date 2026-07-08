@@ -33,12 +33,11 @@ def _resolve_module(module_name: str, project_root: str) -> str | None:
     packaging layout, so `import <pkg>` must resolve against src/).
     """
     parts = module_name.split(".")
-    candidates = [
-        os.path.join(project_root, *parts) + ".py",
-        os.path.join(project_root, *parts, "__init__.py"),
-        os.path.join(project_root, "src", *parts) + ".py",
-        os.path.join(project_root, "src", *parts, "__init__.py"),
-    ]
+    candidates = []
+    for base in ("", "src", "scripts", "lib"):
+        root = os.path.join(project_root, base) if base else project_root
+        candidates.append(os.path.join(root, *parts) + ".py")
+        candidates.append(os.path.join(root, *parts, "__init__.py"))
     for c in candidates:
         if os.path.isfile(c):
             return c
@@ -78,6 +77,13 @@ def _is_installed(module_name: str) -> bool:
         return False
 
 
+_IMPORT_ALIASES = {
+    "yaml": "pyyaml", "pil": "pillow", "cv2": "opencv-python",
+    "bs4": "beautifulsoup4", "sklearn": "scikit-learn", "dotenv": "python-dotenv",
+    "dateutil": "python-dateutil", "attr": "attrs", "google": "google-api-python-client",
+}
+
+
 def _declared_dependency(module_name: str, project_root: str) -> bool:
     """True if the top-level module is named in the project's dependency
     manifests. Ephemeral envs (uv run --with X) leave no .venv to probe,
@@ -86,7 +92,9 @@ def _declared_dependency(module_name: str, project_root: str) -> bool:
     """
     import re
     top = _top_level_module(module_name)
-    pattern = re.compile(r"[\"'\s=\[,;]" + re.escape(top) + r"[\"'\s><=\[\],;.]", re.IGNORECASE)
+    names = {top, _IMPORT_ALIASES.get(top.lower(), top)}
+    alt = "|".join(re.escape(n) for n in names)
+    pattern = re.compile(r"[\"'\s=\[,;](?:" + alt + r")[\"'\s><=\[\],;.]", re.IGNORECASE)
     for manifest in ("pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.cfg"):
         path = os.path.join(project_root, manifest)
         try:
@@ -188,6 +196,9 @@ ALLOWED_DYNAMIC_IMPORTS: set[str] = set()  # add project-specific dynamic import
 def check_imports(file_path: str, project_root: str) -> list[dict]:
     """Check that all static imports in file_path resolve to files in project_root or stdlib."""
     errors = []
+    # A module that does sys.path.insert(0, os.path.dirname(__file__)) makes
+    # its own directory an import root — resolve sibling imports there too.
+    file_dir = os.path.dirname(os.path.abspath(file_path))
     for imp in _parse_imports(file_path):
         module = imp["module"]
         top = _top_level_module(module)
@@ -205,6 +216,8 @@ def check_imports(file_path: str, project_root: str) -> list[dict]:
         if _is_local_module(module, project_root):
             continue
         if _is_local_module(top, project_root):
+            continue
+        if _is_local_module(module, file_dir) or _is_local_module(top, file_dir):
             continue
 
         errors.append({
