@@ -81,6 +81,25 @@ scan enabled). The generated workflow pins tool versions and invokes
 | 4 | `fettle ci` over a temp repo wired end-to-end (clean → exit 0; planted synthetic key → nonzero) through the real compose path, not mocks | INTEGRATION | `uv run --with pytest python -m pytest tests/test_ci.py -k integration` |
 | 5 | Run `python scripts/cli.py ci` at the Fettle repo root — reproduces CI locally and exits 0; run `python scripts/cli.py ci init --dry-run` and confirm the emitted YAML names the boundary-scan + gate steps and parses under a YAML loader | LIVE | `ci` exits 0; `ci init --dry-run` prints a workflow naming both steps |
 
+## WP-3 Bootstrap gate — CI required before development
+
+A `scan_bootstrap` check in the unified quality gate (mirrors
+`scan_planning`): on a PreToolUse Write/Edit to an implementation file in a
+repo with no Fettle CI workflow (`.github/workflows/fettle.yml`), it fires.
+Config `[gates.ci_bootstrap]` (default enabled, mode `advisory`): advisory
+warns once per session ("run `fettle ci init`"), `strict` blocks the edit
+(exit 2, `decision: block`). `fettle ci init` writes the workflow
+(silencing it) and seeds `mode = "strict"` so the repo hard-enforces
+thereafter. This turns "CI is available" into "CI is set up before code is."
+
+| # | Task | Method | Verify by |
+|---|------|--------|-----------|
+| 1 | Tests for `scan_bootstrap(file_path, cwd)`: an impl-file edit in a repo with no `.github/workflows/fettle.yml` returns a finding; with the workflow present returns none; a non-impl file (`.md`, a test file) returns none | TDD | `uv run --with pytest python -m pytest tests/test_bootstrap_gate.py` green |
+| 2 | Implement `scan_bootstrap` + `[gates.ci_bootstrap]` default + Write/Edit wiring (strict→block on Pre, advisory→warn once) + `ci init` seeding `mode="strict"` | BUILD | task 1 tests pass |
+| 3 | Regression — must not nag the wrong cases and must fail in the right direction: a scratch/exempt file (outside cwd, or a `.md`/test file) never triggers the gate, and advisory mode never blocks (exit != 2), so unrelated repos are informed but never broken | REGRESSION | exempt + advisory-non-blocking assertions in tests/test_bootstrap_gate.py |
+| 4 | Drive `quality_gate.main` end-to-end via a PreToolUse Write payload over a temp repo: strict mode + no workflow → exit 2 with a `fettle ci init` reason; workflow present → exit 0 | INTEGRATION | `uv run --with pytest python -m pytest tests/test_bootstrap_gate.py -k integration` |
+| 5 | In a fresh temp git repo, feed a strict PreToolUse Write payload through `bash scripts/run.sh quality_gate.py` → blocks naming `fettle ci init`; add `.github/workflows/fettle.yml` and re-feed → allowed (exit 0) | LIVE | first invocation exits 2 with the reason; post-workflow invocation exits 0 |
+
 ## Out of scope
 
 - Replacing Fettle's own hand-tuned `.github/workflows/ci.yml` — the

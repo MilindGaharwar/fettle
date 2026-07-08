@@ -131,6 +131,12 @@ _CONFIG_SEED = """\
 # generic and standalone. The secret and out-of-project-path checks are
 # always on; add names here to also forbid cross-package references.
 forbidden = []
+
+[gates.ci_bootstrap]
+# CI is now set up for this repo — hard-enforce it: block edits if the
+# workflow is ever removed. Set mode = "advisory" to only warn.
+enabled = true
+mode = "strict"
 """
 
 

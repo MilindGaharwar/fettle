@@ -39,6 +39,9 @@ DEFAULTS: dict[str, Any] = {
         "docs": {"enabled": False, "mode": "soft"},  # doc-update-before-push check
         "tests": {"enabled": False, "browser_test_window_s": 1800},
         "mcp_trust": {"enabled": False},
+        # CI must be set up before development. Default on + advisory (a
+        # one-time nudge to run `fettle ci init`); mode="strict" blocks.
+        "ci_bootstrap": {"enabled": True, "mode": "advisory"},
     },
     "severity": {
         "error_rules": ["BLE001", "S110", "S608", "S701"],
