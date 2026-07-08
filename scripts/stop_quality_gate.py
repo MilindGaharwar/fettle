@@ -67,7 +67,7 @@ def _find_project_root(py_file: str) -> str:
     """Walk up from the file to the nearest project marker.
 
     Defaulting to the file's own directory made tests/ subdirectories their
-    own import root — 61 false findings in alpha-agent (2026-07-07).
+    own import root — a flood of false import findings.
     """
     d = os.path.dirname(os.path.abspath(py_file))
     home = os.path.expanduser("~")

@@ -203,14 +203,14 @@ def test_stdlib_imports_skipped(project_dir):
     assert errors == []
 
 
-# --- Regressions: 2026-07-07 alpha-agent false-positive storm (61 findings) ---
+# --- Regressions: import false positives on real-world project layouts ---
 
 def test_third_party_in_project_venv_is_skipped(project_dir):
     """A package in the project's .venv but not the hook's python must pass.
 
-    Regression (2026-07-07): pytest/fastapi/httpx flagged as unresolvable in
-    alpha-agent because the Stop hook runs under its own interpreter and
-    importlib can't see the project venv.
+    Regression: third-party deps were flagged as unresolvable because the
+    hook runs under its own interpreter and importlib can't see a project
+    virtualenv it was not launched from.
     """
     sp = os.path.join(project_dir, ".venv", "lib", "python3.14", "site-packages", "notinhookenv")
     os.makedirs(sp)
@@ -224,8 +224,9 @@ def test_third_party_in_project_venv_is_skipped(project_dir):
 def test_check_contracts_submodule_import_is_valid(project_dir):
     """`from pkg import submodule` is valid even without __init__ re-export.
 
-    Regression (2026-07-07): `from api.routes import analysis` flagged as
-    "'analysis' not found in 'api.routes'" in alpha-agent's main.py.
+    Regression: `from pkg import submodule` was flagged as
+    "'submodule' not found in 'pkg'" when the package's __init__ did not
+    re-export the submodule — a valid Python import wrongly rejected.
     """
     pkg = os.path.join(project_dir, "pkg")
     os.makedirs(pkg)
@@ -253,8 +254,8 @@ def test_submodule_leniency_keeps_missing_names_blocked(project_dir):
 
 
 def test_src_layout_package_resolves(project_dir):
-    """Regression (2026-07-07, acumen): src-layout (`src/<pkg>/`) is the
-    standard packaging layout — `import <pkg>` must resolve against src/."""
+    """Regression: src-layout (`src/<pkg>/`) is a standard packaging
+    layout — `import <pkg>` must resolve against src/, not only repo root."""
     pkg = os.path.join(project_dir, "src", "mypkg")
     os.makedirs(pkg)
     open(os.path.join(pkg, "__init__.py"), "w").close()
@@ -267,9 +268,9 @@ def test_src_layout_package_resolves(project_dir):
 
 
 def test_declared_dependency_is_skipped(project_dir):
-    """Regression (2026-07-07, acumen): pytest ran via an ephemeral
-    `uv run --with pytest` env — no .venv to probe — but it IS declared in
-    pyproject.toml. Declared dependencies are the project's business."""
+    """Regression: a dependency run via an ephemeral env (e.g.
+    `uv run --with X`) leaves no .venv to probe, but it is declared in
+    pyproject.toml — a declared dependency must not be flagged."""
     with open(os.path.join(project_dir, "pyproject.toml"), "w") as f:
         f.write('[project]\nname = "x"\n[project.optional-dependencies]\ndev = ["pytest>=7.0"]\n')
     a_path = os.path.join(project_dir, "a.py")
