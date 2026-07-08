@@ -53,6 +53,10 @@ DEFAULTS: dict[str, Any] = {
         "endpoint": "",
         "model": "",
     },
+    # Boundary scan: secrets + out-of-project paths (always on) plus a
+    # repo-declared forbidden-strings list (sibling projects this package
+    # must not reference). Fettle ships no names — each repo fills `forbidden`.
+    "boundary": {"forbidden": []},
 }
 
 CONFIG_FILENAME = ".fettle.toml"
