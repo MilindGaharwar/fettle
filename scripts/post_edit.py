@@ -314,6 +314,22 @@ def main() -> None:
     except OSError:
         pass
 
+    # ── Trace logging (WP-64) ───────────────────────────────────────────
+    try:
+        from trace import log_decision
+        status = "violation" if error_findings else ("pass" if not findings else "warning")
+        log_decision(
+            hook="PostToolUse",
+            status=status,
+            tool="ruff+semgrep",
+            file=file_path,
+            findings=[{"code": str(f.get("rule","")), "message": str(f.get("message","")), "severity": str(f.get("severity",""))} for f in findings[:5]],
+            duration_ms=hook_duration_ms,
+            session_id=session_id,
+        )
+    except (ImportError, OSError):
+        pass
+
     # ── Output ───────────────────────────────────────────────────────────
     visible: list[dict[str, object]] = [f for f in findings if not f.get("_suppressed")]
     if not visible:
