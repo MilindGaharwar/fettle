@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fettle cross-review — provider-agnostic independent code review.
 
-Sends code to an LLM (via Ollama, Nexus proxy, or any OpenAI-compatible endpoint)
+Sends code to an LLM (via Ollama, a local proxy, or any OpenAI-compatible endpoint)
 for independent review from a different perspective than the authoring model.
 
 Usage:
@@ -10,7 +10,7 @@ Usage:
 
 Configuration in .fettle.toml:
     [review]
-    provider = "ollama"           # ollama | nexus | openai
+    provider = "ollama"           # ollama | proxy | openai
     endpoint = "http://localhost:11434/v1"
     model = "sam860/LFM2:8b"
 """
@@ -45,8 +45,8 @@ def _call_review_llm(code: str, cfg: dict) -> str | None:
     endpoint = review_cfg.get("endpoint", "http://localhost:11434/v1")
     model = review_cfg.get("model", "sam860/LFM2:8b")
 
-    if provider == "nexus":
-        endpoint = review_cfg.get("endpoint", "http://localhost:4000/v1")
+    if provider == "proxy":
+        endpoint = review_cfg.get("endpoint", endpoint)
         model = review_cfg.get("model", "claude-opus-4.6")
 
     payload = json.dumps({
@@ -67,8 +67,8 @@ def _call_review_llm(code: str, cfg: dict) -> str | None:
             method="POST",
         )
 
-        api_key = os.environ.get("NEXUS_API_KEY", "")
-        if api_key and provider == "nexus":
+        api_key = os.environ.get("REVIEW_API_KEY", "")
+        if api_key and provider == "proxy":
             req.add_header("Authorization", f"Bearer {api_key}")
 
         with urllib.request.urlopen(req, timeout=120) as resp:

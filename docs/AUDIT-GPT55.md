@@ -1,6 +1,6 @@
 # Fettle Audit — GPT 5.5 (2026-07-07)
 
-Independent code audit conducted by GPT 5.5 via GenAI Nexus.
+Independent code audit conducted by GPT 5.5.
 
 ---
 
