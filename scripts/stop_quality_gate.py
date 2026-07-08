@@ -21,6 +21,48 @@ from import_graph import check_imports, check_contracts
 _ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".git")
 
 
+def _filter_ignored(files: list[str]) -> list[str]:
+    """Remove files matching .fettle-ignore patterns from the list."""
+    import fnmatch
+
+    if not files:
+        return files
+
+    ignore_patterns: list[str] = []
+    for f in files:
+        project_root = _find_project_root(f)
+        ignore_path = os.path.join(project_root, ".fettle-ignore")
+        if os.path.isfile(ignore_path):
+            with open(ignore_path) as fh:
+                ignore_patterns = [
+                    ln.strip() for ln in fh
+                    if ln.strip() and not ln.startswith("#")
+                ]
+            break
+
+    if not ignore_patterns:
+        return files
+
+    result = []
+    for f in files:
+        basename = os.path.basename(f)
+        relpath = f
+        skip = False
+        for pat in ignore_patterns:
+            if fnmatch.fnmatch(basename, pat) or fnmatch.fnmatch(relpath, pat):
+                skip = True
+                break
+            if pat.endswith("/") and f"/{pat[:-1]}/" in f:
+                skip = True
+                break
+            if pat.rstrip("/") in f:
+                skip = True
+                break
+        if not skip:
+            result.append(f)
+    return result
+
+
 def _find_project_root(py_file: str) -> str:
     """Walk up from the file to the nearest project marker.
 
@@ -118,6 +160,10 @@ def main() -> None:
 
     py_files = [f for f in edited_files if f.endswith(".py") and os.path.isfile(f)]
     rs_files = [f for f in edited_files if f.endswith(".rs") and os.path.isfile(f)]
+
+    # Respect .fettle-ignore: skip files matching ignore patterns
+    py_files = _filter_ignored(py_files)
+    rs_files = _filter_ignored(rs_files)
 
     if not py_files and not rs_files:
         sys.exit(0)
