@@ -35,10 +35,10 @@
 
 - Stop-hook import checks understand src-layout packages (`src/<pkg>/`)
   and skip dependencies declared in pyproject/requirements even when no
-  .venv exists to probe (ephemeral `uv run --with` envs) — second
-  false-positive round, caught on acumen 2026-07-07.
+  .venv exists to probe (ephemeral `uv run --with` envs) — a second
+  round of import false positives on real-world project layouts.
 - Stop-hook cross-file checks no longer flood real projects with false
-  positives (61 findings on one AlphaAgent response, 2026-07-07):
+  positives:
   `stop_quality_gate.py` discovers the project root by walking up to
   `pyproject.toml`/`setup.py`/`.git` instead of using the edited file's own
   directory; `check_imports` recognizes packages installed in the project's
@@ -54,7 +54,7 @@
 
 ## v0.2.1 (2026-07-04)
 
-Fixes surfaced by dogfooding the project scan on a real repo (AlphaAgent):
+Fixes surfaced by dogfooding the project scan on a real multi-package repo:
 
 - `quality_scan.py` findings and baselines now use root-relative paths, so a
   committed baseline matches on CI and other machines. Legacy absolute-path

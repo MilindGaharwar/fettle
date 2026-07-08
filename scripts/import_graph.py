@@ -30,7 +30,7 @@ def _resolve_module(module_name: str, project_root: str) -> str | None:
     """Resolve a dotted module name to a file path within the project, or None.
 
     Checks both flat layout and src-layout (src/<pkg>/ is the standard
-    packaging layout — missed it on acumen, 2026-07-07).
+    packaging layout, so `import <pkg>` must resolve against src/).
     """
     parts = module_name.split(".")
     candidates = [
@@ -82,7 +82,7 @@ def _declared_dependency(module_name: str, project_root: str) -> bool:
     """True if the top-level module is named in the project's dependency
     manifests. Ephemeral envs (uv run --with X) leave no .venv to probe,
     but a declared dependency is the project's business, not a broken
-    import (acumen/pytest, 2026-07-07).
+    import when the dependency is declared but not importable here.
     """
     import re
     top = _top_level_module(module_name)
@@ -103,7 +103,7 @@ def _in_project_venv(module_name: str, project_root: str) -> bool:
 
     Hooks run under their own interpreter, so importlib cannot see packages
     installed only in the project venv — without this check every project
-    dependency reads as an unresolvable import (alpha-agent, 2026-07-07).
+    dependency reads as an unresolvable import.
     """
     import glob
     top = _top_level_module(module_name)

@@ -49,7 +49,7 @@ Respond with valid JSON only."""
 
 def _generate_rule_from_incident(incident_text: str) -> dict | None:
     """Use LLM to generate a semgrep rule from incident description."""
-    # Try to use local acumen LLM infrastructure or direct call
+    # Prefer a local model (Ollama) when available; configurable via env.
     try:
         import urllib.request
         import urllib.error

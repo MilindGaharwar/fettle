@@ -273,7 +273,7 @@ def test_project_root_discovered_from_pyproject():
 
     Regression (2026-07-07): backend/tests/test_x.py couldn't resolve the
     project's api.* packages because project_root defaulted to .../tests,
-    producing 61 false findings in alpha-agent.
+    producing a flood of false import findings from tests/ subdirectories.
     """
     tmpdir = tempfile.mkdtemp()
     try:
