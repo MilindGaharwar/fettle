@@ -288,3 +288,45 @@ def test_undeclared_unknown_module_still_flagged(project_dir):
         f.write("import definitely_not_a_module_xyz\n")
     errors = check_imports(a_path, project_dir)
     assert len(errors) == 1
+
+
+def test_sibling_import_via_file_directory(project_dir):
+    """Regression: a module that adds its own directory to sys.path
+    (`sys.path.insert(0, os.path.dirname(__file__))`) can import its
+    siblings by top-level name — even when that directory is not the
+    project root (e.g. a scripts/ dir)."""
+    tools = os.path.join(project_dir, "tools")
+    os.makedirs(tools)
+    with open(os.path.join(tools, "helper.py"), "w") as f:
+        f.write("VALUE = 1\n")
+    a_path = os.path.join(tools, "main.py")
+    with open(a_path, "w") as f:
+        f.write("import sys, os\nsys.path.insert(0, os.path.dirname(__file__))\nfrom helper import VALUE\n")
+    # project_root is the repo root, but helper.py lives under tools/
+    assert check_imports(a_path, project_dir) == []
+
+
+def test_conventional_scripts_root_resolves(project_dir):
+    """Regression: a project keeping code in scripts/ (added to sys.path by
+    tests) — `import mymod` must resolve to scripts/mymod.py."""
+    scripts = os.path.join(project_dir, "scripts")
+    os.makedirs(scripts)
+    with open(os.path.join(scripts, "mymod.py"), "w") as f:
+        f.write("x = 1\n")
+    tests_dir = os.path.join(project_dir, "tests")
+    os.makedirs(tests_dir)
+    t_path = os.path.join(tests_dir, "test_x.py")
+    with open(t_path, "w") as f:
+        f.write("import mymod\n")
+    assert check_imports(t_path, project_dir) == []
+
+
+def test_import_alias_to_declared_package(project_dir):
+    """Regression: `import yaml` is provided by the declared dep `pyyaml`;
+    the import name differs from the package name and must still resolve."""
+    with open(os.path.join(project_dir, "pyproject.toml"), "w") as f:
+        f.write('[project.optional-dependencies]\ndev = ["pyyaml>=6.0"]\n')
+    a_path = os.path.join(project_dir, "a.py")
+    with open(a_path, "w") as f:
+        f.write("import yaml\n")
+    assert check_imports(a_path, project_dir) == []
