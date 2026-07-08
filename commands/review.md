@@ -18,7 +18,7 @@ When the user invokes `/fettle:review`:
 ```toml
 # .fettle.toml
 [review]
-provider = "ollama"    # ollama | nexus | openai
+provider = "ollama"    # ollama | proxy | openai
 endpoint = "http://localhost:11434/v1"
 model = "sam860/LFM2:8b"
 ```
