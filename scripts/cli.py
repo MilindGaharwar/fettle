@@ -22,7 +22,6 @@ def cmd_check(args: argparse.Namespace) -> None:
     """Run quality checks (CI-friendly, no hook context needed)."""
     from config import load_config
     from paths import find_repo_root
-    from quality_scan import scan_project
 
     repo_root = find_repo_root()
     if not repo_root:
@@ -30,6 +29,19 @@ def cmd_check(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     config = load_config(str(repo_root))
+
+    if getattr(args, "boundaries", False):
+        from boundary_scan import scan_repo
+        findings = scan_repo(str(repo_root), config)
+        if args.json:
+            print(json.dumps([f.to_dict() for f in findings], indent=2))
+        else:
+            for f in findings:
+                print(f"  [{f.severity.value.upper()}] {f.path}:{f.line} {f.code} — {f.message}")
+            print(f"\n{len(findings)} boundary finding(s)." if findings else "✓ No boundary issues found.")
+        sys.exit(1 if findings else 0)
+
+    from quality_scan import scan_project
     results = scan_project(str(repo_root), config, json_output=args.json)
 
     if args.json:
@@ -44,6 +56,22 @@ def cmd_check(args: argparse.Namespace) -> None:
                 print(f"  [{sev}] {loc} {f.get('code', '')} — {f.get('message', '')}")
             print(f"\n{len(results['findings'])} finding(s).")
             sys.exit(1 if any(f.get("severity") == "error" for f in results["findings"]) else 0)
+
+
+def cmd_ci(args: argparse.Namespace) -> None:
+    """Reproduce CI locally, or scaffold the workflow with `ci init`."""
+    import ci as ci_mod
+
+    if getattr(args, "ci_action", None) == "init":
+        out = ci_mod.init_ci(args.root, dry_run=getattr(args, "dry_run", False))
+        if getattr(args, "dry_run", False):
+            print(out)
+        else:
+            print("Wrote .github/workflows/fettle.yml and seeded .fettle.toml [boundary].")
+        return
+    result = ci_mod.run_ci(args.root)
+    rc = ci_mod._print_result(result)
+    sys.exit(rc)
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -184,6 +212,7 @@ def main() -> None:
     p_check.add_argument("--json", action="store_true", help="JSON output")
     p_check.add_argument("--fix", action="store_true", help="Apply safe autofixes")
     p_check.add_argument("--baseline", action="store_true", help="Only report new violations")
+    p_check.add_argument("--boundaries", action="store_true", help="Scan for secrets, out-of-project paths, and repo-forbidden strings")
 
     p_config = subparsers.add_parser("config", help="Show configuration")
     p_config.add_argument("--print-effective", action="store_true", help="Show merged effective config")
@@ -195,6 +224,13 @@ def main() -> None:
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")
 
     subparsers.add_parser("doctor", help="Environment self-check")
+
+    p_ci = subparsers.add_parser("ci", help="Run the enforced gate sequence (boundary + quality + plans)")
+    p_ci.add_argument("--root", default=".")
+    ci_sub = p_ci.add_subparsers(dest="ci_action")
+    p_ci_init = ci_sub.add_parser("init", help="Write .github/workflows/fettle.yml")
+    p_ci_init.add_argument("--dry-run", action="store_true")
+    p_ci_init.add_argument("--root", default=".")
 
     args = parser.parse_args()
 
@@ -208,6 +244,7 @@ def main() -> None:
         "explain": cmd_explain,
         "baseline": cmd_baseline,
         "doctor": cmd_doctor,
+        "ci": cmd_ci,
     }
     commands[args.command](args)
 
