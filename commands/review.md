@@ -20,7 +20,7 @@ When the user invokes `/fettle:review`:
 [review]
 provider = "ollama"    # ollama | proxy | openai
 endpoint = "http://localhost:11434/v1"
-model = "sam860/LFM2:8b"
+model = "llama3.2"
 ```
 
 ## Purpose

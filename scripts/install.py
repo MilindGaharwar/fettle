@@ -46,7 +46,7 @@ ruff_config = ""    # empty = plugin's rules/.ruff.toml
 
 [review]
 provider = "ollama"
-model = "sam860/LFM2:8b"
+model = "llama3.2"
 """
 
 DEFAULT_IGNORE = """# .fettle-ignore — glob patterns for files Fettle should skip
