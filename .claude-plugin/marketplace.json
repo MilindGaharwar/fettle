@@ -9,7 +9,7 @@
       "name": "fettle",
       "source": "./",
       "description": "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived LLM-antipattern rules wired into the Claude Code tool lifecycle.",
-      "version": "0.2.1",
+      "version": "0.4.0",
       "author": {"name": "Milind Gaharwar"},
       "license": "MIT",
       "homepage": "https://github.com/MilindGaharwar/fettle",
