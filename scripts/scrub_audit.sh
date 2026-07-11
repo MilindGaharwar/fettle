@@ -4,6 +4,7 @@ set -uo pipefail
 PATTERN='crucible|mb.?its|/data/bridge|cortex|nexus|contextbus|mb-marketplace|localhost:4000|MMILIND|logact'
 HITS=$(grep -riE "$PATTERN" . \
   --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=.fettle \
+  --exclude-dir=.venv --exclude-dir=.pytest_cache \
   --exclude=scrub_audit.sh || true)
 if [ -n "$HITS" ]; then
   echo "SCRUB AUDIT FAILED — private strings found:" >&2
