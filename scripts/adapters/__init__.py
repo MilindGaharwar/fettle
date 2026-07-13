@@ -61,5 +61,14 @@ def _ensure_loaded():
         return
     _loaded = True
     from adapters.python_adapter import PythonAdapter
+    from adapters.typescript_adapter import TypeScriptAdapter
+    from adapters.rust_adapter import RustAdapter
+    from adapters.go_adapter import GoAdapter
     if not any(a.language == "python" for a in _REGISTRY):
         register_adapter(PythonAdapter())
+    if not any(a.language == "typescript" for a in _REGISTRY):
+        register_adapter(TypeScriptAdapter())
+    if not any(a.language == "rust" for a in _REGISTRY):
+        register_adapter(RustAdapter())
+    if not any(a.language == "go" for a in _REGISTRY):
+        register_adapter(GoAdapter())
