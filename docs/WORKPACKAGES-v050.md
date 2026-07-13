@@ -13,7 +13,8 @@
 | 5 | 90–93 | CI feedback loop | Local-vs-CI parity |
 | 6 | 94–97 | Polyglot adapters | TypeScript, Rust, Go |
 | 7 | 98–103 | Advanced | Generated code, migrations, dashboard |
-| **Total** | **37 WPs** | | |
+| 8 | 104–114 | Pre-generation + agent guardrails | Shape what gets written; block destructive patterns; catch debug/scope drift |
+| **Total** | **48 WPs** | | |
 
 Platform: macOS + Linux. Windows explicitly not targeted in v0.5.0.
 
@@ -983,6 +984,18 @@ Phase 7 (Advanced):
   WP-101 (metrics) ← needs 93
   WP-102 (drift) ← needs 101
   WP-103 (docs) ← needs everything
+
+Phase 8 (Pre-Generation + Agent Guardrails) — NO deps on Phases 1–7:
+  WP-105 (skill edit)       ─┐
+  WP-106 (lean review)      ├→ WP-108 (lean debt)
+  WP-107 (lean audit)       │
+  WP-104 (subagent hook)    ←─ uses content from 105
+  WP-109 (config protect)   — standalone
+  WP-110 (destructive guard)— standalone
+  WP-111 (loop detect)      — standalone
+  WP-112 (commit message)   — standalone
+  WP-113 (debug statements) — standalone
+  WP-114 (scope creep)      — standalone
 ```
 
 ---
@@ -998,6 +1011,583 @@ Phase 7 (Advanced):
 | CI ingestion requires `gh` CLI auth | Advisory: "run `gh auth login` to enable CI insights" |
 | Hook timeout blown by tests | Tests never in fast tier; changed tier has 90s budget; deferred reporting |
 | Secret scanner false positives | Allowlist + baseline + expiring suppressions (WP-77, WP-81) |
+| SubagentStart hook latency | JS only, <50ms, fail-open, no Python interpreter startup (WP-104) |
+| Ladder too aggressive (YAGNI kills needed code) | Non-lazy carve-outs for security/validation/accessibility; advisory mode (WP-105) |
+| Lean review subjective | Read-only, no auto-fix; human decides what to act on (WP-106) |
+| Config protect false positives (legit config changes) | Advisory by default; explicit user instruction overrides; allow_patterns escape hatch (WP-109) |
+| Destructive guard evasion (obfuscated commands) | Pragmatic regex, not exhaustive; advisory default means the warning still fires even on partial match (WP-110) |
+| Loop detection triggers on intentional retries | Threshold 3 + window 7 is conservative; config-tunable; advisory-only, never blocks (WP-111) |
+| Commit message validation too rigid | Advisory by default; conventional commit is opt-in; max_subject configurable (WP-112) |
+| Debug print false positives in CLI code | Path exclusions for cli/, scripts/, main.py; WARNING not ERROR (WP-113) |
+| Scope creep warning annoys on large legitimate refactors | Advisory only; resets on commit; configurable thresholds; never blocks (WP-114) |
+
+---
+
+## Phase 8: Pre-Generation Enforcement (WP-104 → WP-108)
+
+> Inspired by Ponytail's "The Ladder" philosophy. Zero dependencies on Phases 1–7 — can ship independently as v0.4.x.
+
+### WP-104 — SubagentStart Hook (Pre-Generation Injection)
+
+Inject coding discipline into subagents that never see Fettle's main-session rules.
+
+**Problem:** Claude Code spawns subagents (TaskCreate, Agent tool, workflows) that generate bloated code with no quality philosophy. Post-edit hooks then catch errors — wasting cycles fixing what should never have been written.
+
+**Deliverables:**
+- `hooks/subagent_inject.js` — SubagentStart hook (<50ms, JavaScript)
+- Addition to `hooks/hooks.json` under new `"SubagentStart"` key
+- Configuration: `[gates.subagent]` section in `.fettle.toml`
+- Matcher: `FETTLE_SUBAGENT_MATCHER` env var (regex on `agent_type`)
+
+**Behavior:**
+1. Fires on every subagent spawn
+2. Reads `[gates.subagent].enabled` from config (default: true)
+3. If disabled → exit immediately
+4. If `FETTLE_SUBAGENT_MATCHER` set → read stdin, match `agent_type`, inject only on match
+5. If no matcher → inject into all subagents (no stdin needed)
+6. Output: `{ hookSpecificOutput: { hookEventName: "SubagentStart", additionalContext: <text> } }`
+7. Fail-open on all errors (never block agent spawn)
+
+**Injected content (<500 tokens):**
+```
+Before writing new code, stop at the first rung that holds:
+1. Does this need to exist? Speculative = skip. YAGNI.
+2. Already in this codebase? Grep first. Reuse > rewrite.
+3. Stdlib/platform does it? Use it.
+4. Already-installed dep solves it? Never add a dep for what few lines do.
+5. One-liner? Do that.
+6. Only then: minimum code that works.
+
+No unrequested abstractions. Deletion over addition. Shortest working diff.
+NEVER simplify away: input validation, error handling, security, accessibility.
+```
+
+**Config schema:**
+```toml
+[gates.subagent]
+enabled = true
+injection_file = ""         # custom content path; default: built-in ladder
+mode = "advisory"           # advisory | off
+```
+
+**TDD contracts:**
+```
+test_injects_ladder_into_subagent
+test_respects_disabled_config
+test_matcher_filters_by_agent_type
+test_no_matcher_injects_into_all
+test_fails_open_on_stdin_error
+test_fails_open_on_missing_config
+test_injection_under_500_tokens
+test_custom_injection_file_loaded
+test_timeout_does_not_hang_session
+test_json_output_format_correct
+```
+
+---
+
+### WP-105 — The Ladder in discipline-coding Skill
+
+Prioritized decision framework for code generation — reduces output volume by forcing reuse-first thinking.
+
+**Problem:** `discipline-coding.md` says "Check for existing patterns" but provides no prioritized hierarchy. The agent's default bias is toward writing new code.
+
+**Deliverables:**
+- Edit `~/.claude/skills/discipline-coding.md`: replace rules 1–3 with The Ladder
+- Keep rules 4–15 (renumbered)
+
+**New "Before Writing Code" section:**
+```markdown
+### Before Writing Code (The Ladder)
+Stop at the first rung that holds:
+1. **Does this need to exist?** Speculative need = skip it. YAGNI.
+2. **Already in this codebase?** Grep for helpers, utils, types. Reuse > rewrite.
+3. **Stdlib/platform does it?** Use it. (CSS > JS, DB constraint > app code, lru_cache > custom)
+4. **Already-installed dep solves it?** Never add a dep for what few lines do.
+5. **One-liner?** Do that.
+6. **Only then:** Write the minimum code that works.
+
+Two rungs work → take the higher one.
+
+Non-lazy carve-outs (never simplify these away):
+- Input validation at trust boundaries
+- Error handling preventing data loss
+- Security measures
+- Accessibility basics
+- Anything explicitly requested
+```
+
+**No code changes.** Skill file edit only.
+
+---
+
+### WP-106 — `/fettle:lean` Slash Command (Over-Engineering Diff Review)
+
+Review current diff specifically for over-engineering — a dimension Fettle currently lacks entirely.
+
+**Problem:** Fettle reviews for bugs/security/lint but cannot detect when code passes all rules yet is 5x more verbose than necessary.
+
+**Deliverables:**
+- `commands/lean.md` — slash command definition (~40 lines)
+
+**Behavior:**
+- Scope: current diff only (git diff + staged)
+- Reviews ONLY for over-engineering (not bugs, security, performance)
+- Format: `L<line>: <tag> <what>. <replacement>.`
+- Tags: `delete:` `stdlib:` `yagni:` `shrink:` `dep:`
+- End: `net: -<N> lines possible.` or `Lean already. Ship.`
+- Does NOT apply fixes (read-only)
+
+**Implementation:** Pure markdown command file. No Python code.
+
+**TDD contracts (manual):**
+```
+test_reviews_current_diff_only
+test_only_reports_over_engineering
+test_uses_correct_tag_format
+test_ends_with_net_summary
+test_does_not_apply_fixes
+test_ignores_security_relevant_code
+```
+
+---
+
+### WP-107 — `/fettle:audit-lean` Slash Command (Repo-Wide Audit)
+
+Scan entire repo for accumulated unnecessary complexity.
+
+**Deliverables:**
+- `commands/audit-lean.md` — slash command definition (~50 lines)
+
+**Hunts for:**
+- Dependencies that stdlib already provides
+- Single-implementation interfaces/abstractions
+- Factories with one product
+- Wrappers that only delegate
+- Files exporting one trivial thing
+- Dead feature flags
+- Hand-rolled stdlib (custom retry, debounce, LRU, etc.)
+
+**Format:** Ranked by biggest cut first. End: `net: -<N> lines, -<M> deps possible.`
+
+**Implementation:** Pure markdown command file. No Python code.
+
+---
+
+### WP-108 — `fettle:lean:` Comment Convention + Debt Tracking
+
+Track deliberate simplifications and their upgrade triggers.
+
+**Problem:** When you skip an abstraction intentionally, that decision and its ceiling evaporate. Nobody knows when to grow the simple version.
+
+**Deliverables:**
+- Convention: `# fettle:lean: <what>, upgrade when: <trigger>`
+- `commands/lean-debt.md` — slash command (grep + report)
+- Addition to `scripts/report.py`: count lean markers
+
+**`/fettle:lean-debt` behavior:**
+- Greps `fettle:lean:` comments (skipping node_modules/.git/.venv/build)
+- Format: `<file>:<line> — <what>. upgrade: <trigger>.`
+- Flags `no-trigger` items (markers without "upgrade when:" → rot risk)
+- End: `<N> markers, <M> with no trigger.`
+
+**Config:**
+```toml
+[lean]
+convention = "fettle:lean:"
+warn_no_trigger = true
+```
+
+**TDD contracts:**
+```
+test_greps_fettle_lean_comments
+test_parses_ceiling_and_trigger
+test_flags_no_trigger_markers
+test_skips_excluded_directories
+test_report_includes_lean_count
+test_handles_ts_and_python_comments
+```
+
+---
+
+### WP-109 — Config Protection Gate
+
+Prevent the agent from weakening linter/formatter configs instead of fixing the code.
+
+**Problem:** When an agent encounters a lint error it can't easily fix, its path of least resistance is to disable the rule or weaken the config. This silently degrades project quality. ECC identified this as a top agent anti-pattern.
+
+**Deliverables:**
+- Addition to `scripts/quality_gate.py` (or new `scripts/config_protect.py`)
+- PreToolUse(Write|Edit) check on known config file patterns
+
+**Protected files:**
+- `.eslintrc*`, `eslint.config.*`
+- `.prettierrc*`, `prettier.config.*`
+- `biome.json`, `biome.jsonc`
+- `.ruff.toml`, `ruff.toml`
+- `pyproject.toml` sections: `[tool.ruff]`, `[tool.mypy]`, `[tool.pyright]`
+- `.shellcheckrc`
+- `rustfmt.toml`, `clippy.toml`
+- `.editorconfig`
+- `tsconfig.json` (strict-related fields)
+
+**Behavior:**
+1. On first creation of a config file → allow (agent is setting up the project)
+2. On modification of an existing config file:
+   - **advisory mode (default):** warn "Fix the code, don't weaken the linter. Disable: `[gates.config_protect].enabled = false`"
+   - **enforce mode:** block (exit code 2)
+3. Exception: if the user's message explicitly says "update the linter config", "disable rule X", or "relax the config" → allow
+4. Exception: adding rules (making config stricter) → allow
+
+**Detection logic:**
+- File path matches protected pattern AND file already exists on disk
+- For `pyproject.toml`: only trigger if diff touches `[tool.ruff]`, `[tool.mypy]`, etc. sections (not metadata/deps)
+- Cannot reliably detect "stricter vs weaker" in all cases → advisory by default
+
+**Config:**
+```toml
+[gates.config_protect]
+enabled = true
+mode = "advisory"           # advisory | enforce
+extra_patterns = []         # additional file globs to protect
+allow_patterns = []         # file globs to always allow
+```
+
+**TDD contracts:**
+```
+test_blocks_eslintrc_modification
+test_allows_eslintrc_creation
+test_blocks_ruff_toml_modification
+test_pyproject_only_triggers_on_tool_sections
+test_allows_when_user_explicitly_requests
+test_advisory_mode_warns_not_blocks
+test_enforce_mode_blocks
+test_extra_patterns_respected
+test_allow_patterns_override
+test_adding_rules_allowed
+```
+
+---
+
+### WP-110 — Destructive Command Guard
+
+Block dangerous bash commands that are hard to reverse.
+
+**Problem:** Agents use destructive operations as shortcuts — `rm -rf`, `git reset --hard`, `git push --force`, `DROP TABLE`. These can destroy work. Fettle's MCP trust gate only covers package installs, not destructive shell commands.
+
+**Deliverables:**
+- Addition to `scripts/mcp_trust_gate.py` (extend existing PreToolUse(Bash) hook)
+- Or new `scripts/destructive_guard.py` if cleaner
+
+**Blocked patterns (regex on command string):**
+```
+rm\s+(-[rR]f|--recursive.*--force|-f.*-[rR]|--force.*--recursive)
+git\s+(reset\s+--hard|push\s+--force|push\s+-f|clean\s+-fd|checkout\s+\.\s*$)
+git\s+branch\s+-D
+DROP\s+(TABLE|DATABASE|SCHEMA)
+TRUNCATE\s+TABLE
+pkill\s+-9|kill\s+-9
+chmod\s+(-R\s+)?777
+dd\s+.*of=/dev/
+mkfs\.
+```
+
+**Behavior:**
+1. Parse bash command from hook stdin
+2. Match against destructive patterns
+3. On match:
+   - **advisory (default):** warn "Destructive command detected: `<cmd>`. Consider a safer alternative."
+   - **enforce:** block (exit code 2) with message "Blocked: `<cmd>`. Use `[gates.destructive].mode = advisory` to allow."
+4. Handle evasion: quoted strings, subshells `$(...)`, pipe chains, `eval`, `xargs rm`
+
+**Evasion handling (pragmatic, not exhaustive):**
+- Normalize: strip quotes, expand simple `$()` subshells, split on `;`, `&&`, `||`, `|`
+- Each segment checked independently
+- Known limitation: cannot detect all obfuscation; advisory by default is the safety net
+
+**Config:**
+```toml
+[gates.destructive]
+enabled = true
+mode = "advisory"
+extra_patterns = []         # additional regex patterns to block
+allow_commands = []         # specific commands to always allow (e.g., "rm -rf node_modules")
+```
+
+**TDD contracts:**
+```
+test_blocks_rm_rf
+test_blocks_git_reset_hard
+test_blocks_git_push_force
+test_blocks_drop_table
+test_allows_safe_rm
+test_allows_git_push_no_force
+test_handles_quoted_commands
+test_handles_pipe_chains
+test_handles_semicolon_chaining
+test_advisory_warns_not_blocks
+test_enforce_blocks
+test_allow_commands_override
+test_does_not_false_positive_on_grep_containing_rm
+```
+
+---
+
+### WP-111 — Tool Loop Detection
+
+Detect and warn when the agent is stuck calling the same tool with identical parameters.
+
+**Problem:** Agents sometimes enter loops — calling the same tool with the same arguments repeatedly without progress. This wastes tokens and context window. ECC detects "same tool+params 3x in last 5 calls" which is a cheap, high-signal heuristic.
+
+**Deliverables:**
+- `scripts/loop_detect.py` — PostToolUse hook addition
+- Ring buffer of last N tool calls (tool_name + content hash of params)
+- Warning when duplicate threshold exceeded
+
+**Behavior:**
+1. After each tool use, record: `(tool_name, hash(params))` in session state
+2. Keep ring buffer of last 7 calls
+3. If same `(tool_name, hash)` appears >= 3 times in the buffer:
+   - Emit warning: "Loop detected: `<tool>` called 3x with identical params. Consider a different approach."
+4. Never blocks (advisory only — loops self-correct once the agent sees the warning)
+5. Reset buffer on tool change (different tool name breaks the count)
+
+**State management:**
+- Use existing session state dir (`$XDG_STATE_HOME/fettle/<session_id>/`)
+- Append-only JSONL file: `tool_calls.jsonl`
+- Read last 7 lines on each call (cheap I/O)
+
+**Config:**
+```toml
+[gates.loop_detect]
+enabled = true
+threshold = 3               # consecutive identical calls to trigger
+window = 7                  # ring buffer size
+```
+
+**TDD contracts:**
+```
+test_no_warning_on_unique_calls
+test_warns_after_3_identical_calls
+test_different_params_resets_count
+test_different_tool_resets_count
+test_window_size_respected
+test_custom_threshold_works
+test_hash_is_deterministic
+test_handles_large_params_efficiently
+test_session_state_persists_across_calls
+```
+
+---
+
+### WP-112 — Commit Message Validation
+
+Enforce conventional commit format and quality at commit time.
+
+**Problem:** Agents write lazy commit messages ("fix bug", "update code", "changes") or exceed line length limits. Since Fettle already hooks PostToolUse(Bash), detecting git commit commands is cheap.
+
+**Deliverables:**
+- Addition to existing PostToolUse(Bash) hook chain
+- Pattern: detect `git commit` in bash command → validate message
+
+**Validation rules:**
+1. Conventional format: `<type>(<optional-scope>): <description>`
+   - Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+2. Subject line <= 72 characters
+3. Subject starts lowercase after colon
+4. No period at end of subject
+5. Body (if present) separated by blank line
+6. `Co-Authored-By:` line preserved (never stripped)
+
+**Behavior:**
+- Extract commit message from `-m "..."` or heredoc or tmpfile
+- If message fails validation:
+  - **advisory (default):** warn with suggested fix
+  - **enforce:** this is tricky post-commit; better to catch pre-commit via PostToolUse on the bash command before execution
+- Alternative: fire on PreToolUse(Bash) when command starts with `git commit` → validate before execution
+
+**Implementation note:** PreToolUse(Bash) is better here — can block the commit before it happens. The message is visible in the command string.
+
+**Config:**
+```toml
+[gates.commit_message]
+enabled = true
+mode = "advisory"
+types = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"]
+max_subject_length = 72
+require_conventional = true
+```
+
+**TDD contracts:**
+```
+test_valid_conventional_commit_passes
+test_missing_type_fails
+test_invalid_type_fails
+test_subject_too_long_fails
+test_missing_colon_space_fails
+test_allows_scope_in_parens
+test_body_with_blank_line_passes
+test_co_authored_by_preserved
+test_advisory_warns_not_blocks
+test_enforce_blocks_bad_commit
+test_handles_heredoc_message
+test_handles_quoted_message
+test_ignores_non_commit_bash_commands
+```
+
+---
+
+### WP-113 — Debug Statement Detection
+
+Catch leftover debug statements before they ship.
+
+**Problem:** Agents scatter `console.log`, `debugger`, `breakpoint()`, `print()` debug statements during development and forget to remove them. These leak into production, pollute logs, and expose internals.
+
+**Deliverables:**
+- New semgrep rules added to `rules/llm-antipatterns.yml` (Python) and `rules/ts-antipatterns.yml` (TS/JS)
+- Severity: WARNING (not blocking — some are intentional)
+- Auto-fixable: yes (ruff can remove `breakpoint()`, semgrep can flag for deletion)
+
+**Rules to add:**
+
+**Python (`llm-antipatterns.yml`):**
+```yaml
+- id: debug-breakpoint
+  pattern: breakpoint()
+  message: "Leftover breakpoint() — remove before shipping."
+  severity: WARNING
+  fix: ""
+
+- id: debug-pdb
+  patterns:
+    - pattern: import pdb
+    - pattern: pdb.set_trace()
+  message: "Leftover pdb debugger — remove before shipping."
+  severity: WARNING
+
+- id: debug-print-statement
+  pattern: print(...)
+  paths:
+    exclude:
+      - "cli/"
+      - "scripts/"
+      - "**/cli.py"
+      - "**/main.py"
+  message: "print() in non-CLI code — use logging or remove."
+  severity: WARNING
+```
+
+**TypeScript/JS (`ts-antipatterns.yml`):**
+```yaml
+- id: debug-console-log
+  pattern: console.log(...)
+  paths:
+    exclude:
+      - "scripts/"
+      - "**/cli.*"
+  message: "Leftover console.log — remove or replace with structured logger."
+  severity: WARNING
+
+- id: debug-debugger-statement
+  pattern: debugger
+  message: "Leftover debugger statement — remove before shipping."
+  severity: ERROR
+```
+
+**Rationale for severity:**
+- `debugger` = ERROR (always wrong in committed code, halts execution in browser)
+- `breakpoint()` / `pdb` = WARNING (always wrong but less catastrophic)
+- `console.log` / `print()` = WARNING (sometimes intentional in CLIs/scripts, hence path exclusions)
+
+**Config:**
+```toml
+[gates.lint]
+# Existing config; debug rules inherit the lint gate's mode
+# Path exclusions in the semgrep rules themselves
+```
+
+**TDD contracts:**
+```
+test_detects_breakpoint
+test_detects_pdb_import
+test_detects_pdb_set_trace
+test_detects_console_log
+test_detects_debugger_statement
+test_excludes_cli_paths_for_print
+test_excludes_scripts_for_console_log
+test_debugger_is_error_severity
+test_print_is_warning_severity
+```
+
+---
+
+### WP-114 — Scope Creep Warning
+
+Warn when a session touches too many files, suggesting the agent is drifting from the task.
+
+**Problem:** Agents expand scope silently — what starts as "fix this bug" becomes "refactor 30 files." By the time the Stop hook fires, the damage is done. A lightweight warning at file-count thresholds catches drift early.
+
+**Deliverables:**
+- Addition to `scripts/quality_gate.py` (PostToolUse path) — check edit count after each edit
+- Warning at configurable threshold (default: 15 files)
+- Critical warning at second threshold (default: 25 files)
+- Reports: file list and original task scope (if detectable from session start)
+
+**Behavior:**
+1. On every PostToolUse(Write|Edit), read edit tracking file count
+2. If count crosses warning threshold → emit advisory:
+   `"Scope check: 15 files modified this session. Is this still on-task? Consider committing current changes."`
+3. If count crosses critical threshold → stronger advisory:
+   `"Scope creep risk: 25 files modified. Strongly consider stopping, reviewing, and committing before continuing."`
+4. Never blocks (advisory only — scope decisions are the user's)
+5. Threshold resets on explicit commit (detected via PostToolUse(Bash) `git commit`)
+
+**Config:**
+```toml
+[gates.scope_creep]
+enabled = true
+warning_threshold = 15      # first advisory
+critical_threshold = 25     # second advisory
+reset_on_commit = true      # count resets after git commit
+```
+
+**Implementation notes:**
+- Fettle already tracks edited files in `EDIT_TRACKING_FILE` — just count lines
+- Commit detection: already parsed in PostToolUse(Bash) for other gates
+- ~15 lines of additional code in `quality_gate.py`
+
+**TDD contracts:**
+```
+test_no_warning_below_threshold
+test_warns_at_warning_threshold
+test_critical_at_critical_threshold
+test_resets_after_commit
+test_custom_thresholds_from_config
+test_disabled_config_skips_check
+test_advisory_only_never_blocks
+test_warns_only_once_per_threshold_crossing
+```
+
+---
+
+### Phase 8 Dependency Graph
+
+```
+Phase 8 (Pre-Generation + Agent Guardrails):
+  WP-105 (skill edit)       — standalone
+  WP-106 (lean review)      — standalone
+  WP-107 (lean audit)       — standalone
+  WP-104 (subagent hook)    — uses content from 105
+  WP-108 (lean debt)        — soft dep on 106 (same conventions)
+  WP-109 (config protect)   — standalone (PreToolUse gate)
+  WP-110 (destructive guard)— standalone (extends PreToolUse(Bash))
+  WP-111 (loop detect)      — standalone (PostToolUse addition)
+  WP-112 (commit message)   — standalone (PreToolUse(Bash))
+  WP-113 (debug statements) — standalone (semgrep rules addition)
+  WP-114 (scope creep)      — standalone (PostToolUse count check)
+
+  No dependencies on Phases 1–7.
+```
 
 ---
 
@@ -1009,3 +1599,9 @@ Phase 7 (Advanced):
 4. Works on any Python project without manual configuration
 5. Extensible to other stacks via adapter protocol
 6. Zero surprise CI failures for: lint, format, type, dependency, entry point issues
+7. Subagents generate code following The Ladder (Phase 8, WP-104)
+8. Over-engineering is reviewable via `/fettle:lean` (Phase 8, WP-106)
+9. Agent cannot silently weaken linter configs (Phase 8, WP-109)
+10. Destructive commands are flagged before execution (Phase 8, WP-110)
+11. Leftover debug statements caught before commit (Phase 8, WP-113)
+12. Scope drift is surfaced before it compounds (Phase 8, WP-114)
