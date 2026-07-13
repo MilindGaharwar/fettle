@@ -13,8 +13,8 @@
 | 5 | 90–93 | CI feedback loop | Local-vs-CI parity |
 | 6 | 94–97 | Polyglot adapters | TypeScript, Rust, Go |
 | 7 | 98–103 | Advanced | Generated code, migrations, dashboard |
-| 8 | 104–114 | Pre-generation + agent guardrails | Shape what gets written; block destructive patterns; catch debug/scope drift |
-| **Total** | **48 WPs** | | |
+| 8 | 104–115 | Pre-generation + agent guardrails + perf | Shape what gets written; block destructive patterns; daemon for speed |
+| **Total** | **49 WPs** | | |
 
 Platform: macOS + Linux. Windows explicitly not targeted in v0.5.0.
 
@@ -1570,6 +1570,76 @@ test_warns_only_once_per_threshold_crossing
 
 ---
 
+### WP-115 — Daemon Architecture (Performance Optimization)
+
+Eliminate per-hook Python interpreter startup via a persistent daemon and thin JS dispatcher.
+
+**Problem:** Every hook fires `bash run.sh <script>.py`, paying ~80ms for Python interpreter startup + module imports. On a 100-edit session, that's ~8 seconds of pure overhead. The actual analysis tools (ruff, semgrep) are already compiled and fast — the orchestrator is the bottleneck.
+
+**Architecture:**
+```
+Hook fires → hooks/dispatch.js (Node, ~5ms)
+            │
+            ▼
+Unix socket → Python daemon (started once per session)
+            │
+            ├─ cached: profile, config, baselines, file hashes
+            ├─ runs: ruff, semgrep, pyright (subprocess)
+            └─ returns: JSON CheckResult
+```
+
+**Deliverables:**
+- `scripts/daemon.py` — Unix socket server, auto-starts on first call, session-scoped
+- `hooks/dispatch.js` — thin JS dispatcher, sends event JSON over socket, reads result
+- `scripts/daemon_client.py` — Python client for testing and CLI use
+- Migration of `hooks.json` entries from `bash run.sh X.py` to `node hooks/dispatch.js <event>`
+- Fallback: if daemon not running, JS dispatcher spawns Python directly (never blocks)
+
+**Daemon lifecycle:**
+1. First hook call detects no socket → starts daemon in background
+2. Daemon binds to `$XDG_STATE_HOME/fettle/<session_id>/fettle.sock`
+3. Daemon loads config, profile, baselines into memory (one-time cost)
+4. Subsequent hooks connect to socket (~2ms), send event, get result
+5. Daemon exits after 30 minutes of inactivity or on session end
+6. Socket file cleaned up on exit
+
+**Performance target:**
+- Current: ~110ms per hook (bash + python startup + imports + work)
+- Target: ~7ms per hook (JS → socket → cached state → result)
+- 15x improvement on hook-heavy sessions
+
+**Why not rewrite in Rust/Go:**
+- The analysis tools are already compiled (ruff=Rust, semgrep=OCaml)
+- Python holds 362+ tests and the entire adapter ecosystem
+- A rewrite would cost weeks; daemon costs hours
+- The daemon pattern keeps Python's extensibility while eliminating startup cost
+
+**Config:**
+```toml
+[daemon]
+enabled = true              # false reverts to direct Python spawning
+idle_timeout_s = 1800       # exit after 30 min inactivity
+socket_path = ""            # default: state_dir/fettle.sock
+```
+
+**TDD contracts:**
+```
+test_daemon_starts_on_first_call
+test_daemon_responds_to_check_event
+test_daemon_caches_profile
+test_daemon_exits_on_idle_timeout
+test_fallback_when_daemon_not_running
+test_socket_cleanup_on_exit
+test_concurrent_hook_calls_handled
+test_daemon_reloads_config_on_change
+test_js_dispatcher_sends_correct_json
+test_js_dispatcher_handles_socket_error
+```
+
+**Dependencies:** WP-76 (hook integration — defines the event protocol the daemon implements)
+
+---
+
 ### Phase 8 Dependency Graph
 
 ```
@@ -1585,8 +1655,9 @@ Phase 8 (Pre-Generation + Agent Guardrails):
   WP-112 (commit message)   — standalone (PreToolUse(Bash))
   WP-113 (debug statements) — standalone (semgrep rules addition)
   WP-114 (scope creep)      — standalone (PostToolUse count check)
+  WP-115 (daemon arch)      — depends on WP-76 (hook integration)
 
-  No dependencies on Phases 1–7.
+  No dependencies on Phases 1–7 (except WP-115 → WP-76).
 ```
 
 ---
