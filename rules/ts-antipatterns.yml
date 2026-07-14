@@ -66,6 +66,29 @@ rules:
       citation: "SQL injection via template literals in AI-generated database code"
       fix: "Use parameterized queries: db.query('SELECT * FROM t WHERE id = $1', [id])"
 
+  - id: debug-console-log
+    metadata:
+      origin: debug-detection
+      citation: "WP-113: Leftover console.log pollutes production logs"
+    languages: [typescript, javascript]
+    severity: WARNING
+    pattern: console.log(...)
+    paths:
+      exclude:
+        - "scripts/"
+        - "**/cli.*"
+        - "**/cli/"
+    message: "Leftover console.log — remove or replace with structured logger."
+
+  - id: debug-debugger-statement
+    metadata:
+      origin: debug-detection
+      citation: "WP-113: debugger statement halts execution in browser"
+    languages: [typescript, javascript]
+    severity: ERROR
+    pattern: debugger
+    message: "Leftover debugger statement — remove before shipping."
+
   - id: regex-llm-output-ts
     patterns:
       - pattern: |

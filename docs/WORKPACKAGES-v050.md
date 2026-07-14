@@ -986,16 +986,17 @@ Phase 7 (Advanced):
   WP-103 (docs) ← needs everything
 
 Phase 8 (Pre-Generation + Agent Guardrails) — NO deps on Phases 1–7:
-  WP-105 (skill edit)       ─┐
-  WP-106 (lean review)      ├→ WP-108 (lean debt)
-  WP-107 (lean audit)       │
-  WP-104 (subagent hook)    ←─ uses content from 105
-  WP-109 (config protect)   — standalone
-  WP-110 (destructive guard)— standalone
-  WP-111 (loop detect)      — standalone
-  WP-112 (commit message)   — standalone
-  WP-113 (debug statements) — standalone
-  WP-114 (scope creep)      — standalone
+  WP-105 (skill edit)         — standalone                      ✓ DONE
+  WP-104 (subagent hook)      ←─ uses content from 105         ✓ DONE
+  WP-110 (destructive guard)  — standalone                      ✓ DONE
+  WP-106 (lean sniffers T1)   — standalone (silent recording)
+  WP-107 (lean review T2)     ←─ depends on 106 + golden corpus (GATED)
+  WP-108 (lean debt)          — soft dep on 106 (suppression)
+  WP-109 (config protect)     — standalone
+  WP-111 (loop detect)        — standalone
+  WP-112 (commit message)     — standalone
+  WP-113 (debug statements)   — standalone
+  WP-114 (scope creep)        — standalone
 ```
 
 ---
@@ -1013,7 +1014,7 @@ Phase 8 (Pre-Generation + Agent Guardrails) — NO deps on Phases 1–7:
 | Secret scanner false positives | Allowlist + baseline + expiring suppressions (WP-77, WP-81) |
 | SubagentStart hook latency | JS only, <50ms, fail-open, no Python interpreter startup (WP-104) |
 | Ladder too aggressive (YAGNI kills needed code) | Non-lazy carve-outs for security/validation/accessibility; advisory mode (WP-105) |
-| Lean review subjective | Read-only, no auto-fix; human decides what to act on (WP-106) |
+| Lean sniffer false positives | Silent recording only (Tier 1); LLM review (Tier 2) gated behind golden corpus precision ≥ 80%; advisory default (WP-106/107) |
 | Config protect false positives (legit config changes) | Advisory by default; explicit user instruction overrides; allow_patterns escape hatch (WP-109) |
 | Destructive guard evasion (obfuscated commands) | Pragmatic regex, not exhaustive; advisory default means the warning still fires even on partial match (WP-110) |
 | Loop detection triggers on intentional retries | Threshold 3 + window 7 is conservative; config-tunable; advisory-only, never blocks (WP-111) |
@@ -1121,56 +1122,188 @@ Non-lazy carve-outs (never simplify these away):
 
 ---
 
-### WP-106 — `/fettle:lean` Slash Command (Over-Engineering Diff Review)
+### WP-106 — Tiered Lean Review: Deterministic Sniffers (Phase 1)
 
-Review current diff specifically for over-engineering — a dimension Fettle currently lacks entirely.
+> Replaces original WP-106/107/108 (slash commands). Decision: automated silent
+> detection is higher-value than manual on-demand commands. Validated via GPT 5.5
+> architectural review (2026-07-14). Full plan: `~/.claude/plans/tiered-lean-review.md`
 
-**Problem:** Fettle reviews for bugs/security/lint but cannot detect when code passes all rules yet is 5x more verbose than necessary.
+**Problem:** Fettle reviews for bugs/security/lint but cannot detect when code passes all rules yet is 5× more verbose than necessary. The Ladder (WP-104/105) prevents over-engineering at generation time; this system detects it post-generation for later review.
+
+**Architecture (two-tier, phased rollout):**
+- **Tier 1 (this WP):** Deterministic sniffers, silent recording, PostToolUse. No LLM.
+- **Tier 2 (WP-107, later):** Local Ollama review at Stop hook. Ships only after golden corpus validates precision ≥ 80%.
 
 **Deliverables:**
-- `commands/lean.md` — slash command definition (~40 lines)
+- `scripts/lean_sniffers.py` — PostToolUse(Write|Edit) hook, <200ms, silent
+- Config defaults under `[gates.lean_review]` in `scripts/config.py`
+- Hook wiring in `hooks/hooks.json`
+- Tests in `tests/test_lean_sniffers.py`
+- Session state as JSONL: `~/.claude/plugins/fettle/.state/sessions/<session_id>.lean.jsonl`
+
+**Sniffer catalog (6 rules):**
+
+| ID | Name | Detection | Ladder Step | Severity |
+|----|------|-----------|-------------|----------|
+| LR001 | Dependency added | Regex on manifest files (pyproject.toml, package.json, Cargo.toml, go.mod, requirements*.txt) | existing_dep | high |
+| LR002 | New abstraction name | Regex: class/function names containing Factory, Manager, Provider, Registry, Strategy, Orchestrator, etc. | YAGNI | medium |
+| LR003 | Pass-through wrapper | AST (Python): 1-statement function that only delegates to another call | one-liner | medium |
+| LR004 | Single-method class | AST (Python): class with exactly 1 non-dunder method, no framework inheritance | minimum_code | medium |
+| LR008 | Large addition | Line count: added_lines ≥ 120, new function ≥ 60, new class ≥ 80 | minimum_code | low |
+| LR012 | Duplicate helper name | `git grep` (40ms timeout) for same function name elsewhere in repo | reuse | high |
+
+**Deferred sniffers (add after real-session validation):**
+- LR005: Custom stdlib-like helper (needs tuning)
+- LR006: Premature configuration (too broad — flags all os.getenv)
+- LR007: Future-proofing comment (low signal alone)
+- LR009: Many optional parameters (needs context)
+- LR010: Local registry/plugin system (overlaps LR002)
+- LR011: Broad exception fallback (belongs in lint, not lean)
 
 **Behavior:**
-- Scope: current diff only (git diff + staged)
-- Reviews ONLY for over-engineering (not bugs, security, performance)
-- Format: `L<line>: <tag> <what>. <replacement>.`
-- Tags: `delete:` `stdlib:` `yagni:` `shrink:` `dep:`
-- End: `net: -<N> lines possible.` or `Lean already. Ship.`
-- Does NOT apply fixes (read-only)
+1. Parse stdin → extract file_path, session_id, cwd
+2. Guard: skip if not implementation file (.py/.ts/.tsx/.js/.jsx/.rs/.go)
+3. Guard: skip if path in ignore list or file > 256KiB
+4. Load config → check `gates.lean_review.enabled`
+5. Detect changed lines via `git diff --unified=0` (fallback: whole file)
+6. Run sniffers against changed lines / AST
+7. Append candidates to session state JSONL
+8. Exit 0 always. Print nothing. (Silent recording only.)
 
-**Implementation:** Pure markdown command file. No Python code.
+**Config schema:**
+```toml
+[gates.lean_review]
+enabled = true
+mode = "silent"                    # silent (Tier 1 only) | advisory | enforce (Tier 2)
 
-**TDD contracts (manual):**
+[gates.lean_review.tier1]
+enabled = true
+max_runtime_ms = 200
+
+[gates.lean_review.tier1.sniffers]
+LR001_DEPENDENCY_ADDED = true
+LR002_NEW_ABSTRACTION_NAME = true
+LR003_PASS_THROUGH_WRAPPER = true
+LR004_SINGLE_METHOD_CLASS = true
+LR008_LARGE_ADDITION = true
+LR012_DUPLICATE_LOCAL_HELPER_NAME = true
+
+[gates.lean_review.tier1.thresholds]
+large_added_lines = 120
+large_function_lines = 60
+large_class_lines = 80
+
+[gates.lean_review.paths]
+ignore = ["**/__pycache__/**", "**/.venv/**", "**/node_modules/**",
+          "**/dist/**", "**/build/**", "**/migrations/**"]
 ```
-test_reviews_current_diff_only
-test_only_reports_over_engineering
-test_uses_correct_tag_format
-test_ends_with_net_summary
-test_does_not_apply_fixes
-test_ignores_security_relevant_code
+
+**Performance budget:**
+```
+JSON parse + guards:        5ms
+Config load:               10ms
+Git changed-line detection: 50ms
+File read:                 20ms
+AST parse (Python only):   40ms
+All sniffers:              50ms
+JSONL append:              10ms
+────────────────────────────────────
+Total:                    <200ms p95
+```
+
+Self-abort: if elapsed > max_runtime_ms, write partial results and exit 0.
+
+**TDD contracts:**
+```
+# Sniffer detection
+test_lr001_detects_new_pip_dependency
+test_lr001_detects_new_npm_dependency
+test_lr001_ignores_existing_unchanged_deps
+test_lr002_detects_factory_class
+test_lr002_detects_manager_function
+test_lr002_ignores_test_files
+test_lr003_detects_passthrough_wrapper
+test_lr003_skips_function_with_validation
+test_lr004_detects_single_method_class
+test_lr004_skips_exception_classes
+test_lr008_detects_large_addition
+test_lr008_respects_configurable_threshold
+test_lr012_detects_duplicate_helper_name
+test_lr012_skips_on_git_grep_timeout
+
+# Hook behavior
+test_silent_no_stdout_no_stderr
+test_exits_zero_always
+test_skips_non_implementation_files
+test_skips_ignored_paths
+test_skips_large_files
+test_respects_disabled_config
+test_appends_to_session_state
+test_malformed_stdin_exits_zero
+test_missing_file_exits_zero
+test_no_git_falls_back_to_whole_file
+test_ast_parse_failure_skips_ast_sniffers
+test_self_aborts_on_timeout
 ```
 
 ---
 
-### WP-107 — `/fettle:audit-lean` Slash Command (Repo-Wide Audit)
+### WP-107 — Tiered Lean Review: LLM Batch Review at Stop (Phase 2)
 
-Scan entire repo for accumulated unnecessary complexity.
+> Ships ONLY after: (1) WP-106 runs on 3+ real sessions, (2) manual review of
+> candidates shows >50% true positive rate, (3) golden corpus of 50+ diffs
+> validates model precision ≥ 80%.
+
+**Problem:** Deterministic sniffers (WP-106) detect suspicious patterns but cannot judge whether the pattern is actually a Lean Ladder violation in context. A local LLM can make that judgment with evidence.
 
 **Deliverables:**
-- `commands/audit-lean.md` — slash command definition (~50 lines)
+- `scripts/lean_review.py` — Stop hook, batched LLM review
+- Golden corpus: `tests/fixtures/lean_corpus/` (50+ diffs with expected verdicts)
+- Evaluation script: `scripts/lean_eval.py` (runs corpus against model, reports precision)
 
-**Hunts for:**
-- Dependencies that stdlib already provides
-- Single-implementation interfaces/abstractions
-- Factories with one product
-- Wrappers that only delegate
-- Files exporting one trivial thing
-- Dead feature flags
-- Hand-rolled stdlib (custom retry, debounce, LRU, etc.)
+**Behavior:**
+1. Load session state JSONL
+2. Exit 0 immediately if no Tier 1 candidates exist
+3. Collect final diff (only files with candidates)
+4. Gather repo context: dependency manifests, similar symbols via git grep
+5. Build prompt with candidates + diff + context
+6. Send to Ollama (localhost:11434, configurable model)
+7. Parse structured JSON response
+8. Validate: drop findings below confidence threshold or without evidence
+9. Dedupe against already-injected findings (prevent Stop re-entry loops)
+10. Inject only top N high-confidence findings (advisory or block per config)
 
-**Format:** Ranked by biggest cut first. End: `net: -<N> lines, -<M> deps possible.`
+**Config additions:**
+```toml
+[gates.lean_review.tier2]
+enabled = false                    # off until golden corpus validates
+model = "qwen2.5-coder:7b"
+ollama_url = "http://localhost:11434"
+ollama_timeout_ms = 6000
+high_confidence_threshold = 0.85
+max_findings = 3
+```
 
-**Implementation:** Pure markdown command file. No Python code.
+**Prerequisite gates (hard blocks):**
+- Golden corpus exists with ≥ 50 entries
+- `lean_eval.py` shows precision ≥ 80% for chosen model + prompt
+- WP-106 has run on ≥ 3 real sessions with >50% TP rate in candidates
+
+**TDD contracts:**
+```
+test_no_candidates_exits_immediately
+test_ollama_unavailable_exits_zero
+test_ollama_timeout_exits_zero
+test_drops_low_confidence_findings
+test_drops_findings_without_sniffer_match
+test_drops_findings_for_non_candidate_files
+test_advisory_mode_exits_zero_with_output
+test_enforce_mode_exits_two
+test_prevents_duplicate_injection_on_reentry
+test_prompt_contains_ladder
+test_prompt_truncates_oversized_diff
+test_golden_corpus_precision_above_threshold
+```
 
 ---
 
@@ -1178,12 +1311,13 @@ Scan entire repo for accumulated unnecessary complexity.
 
 Track deliberate simplifications and their upgrade triggers.
 
-**Problem:** When you skip an abstraction intentionally, that decision and its ceiling evaporate. Nobody knows when to grow the simple version.
+**Problem:** When you skip an abstraction intentionally (applying The Ladder), that decision and its ceiling evaporate. Nobody knows when to grow the simple version.
 
 **Deliverables:**
 - Convention: `# fettle:lean: <what>, upgrade when: <trigger>`
 - `commands/lean-debt.md` — slash command (grep + report)
 - Addition to `scripts/report.py`: count lean markers
+- Tier 1 sniffer suppression: if a file has `# fettle:lean:` near a flagged line, suppress that candidate
 
 **`/fettle:lean-debt` behavior:**
 - Greps `fettle:lean:` comments (skipping node_modules/.git/.venv/build)
@@ -1206,6 +1340,7 @@ test_flags_no_trigger_markers
 test_skips_excluded_directories
 test_report_includes_lean_count
 test_handles_ts_and_python_comments
+test_suppresses_tier1_candidate_near_lean_marker
 ```
 
 ---
@@ -1644,18 +1779,21 @@ test_js_dispatcher_handles_socket_error
 
 ```
 Phase 8 (Pre-Generation + Agent Guardrails):
-  WP-105 (skill edit)       — standalone
-  WP-106 (lean review)      — standalone
-  WP-107 (lean audit)       — standalone
-  WP-104 (subagent hook)    — uses content from 105
-  WP-108 (lean debt)        — soft dep on 106 (same conventions)
-  WP-109 (config protect)   — standalone (PreToolUse gate)
-  WP-110 (destructive guard)— standalone (extends PreToolUse(Bash))
-  WP-111 (loop detect)      — standalone (PostToolUse addition)
-  WP-112 (commit message)   — standalone (PreToolUse(Bash))
-  WP-113 (debug statements) — standalone (semgrep rules addition)
-  WP-114 (scope creep)      — standalone (PostToolUse count check)
-  WP-115 (daemon arch)      — depends on WP-76 (hook integration)
+  WP-105 (skill edit)         — standalone                          ✓ DONE
+  WP-104 (subagent hook)      — uses content from 105              ✓ DONE
+  WP-110 (destructive guard)  — standalone (PreToolUse(Bash))      ✓ DONE
+  WP-106 (lean sniffers T1)   — standalone (PostToolUse, silent)
+  WP-107 (lean review T2)     — depends on WP-106 + golden corpus (GATED)
+  WP-108 (lean debt)          — soft dep on 106 (suppression integration)
+  WP-109 (config protect)     — standalone (PreToolUse gate)
+  WP-111 (loop detect)        — standalone (PostToolUse addition)
+  WP-112 (commit message)     — standalone (PreToolUse(Bash))
+  WP-113 (debug statements)   — standalone (semgrep rules addition)
+  WP-114 (scope creep)        — standalone (PostToolUse count check)
+  WP-115 (daemon arch)        — depends on WP-76 (hook integration)
+
+  WP-107 is GATED: requires 3+ real sessions with WP-106, >50% TP rate,
+  golden corpus of 50+ diffs, and model precision ≥ 80%.
 
   No dependencies on Phases 1–7 (except WP-115 → WP-76).
 ```
@@ -1670,9 +1808,10 @@ Phase 8 (Pre-Generation + Agent Guardrails):
 4. Works on any Python project without manual configuration
 5. Extensible to other stacks via adapter protocol
 6. Zero surprise CI failures for: lint, format, type, dependency, entry point issues
-7. Subagents generate code following The Ladder (Phase 8, WP-104)
-8. Over-engineering is reviewable via `/fettle:lean` (Phase 8, WP-106)
-9. Agent cannot silently weaken linter configs (Phase 8, WP-109)
-10. Destructive commands are flagged before execution (Phase 8, WP-110)
-11. Leftover debug statements caught before commit (Phase 8, WP-113)
+7. Subagents generate code following The Ladder (Phase 8, WP-104) ✓
+8. Over-engineering is detected silently by deterministic sniffers (Phase 8, WP-106)
+9. Over-engineering findings are validated by local LLM at Stop (Phase 8, WP-107, gated)
+10. Agent cannot silently weaken linter configs (Phase 8, WP-109)
+11. Destructive commands are flagged before execution (Phase 8, WP-110) ✓
+12. Leftover debug statements caught before commit (Phase 8, WP-113)
 12. Scope drift is surfaced before it compounds (Phase 8, WP-114)

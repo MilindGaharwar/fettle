@@ -9,6 +9,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh quality_gate.py",
             "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh config_protect.py",
+            "timeout": 5000
           }
         ]
       },
@@ -19,6 +24,16 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh mcp_trust_gate.py",
             "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh destructive_guard.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh commit_message.py",
+            "timeout": 5000
           }
         ]
       }
@@ -41,6 +56,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_edit_ts.py",
             "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh lean_sniffers.py",
+            "timeout": 5000
           }
         ]
       },
@@ -56,6 +76,37 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_bash_doc_check.py",
             "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh loop_detect.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh scope_creep.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/subagent_inject.js",
+            "timeout": 5000
           }
         ]
       }

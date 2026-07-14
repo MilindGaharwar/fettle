@@ -206,6 +206,43 @@ rules:
       Incident: incident INC-2026-0501-B
       written with processed=0; no consumer ever called get_unprocessed_episodes.
 
+  - id: debug-breakpoint
+    metadata:
+      origin: debug-detection
+      citation: "WP-113: Leftover debug statements leak into production"
+    languages: [python]
+    severity: WARNING
+    pattern: breakpoint()
+    message: "Leftover breakpoint() — remove before shipping."
+
+  - id: debug-pdb
+    metadata:
+      origin: debug-detection
+      citation: "WP-113: Leftover debug statements leak into production"
+    languages: [python]
+    severity: WARNING
+    pattern-either:
+      - pattern: import pdb
+      - pattern: pdb.set_trace()
+    message: "Leftover pdb debugger — remove before shipping."
+
+  - id: debug-print-statement
+    metadata:
+      origin: debug-detection
+      citation: "WP-113: print() in non-CLI code pollutes logs"
+    languages: [python]
+    severity: WARNING
+    pattern: print(...)
+    paths:
+      exclude:
+        - "cli/"
+        - "scripts/"
+        - "**/cli.py"
+        - "**/main.py"
+        - "**/conftest.py"
+        - "tests/"
+    message: "print() in non-CLI code — use logging or remove."
+
   - id: non-atomic-write-output
     metadata:
       origin: pipeline
