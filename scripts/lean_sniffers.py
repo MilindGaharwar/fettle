@@ -495,5 +495,84 @@ def main() -> None:
     sys.exit(0)
 
 
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Always returns allow (silent recording)."""
+    from dispatcher_types import CheckResult
+
+    file_path = ctx.tool_input.get("file_path", "")
+    if not file_path:
+        return CheckResult.allow()
+
+    cwd = str(ctx.cwd)
+    session_id = ctx.session_id or "unknown"
+
+    ext = os.path.splitext(file_path)[1].lower()
+    is_manifest = _is_manifest(file_path)
+    if ext not in IMPL_EXTENSIONS and not is_manifest:
+        return CheckResult.allow()
+    if _is_ignored(file_path):
+        return CheckResult.allow()
+    if not os.path.isfile(file_path):
+        return CheckResult.allow()
+    if os.path.getsize(file_path) > MAX_FILE_BYTES:
+        return CheckResult.allow()
+
+    lean_cfg = ctx.config.get("gates", {}).get("lean_review", {})
+    if not lean_cfg.get("enabled", True):
+        return CheckResult.allow()
+    tier1_cfg = lean_cfg.get("tier1", {})
+    if not tier1_cfg.get("enabled", True):
+        return CheckResult.allow()
+    thresholds = {**DEFAULT_THRESHOLDS, **tier1_cfg.get("thresholds", {})}
+    max_runtime_ms = tier1_cfg.get("max_runtime_ms", 200)
+
+    start_time = time.monotonic()
+
+    try:
+        with open(file_path, encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return CheckResult.allow()
+
+    changed_lines = _get_changed_lines(file_path, cwd)
+
+    tree: ast.Module | None = None
+    if ext == ".py":
+        with contextlib.suppress(SyntaxError):
+            tree = ast.parse(content)
+
+    state_dir = os.environ.get(
+        "FETTLE_LEAN_STATE_DIR",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state"),
+    )
+
+    candidates: list[dict] = []
+
+    def _budget_ok() -> bool:
+        return (time.monotonic() - start_time) * 1000 < max_runtime_ms
+
+    if _budget_ok() and is_manifest:
+        candidates.extend(sniff_lr001(file_path, content, changed_lines, cwd, session_id))
+    if _budget_ok() and ext in IMPL_EXTENSIONS:
+        candidates.extend(sniff_lr002(file_path, content, changed_lines, cwd, session_id))
+    if _budget_ok() and tree is not None:
+        candidates.extend(sniff_lr003(file_path, tree, changed_lines, cwd, session_id))
+    if _budget_ok() and tree is not None:
+        candidates.extend(sniff_lr004(file_path, tree, changed_lines, cwd, session_id))
+    if _budget_ok():
+        candidates.extend(sniff_lr008(file_path, content, changed_lines, tree, cwd, session_id, thresholds))
+    if _budget_ok() and tree is not None:
+        candidates.extend(sniff_lr012(file_path, tree, cwd, session_id))
+
+    if candidates:
+        candidates = _suppress_near_lean_markers(candidates, content)
+
+    if candidates:
+        with contextlib.suppress(OSError):
+            _append_candidates(state_dir, session_id, candidates)
+
+    return CheckResult.allow()
+
+
 if __name__ == "__main__":
     main()

@@ -123,6 +123,61 @@ def main() -> None:
     sys.exit(2)
 
 
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Returns CheckResult."""
+    from dispatcher_types import CheckResult
+
+    command = ctx.tool_input.get("command", "")
+    if not command or not _GIT_PUSH_RE.search(command):
+        return CheckResult.allow()
+
+    if not ctx.config.get("gates", {}).get("docs", {}).get("enabled", False):
+        return CheckResult.allow()
+    mode = str(ctx.config.get("gates", {}).get("docs", {}).get("mode", "advisory"))
+
+    session_id = ctx.session_id or "unknown"
+    tracking_path = os.environ.get(
+        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
+    )
+
+    try:
+        with open(tracking_path) as fh:
+            entries = [json.loads(line) for line in fh if line.strip()]
+    except (FileNotFoundError, json.JSONDecodeError):
+        return CheckResult.allow()
+
+    if not entries:
+        return CheckResult.allow()
+
+    impl_edits = [e for e in entries if _is_impl(e.get("file", ""))]
+    if not impl_edits:
+        return CheckResult.allow()
+
+    latest_impl_ts = max(e.get("ts", 0.0) for e in impl_edits)
+    doc_edits_after = [
+        e for e in entries
+        if _is_doc(e.get("file", "")) and e.get("ts", 0.0) >= latest_impl_ts
+    ]
+
+    if doc_edits_after:
+        return CheckResult.allow()
+
+    impl_files = sorted({e["file"] for e in impl_edits})
+    file_list = "\n".join(f"  - {f}" for f in impl_files[:10])
+    if len(impl_files) > 10:
+        file_list += f"\n  ... and {len(impl_files) - 10} more"
+
+    reason = (
+        f"git push: {len(impl_files)} implementation files edited but no docs updated.\n"
+        f"Files:\n{file_list}"
+    )
+
+    if mode == "advisory":
+        return CheckResult.advisory(reason, hook_specific_output={"hookEventName": "PostToolUse", "additionalContext": reason})
+
+    return CheckResult.block(reason, hook_specific_output={"hookEventName": "PostToolUse", "additionalContext": reason})
+
+
 if __name__ == "__main__":
     try:
         main()
