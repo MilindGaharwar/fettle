@@ -111,6 +111,63 @@ def main() -> None:
     result.emit_and_exit(hook_event="PostToolUse", block=(mode == "enforce"))
 
 
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Returns CheckResult."""
+    from dispatcher_types import CheckResult
+
+    file_path = ctx.tool_input.get("file_path", "")
+    if not any(file_path.endswith(ext) for ext in TS_EXTENSIONS):
+        return CheckResult.allow()
+    if not os.path.isfile(file_path):
+        return CheckResult.allow()
+    if not ctx.config.get("gates", {}).get("lint", {}).get("enabled", True):
+        return CheckResult.allow()
+
+    plugin_root = str(ctx.plugin_root)
+    semgrep_bin = _resolve_tool("semgrep")
+    if not semgrep_bin:
+        return CheckResult.allow()
+
+    rules_file = os.path.join(plugin_root, "rules", "ts-antipatterns.yml")
+    if not os.path.isfile(rules_file):
+        return CheckResult.allow()
+
+    findings: list[Finding] = []
+    try:
+        proc = subprocess.run(
+            [semgrep_bin, "--config", rules_file, "--json", file_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.stdout.strip():
+            raw = json.loads(proc.stdout)
+            for item in raw.get("results", []):
+                if not isinstance(item, dict):
+                    continue
+                start_loc = item.get("start", {})
+                line_no = start_loc.get("line", 0) if isinstance(start_loc, dict) else 0
+                extra = item.get("extra", {})
+                msg = extra.get("message", "") if isinstance(extra, dict) else ""
+                rule_id = item.get("check_id", "")
+                sev = Severity.ERROR if "error" in str(extra.get("severity", "")).lower() else Severity.WARNING
+                findings.append(Finding(tool="semgrep", severity=sev, path=file_path, line=line_no, code=rule_id, message=msg))
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return CheckResult.allow()
+
+    if not findings:
+        return CheckResult.allow()
+
+    lines = []
+    for f in findings:
+        lines.append(f"[{f.severity.value.upper()}] {f.path}:{f.line} {f.code} — {f.message}")
+    text = "\n".join(lines)
+
+    mode = str(ctx.config.get("gates", {}).get("lint", {}).get("mode", "advisory"))
+    if mode == "enforce" and any(f.severity == Severity.ERROR for f in findings):
+        return CheckResult.block(text, hook_specific_output={"hookEventName": "PostToolUse", "additionalContext": text})
+
+    return CheckResult.advisory(text, hook_specific_output={"hookEventName": "PostToolUse", "additionalContext": text})
+
+
 if __name__ == "__main__":
     try:
         main()

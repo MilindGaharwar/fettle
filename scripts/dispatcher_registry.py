@@ -15,6 +15,11 @@ from commit_message import run_check as commit_message_run
 from loop_detect import run_check as loop_detect_run
 from scope_creep import run_check as scope_creep_run
 
+# Phase 2 checks (tool-backed, run subprocesses)
+from post_edit_ts import run_check as post_edit_ts_run
+from lean_sniffers import run_check as lean_sniffers_run
+from post_bash_doc_check import run_check as post_bash_doc_check_run
+
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
     CheckSpec(
@@ -41,6 +46,33 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Bash"}),
         order=20,
         budget_ms=50,
+    ),
+    # PostToolUse — Write|Edit (tool-backed)
+    CheckSpec(
+        name="post_edit_ts",
+        run=post_edit_ts_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".ts", ".tsx", ".js", ".jsx"}),
+        order=30,
+        budget_ms=80,
+    ),
+    CheckSpec(
+        name="lean_sniffers",
+        run=lean_sniffers_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=50,
+        budget_ms=200,
+    ),
+    # PostToolUse — Bash (tool-backed)
+    CheckSpec(
+        name="post_bash_doc_check",
+        run=post_bash_doc_check_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=40,
+        budget_ms=80,
     ),
     # PostToolUse — all tools
     CheckSpec(
