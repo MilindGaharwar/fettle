@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .fettle/
+.state/
 *.egg-info/
 .venv/
 .DS_Store

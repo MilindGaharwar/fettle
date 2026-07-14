@@ -42,6 +42,75 @@ DEFAULTS: dict[str, Any] = {
         # CI must be set up before development. Default on + advisory (a
         # one-time nudge to run `fettle ci init`); mode="strict" blocks.
         "ci_bootstrap": {"enabled": True, "mode": "advisory"},
+        "destructive": {
+            "enabled": True,
+            "mode": "advisory",
+            "extra_patterns": [],
+            "allow_commands": [],
+        },
+        "config_protect": {
+            "enabled": True,
+            "mode": "advisory",
+            "extra_patterns": [],
+            "allow_patterns": [],
+        },
+        "loop_detect": {
+            "enabled": True,
+            "threshold": 3,
+            "window": 7,
+        },
+        "scope_creep": {
+            "enabled": True,
+            "warning_threshold": 15,
+            "critical_threshold": 25,
+            "reset_on_commit": True,
+        },
+        "commit_message": {
+            "enabled": True,
+            "mode": "advisory",
+            "types": [
+                "feat", "fix", "docs", "style", "refactor", "perf",
+                "test", "build", "ci", "chore", "revert",
+            ],
+            "max_subject_length": 72,
+            "require_conventional": True,
+        },
+        "subagent": {"enabled": True, "injection_file": "", "mode": "advisory"},
+        "lean_review": {
+            "enabled": True,
+            "mode": "silent",
+            "tier1": {
+                "enabled": True,
+                "max_runtime_ms": 200,
+                "sniffers": {
+                    "LR001_DEPENDENCY_ADDED": True,
+                    "LR002_NEW_ABSTRACTION_NAME": True,
+                    "LR003_PASS_THROUGH_WRAPPER": True,
+                    "LR004_SINGLE_METHOD_CLASS": True,
+                    "LR008_LARGE_ADDITION": True,
+                    "LR012_DUPLICATE_LOCAL_HELPER_NAME": True,
+                },
+                "thresholds": {
+                    "large_added_lines": 120,
+                    "large_function_lines": 60,
+                    "large_class_lines": 80,
+                },
+            },
+            "tier2": {
+                "enabled": False,
+                "model": "qwen2.5-coder:7b",
+                "ollama_url": "http://localhost:11434",
+                "ollama_timeout_ms": 6000,
+                "high_confidence_threshold": 0.85,
+                "max_findings": 3,
+            },
+            "paths": {
+                "ignore": [
+                    "**/__pycache__/**", "**/.venv/**", "**/node_modules/**",
+                    "**/dist/**", "**/build/**", "**/migrations/**",
+                ],
+            },
+        },
     },
     "severity": {
         "error_rules": ["BLE001", "S110", "S608", "S701"],
