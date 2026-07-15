@@ -390,10 +390,59 @@ def main() -> None:
     sys.exit(2)
 
 
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Delegates to subprocess for now.
+
+    post_edit.py is too complex (ruff subprocess, suppressions, repeat counting,
+    edit tracking) to refactor in-process safely. Instead, we run it as a
+    subprocess with the same stdin payload and translate its output to CheckResult.
+    This is Phase 3 pragmatism — full in-process migration is a later step.
+    """
+    from dispatcher_types import CheckResult
+
+    file_path = ctx.tool_input.get("file_path", "")
+    if not file_path or not file_path.endswith(".py"):
+        return CheckResult.allow()
+    if not os.path.isfile(file_path):
+        return CheckResult.allow()
+    if not ctx.config.get("gates", {}).get("lint", {}).get("enabled", True):
+        return CheckResult.allow()
+
+    script_path = os.path.abspath(__file__)
+    payload = ctx.input.raw
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, script_path],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return CheckResult.allow()
+
+    if not proc.stdout.strip():
+        return CheckResult.allow()
+
+    try:
+        output = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return CheckResult.allow()
+
+    hso = output.get("hookSpecificOutput", {})
+    context = hso.get("additionalContext", "")
+
+    if proc.returncode == 2:
+        return CheckResult.block(context, hook_specific_output=hso)
+    if context:
+        return CheckResult.advisory(context, hook_specific_output=hso)
+    return CheckResult.allow()
+
+
 if __name__ == "__main__":
     try:
         main()
     except (json.JSONDecodeError, OSError, ValueError) as e:
-        # Environment problems must not block the session, but must be seen.
         print(f"fettle gate warning: post_edit hook failed: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(0)

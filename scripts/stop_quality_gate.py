@@ -210,6 +210,74 @@ def main() -> None:
     sys.exit(2)
 
 
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Returns CheckResult."""
+    from dispatcher_types import CheckResult
+
+    if ctx.input.raw.get("stop_hook_active") is True:
+        return CheckResult.allow()
+
+    session_id = ctx.session_id or "unknown"
+    tracking_path = os.environ.get(
+        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
+    )
+
+    entries: list[dict] = []
+    try:
+        with open(tracking_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    entries.append(json.loads(line))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return CheckResult.allow()
+
+    if not entries:
+        return CheckResult.allow()
+
+    edited_files = list(dict.fromkeys(
+        str(e.get("file", "")) for e in entries if e.get("file")
+    ))
+
+    py_files = _filter_ignored([f for f in edited_files if f.endswith(".py") and os.path.isfile(f)])
+    rs_files = _filter_ignored([f for f in edited_files if f.endswith(".rs") and os.path.isfile(f)])
+
+    if not py_files and not rs_files:
+        return CheckResult.allow()
+
+    all_findings: list[str] = []
+
+    for py_file in py_files:
+        project_root = os.environ.get("FETTLE_PROJECT_ROOT") or _find_project_root(py_file)
+        for err in check_imports(py_file, project_root):
+            all_findings.append(
+                f"{os.path.basename(err['file'])}:{err['line']}: cannot resolve import '{err['module']}'"
+            )
+        for err in check_contracts(py_file, project_root):
+            all_findings.append(
+                f"{os.path.basename(err['file'])}:{err['line']}: '{err['name']}' not found in '{err['module']}'"
+            )
+
+    checked_workspaces: set[str] = set()
+    for rs_file in rs_files:
+        cargo_toml = _find_cargo_toml(rs_file)
+        if not cargo_toml or cargo_toml in checked_workspaces:
+            continue
+        checked_workspaces.add(cargo_toml)
+        all_findings.extend(_cargo_check(rs_file))
+
+    if not all_findings:
+        return CheckResult.allow()
+
+    report = "\n".join(all_findings[:20])
+    reason = (
+        f"Cross-file quality issues found ({len(all_findings)} finding(s)):\n\n"
+        f"{report}\n\n"
+        f"Fix these issues before completing your response."
+    )
+    return CheckResult.block(reason, hook_specific_output={"additionalContext": reason})
+
+
 if __name__ == "__main__":
     try:
         main()
