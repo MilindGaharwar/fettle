@@ -1,101 +1,26 @@
 {
-  "description": "Fettle enforcement hooks — authoritative wiring; installs with the plugin, no global settings required.",
+  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh quality_gate.py",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
             "timeout": 10000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh config_protect.py",
-            "timeout": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh mcp_trust_gate.py",
-            "timeout": 10000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh destructive_guard.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh commit_message.py",
-            "timeout": 5000
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh quality_gate.py",
-            "timeout": 10000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_edit.py",
-            "timeout": 15000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_edit_ts.py",
-            "timeout": 15000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh lean_sniffers.py",
-            "timeout": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh quality_gate.py",
-            "timeout": 10000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh post_bash_doc_check.py",
-            "timeout": 10000
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit|Bash|Read",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh loop_detect.py",
-            "timeout": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh scope_creep.py",
-            "timeout": 5000
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
+            "timeout": 15000
           }
         ]
       }
@@ -116,12 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh quality_gate.py",
-            "timeout": 15000
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh stop_quality_gate.py",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
             "timeout": 60000
           }
         ]

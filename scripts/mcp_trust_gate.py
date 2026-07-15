@@ -217,5 +217,103 @@ def main() -> None:
     sys.exit(0)
 
 
+def _check_bash_result(command: str, allowlist: dict) -> str | None:
+    """Same logic as check_bash but returns denial reason instead of calling deny()."""
+    registries = allowlist.get("registries_blocked", [])
+    protected = allowlist.get("protected_paths", [])
+
+    if isinstance(protected, list):
+        for path in protected:
+            if isinstance(path, str) and path in command and WRITE_INDICATORS_RE.search(command):
+                return f"Write to protected path blocked: {path}"
+
+    if IPTABLES_MODIFY_RE.search(command):
+        return "Modification of iptables rules is blocked."
+
+    if PKG_INSTALL_RE.search(command):
+        return check_package_approved(command, allowlist)
+
+    if NPX_RE.search(command):
+        reason = check_package_approved(command, allowlist)
+        if reason is None:
+            m = re.search(r"(?:npx|bunx|pipx\s+run|yarn\s+dlx|pnpm\s+dlx)\s+(\S+)", command, re.IGNORECASE)
+            if m:
+                pkg = m.group(1)
+                packages = allowlist.get("packages", {})
+                found = False
+                if isinstance(packages, dict):
+                    for name, entry in packages.items():
+                        if isinstance(entry, dict):
+                            versioned = f"{name}@{entry['version']}"
+                            if pkg in (versioned, name):
+                                found = True
+                                break
+                if not found:
+                    return f"Package '{pkg}' is not in the allowlist."
+        else:
+            return reason
+
+    if isinstance(registries, list):
+        for reg in registries:
+            if isinstance(reg, str) and reg in command and re.search(r"(curl|wget|fetch|http)", command, re.IGNORECASE):
+                return f"Direct download from blocked registry: {reg}"
+
+    return None
+
+
+def _check_file_result(file_path: str, allowlist: dict) -> str | None:
+    """Same logic as check_file_tool but returns denial reason."""
+    protected = allowlist.get("protected_paths", [])
+    if file_path == "~/.config/fettle/mcp-allowlist.json":
+        return f"Write to protected path blocked: {file_path}"
+    if isinstance(protected, list):
+        if file_path in protected:
+            return f"Write to protected path blocked: {file_path}"
+        for p in protected:
+            if isinstance(p, str) and (file_path.startswith(p + "/") or file_path.startswith(p + os.sep)):
+                return f"Write to protected path blocked: {file_path} (under {p})"
+    return None
+
+
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Returns CheckResult."""
+    from dispatcher_types import CheckResult
+
+    if not ctx.config.get("gates", {}).get("mcp_trust", {}).get("enabled", False):
+        return CheckResult.allow()
+
+    allowlist = load_allowlist()
+    tool_name = ctx.tool_name or ""
+
+    if tool_name == "Bash":
+        command = ctx.tool_input.get("command", "")
+        if command:
+            reason = _check_bash_result(command, allowlist)
+            if reason:
+                return CheckResult.block(
+                    reason,
+                    hook_specific_output={
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    },
+                )
+    elif tool_name in ("Write", "Edit"):
+        file_path = ctx.tool_input.get("file_path", "")
+        if file_path:
+            reason = _check_file_result(file_path, allowlist)
+            if reason:
+                return CheckResult.block(
+                    reason,
+                    hook_specific_output={
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    },
+                )
+
+    return CheckResult.allow()
+
+
 if __name__ == "__main__":
     main()

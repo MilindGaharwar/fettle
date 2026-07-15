@@ -16,6 +16,7 @@ Exit 0 = allow/warn. Exit 2 = BLOCK.
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -465,6 +466,47 @@ def main():
         sys.exit(2)
 
     sys.exit(0)
+
+
+def run_check(ctx):
+    """Dispatcher-compatible entry point. Delegates to subprocess.
+
+    quality_gate.py handles PreToolUse, PostToolUse, and Stop events with complex
+    internal routing (UX spec, UI colors, planning, test tracking). Subprocess
+    delegation preserves all behavior while enabling the single-dispatcher model.
+    """
+    from dispatcher_types import CheckResult
+
+    script_path = os.path.abspath(__file__)
+    payload = ctx.input.raw
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, script_path],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return CheckResult.allow()
+
+    if not proc.stdout.strip():
+        return CheckResult.allow()
+
+    try:
+        output = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return CheckResult.allow()
+
+    hso = output.get("hookSpecificOutput", {})
+    context = hso.get("additionalContext", "")
+
+    if proc.returncode == 2:
+        return CheckResult.block(context, hook_specific_output=hso)
+    if context:
+        return CheckResult.advisory(context, hook_specific_output=hso)
+    return CheckResult.allow()
 
 
 if __name__ == "__main__":

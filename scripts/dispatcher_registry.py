@@ -20,6 +20,12 @@ from post_edit_ts import run_check as post_edit_ts_run
 from lean_sniffers import run_check as lean_sniffers_run
 from post_bash_doc_check import run_check as post_bash_doc_check_run
 
+# Phase 3 checks (complex, subprocess-delegated)
+from mcp_trust_gate import run_check as mcp_trust_gate_run
+from post_edit import run_check as post_edit_run
+from quality_gate import run_check as quality_gate_run
+from stop_quality_gate import run_check as stop_quality_gate_run
+
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
     CheckSpec(
@@ -30,7 +36,23 @@ CHECKS: tuple[CheckSpec, ...] = (
         order=10,
         budget_ms=50,
     ),
+    CheckSpec(
+        name="quality_gate",
+        run=quality_gate_run,
+        events=frozenset({"PreToolUse", "PostToolUse", "Stop"}),
+        tools=None,
+        order=5,
+        budget_ms=120,
+    ),
     # PreToolUse — Bash
+    CheckSpec(
+        name="mcp_trust_gate",
+        run=mcp_trust_gate_run,
+        events=frozenset({"PreToolUse"}),
+        tools=frozenset({"Bash", "Write", "Edit"}),
+        order=8,
+        budget_ms=60,
+    ),
     CheckSpec(
         name="destructive_guard",
         run=destructive_guard_run,
@@ -48,6 +70,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         budget_ms=50,
     ),
     # PostToolUse — Write|Edit (tool-backed)
+    CheckSpec(
+        name="post_edit",
+        run=post_edit_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".py"}),
+        order=25,
+        budget_ms=150,
+    ),
     CheckSpec(
         name="post_edit_ts",
         run=post_edit_ts_run,
@@ -90,6 +121,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Write", "Edit", "Bash"}),
         order=95,
         budget_ms=50,
+    ),
+    # Stop
+    CheckSpec(
+        name="stop_quality_gate",
+        run=stop_quality_gate_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=50,
+        budget_ms=300,
     ),
 )
 
