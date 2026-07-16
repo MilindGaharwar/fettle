@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -76,7 +75,7 @@ def cmd_ci(args: argparse.Namespace) -> None:
 
 def cmd_config(args: argparse.Namespace) -> None:
     """Show effective configuration."""
-    from config import load_config, DEFAULTS
+    from config import load_config
     from paths import find_repo_root
 
     repo_root = find_repo_root()
@@ -94,7 +93,6 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 def cmd_explain(args: argparse.Namespace) -> None:
     """Explain the last hook decision."""
-    from config import load_config
 
     state_dir = os.environ.get(
         "XDG_STATE_HOME", os.path.expanduser("~/.local/state")
@@ -202,6 +200,34 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     subprocess.run([sys.executable, os.path.join(script_dir, "doctor.py")], check=False)
 
 
+def cmd_bench(args: argparse.Namespace) -> None:
+    """Run the noise benchmark over pinned corpora (WP-118)."""
+    from bench import load_budgets, run_bench
+
+    corpora = {}
+    for spec in args.corpus:
+        name, _, root = spec.partition("=")
+        if not root:
+            print(f"Error: --corpus must be name=path, got '{spec}'", file=sys.stderr)
+            sys.exit(2)
+        corpora[name] = root
+    budgets = load_budgets(args.budgets)
+    result = run_bench(
+        corpora, budgets,
+        update_budgets_path=args.budgets if args.update_budgets else None,
+    )
+    for name, m in result.measurements.items():
+        print(f"{name}: {m.kloc:.2f} KLOC")
+        for rule, count in sorted(m.findings_per_rule.items()):
+            marker = " (unbudgeted)" if rule in result.unbudgeted.get(name, []) else ""
+            print(f"  {rule}: {count} findings, {m.rate_per_kloc(rule):.2f}/KLOC{marker}")
+    for v in result.violations:
+        print(f"BUDGET EXCEEDED: {v}", file=sys.stderr)
+    if args.update_budgets:
+        print(f"\u2713 Budgets written to {args.budgets}")
+    sys.exit(0 if result.passed else 1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -225,6 +251,14 @@ def main() -> None:
 
     subparsers.add_parser("doctor", help="Environment self-check")
 
+    p_bench = subparsers.add_parser("bench", help="Noise benchmark: findings-per-KLOC vs committed budgets")
+    p_bench.add_argument("--corpus", action="append", required=True, metavar="NAME=PATH",
+                         help="Named corpus directory (repeatable)")
+    p_bench.add_argument("--budgets", default="benchmarks/budgets.json",
+                         help="Budget file (default: benchmarks/budgets.json)")
+    p_bench.add_argument("--update-budgets", action="store_true",
+                         help="Write measured rates as the new budgets")
+
     p_ci = subparsers.add_parser("ci", help="Run the enforced gate sequence (boundary + quality + plans)")
     p_ci.add_argument("--root", default=".")
     ci_sub = p_ci.add_subparsers(dest="ci_action")
@@ -244,6 +278,7 @@ def main() -> None:
         "explain": cmd_explain,
         "baseline": cmd_baseline,
         "doctor": cmd_doctor,
+        "bench": cmd_bench,
         "ci": cmd_ci,
     }
     commands[args.command](args)

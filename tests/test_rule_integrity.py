@@ -35,6 +35,7 @@ FIXTURE_ROOT = PLUGIN_DIR / "tests" / "fixtures" / "rulepacks"
 
 sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
 from project_rules import generate_promise_rule  # noqa: E402
+from semgrep_util import validate_rule_pack  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
@@ -115,23 +116,16 @@ def test_corrupted_pack_fails_validation(tmp_path):
         "    severity: ERROR", "    severity: ERROR\n    severity: WARNING", 1
     )
     corrupted.write_text(text)
-    result = subprocess.run(
-        ["semgrep", "scan", "--config", str(corrupted), "--validate", "--metrics=off"],
-        capture_output=True, text=True, timeout=60, env=_ENV,
-    )
-    assert result.returncode != 0, (
-        "MUTATION CHECK FAILED: semgrep --validate accepted a pack with a "
+    valid, _ = validate_rule_pack(str(corrupted))
+    assert not valid, (
+        "MUTATION CHECK FAILED: validation accepted a pack with a "
         "duplicate key — the integrity gate is not actually guarding."
     )
 
 
 def test_uncorrupted_pack_passes_validation():
-    result = subprocess.run(
-        ["semgrep", "scan", "--config", str(RULES_DIR / "llm-antipatterns.yml"),
-         "--validate", "--metrics=off"],
-        capture_output=True, text=True, timeout=60, env=_ENV,
-    )
-    assert result.returncode == 0
+    valid, err = validate_rule_pack(str(RULES_DIR / "llm-antipatterns.yml"))
+    assert valid, err
 
 
 # ── generated rules must meet the same bar ───────────────────────────
@@ -140,11 +134,6 @@ def test_uncorrupted_pack_passes_validation():
 def test_generated_promise_rule_validates(tmp_path):
     cfg = {"rules": {"extra_dirs": [], "promise_apis": ["jQuery.ajax"]}}
     generated = generate_promise_rule(cfg, str(tmp_path))
-    result = subprocess.run(
-        ["semgrep", "scan", "--config", generated, "--validate", "--metrics=off"],
-        capture_output=True, text=True, timeout=60, env=_ENV,
-    )
-    assert result.returncode == 0, (
-        f"generated rule failed --validate:\n{result.stderr}"
-    )
+    valid, err = validate_rule_pack(generated)
+    assert valid, f"generated rule failed validation:\n{err}"
     shutil.rmtree(tmp_path / ".fettle", ignore_errors=True)
