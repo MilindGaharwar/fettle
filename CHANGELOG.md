@@ -2,6 +2,17 @@
 
 ## Unreleased (v0.6.0 arc)
 
+- **WP-124 (pulled forward) — pre-commit integration**: published
+  `.pre-commit-hooks.yaml` with `fettle-check` (changed-files quality scan)
+  and `fettle-rules-validate` (project rule packs must pass `--validate`);
+  consumer snippet in `templates/pre-commit-config.yaml`. Same policy at the
+  commit chokepoint regardless of editor/agent.
+- **WP-133 (scaffold) — behavioral eval lab** (`evals/`,
+  `scripts/evals_runner.py`): quorum-inspired, slimmed. Scenario dirs with
+  prompt/setup_files/checks; three-valued verdicts; static side CI-safe
+  (`evals_runner.py validate` + fake-runner unit tests), live side
+  (`claude -p`) trusted-operator only. Two seed scenarios: hook-catches-debug-statement,
+  plan-gate-nudges-multifile.
 - **WP-116 — Rule-pack integrity gates** (`tests/test_rule_integrity.py`):
   every rule in every pack must have a `fire/` and a `silent/` fixture under
   `tests/fixtures/rulepacks/<pack>/<rule-id>/` — fixture-less rules fail the

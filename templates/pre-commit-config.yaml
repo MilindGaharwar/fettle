@@ -1,13 +1,16 @@
+# Consumer-side snippet — copy into your repo's .pre-commit-config.yaml.
+# Gives every commit Fettle verification regardless of editor or agent
+# (VS Code, Claude Code, plain terminal): the same policy at every chokepoint.
 repos:
+  - repo: https://github.com/MilindGaharwar/fettle
+    rev: v0.4.2   # pin a tag; bump deliberately
+    hooks:
+      - id: fettle-check
+      - id: fettle-rules-validate
+
+  # Optional: language-native fast paths alongside Fettle
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.0
     hooks:
       - id: ruff
-        args: [check, --config, .fettle/ruff.toml]
       - id: ruff-format
-
-  - repo: https://github.com/semgrep/semgrep
-    rev: v1.159.0
-    hooks:
-      - id: semgrep
-        args: [--config, .fettle/llm-antipatterns.yml, --error]
