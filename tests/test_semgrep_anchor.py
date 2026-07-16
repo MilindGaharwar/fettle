@@ -20,7 +20,7 @@ PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RULES_DIR = os.path.join(PLUGIN_DIR, "rules")
 
 sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
-from semgrep_util import anchored_semgrep_args  # noqa: E402
+from semgrep_util import anchored_semgrep_args, validate_rule_pack  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
@@ -47,13 +47,12 @@ def test_rule_files_discovered():
 
 @pytest.mark.parametrize("rule_file", RULE_FILES, ids=lambda p: os.path.relpath(p, RULES_DIR))
 def test_rule_file_is_valid(rule_file):
-    result = subprocess.run(
-        ["semgrep", "scan", "--config", rule_file, "--validate"],
-        capture_output=True, text=True, timeout=60, env=_ENV,
-    )
-    assert result.returncode == 0, (
+    # Offline-safe validation: semgrep >= 1.168 --validate fetches a registry
+    # pack and hard-fails behind TLS-intercepting proxies.
+    valid, err = validate_rule_pack(rule_file)
+    assert valid, (
         f"{os.path.relpath(rule_file, PLUGIN_DIR)} is invalid — "
-        f"ALL its rules are silently disabled:\n{result.stderr}"
+        f"ALL its rules are silently disabled:\n{err}"
     )
 
 

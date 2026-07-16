@@ -1,13 +1,45 @@
-"""Anchored semgrep invocation.
+"""Anchored semgrep invocation + offline-safe rule-pack validation.
 
 Semgrep >= 1.136 resolves ``paths.include``/``paths.exclude`` rule filters
 against the *project root* (the enclosing git root). When a scanned file is
 not inside a git repo, path-scoped rules silently never match — or excludes
 silently stop excluding. This module pins the project root explicitly so
 path filters behave identically everywhere.
+
+Validation: semgrep >= 1.168 makes ``--validate`` fetch the
+``p/semgrep-rule-lints`` registry pack, which hard-fails offline or behind
+TLS-intercepting proxies — and ``--experimental scan --validate`` silently
+accepts corrupted configs (caught by the WP-116 mutation check).
+``validate_rule_pack`` scans an empty target instead: config parsing runs
+fully, no search happens, no network is touched.
 """
 
+import json
 import os
+import shutil
+import subprocess
+import tempfile
+
+
+def validate_rule_pack(config_path: str, timeout: int = 60) -> tuple[bool, str]:
+    """Offline-safe rule-pack validation. Returns (valid, error_text)."""
+    semgrep_bin = shutil.which("semgrep") or os.path.expanduser("~/.local/bin/semgrep")
+    empty_dir = tempfile.mkdtemp(prefix="fettle-validate-")
+    try:
+        proc = subprocess.run(
+            [semgrep_bin, "scan", "--config", str(config_path), "--json",
+             "--quiet", "--metrics=off", "--project-root", ".", "."],
+            capture_output=True, text=True, timeout=timeout, cwd=empty_dir,
+        )
+        try:
+            errors = json.loads(proc.stdout).get("errors", [])
+        except json.JSONDecodeError:
+            return False, f"semgrep produced no parseable output: {proc.stderr[-500:]}"
+        if errors:
+            return False, "\n".join(str(e.get("message", e)) for e in errors)
+        return True, ""
+    finally:
+        shutil.rmtree(empty_dir, ignore_errors=True)
 
 
 def _find_git_root(start_dir: str) -> str | None:
