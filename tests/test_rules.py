@@ -20,6 +20,11 @@ _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.envi
 def run_semgrep(target_file, cwd=None, extra_args=None):
     """Run semgrep and return list of rule IDs that matched."""
     cmd = ["semgrep", "scan", "--config", RULES_FILE, "--json"]
+    if cwd:
+        # Semgrep >= 1.136 resolves paths.include relative to the project
+        # root (git root). Tmpdirs are not git repos, so pin the root
+        # explicitly or path-scoped rules never match.
+        cmd.extend(["--project-root", "."])
     if extra_args:
         cmd.extend(extra_args)
     cmd.append(target_file)

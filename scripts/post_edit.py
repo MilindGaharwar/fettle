@@ -12,6 +12,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
+from semgrep_util import anchored_semgrep_args  # noqa: E402
 
 
 def _resolve_tool(name: str) -> str | None:
@@ -132,11 +133,13 @@ def main() -> None:
             gate_errors.append("semgrep not found on PATH — antipattern layer skipped")
         if semgrep_bin:
             try:
+                anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=cwd)
                 result = subprocess.run(
-                    [semgrep_bin, "--config", semgrep_rules, "--json", file_path],
+                    [semgrep_bin, "--config", semgrep_rules, "--json", *anchor_args],
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    cwd=anchor_cwd,
                 )
                 if result.stdout.strip():
                     raw_semgrep: dict[str, object] = json.loads(result.stdout)

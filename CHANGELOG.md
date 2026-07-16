@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.1 — Rule config fixes + anchored semgrep scans (2026-07-16)
+
+- **Fix: `ts-antipatterns.yml` was invalid** — duplicate `pattern-not-inside` keys
+  (`unawaited-promise`) and `patterns` + sibling `pattern-not-inside`
+  (`fetch-without-timeout`) made semgrep reject the whole config, silently
+  disabling **all** TS/JS checks. Also fixed AND-vs-OR misuse: `empty-catch-block`,
+  `string-built-sql-ts`, `regex-llm-output-ts` used `patterns:` (AND) where
+  `pattern-either:` (OR) was intended and could never fire.
+- **Fix: path-filter anchoring** (`scripts/semgrep_util.py`): semgrep ≥ 1.136
+  resolves `paths.include`/`exclude` against the git project root; files outside a
+  git repo silently escaped path-scoped rules and exclusions. Both hooks
+  (`post_edit.py`, `post_edit_ts.py`) now scan via `anchored_semgrep_args()` —
+  git root, else session cwd, else file dir — with `--project-root .`.
+- **Tests** (`tests/test_semgrep_anchor.py`): every file under `rules/` must pass
+  `semgrep --validate` (catches dead-config regressions), plus anchoring contract
+  tests. Test harnesses in `test_rules.py`/`test_debug_detect.py` pin
+  `--project-root` for non-git tmpdirs.
+
 ## v0.4.0 — Intelligence + Extensibility (2026-07-07)
 
 - **TypeScript/JS rules** (`rules/ts-antipatterns.yml`): 5 semgrep rules for TS/JS
