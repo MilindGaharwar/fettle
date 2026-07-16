@@ -10,6 +10,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config
+from project_rules import extra_rule_configs
 from result import Finding, Severity, make_pass, make_tool_error, make_violation
 from semgrep_util import anchored_semgrep_args
 from trace import log_decision
@@ -65,8 +66,11 @@ def main() -> None:
 
     try:
         anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=cwd)
+        config_args = ["--config", rules_file]
+        for extra in extra_rule_configs(cfg, anchor_cwd):
+            config_args.extend(["--config", extra])
         proc = subprocess.run(
-            [semgrep_bin, "--config", rules_file, "--json", *anchor_args],
+            [semgrep_bin, *config_args, "--json", *anchor_args],
             capture_output=True, text=True, timeout=15, cwd=anchor_cwd,
         )
         if proc.stdout.strip():
@@ -137,8 +141,11 @@ def run_check(ctx):
     findings: list[Finding] = []
     try:
         anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=str(ctx.cwd))
+        config_args = ["--config", rules_file]
+        for extra in extra_rule_configs(ctx.config, anchor_cwd):
+            config_args.extend(["--config", extra])
         proc = subprocess.run(
-            [semgrep_bin, "--config", rules_file, "--json", *anchor_args],
+            [semgrep_bin, *config_args, "--json", *anchor_args],
             capture_output=True, text=True, timeout=15, cwd=anchor_cwd,
         )
         if proc.stdout.strip():

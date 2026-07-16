@@ -12,6 +12,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
+from project_rules import extra_rule_configs  # noqa: E402
 from semgrep_util import anchored_semgrep_args  # noqa: E402
 
 
@@ -134,8 +135,11 @@ def main() -> None:
         if semgrep_bin:
             try:
                 anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=cwd)
+                config_args = ["--config", semgrep_rules]
+                for extra in extra_rule_configs(cfg, anchor_cwd):
+                    config_args.extend(["--config", extra])
                 result = subprocess.run(
-                    [semgrep_bin, "--config", semgrep_rules, "--json", *anchor_args],
+                    [semgrep_bin, *config_args, "--json", *anchor_args],
                     capture_output=True,
                     text=True,
                     timeout=10,
