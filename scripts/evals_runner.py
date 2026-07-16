@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -131,13 +132,20 @@ def _evaluate(check: Check, transcript: str, workdir: Path) -> CheckRecord:
 
 
 def _claude_runner(prompt: str, cwd: Path) -> str:
-    """LIVE runner — launches `claude -p`. Trusted-operator use only."""
+    """LIVE runner — launches `claude -p`. Trusted-operator use only.
+
+    Runs with --dangerously-skip-permissions (the quorum approach): in
+    non-interactive print mode, permission prompts cannot be answered and
+    stall the run to timeout. Timeout via $FETTLE_EVAL_TIMEOUT_S (default 600).
+    """
     claude = shutil.which("claude")
     if not claude:
         raise RuntimeError("claude CLI not on PATH — live evals unavailable")
+    timeout_s = int(os.environ.get("FETTLE_EVAL_TIMEOUT_S", "600"))
     proc = subprocess.run(
-        [claude, "-p", prompt], capture_output=True, text=True,
-        timeout=600, cwd=str(cwd),
+        [claude, "-p", "--dangerously-skip-permissions", prompt],
+        capture_output=True, text=True,
+        timeout=timeout_s, cwd=str(cwd),
     )
     return proc.stdout
 
