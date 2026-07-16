@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.2 — Go post-edit check (2026-07-16)
+
+- **Go route** (`scripts/post_edit_go.py`, registered in the dispatcher for
+  `.go` edits): semgrep runs the new built-in `rules/go-antipatterns.yml`
+  (empty-error-swallow, debug-print, sql-string-concat, http-client-no-timeout)
+  plus project rules from `.fettle/rules/`; golangci-lint runs when the anchor
+  root has a `go.mod`. Enforce mode blocks on ERROR findings.
+  End-to-end test proves a project-local Go rule (e.g. DVA3's
+  `no-direct-kafka-produce`) fires through the hook (`tests/test_post_edit_go.py`).
+
 ## v0.4.1 — Rule config fixes + anchored semgrep scans (2026-07-16)
 
 - **Fix: `ts-antipatterns.yml` was invalid** — duplicate `pattern-not-inside` keys
