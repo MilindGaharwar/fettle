@@ -15,23 +15,28 @@ rules:
 
   - id: unawaited-promise
     patterns:
-      - pattern: |
-          $FN(...)
-      - pattern-not-inside: |
-          await $FN(...)
-      - pattern-not-inside: |
-          return $FN(...)
-      - pattern-not-inside: |
-          const $X = $FN(...)
-      - pattern-not-inside: |
-          let $X = $FN(...)
-    message: "Possible unawaited promise. Add await or handle the return value."
+      - pattern-either:
+          - pattern: fetch(...)
+          - pattern: axios(...)
+          - pattern: axios.$METHOD(...)
+      - pattern-not-inside: await $X
+      - pattern-not-inside: return $X
+      - pattern-not-inside: const $X = $Y
+      - pattern-not-inside: let $X = $Y
+      - pattern-not-inside: var $X = $Y
+      - pattern-not-inside: $X.then(...)
+      - pattern-not-inside: $X.catch(...)
+    message: "Unawaited promise from fetch/axios. Add await or handle the returned promise."
     languages: [typescript, javascript]
     severity: WARNING
     metadata:
       origin: fettle-v0.4.0
       citation: "Fire-and-forget async calls lose errors and create race conditions"
-      fix: "Add await: const result = await fn()"
+      fix: "Add await: const result = await fetch(url)"
+      note: >-
+        Scoped to known promise-returning APIs. Semgrep OSS has no type
+        inference, so matching arbitrary $FN(...) calls flagged every
+        statement-level call (~9k findings on a 23-file app).
 
   - id: fetch-without-timeout
     patterns:
@@ -97,6 +102,11 @@ rules:
           $X.match($REGEX)
       - pattern: |
           $REGEX.exec($X)
+    paths:
+      include:
+        - "agents/"
+        - "pipeline/"
+        - "llm/"
     message: "Regex parsing of what may be LLM output. Use structured output (JSON, tool_use) instead."
     languages: [typescript, javascript]
     severity: WARNING

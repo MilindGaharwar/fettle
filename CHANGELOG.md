@@ -8,6 +8,12 @@
   disabling **all** TS/JS checks. Also fixed AND-vs-OR misuse: `empty-catch-block`,
   `string-built-sql-ts`, `regex-llm-output-ts` used `patterns:` (AND) where
   `pattern-either:` (OR) was intended and could never fire.
+- **Fix: TS rule precision** — the resurrected rules measured ~9,000 findings on a
+  23-file UI5 app. `unawaited-promise` now targets known promise-returning APIs
+  (fetch/axios) instead of every statement-level call (semgrep OSS has no type
+  inference), and ignores `.then()`/`.catch()` chains. `regex-llm-output-ts` is
+  path-scoped to `agents/`, `pipeline/`, `llm/` like its Python counterpart.
+  Same app now: 2 findings, both true positives (`tests/test_ts_rules.py`).
 - **Fix: path-filter anchoring** (`scripts/semgrep_util.py`): semgrep ≥ 1.136
   resolves `paths.include`/`exclude` against the git project root; files outside a
   git repo silently escaped path-scoped rules and exclusions. Both hooks
