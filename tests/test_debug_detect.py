@@ -26,12 +26,21 @@ def _has_semgrep() -> bool:
 pytestmark = pytest.mark.skipif(not _has_semgrep(), reason="semgrep not available")
 
 
-def _run_semgrep(rule_file: str, target_file: str) -> list[dict]:
-    """Run semgrep with a rule file against a target, return findings."""
+def _run_semgrep(rule_file: str, target_file: str, cwd: str | None = None) -> list[dict]:
+    """Run semgrep with a rule file against a target, return findings.
+
+    When cwd is given, the scan runs there with --project-root . so that
+    paths.include/exclude filters anchor correctly (semgrep >= 1.136
+    resolves them against the git project root, and tmpdirs have none).
+    """
     import json
+    cmd = ["semgrep", "--config", rule_file, "--json", "--quiet"]
+    if cwd:
+        cmd.extend(["--project-root", "."])
+    cmd.append(target_file)
     result = subprocess.run(
-        ["semgrep", "--config", rule_file, "--json", "--quiet", target_file],
-        capture_output=True, text=True, timeout=30,
+        cmd,
+        capture_output=True, text=True, timeout=30, cwd=cwd,
     )
     if result.returncode not in (0, 1):  # 1 = findings found
         return []
@@ -112,7 +121,9 @@ class TestTypeScriptDebugDetection:
         f = scripts_dir / "build.js"
         f.write_text("console.log('Building...');\n")
         findings = _run_semgrep(
-            os.path.join(RULES_DIR, "ts-antipatterns.yml"), str(f)
+            os.path.join(RULES_DIR, "ts-antipatterns.yml"),
+            "scripts/build.js",
+            cwd=str(tmp_path),
         )
         console_logs = [r for r in findings if "debug-console-log" in r.get("check_id", "")]
         assert console_logs == []

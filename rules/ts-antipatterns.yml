@@ -1,6 +1,6 @@
 rules:
   - id: empty-catch-block
-    patterns:
+    pattern-either:
       - pattern: |
           catch ($ERR) { }
       - pattern: |
@@ -14,16 +14,17 @@ rules:
       fix: "Add error logging: catch (e) { console.error('Context:', e); throw e; }"
 
   - id: unawaited-promise
-    pattern: |
-      $FN(...)
-    pattern-not-inside: |
-      await $FN(...)
-    pattern-not-inside: |
-      return $FN(...)
-    pattern-not-inside: |
-      const $X = $FN(...)
-    pattern-not-inside: |
-      let $X = $FN(...)
+    patterns:
+      - pattern: |
+          $FN(...)
+      - pattern-not-inside: |
+          await $FN(...)
+      - pattern-not-inside: |
+          return $FN(...)
+      - pattern-not-inside: |
+          const $X = $FN(...)
+      - pattern-not-inside: |
+          let $X = $FN(...)
     message: "Possible unawaited promise. Add await or handle the return value."
     languages: [typescript, javascript]
     severity: WARNING
@@ -34,12 +35,13 @@ rules:
 
   - id: fetch-without-timeout
     patterns:
-      - pattern: |
-          fetch($URL)
-      - pattern: |
-          fetch($URL, { ... })
-    pattern-not-inside: |
-      fetch($URL, { ..., signal: $SIGNAL, ... })
+      - pattern-either:
+          - pattern: |
+              fetch($URL)
+          - pattern: |
+              fetch($URL, { ... })
+      - pattern-not: |
+          fetch($URL, { ..., signal: $SIGNAL, ... })
     message: "fetch() without AbortSignal timeout. Network calls can hang indefinitely."
     languages: [typescript, javascript]
     severity: ERROR
@@ -49,7 +51,7 @@ rules:
       fix: "Add signal: fetch(url, { signal: AbortSignal.timeout(10000) })"
 
   - id: string-built-sql-ts
-    patterns:
+    pattern-either:
       - pattern: |
           `SELECT ... ${$VAR} ...`
       - pattern: |
@@ -90,7 +92,7 @@ rules:
     message: "Leftover debugger statement — remove before shipping."
 
   - id: regex-llm-output-ts
-    patterns:
+    pattern-either:
       - pattern: |
           $X.match($REGEX)
       - pattern: |

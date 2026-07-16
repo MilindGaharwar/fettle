@@ -11,6 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config
 from result import Finding, Severity, make_pass, make_tool_error, make_violation
+from semgrep_util import anchored_semgrep_args
 from trace import log_decision
 
 TS_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
@@ -63,9 +64,10 @@ def main() -> None:
     findings: list[Finding] = []
 
     try:
+        anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=cwd)
         proc = subprocess.run(
-            [semgrep_bin, "--config", rules_file, "--json", file_path],
-            capture_output=True, text=True, timeout=15,
+            [semgrep_bin, "--config", rules_file, "--json", *anchor_args],
+            capture_output=True, text=True, timeout=15, cwd=anchor_cwd,
         )
         if proc.stdout.strip():
             raw = json.loads(proc.stdout)
@@ -134,9 +136,10 @@ def run_check(ctx):
 
     findings: list[Finding] = []
     try:
+        anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=str(ctx.cwd))
         proc = subprocess.run(
-            [semgrep_bin, "--config", rules_file, "--json", file_path],
-            capture_output=True, text=True, timeout=15,
+            [semgrep_bin, "--config", rules_file, "--json", *anchor_args],
+            capture_output=True, text=True, timeout=15, cwd=anchor_cwd,
         )
         if proc.stdout.strip():
             raw = json.loads(proc.stdout)
