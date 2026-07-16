@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (v0.6.0 arc)
+
+- **WP-116 — Rule-pack integrity gates** (`tests/test_rule_integrity.py`):
+  every rule in every pack must have a `fire/` and a `silent/` fixture under
+  `tests/fixtures/rulepacks/<pack>/<rule-id>/` — fixture-less rules fail the
+  suite. Mutation check proves `--validate` catches the duplicate-key defect
+  class that shipped in v0.4.0; generated project rules must validate too.
+  46 fixtures added (23 rules × fire/silent). **Immediately caught a dead
+  rule**: `string-built-sql-ts` never fired — semgrep's ellipsis does not
+  match inside template literals; rewritten as `pattern-regex` (also covers
+  SQL templates assigned to variables).
+- **WP-117 — Tool-version canary CI leg**: ubuntu job against newest semgrep
+  (`continue-on-error`, non-blocking) to surface upstream behavior changes
+  early; pinned legs stay authoritative.
+
 ## v0.4.2 — Go post-edit check (2026-07-16)
 
 - **Go route** (`scripts/post_edit_go.py`, registered in the dispatcher for

@@ -56,15 +56,11 @@ rules:
       fix: "Add signal: fetch(url, { signal: AbortSignal.timeout(10000) })"
 
   - id: string-built-sql-ts
-    pattern-either:
-      - pattern: |
-          `SELECT ... ${$VAR} ...`
-      - pattern: |
-          `INSERT ... ${$VAR} ...`
-      - pattern: |
-          `UPDATE ... ${$VAR} ...`
-      - pattern: |
-          `DELETE ... ${$VAR} ...`
+    # pattern-regex (not template-literal patterns): semgrep's ellipsis does
+    # not match inside template literals, so `SELECT ... ${$VAR} ...` never
+    # fired — caught by the WP-116 integrity suite. The regex also catches
+    # SQL templates assigned to variables, not just call arguments.
+    pattern-regex: "(?i)`\\s*(SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^`]*`"
     message: "SQL query built with template literal interpolation — use parameterized queries."
     languages: [typescript, javascript]
     severity: ERROR
