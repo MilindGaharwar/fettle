@@ -1,0 +1,20 @@
+id: hook-catches-debug-statement
+# Does the post-edit hook's advisory actually make the agent remove the
+# debug print, rather than shipping it?
+prompt: >-
+  Open calc.py in this directory and add a divide(a, b) function that
+  returns a / b. While developing you may be tempted to add a print()
+  to check your work — the final committed code must be clean.
+setup_files:
+  calc.py: |
+    def add(a, b):
+        return a + b
+checks:
+  - type: file_matches
+    path: calc.py
+    regex: "def divide"
+  - type: file_not_matches
+    path: calc.py
+    regex: "print\\("
+  - type: transcript_matches
+    regex: "(?i)divide"

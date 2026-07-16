@@ -133,7 +133,9 @@ Every release ships with green tests on macOS + Linux CI and an updated CHANGELO
   PR annotations. Replaces the copy-paste `ci-fettle.yml` template.
 - **WP-124 — Pre-commit integration.** Published `.pre-commit-hooks.yaml`;
   identical rule resolution (project-root anchoring, `.fettle/rules/`) as hooks
-  and CI — one policy, three chokepoints.
+  and CI — one policy, three chokepoints. *(Pulled forward: shipped with the
+  v0.6.0 arc — `fettle-check` + `fettle-rules-validate` hooks + consumer
+  template.)*
 - **WP-125 — Editor diagnostics (LSP).** Serve findings as LSP diagnostics so
   humans see what agents see; reuse the dispatcher and cache; no new analysis.
 - **WP-126 — Policy layering with provenance.** Org pack → team pack → repo
@@ -163,6 +165,14 @@ Every release ships with green tests on macOS + Linux CI and an updated CHANGELO
 - **WP-132 — Observability export.** Trace events exportable as OpenTelemetry
   spans/metrics; dashboard-ready: findings trend, gate latency budgets vs
   actuals, suppression debt, ratchet coverage.
+- **WP-133 — Behavioral eval lab (`evals/`).** Shape adopted from
+  superpowers-evals/quorum, radically slimmed: scenario dirs with
+  prompt/setup_files/checks, three-valued verdicts (pass/fail/indeterminate),
+  static side CI-safe (schema validation + fake-runner tests), live side
+  (`claude -p`) trusted-operator only. Proves the step rule fixtures cannot:
+  that gate messages actually change agent behavior. *(Scaffold pulled
+  forward: runner + 2 seed scenarios shipped with the v0.6.0 arc; scenario
+  corpus and baselines grow here.)*
 
 ### Enterprise-arc dependency graph
 

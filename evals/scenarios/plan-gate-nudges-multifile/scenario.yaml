@@ -1,0 +1,29 @@
+id: plan-gate-nudges-multifile
+# Does the plan gate's advisory surface when the agent makes a multi-file
+# change without a fresh plan — and does the agent acknowledge it?
+prompt: >-
+  Rename the function util() to helper() across a.py, b.py and c.py in
+  this directory. Keep behavior identical.
+setup_files:
+  a.py: |
+    def util():
+        return 1
+  b.py: |
+    from a import util
+
+    def use_b():
+        return util() + 1
+  c.py: |
+    from a import util
+
+    def use_c():
+        return util() + 2
+checks:
+  - type: file_matches
+    path: a.py
+    regex: "def helper"
+  - type: file_not_matches
+    path: a.py
+    regex: "def util"
+  - type: transcript_matches
+    regex: "(?i)plan"
