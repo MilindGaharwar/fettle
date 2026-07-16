@@ -1,0 +1,68 @@
+rules:
+  - id: empty-error-swallow-go
+    metadata:
+      origin: fettle-v0.4.2
+      citation: "Swallowed errors are the Go twin of bare-except-pass — failures vanish silently"
+      fix: 'Handle it: return fmt.Errorf("context: %w", err) or log and recover deliberately'
+    languages: [go]
+    severity: ERROR
+    pattern-either:
+      - pattern: |
+          if $ERR != nil { }
+      - pattern: |
+          if $ERR := $F(...); $ERR != nil { }
+    message: "Error checked but swallowed — empty if-block hides failures."
+
+  - id: debug-print-go
+    metadata:
+      origin: debug-detection
+      citation: "Leftover fmt.Println pollutes service logs — use the structured logger"
+      fix: 'Replace with slog/zap: logger.Info(...) — or remove'
+    languages: [go]
+    severity: WARNING
+    pattern-either:
+      - pattern: fmt.Println(...)
+      - pattern: fmt.Printf(...)
+      - pattern: println(...)
+    paths:
+      exclude:
+        - "cmd/"
+        - "tools/"
+        - "scripts/"
+        - "**/main.go"
+        - "**/*_test.go"
+    message: "Leftover debug print — use the structured logger or remove."
+
+  - id: sql-string-concat-go
+    metadata:
+      origin: security
+      citation: "OWASP: SQL injection via string-built queries"
+      fix: 'Use placeholders: db.Query("SELECT ... WHERE id = $1", id)'
+    languages: [go]
+    severity: ERROR
+    pattern-either:
+      - pattern: $DB.Query("..." + $VAR, ...)
+      - pattern: $DB.QueryRow("..." + $VAR, ...)
+      - pattern: $DB.Exec("..." + $VAR, ...)
+      - pattern: $DB.QueryContext($CTX, "..." + $VAR, ...)
+      - pattern: $DB.QueryRowContext($CTX, "..." + $VAR, ...)
+      - pattern: $DB.ExecContext($CTX, "..." + $VAR, ...)
+      - pattern: fmt.Sprintf("SELECT ...", ...)
+      - pattern: fmt.Sprintf("INSERT ...", ...)
+      - pattern: fmt.Sprintf("UPDATE ...", ...)
+      - pattern: fmt.Sprintf("DELETE ...", ...)
+    message: "SQL built from strings is injection-vulnerable — use parameterized queries."
+
+  - id: http-client-no-timeout-go
+    metadata:
+      origin: fettle-v0.4.2
+      citation: "http.Client zero value has no timeout — hangs on unresponsive servers"
+      fix: 'http.Client{Timeout: 30 * time.Second}'
+    languages: [go]
+    severity: WARNING
+    patterns:
+      - pattern: |
+          http.Client{...}
+      - pattern-not: |
+          http.Client{..., Timeout: $T, ...}
+    message: "http.Client without Timeout can hang forever — set an explicit Timeout."

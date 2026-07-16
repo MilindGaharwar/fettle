@@ -17,6 +17,7 @@ from scope_creep import run_check as scope_creep_run
 
 # Phase 2 checks (tool-backed, run subprocesses)
 from post_edit_ts import run_check as post_edit_ts_run
+from post_edit_go import run_check as post_edit_go_run
 from lean_sniffers import run_check as lean_sniffers_run
 from post_bash_doc_check import run_check as post_bash_doc_check_run
 
@@ -87,6 +88,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         extensions=frozenset({".ts", ".tsx", ".js", ".jsx"}),
         order=30,
         budget_ms=80,
+    ),
+    CheckSpec(
+        name="post_edit_go",
+        run=post_edit_go_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".go"}),
+        order=30,
+        budget_ms=150,
     ),
     CheckSpec(
         name="lean_sniffers",

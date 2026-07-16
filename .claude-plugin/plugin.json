@@ -1,6 +1,6 @@
 {
   "name": "fettle",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Quality enforcement for AI-assisted development. Fettles freshly generated code: ruff + semgrep + incident-derived LLM-antipattern rules, wired into the Claude Code tool lifecycle.",
   "author": {
     "name": "Milind Gaharwar"
