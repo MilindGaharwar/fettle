@@ -11,7 +11,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        semgrep: ["1.168.0"]
+        canary: [false]
+        # WP-117 — canary leg: run against the newest semgrep to catch
+        # upstream behavior changes (e.g. 1.136 re-anchored paths.include
+        # to the git root) the week they ship, not months later. Informative,
+        # never blocking — the pinned legs stay authoritative.
+        include:
+          - os: ubuntu-latest
+            semgrep: "latest"
+            canary: true
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.canary }}
+    name: test (${{ matrix.os }}, semgrep ${{ matrix.semgrep }}${{ matrix.canary && ', canary' || '' }})
     steps:
       - uses: actions/checkout@v4
 
@@ -20,8 +32,15 @@ jobs:
           python-version: "3.12"
 
       - name: Install tools (pinned)
+        if: ${{ !matrix.canary }}
         run: |
-          python -m pip install --quiet pytest ruff==0.15.20 semgrep==1.168.0 pyyaml
+          python -m pip install --quiet pytest ruff==0.15.20 semgrep==${{ matrix.semgrep }} pyyaml
+
+      - name: Install tools (canary — newest semgrep)
+        if: ${{ matrix.canary }}
+        run: |
+          python -m pip install --quiet pytest ruff==0.15.20 semgrep pyyaml
+          semgrep --version
 
       # Rust/shell scan paths only need coverage on one OS; macOS runner
       # minutes cost 10x, so exercise them on ubuntu.
