@@ -14,6 +14,15 @@
   inference), and ignores `.then()`/`.catch()` chains. `regex-llm-output-ts` is
   path-scoped to `agents/`, `pipeline/`, `llm/` like its Python counterpart.
   Same app now: 2 findings, both true positives (`tests/test_ts_rules.py`).
+- **Project-local rules** (`scripts/project_rules.py`): projects extend the
+  built-in rule packs via `.fettle.toml` — `[rules] extra_dirs` adds project
+  semgrep rule files (default `.fettle/rules/`), `promise_apis` extends
+  `unawaited-promise` with project-specific promise-returning APIs (validated
+  identifiers only; rule generated and cached under `.fettle/generated/`).
+  Both post-edit hooks pass the extra configs to semgrep.
+- **Noise audit** of `llm-antipatterns.yml` on three real codebases: rules
+  confirmed precise when scans are correctly anchored (mis-anchored scans
+  defeated `paths.exclude` — same class of bug as the hook anchoring fix).
 - **Fix: path-filter anchoring** (`scripts/semgrep_util.py`): semgrep ≥ 1.136
   resolves `paths.include`/`exclude` against the git project root; files outside a
   git repo silently escaped path-scoped rules and exclusions. Both hooks

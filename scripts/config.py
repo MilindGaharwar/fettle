@@ -129,6 +129,11 @@ DEFAULTS: dict[str, Any] = {
     # repo-declared forbidden-strings list (sibling projects this package
     # must not reference). Fettle ships no names — each repo fills `forbidden`.
     "boundary": {"forbidden": []},
+    # Project-local semgrep rule extension (scripts/project_rules.py).
+    "rules": {
+        "extra_dirs": [".fettle/rules"],  # project rule files, relative to root
+        "promise_apis": [],  # extra APIs for unawaited-promise (TS/JS)
+    },
 }
 
 CONFIG_FILENAME = ".fettle.toml"
