@@ -228,6 +228,18 @@ def cmd_bench(args: argparse.Namespace) -> None:
     sys.exit(0 if result.passed else 1)
 
 
+def cmd_ratchet(args: argparse.Namespace) -> None:
+    """Evidence-based rule promotion/demotion (WP-119)."""
+    from ratchet import cmd_ratchet as _cmd_ratchet
+    _cmd_ratchet(args)
+
+
+def cmd_suppressions(args: argparse.Namespace) -> None:
+    """Manage suppressions with expiry and owner (WP-120)."""
+    from suppressions_v3 import cmd_suppressions as _cmd_suppressions
+    _cmd_suppressions(args)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -266,6 +278,32 @@ def main() -> None:
     p_ci_init.add_argument("--dry-run", action="store_true")
     p_ci_init.add_argument("--root", default=".")
 
+    # WP-119: Ratchet workflow
+    p_ratchet = subparsers.add_parser("ratchet", help="Evidence-based rule promotion/demotion")
+    ratchet_sub = p_ratchet.add_subparsers(dest="ratchet_action")
+    ratchet_sub.add_parser("status", help="Show per-rule mode and evidence")
+    p_ratchet_promote = ratchet_sub.add_parser("promote", help="Promote rule advisory -> enforce")
+    p_ratchet_promote.add_argument("rule_id", help="Rule ID to promote")
+    p_ratchet_demote = ratchet_sub.add_parser("demote", help="Demote rule enforce -> advisory")
+    p_ratchet_demote.add_argument("rule_id", help="Rule ID to demote")
+    p_ratchet_demote.add_argument("--reason", required=True, help="Reason for demotion")
+    ratchet_sub.add_parser("sync", help="Re-aggregate evidence from trace")
+
+    # WP-120: Suppressions with expiry and owner
+    p_supp = subparsers.add_parser("suppressions", help="Manage suppressions with expiry and owner")
+    supp_sub = p_supp.add_subparsers(dest="supp_action")
+    supp_sub.add_parser("list", help="Show all suppressions")
+    p_supp_add = supp_sub.add_parser("add", help="Add a suppression")
+    p_supp_add.add_argument("--rule", required=True, help="Rule ID")
+    p_supp_add.add_argument("--path", default="", help="File path pattern")
+    p_supp_add.add_argument("--reason", required=True, help="Suppression reason")
+    p_supp_add.add_argument("--owner", default="", help="Owner handle (@user)")
+    p_supp_add.add_argument("--until", default="", help="Expiry date (YYYY-MM-DD)")
+    p_supp_rm = supp_sub.add_parser("remove", help="Remove a suppression by index")
+    p_supp_rm.add_argument("index", type=int, help="0-based suppression index")
+    supp_sub.add_parser("report", help="Suppressions report (expired, ownerless)")
+    supp_sub.add_parser("expired", help="Show expired suppressions (now findings)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -280,6 +318,8 @@ def main() -> None:
         "doctor": cmd_doctor,
         "bench": cmd_bench,
         "ci": cmd_ci,
+        "ratchet": cmd_ratchet,
+        "suppressions": cmd_suppressions,
     }
     commands[args.command](args)
 

@@ -25,6 +25,26 @@
 - **WP-117 — Tool-version canary CI leg**: ubuntu job against newest semgrep
   (`continue-on-error`, non-blocking) to surface upstream behavior changes
   early; pinned legs stay authoritative.
+- **WP-119 — Ratchet workflow** (`scripts/ratchet.py`): evidence-based
+  rule promotion/demotion. `fettle ratchet status` shows per-rule mode,
+  fire count, FP rate, and promotion eligibility. `promote` only succeeds
+  when a rule has ≥5 fires and ≤20% FP rate (aggregated from trace JSONL
+  and false-positive stamps). `demote` requires a reason. `sync`
+  re-aggregates without changing modes. Makes advisory-first a measured
+  product feature instead of a convention. (21 tests)
+- **WP-120 — Suppressions with expiry and owner**
+  (`scripts/suppressions_v3.py`): structured suppression model with
+  `# fettle:ignore[rule-id] reason=... owner=@handle until=YYYY-MM-DD`
+  inline comments and `.fettle/suppressions.json` file-level entries.
+  Expired suppressions become findings themselves; ownerless suppressions
+  flagged in reports. CLI: `fettle suppressions {list|add|remove|report|expired}`.
+  (28 tests)
+- **WP-121 — Loaded-rules health telemetry**
+  (`scripts/health_telemetry.py`): every hook run can log rules
+  loaded/skipped per config source into trace (`record_loaded_rules`);
+  `check_health` detects zero-rule packs and drops; `doctor_check()`
+  discovers expected packs from `rules/*.yml` and asserts health.
+  Standalone CLI for debugging. (16 tests)
 
 ## v0.4.2 — Go post-edit check (2026-07-16)
 
