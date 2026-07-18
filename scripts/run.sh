@@ -47,4 +47,20 @@ if ! _ok "$PYTHON"; then
     exit 0  # hooks must not hard-fail the session over environment issues
 fi
 
+# --- Tool bootstrap: ensure ruff and semgrep are available ---
+_ensure_tool() {
+    local tool="$1"
+    [ -x "$HOME/.local/bin/$tool" ] && return 0
+    command -v "$tool" >/dev/null 2>&1 && return 0
+    # Install via uv tool (preferred) or pipx
+    if command -v uv >/dev/null 2>&1; then
+        uv tool install "$tool" >/dev/null 2>&1 && return 0
+    elif command -v pipx >/dev/null 2>&1; then
+        pipx install "$tool" >/dev/null 2>&1 && return 0
+    fi
+    echo "fettle: could not auto-install $tool (no uv or pipx)" >&2
+}
+_ensure_tool ruff
+_ensure_tool semgrep
+
 exec "$PYTHON" "$SCRIPT_DIR/$TARGET" "$@"
