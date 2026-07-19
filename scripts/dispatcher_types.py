@@ -35,6 +35,7 @@ class HookContext:
     plugin_root: Path
     hook_start_monotonic: float
     global_deadline_monotonic: float
+    check_deadline_monotonic: float = 0.0
 
     @property
     def event(self) -> str:

@@ -548,8 +548,15 @@ def run_check(ctx):
 
     candidates: list[dict] = []
 
+    # WP-D: Honor both internal max_runtime_ms and dispatcher check_deadline
+    dispatcher_deadline = getattr(ctx, "check_deadline_monotonic", 0.0)
+
     def _budget_ok() -> bool:
-        return (time.monotonic() - start_time) * 1000 < max_runtime_ms
+        now = time.monotonic()
+        return (
+            (now - start_time) * 1000 < max_runtime_ms
+            and not (dispatcher_deadline and now >= dispatcher_deadline)
+        )
 
     if _budget_ok() and is_manifest:
         candidates.extend(sniff_lr001(file_path, content, changed_lines, cwd, session_id))

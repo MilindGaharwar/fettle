@@ -125,6 +125,14 @@ def main() -> int:
             break
 
         check_start = time.monotonic()
+
+        # WP-D: Per-check deadline = min(global, start + budget_ms)
+        check_deadline = deadline
+        if spec.budget_ms:
+            check_deadline = min(deadline, check_start + spec.budget_ms / 1000.0)
+
+        ctx.check_deadline_monotonic = check_deadline
+
         try:
             result = spec.run(ctx)
             if result is None:
@@ -136,6 +144,13 @@ def main() -> int:
 
         elapsed_ms = int((time.monotonic() - check_start) * 1000)
         aggregator.add_result(spec.name, result, elapsed_ms)
+
+        # WP-D: Log overruns for observability
+        if time.monotonic() > check_deadline:
+            logger.warning(
+                "fettle: check %s overran budget (%dms budget, %dms actual)",
+                spec.name, spec.budget_ms or 0, elapsed_ms,
+            )
 
         if aggregator.has_block:
             break
