@@ -118,6 +118,12 @@ DEFAULTS: dict[str, Any] = {
             "max_total_bytes": 2048,
             "allow_escalation": True,
         },
+        "discipline_link": {
+            "enabled": True,
+            "skills_path": "~/.claude/plugins/disciplines/skills",
+            "cooldown_seconds": 300,
+            "reminder_style": "compact",
+        },
     },
     "severity": {
         "error_rules": ["BLE001", "S110", "S608", "S701"],
