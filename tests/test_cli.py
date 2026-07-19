@@ -27,6 +27,17 @@ def test_cli_config_effective(capsys, tmp_path, monkeypatch):
     assert "Effective Fettle Configuration" in output
 
 
+def test_cli_config_effective_honors_mode_override(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FETTLE_GATE_MODE", "enforce")
+    (tmp_path / ".git").mkdir()
+    from cli import main
+    with patch("sys.argv", ["fettle", "config", "--print-effective"]):
+        main()
+    output = capsys.readouterr().out
+    assert '"mode": "enforce"' in output
+
+
 def test_cli_doctor(tmp_path, monkeypatch):
     """Doctor command runs without crashing."""
     monkeypatch.chdir(tmp_path)

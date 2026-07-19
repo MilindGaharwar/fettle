@@ -3,14 +3,14 @@
 > **fettle** *(v.)* — to trim and clean a rough casting fresh from the mold.
 > *"In fine fettle"* — in excellent condition.
 
-Quality enforcement for AI-assisted development. Fettle intercepts every code
-mutation made by Claude Code, runs static analysis in real time, and surfaces
+Quality enforcement for AI-assisted development. Fettle intercepts code
+mutations made by Claude Code or OpenCode, runs static analysis in real time, and surfaces
 findings before they reach production — ruff linting, semgrep pattern matching,
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v0.4.0** — core lint + process gates + intelligence layer + TS/JS rules + checker protocol.
-9,500+ lines, 90+ files, 38+ new tests (plus original test suite).
+**Status: v0.7.0** — adaptive enforcement, CI/Action integration, editor
+diagnostics, policy layering, and Claude Code/OpenCode adapters.
 
 ## What It Does
 
@@ -52,7 +52,7 @@ Plus ruff: `BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`, `UP*` as warnings
 ## Installation
 
 ```bash
-# Clone as Claude Code plugin
+# Clone for Claude Code and OpenCode integration
 git clone https://github.com/MilindGaharwar/fettle ~/.claude/plugins/fettle
 
 # Install tools
@@ -64,16 +64,42 @@ bash ~/.claude/plugins/fettle/scripts/run.sh doctor.py
 ```
 
 Hooks auto-activate via `hooks/hooks.json` when installed in `~/.claude/plugins/`.
+For OpenCode, register the adapter as described in
+[docs/OPENCODE.md](docs/OPENCODE.md).
+
+The `fettle` name on PyPI belongs to an unrelated project. Install this Fettle
+CLI from GitHub instead:
+
+```bash
+pip install "git+https://github.com/MilindGaharwar/fettle.git@main"
+fettle doctor
+```
 
 ## CLI
 
 ```bash
 fettle check [--all] [--changed] [--json] [--fix] [--baseline]
 fettle config --print-effective
+fettle config --explain
 fettle explain [--last N]
 fettle baseline create|update
 fettle doctor
+fettle lsp
 ```
+
+## GitHub Actions
+
+Use the composite Action at the same ref as your workflow:
+
+```yaml
+- uses: MilindGaharwar/fettle@main
+  with:
+    mode: advisory
+```
+
+For centralized adoption, call
+`.github/workflows/fettle-reusable.yml`; both surfaces support SARIF and pull
+request annotations. Pin a release tag instead of `main` for stable CI.
 
 ## Slash Commands (12)
 
@@ -199,14 +225,12 @@ Cache key = file content hash + config hash. Skips re-scanning unchanged files.
 | v0.2.0 | Core lint gates | **Shipped** |
 | v0.3.0 | Process gates + intelligence foundation | **Shipped** |
 | v0.4.0 | TS/JS rules, cross-review, SARIF, caching, autofix, checker protocol | **Shipped** |
-| v0.5.0 | Rule suppression with expiry, false-positive stamps | Planned |
+| v0.5.0 | Adaptive enforcement platform | **Shipped** |
+| v0.6.0 | Trust and precision | **Shipped** |
+| v0.7.0 | Action, LSP, policy layering, OpenCode adapter | **Shipped** |
 
-### Remaining Planned Enhancements
-
-- **Rule suppression with expiry**: `[[suppressions]]` in .fettle.toml with reason + expires date
-- **False-positive stamps**: mark findings as FP in trace, feed into effectiveness report
-- **More checkers**: mypy, pyright, eslint, bandit, gitleaks (via checker protocol)
-- **`fettle upgrade`**: self-update command
+See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
+distribution work.
 
 ## License
 

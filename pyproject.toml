@@ -4,27 +4,47 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fettle"
-version = "0.4.2"
+version = "0.7.0"
 description = "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived rules for Claude Code"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "Milind Gaharwar"}]
 requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0", "pyyaml>=6.0"]
 semgrep = ["semgrep>=1.50"]
+all = ["semgrep>=1.50", "ruff>=0.4.0"]
 
 [project.scripts]
 fettle = "fettle.cli:main"
 
 [project.urls]
 Repository = "https://github.com/MilindGaharwar/fettle"
+Changelog = "https://github.com/MilindGaharwar/fettle/blob/main/CHANGELOG.md"
 
-[tool.setuptools.packages.find]
-where = ["scripts"]
-include = ["fettle*"]
+[tool.setuptools]
+packages = ["fettle", "fettle.adapters"]
+
+[tool.setuptools.package-dir]
+fettle = "scripts"
+"fettle.adapters" = "scripts/adapters"
+
+[tool.setuptools.package-data]
+fettle = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config  # noqa: E402
+from _resources import rules_dir  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -112,7 +113,7 @@ def run_ruff(root: str) -> list[dict]:
         print("WARNING: ruff not found — skipping ruff checks", file=sys.stderr)
         return []
 
-    ruff_toml = os.path.join(PLUGIN_ROOT, "rules", ".ruff.toml")
+    ruff_toml = str(rules_dir() / ".ruff.toml")
     cmd = [ruff, "check", "--output-format=json"]
     if os.path.isfile(ruff_toml):
         cmd.extend(["--config", ruff_toml])
@@ -149,7 +150,7 @@ def run_semgrep(root: str) -> list[dict]:
         print("WARNING: semgrep not found — skipping semgrep checks", file=sys.stderr)
         return []
 
-    rules_file = os.path.join(PLUGIN_ROOT, "rules", "llm-antipatterns.yml")
+    rules_file = str(rules_dir() / "llm-antipatterns.yml")
     if not os.path.isfile(rules_file):
         print("WARNING: semgrep rules file not found — skipping semgrep checks", file=sys.stderr)
         return []

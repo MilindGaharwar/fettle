@@ -43,7 +43,7 @@ def select_tests(
     cwd: str,
     changed_files: list[str],
     test_roots: list[str] | None = None,
-) -> TestSelection:
+) -> SelectedTests:
     """Select tests to run based on changed files."""
     if not changed_files:
         return SelectedTests(reason="no changes")
