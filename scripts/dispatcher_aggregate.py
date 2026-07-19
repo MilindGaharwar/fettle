@@ -22,6 +22,7 @@ class CheckTiming:
 @dataclass
 class Aggregator:
     total_budget_ms: int
+    hook_event_name: str = ""
     advisories: list[str] = field(default_factory=list)
     first_block: CheckResult | None = None
     first_block_name: str | None = None
@@ -57,10 +58,14 @@ class Aggregator:
 
     def finish(self) -> tuple[dict[str, Any], int]:
         hso: dict[str, Any] = {}
+        if self.hook_event_name:
+            hso["hookEventName"] = self.hook_event_name
         advisory_context = "\n\n".join(self.advisories).strip()
 
         if self.first_block is not None:
             hso.update(self.first_block.hook_specific_output)
+            if "hookEventName" not in hso and self.hook_event_name:
+                hso["hookEventName"] = self.hook_event_name
             if advisory_context:
                 existing = hso.get("additionalContext", "")
                 if existing:

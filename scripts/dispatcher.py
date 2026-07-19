@@ -48,11 +48,16 @@ def _event_budget_ms(config: dict, event: str) -> int:
     return DEFAULT_EVENT_BUDGETS_MS.get(event, 400)
 
 
+def _empty_output(event_name: str = "") -> str:
+    hso = {"hookEventName": event_name} if event_name else {}
+    return json.dumps({"hookSpecificOutput": hso}, separators=(",", ":"))
+
+
 def main() -> int:
     start = time.monotonic()
 
     if os.environ.get("FETTLE_DISABLE_DISPATCHER") == "1":
-        print(json.dumps({"hookSpecificOutput": {}}, separators=(",", ":")))
+        print(_empty_output())
         return 0
 
     try:
@@ -61,8 +66,10 @@ def main() -> int:
         if not isinstance(payload, dict):
             payload = {}
     except Exception:  # noqa: BLE001 — fail-open by design
-        print(json.dumps({"hookSpecificOutput": {}}, separators=(",", ":")))
+        print(_empty_output())
         return 0
+
+    event_name = str(payload.get("hook_event_name") or "")
 
     try:
         cwd_raw = payload.get("cwd") or os.getcwd()
@@ -72,7 +79,7 @@ def main() -> int:
             tool_input = {}
 
         hook_input = HookInput(
-            hook_event_name=str(payload.get("hook_event_name") or ""),
+            hook_event_name=event_name,
             tool_name=payload.get("tool_name"),
             tool_input=tool_input,
             cwd=cwd,
@@ -80,7 +87,7 @@ def main() -> int:
             raw=payload,
         )
     except Exception:  # noqa: BLE001 — fail-open by design
-        print(json.dumps({"hookSpecificOutput": {}}, separators=(",", ":")))
+        print(_empty_output(event_name))
         return 0
 
     try:
@@ -99,7 +106,7 @@ def main() -> int:
         global_deadline_monotonic=deadline,
     )
 
-    aggregator = Aggregator(total_budget_ms=budget_ms)
+    aggregator = Aggregator(total_budget_ms=budget_ms, hook_event_name=hook_input.hook_event_name)
 
     try:
         checks = select_checks(ctx)
@@ -139,5 +146,5 @@ if __name__ == "__main__":
         raise
     except Exception:  # noqa: BLE001 — last-resort fail-open
         traceback.print_exc(file=sys.stderr)
-        print(json.dumps({"hookSpecificOutput": {}}, separators=(",", ":")))
+        print(_empty_output())
         raise SystemExit(0) from None
