@@ -30,6 +30,18 @@ def _version_of(binary: str, args: list[str] | None = None) -> str | None:
         return None
 
 
+def _which(name: str) -> str | None:
+    """Find a tool on PATH, including ~/.local/bin (uv tool install location)."""
+    import os
+    path = shutil.which(name)
+    if path:
+        return path
+    local_bin = os.path.expanduser(f"~/.local/bin/{name}")
+    if os.path.isfile(local_bin) and os.access(local_bin, os.X_OK):
+        return local_bin
+    return None
+
+
 def check_environment() -> list[dict]:
     checks: list[dict] = []
 
@@ -50,7 +62,7 @@ def check_environment() -> list[dict]:
         ("claude", False, "cross-review/learn providers unavailable without it (v0.4.0)"),
     ]
     for name, required, consequence in tools:
-        path = shutil.which(name)
+        path = _which(name)
         version = _version_of(path) if path else None
         checks.append({
             "name": name,

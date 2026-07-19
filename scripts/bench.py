@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 RULES_DIR = PLUGIN_ROOT / "rules"
+_ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
 _SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".jsx", ".go")
 
@@ -65,7 +67,7 @@ def _scan_corpus(corpus_dir: Path) -> dict[str, int]:
     proc = subprocess.run(
         ["semgrep", "scan", *config_args, "--json", "--quiet", "--metrics=off",
          "--project-root", ".", "."],
-        capture_output=True, text=True, timeout=600, cwd=str(corpus_dir),
+        capture_output=True, text=True, timeout=600, cwd=str(corpus_dir), env=_ENV,
     )
     data = json.loads(proc.stdout)
     counts: dict[str, int] = {}
