@@ -93,7 +93,7 @@ def test_advisory_mode_with_findings_returns_advisory():
             result = run_check(ctx)
         assert result.decision == Decision.ADVISORY
         assert result.message is not None
-        assert "Lean review" in result.message
+        assert "LR" in result.message
         assert "hookEventName" in result.hook_specific_output
         assert result.hook_specific_output["hookEventName"] == "PostToolUse"
     finally:

@@ -571,31 +571,48 @@ def run_check(ctx):
         with contextlib.suppress(OSError):
             _append_candidates(state_dir, session_id, candidates)
 
-    # WP-A: Surface findings when mode != "silent"
+    # WP-A+B2: Surface findings when mode != "silent", dedup via AdvisoryDeduplicator
     mode = lean_cfg.get("mode", "silent")
     if mode == "silent" or not candidates:
         return CheckResult.allow()
 
-    # Deduplicate by dedupe_key (replaced by AdvisoryDeduplicator in WP-B2)
-    seen: set[str] = set()
-    unique: list[dict] = []
-    for c in candidates:
-        key = c.get("dedupe_key", "")
-        if key not in seen:
-            seen.add(key)
-            unique.append(c)
+    from advisory import Advisory, AdvisoryDeduplicator, Severity, format_advisories
+    from config import state_dir as _state_dir
+
+    advisory_cfg = ctx.config.get("gates", {}).get("advisory", {})
+    dedup = AdvisoryDeduplicator(
+        _state_dir(session_id),
+        session_id,
+        cooldown_s=float(advisory_cfg.get("cooldown_seconds", 300)),
+        window_s=float(advisory_cfg.get("dedup_window_seconds", 900)),
+    )
 
     MAX_FINDINGS = 3
-    capped = unique[:MAX_FINDINGS]
-    lines = []
-    for c in capped:
-        msg = c.get("message", "")[:200]
-        loc = f"{c.get('relative_path', '?')}:{c.get('line_start', '?')}"
-        lines.append(f"  [{c.get('sniffer_id', 'lean')}] {loc}: {msg}")
-    if len(unique) > MAX_FINDINGS:
-        lines.append(f"  ... and {len(unique) - MAX_FINDINGS} more (run /fettle:lean-debt)")
+    emitted: list[Advisory] = []
+    for c in candidates:
+        if len(emitted) >= MAX_FINDINGS:
+            break
+        adv = Advisory(
+            rule_id=c.get("sniffer_id", "lean"),
+            category="lean",
+            severity=Severity.INFO,
+            confidence=0.7,
+            summary=c.get("message", "")[:120],
+            recommended_action=f"{c.get('relative_path', '?')}:{c.get('line_start', '?')}",
+            dedupe_key=c.get("dedupe_key", ""),
+            provenance="lean_sniffers@0.7.0",
+        )
+        if dedup.should_emit(adv):
+            dedup.record(adv)
+            emitted.append(adv)
 
-    text = "Lean review findings:\n" + "\n".join(lines)
+    if not emitted:
+        return CheckResult.allow()
+
+    text = format_advisories(emitted, max_total_bytes=int(advisory_cfg.get("max_total_bytes", 2048)))
+    if len(candidates) > MAX_FINDINGS:
+        text += f"\n  ... and {len(candidates) - MAX_FINDINGS} more (run /fettle:lean-debt)"
+
     return CheckResult.advisory(text, hook_specific_output={
         "hookEventName": ctx.input.hook_event_name,
         "additionalContext": text,
