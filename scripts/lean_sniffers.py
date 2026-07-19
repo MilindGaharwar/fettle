@@ -496,7 +496,7 @@ def main() -> None:
 
 
 def run_check(ctx):
-    """Dispatcher-compatible entry point. Always returns allow (silent recording)."""
+    """Dispatcher-compatible entry point. Surfaces findings when mode != 'silent'."""
     from dispatcher_types import CheckResult
 
     file_path = ctx.tool_input.get("file_path", "")
@@ -571,7 +571,35 @@ def run_check(ctx):
         with contextlib.suppress(OSError):
             _append_candidates(state_dir, session_id, candidates)
 
-    return CheckResult.allow()
+    # WP-A: Surface findings when mode != "silent"
+    mode = lean_cfg.get("mode", "silent")
+    if mode == "silent" or not candidates:
+        return CheckResult.allow()
+
+    # Deduplicate by dedupe_key (replaced by AdvisoryDeduplicator in WP-B2)
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in candidates:
+        key = c.get("dedupe_key", "")
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    MAX_FINDINGS = 3
+    capped = unique[:MAX_FINDINGS]
+    lines = []
+    for c in capped:
+        msg = c.get("message", "")[:200]
+        loc = f"{c.get('relative_path', '?')}:{c.get('line_start', '?')}"
+        lines.append(f"  [{c.get('sniffer_id', 'lean')}] {loc}: {msg}")
+    if len(unique) > MAX_FINDINGS:
+        lines.append(f"  ... and {len(unique) - MAX_FINDINGS} more (run /fettle:lean-debt)")
+
+    text = "Lean review findings:\n" + "\n".join(lines)
+    return CheckResult.advisory(text, hook_specific_output={
+        "hookEventName": ctx.input.hook_event_name,
+        "additionalContext": text,
+    })
 
 
 if __name__ == "__main__":
