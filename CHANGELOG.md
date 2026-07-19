@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased (v0.6.0 arc)
+## Unreleased (v0.7.0)
+
+- **WP-122 (partial) — Git-installable Python package**: console entry points,
+  bundled rule resources, and `python -m fettle`. PyPI publication is deferred
+  because that project name belongs to an unrelated package.
+- **WP-123 — GitHub Action and reusable workflow**: advisory/enforce modes,
+  SARIF output, and pull-request annotations.
+- **WP-125 — LSP diagnostics**: `fettle lsp` publishes ruff and semgrep findings
+  to editors over stdio JSON-RPC.
+- **WP-126 (partial) — policy layering**: defaults, organization, team,
+  repository, and directory-scoped configuration with `fettle config --explain`.
+  Cryptographic bundle signing remains open.
+- **OpenCode integration**: translates OpenCode tool/session lifecycle events
+  into the existing dispatcher protocol while preserving Claude Code support.
+
+## v0.6.0 arc
 
 - **WP-124 (pulled forward) — pre-commit integration**: published
   `.pre-commit-hooks.yaml` with `fettle-check` (changed-files quality scan)

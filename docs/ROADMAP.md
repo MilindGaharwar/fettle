@@ -17,7 +17,7 @@ This roadmap is committed before implementation begins and updated as releases s
 | v0.4.2 | Go post-edit check (built-in pack + project rules) | — (hotfix arc) | **Shipped** |
 | v0.5.0 | Adaptive enforcement platform (profiles, tiers, adapters, CI loop, dispatcher) | WP-67..WP-115 | **Shipped** (see [WORKPACKAGES-v050.md](WORKPACKAGES-v050.md)) |
 | v0.6.0 | **Trust & precision** — the harness proves itself | WP-116..WP-121 | **Shipped** |
-| v0.7.0 | **Reach** — same policy at every chokepoint | WP-122..WP-126 | Planned |
+| v0.7.0 | **Reach** — same policy at every chokepoint | WP-122..WP-126 | **Shipped with distribution exceptions** |
 | v0.8.0 | **Governance & agent audit** — enterprise operability | WP-127..WP-132 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
@@ -125,10 +125,11 @@ Every release ships with green tests on macOS + Linux CI and an updated CHANGELO
 
 ### v0.7.0 — Reach (same policy at every chokepoint)
 
-- **WP-122 — Packaging & distribution.** PyPI release (`uvx fettle`), pinned +
-  signed artifacts, SBOM, version-check in doctor. Clone-into-`~/.claude/plugins`
-  remains supported but stops being the only path.
-- **WP-123 — GitHub Action / reusable workflow.** First-class CI surface: one
+- **WP-122 — Packaging & distribution (partial).** Git-installable wheel and
+  console script shipped; clone-into-`~/.claude/plugins` remains supported.
+  PyPI publication is deferred because the `fettle` project name is owned by
+  an unrelated package. Signed artifacts, SBOM, and update checks remain open.
+- **WP-123 — GitHub Action / reusable workflow (shipped).** First-class CI surface: one
   action running the same checks as the hooks, SARIF upload to code scanning,
   PR annotations. Replaces the copy-paste `ci-fettle.yml` template.
 - **WP-124 — Pre-commit integration.** Published `.pre-commit-hooks.yaml`;
@@ -136,12 +137,13 @@ Every release ships with green tests on macOS + Linux CI and an updated CHANGELO
   and CI — one policy, three chokepoints. *(Pulled forward: shipped with the
   v0.6.0 arc — `fettle-check` + `fettle-rules-validate` hooks + consumer
   template.)*
-- **WP-125 — Editor diagnostics (LSP).** Serve findings as LSP diagnostics so
+- **WP-125 — Editor diagnostics (LSP, shipped).** Serve findings as LSP diagnostics so
   humans see what agents see; reuse the dispatcher and cache; no new analysis.
-- **WP-126 — Policy layering with provenance.** Org pack → team pack → repo
+- **WP-126 — Policy layering with provenance (partial).** Org pack → team pack → repo
   `.fettle.toml` → directory overrides; `fettle config --print-effective` shows
   which layer set every value; org packs distributable as signed bundles that
-  repos consume read-only.
+  repos consume read-only. Layer discovery, merging, path overrides, and CLI
+  provenance are shipped; cryptographic bundle signing remains open.
 
 ### v0.8.0 — Governance & agent audit (enterprise operability)
 

@@ -5,12 +5,16 @@ Orchestrates checkers with timeout, result aggregation, and exit codes.
 
 from __future__ import annotations
 
-import time
 import concurrent.futures
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from finding import CheckFinding, CheckResult, FindingSeverity, sort_findings
+
+
+logger = logging.getLogger(__name__)
 
 
 class CheckerProtocol(Protocol):
@@ -102,8 +106,7 @@ class CheckRunner:
                     message=f"{reg.name}: timed out after {timeout_s:.0f}s",
                 )]
             except Exception as e:  # noqa: BLE001
-                import sys
-                print(f"fettle: checker {reg.name} crashed: {e}", file=sys.stderr)
+                logger.exception("fettle: checker %s crashed", reg.name)
                 return [CheckFinding(
                     checker=reg.name,
                     severity=FindingSeverity.WARNING,

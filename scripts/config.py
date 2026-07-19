@@ -154,7 +154,10 @@ def load_config(cwd: str | None = None) -> dict[str, Any]:
     root = Path(cwd or os.getcwd())
     cfg = copy.deepcopy(DEFAULTS)
 
-    config_path = root / CONFIG_FILENAME
+    configured_path = os.environ.get("FETTLE_CONFIG", "").strip()
+    config_path = Path(configured_path).expanduser() if configured_path else root / CONFIG_FILENAME
+    if not config_path.is_absolute():
+        config_path = Path.cwd() / config_path
     if config_path.is_file():
         try:
             with open(config_path, "rb") as fh:

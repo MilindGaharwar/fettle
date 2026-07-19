@@ -1,6 +1,6 @@
 # Fettle Architectural Audit — GPT 5.5 (2026-07-14)
 
-> Full review of Fettle v0.5.0-phase8 by GPT 5.5 via GenAI Nexus.
+> Full review of Fettle v0.5.0-phase8 by GPT 5.5 through an external model gateway.
 > Prompt: "Complete architectural review + v2.0 redesign proposal."
 
 ## Executive Summary

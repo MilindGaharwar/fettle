@@ -1,0 +1,110 @@
+name: "Fettle Quality Check"
+description: "Run Fettle quality enforcement (ruff + semgrep) with SARIF upload and PR annotations"
+author: "Milind Gaharwar"
+
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  mode:
+    description: "Enforcement mode: 'advisory' (always exit 0) or 'enforce' (exit non-zero on errors)"
+    required: false
+    default: "advisory"
+  sarif:
+    description: "Upload SARIF to GitHub code scanning"
+    required: false
+    default: "true"
+  annotations:
+    description: "Post PR annotations for findings"
+    required: false
+    default: "true"
+  config:
+    description: "Path to custom .fettle.toml (empty = auto-detect)"
+    required: false
+    default: ""
+  paths:
+    description: "Paths to scan (space-separated)"
+    required: false
+    default: "."
+
+outputs:
+  findings-count:
+    description: "Number of findings"
+    value: ${{ steps.run-fettle.outputs.findings_count }}
+  sarif-file:
+    description: "Path to generated SARIF file (if sarif=true)"
+    value: ${{ steps.run-fettle.outputs.sarif_file }}
+  exit-code:
+    description: "Exit code from fettle (0=clean or advisory, non-zero=enforce failures)"
+    value: ${{ steps.run-fettle.outputs.exit_code }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Fettle
+      shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}"
+
+    - name: Install ruff and semgrep
+      shell: bash
+      run: |
+        python -m pip install --quiet ruff semgrep
+
+    - name: Run Fettle
+      id: run-fettle
+      continue-on-error: true
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_PATHS: ${{ inputs.paths }}
+      run: |
+        python "${{ github.action_path }}/action-entrypoint.py"
+
+    - name: Post PR annotations
+      if: inputs.annotations == 'true' && steps.run-fettle.outputs.findings_count != '0' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const raw = fs.readFileSync('${{ runner.temp }}/fettle-findings.json', 'utf8');
+          const findings = JSON.parse(raw);
+
+          for (const f of findings.slice(0, 50)) {
+            const file = f.file || f.path || '';
+            const line = f.line || 1;
+            const severity = f.severity || 'warning';
+            const level = severity === 'error' ? 'failure' : 'warning';
+            const message = `[${f.code || 'fettle'}] ${f.message || ''}`;
+
+            if (file) {
+              core.warning(message, {
+                file: file,
+                startLine: line,
+                title: f.code || 'fettle'
+              });
+            }
+          }
+
+    - name: Upload SARIF
+      if: inputs.sarif == 'true' && steps.run-fettle.outputs.sarif_file != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run-fettle.outputs.sarif_file }}
+        category: "fettle"
+      continue-on-error: true
+
+    - name: Enforce exit code
+      if: always() && (steps.run-fettle.outcome == 'failure' || steps.run-fettle.outputs.exit_code == '2' || (inputs.mode == 'enforce' && steps.run-fettle.outputs.exit_code != '0'))
+      shell: bash
+      run: |
+        echo "::error::Fettle check failed (${{ steps.run-fettle.outputs.findings_count }} finding(s))"
+        exit_code="${{ steps.run-fettle.outputs.exit_code }}"
+        exit "${exit_code:-2}"

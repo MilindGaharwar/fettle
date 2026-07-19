@@ -1,0 +1,9 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+
+recursive-include rules *.yml
+recursive-include rules *.toml
+recursive-include hooks *.json *.js
+recursive-include integrations *.ts
+recursive-include templates *.yml *.yaml *.md

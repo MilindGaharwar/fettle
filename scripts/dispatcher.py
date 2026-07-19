@@ -10,6 +10,7 @@ Fail-open on all errors. Never crashes the session.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import time
@@ -24,6 +25,9 @@ from config import load_config  # noqa: E402
 from dispatcher_aggregate import Aggregator  # noqa: E402
 from dispatcher_registry import select_checks  # noqa: E402
 from dispatcher_types import CheckResult, HookContext, HookInput  # noqa: E402
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_EVENT_BUDGETS_MS = {
@@ -113,6 +117,7 @@ def main() -> int:
             if result is None:
                 result = CheckResult.allow()
         except Exception as exc:  # noqa: BLE001 — isolate check failures
+            logger.error("fettle: check %s failed: %s", spec.name, exc)
             aggregator.record_check_error(spec.name, f"{type(exc).__name__}: {exc}")
             continue
 

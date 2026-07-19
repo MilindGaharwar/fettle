@@ -45,6 +45,16 @@ def test_env_mode_override(tmp_path, monkeypatch):
     assert cfg["gates"]["lint"]["mode"] == "advisory"
 
 
+def test_explicit_config_path(tmp_path, monkeypatch):
+    config_path = tmp_path / "custom.toml"
+    config_path.write_text('[gates.lint]\nmode = "enforce"\n')
+    monkeypatch.setenv("FETTLE_CONFIG", str(config_path))
+
+    cfg = load_config(str(tmp_path / "project"))
+
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
 def test_env_mode_off_disables_lint(tmp_path, monkeypatch):
     monkeypatch.setenv("FETTLE_GATE_MODE", "off")
     cfg = load_config(str(tmp_path))

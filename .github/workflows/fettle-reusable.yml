@@ -1,0 +1,125 @@
+name: Fettle Quality Gate (Reusable)
+
+# Reusable workflow — consumers call this from their own repos:
+#
+#   jobs:
+#     fettle:
+#       uses: MilindGaharwar/fettle/.github/workflows/fettle-reusable.yml@main
+#       with:
+#         mode: advisory
+#
+# No secrets required. SARIF upload uses GitHub's built-in OIDC.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Git ref to install, such as 'main' or 'v0.7.0'."
+        type: string
+        required: false
+        default: "main"
+      mode:
+        description: "Enforcement mode: 'advisory' (always pass) or 'enforce' (fail on errors)"
+        type: string
+        required: false
+        default: "advisory"
+      sarif:
+        description: "Upload SARIF to GitHub code scanning"
+        type: string
+        required: false
+        default: "true"
+      annotations:
+        description: "Post PR annotations for findings"
+        type: string
+        required: false
+        default: "true"
+      config:
+        description: "Path to custom .fettle.toml"
+        type: string
+        required: false
+        default: ""
+      paths:
+        description: "Paths to scan (space-separated)"
+        type: string
+        required: false
+        default: "."
+      python-version:
+        description: "Python version to use"
+        type: string
+        required: false
+        default: "3.12"
+
+jobs:
+  fettle:
+    name: Fettle Quality Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install Fettle
+        env:
+          FETTLE_REF: ${{ inputs.version }}
+        run: python -m pip install --quiet "git+https://github.com/MilindGaharwar/fettle.git@${FETTLE_REF}"
+
+      - name: Install ruff and semgrep
+        run: |
+          python -m pip install --quiet ruff semgrep
+
+      - name: Run Fettle check
+        id: run-fettle
+        continue-on-error: true
+        env:
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_SARIF: ${{ inputs.sarif }}
+          INPUT_CONFIG: ${{ inputs.config }}
+          INPUT_PATHS: ${{ inputs.paths }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: python -m fettle.action_entrypoint
+
+      - name: Post PR annotations
+        if: inputs.annotations == 'true' && steps.run-fettle.outputs.findings_count != '0' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const raw = fs.readFileSync('${{ runner.temp }}/fettle-findings.json', 'utf8');
+            const findings = JSON.parse(raw);
+
+            for (const f of findings.slice(0, 50)) {
+              const file = f.file || f.path || '';
+              const line = f.line || 1;
+              const message = `[${f.code || 'fettle'}] ${f.message || ''}`;
+
+              if (file) {
+                core.warning(message, {
+                  file: file,
+                  startLine: line,
+                  title: f.code || 'fettle'
+                });
+              }
+            }
+
+      - name: Upload SARIF
+        if: inputs.sarif == 'true' && steps.run-fettle.outputs.sarif_file != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.run-fettle.outputs.sarif_file }}
+          category: "fettle"
+        continue-on-error: true
+
+      - name: Enforce exit code
+        if: always() && (steps.run-fettle.outcome == 'failure' || steps.run-fettle.outputs.exit_code == '2' || (inputs.mode == 'enforce' && steps.run-fettle.outputs.exit_code != '0'))
+        run: |
+          echo "::error::Fettle check failed (${{ steps.run-fettle.outputs.findings_count }} finding(s))"
+          exit_code="${{ steps.run-fettle.outputs.exit_code }}"
+          exit "${exit_code:-2}"

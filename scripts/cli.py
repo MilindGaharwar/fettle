@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,6 +29,7 @@ def cmd_check(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     config = load_config(str(repo_root))
+    scan_root = Path(args.root).resolve() if args.root else repo_root
 
     if getattr(args, "boundaries", False):
         from boundary_scan import scan_repo
@@ -41,7 +43,7 @@ def cmd_check(args: argparse.Namespace) -> None:
         sys.exit(1 if findings else 0)
 
     from quality_scan import scan_project
-    results = scan_project(str(repo_root), config, json_output=args.json)
+    results = scan_project(str(scan_root), config, json_output=args.json)
 
     if args.json:
         print(json.dumps(results, indent=2))
@@ -75,11 +77,13 @@ def cmd_ci(args: argparse.Namespace) -> None:
 
 def cmd_config(args: argparse.Namespace) -> None:
     """Show effective configuration."""
-    from config import load_config
     from paths import find_repo_root
+    from policy_layers import discover_layers, load_config_layered
 
     repo_root = find_repo_root()
-    config = load_config(str(repo_root) if repo_root else None)
+    project_root = repo_root or __import__("pathlib").Path.cwd()
+    layers = discover_layers(project_root)
+    config = load_config_layered(str(project_root))
 
     if args.print_effective:
         print("── Effective Fettle Configuration ──\n")
@@ -87,8 +91,11 @@ def cmd_config(args: argparse.Namespace) -> None:
         print(f"  Config file: {repo_root / '.fettle.toml' if repo_root and (repo_root / '.fettle.toml').exists() else '(defaults only)'}")
         print()
         print(json.dumps(config, indent=2, default=str))
+    elif args.explain:
+        from policy_layers import _print_explain
+        _print_explain(layers)
     else:
-        print("Use --print-effective to see merged config.")
+        print("Use --print-effective or --explain to inspect merged config.")
 
 
 def cmd_explain(args: argparse.Namespace) -> None:
@@ -240,6 +247,12 @@ def cmd_suppressions(args: argparse.Namespace) -> None:
     _cmd_suppressions(args)
 
 
+def cmd_lsp(args: argparse.Namespace) -> None:
+    """Start the LSP server (WP-125)."""
+    from lsp_server import main as lsp_main
+    lsp_main()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -251,9 +264,11 @@ def main() -> None:
     p_check.add_argument("--fix", action="store_true", help="Apply safe autofixes")
     p_check.add_argument("--baseline", action="store_true", help="Only report new violations")
     p_check.add_argument("--boundaries", action="store_true", help="Scan for secrets, out-of-project paths, and repo-forbidden strings")
+    p_check.add_argument("--root", help="File or directory to scan (default: repository root)")
 
     p_config = subparsers.add_parser("config", help="Show configuration")
     p_config.add_argument("--print-effective", action="store_true", help="Show merged effective config")
+    p_config.add_argument("--explain", action="store_true", help="Show the source of each effective value")
 
     p_explain = subparsers.add_parser("explain", help="Explain last hook decision")
     p_explain.add_argument("--last", action="store_true", default=True)
@@ -304,6 +319,8 @@ def main() -> None:
     supp_sub.add_parser("report", help="Suppressions report (expired, ownerless)")
     supp_sub.add_parser("expired", help="Show expired suppressions (now findings)")
 
+    subparsers.add_parser("lsp", help="Start the LSP server for editor integration (WP-125)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -320,6 +337,7 @@ def main() -> None:
         "ci": cmd_ci,
         "ratchet": cmd_ratchet,
         "suppressions": cmd_suppressions,
+        "lsp": cmd_lsp,
     }
     commands[args.command](args)
 
