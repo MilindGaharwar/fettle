@@ -111,6 +111,13 @@ DEFAULTS: dict[str, Any] = {
                 ],
             },
         },
+        "advisory": {
+            "cooldown_seconds": 300,
+            "dedup_window_seconds": 900,
+            "max_per_turn": 3,
+            "max_total_bytes": 2048,
+            "allow_escalation": True,
+        },
     },
     "severity": {
         "error_rules": ["BLE001", "S110", "S608", "S701"],
