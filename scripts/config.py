@@ -124,6 +124,22 @@ DEFAULTS: dict[str, Any] = {
             "cooldown_seconds": 300,
             "reminder_style": "compact",
         },
+        "bash_audit": {
+            "enabled": False,
+            "capture_command": False,
+            "capture_exit_code": True,
+            "capture_duration": True,
+            "retention_days": 14,
+            "redaction": {
+                "enabled": True,
+                "replacement": "[REDACTED]",
+                "patterns": [
+                    r"(?i)(api[_-]?key|password|secret|token)\s*[=:]\s*\S+",
+                    r"(?i)bearer\s+\S+",
+                ],
+                "fail_closed": True,
+            },
+        },
     },
     "severity": {
         "error_rules": ["BLE001", "S110", "S608", "S701"],

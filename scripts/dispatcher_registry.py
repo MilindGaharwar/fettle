@@ -27,6 +27,9 @@ from post_edit import run_check as post_edit_run
 from quality_gate import run_check as quality_gate_run
 from stop_quality_gate import run_check as stop_quality_gate_run
 
+# Phase 4 checks (audit, never blocks)
+from bash_audit import run_check as bash_audit_run
+
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
     CheckSpec(
@@ -140,6 +143,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=50,
         budget_ms=300,
+    ),
+    # Audit (never blocks, runs last)
+    CheckSpec(
+        name="bash_audit",
+        run=bash_audit_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=99,
+        budget_ms=30,
     ),
 )
 
