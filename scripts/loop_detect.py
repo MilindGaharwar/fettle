@@ -110,6 +110,60 @@ def main() -> None:
     sys.exit(0)
 
 
+_FALLBACK_REMINDER = (
+    "Pause and inspect the evidence before repeating the same action. "
+    "Form a new hypothesis, then choose a tool call that tests it."
+)
+
+
+def _get_discipline_reminder(disc_cfg: dict, state_dir: str, session_id: str) -> str:
+    """Load a 2-sentence reminder from discipline-debugging, with cooldown."""
+    import re
+    import time
+    from pathlib import Path
+
+    cooldown_s = float(disc_cfg.get("cooldown_seconds", 300))
+
+    # Cooldown check via timestamp file
+    safe_id = re.sub(r"[^a-zA-Z0-9_.\-]", "_", session_id)
+    marker = Path(state_dir) / f"{safe_id}.discipline-ts"
+    now = time.time()
+    if marker.is_file():
+        try:
+            last = float(marker.read_text().strip())
+            if now - last < cooldown_s:
+                return ""
+        except (ValueError, OSError):
+            pass
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(now))
+    except OSError:
+        pass
+
+    # Load snippet from disciplines plugin
+    skills_path = Path(os.path.expanduser(
+        disc_cfg.get("skills_path", "~/.claude/plugins/disciplines/skills")
+    ))
+    skill_file = skills_path / "discipline-debugging" / "SKILL.md"
+    if not skill_file.is_file():
+        return _FALLBACK_REMINDER
+
+    try:
+        text = skill_file.read_text(encoding="utf-8")
+        if text.startswith("---"):
+            _, _, text = text.partition("---\n")
+            _, _, text = text.partition("---\n")
+        text = " ".join(
+            line.strip() for line in text.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+        sentences = re.findall(r"[^.!?]+[.!?]", text)
+        return " ".join(sentences[:2]).strip() if len(sentences) >= 2 else _FALLBACK_REMINDER
+    except OSError:
+        return _FALLBACK_REMINDER
+
+
 def run_check(ctx):
     """Dispatcher-compatible entry point. Returns CheckResult."""
     from dispatcher_types import CheckResult
@@ -155,9 +209,20 @@ def run_check(ctx):
             f"Loop detected: `{tool_name}` called {count}x with identical params "
             f"in last {window} calls. Consider a different approach."
         )
+
+        # WP-C: Discipline link — inject debugging reminder on loop detection
+        disc_cfg = ctx.config.get("gates", {}).get("discipline_link", {})
+        if disc_cfg.get("enabled", True):
+            reminder = _get_discipline_reminder(disc_cfg, state_dir, session_id)
+            if reminder:
+                msg += f"\n\nDiscipline reminder: {reminder}"
+
         return CheckResult.advisory(
             msg,
-            hook_specific_output={"hookEventName": "PostToolUse", "additionalContext": msg},
+            hook_specific_output={
+                "hookEventName": ctx.input.hook_event_name,
+                "additionalContext": msg,
+            },
         )
 
     return CheckResult.allow()
