@@ -23,12 +23,15 @@ class CheckTiming:
 class Aggregator:
     total_budget_ms: int
     hook_event_name: str = ""
+    max_advisories_per_turn: int = 3
+    max_advisory_bytes: int = 2048
     advisories: list[str] = field(default_factory=list)
     first_block: CheckResult | None = None
     first_block_name: str | None = None
     timings: list[CheckTiming] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     budget_exhausted_before: str | None = None
+    _advisories_suppressed: int = 0
 
     @property
     def has_block(self) -> bool:
@@ -45,9 +48,15 @@ class Aggregator:
 
         context = result.hook_specific_output.get("additionalContext")
         if isinstance(context, str) and context.strip():
-            self.advisories.append(context.strip())
+            if len(self.advisories) < self.max_advisories_per_turn:
+                self.advisories.append(context.strip())
+            else:
+                self._advisories_suppressed += 1
         elif result.message and result.decision == Decision.ADVISORY:
-            self.advisories.append(result.message.strip())
+            if len(self.advisories) < self.max_advisories_per_turn:
+                self.advisories.append(result.message.strip())
+            else:
+                self._advisories_suppressed += 1
 
     def record_check_error(self, check_name: str, error: str) -> None:
         self.errors.append({"check": check_name, "error": error})
@@ -60,7 +69,22 @@ class Aggregator:
         hso: dict[str, Any] = {}
         if self.hook_event_name:
             hso["hookEventName"] = self.hook_event_name
-        advisory_context = "\n\n".join(self.advisories).strip()
+
+        # Build advisory context with byte cap
+        parts: list[str] = []
+        total_bytes = 0
+        for adv in self.advisories:
+            adv_bytes = len(adv.encode("utf-8"))
+            if total_bytes + adv_bytes > self.max_advisory_bytes:
+                self._advisories_suppressed += 1
+                continue
+            parts.append(adv)
+            total_bytes += adv_bytes
+
+        if self._advisories_suppressed > 0:
+            parts.append(f"... and {self._advisories_suppressed} more advisory(s) suppressed this turn")
+
+        advisory_context = "\n\n".join(parts).strip()
 
         if self.first_block is not None:
             hso.update(self.first_block.hook_specific_output)

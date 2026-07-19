@@ -106,7 +106,13 @@ def main() -> int:
         global_deadline_monotonic=deadline,
     )
 
-    aggregator = Aggregator(total_budget_ms=budget_ms, hook_event_name=hook_input.hook_event_name)
+    advisory_cfg = config.get("gates", {}).get("advisory", {})
+    aggregator = Aggregator(
+        total_budget_ms=budget_ms,
+        hook_event_name=hook_input.hook_event_name,
+        max_advisories_per_turn=int(advisory_cfg.get("max_per_turn", 3)),
+        max_advisory_bytes=int(advisory_cfg.get("max_total_bytes", 2048)),
+    )
 
     try:
         checks = select_checks(ctx)
