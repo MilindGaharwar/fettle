@@ -1,0 +1,21 @@
+# Fettle dogfooding — enforce on itself
+
+[gates.lean_review]
+mode = "advisory"
+
+[gates.advisory]
+cooldown_seconds = 300
+max_per_turn = 3
+
+[gates.discipline_link]
+enabled = true
+cooldown_seconds = 300
+
+[gates.bash_audit]
+enabled = true
+capture_command = false
+
+[gates.coverage]
+enabled = true
+threshold = 80
+mode = "advisory"

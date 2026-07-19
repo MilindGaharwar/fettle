@@ -18,9 +18,9 @@ SCRIPT = os.path.join(PLUGIN_DIR, "scripts", "doctor.py")
 
 
 def test_missing_optional_tool_is_warning_not_failure(monkeypatch):
-    real_which = doctor.shutil.which
+    real_which = doctor._which
     monkeypatch.setattr(
-        doctor.shutil, "which",
+        doctor, "_which",
         lambda name: None if name in ("semgrep", "cargo", "shellcheck", "claude") else real_which(name),
     )
     checks = doctor.check_environment()
@@ -34,7 +34,7 @@ def test_missing_optional_tool_is_warning_not_failure(monkeypatch):
 
 
 def test_missing_required_tool_fails(monkeypatch):
-    monkeypatch.setattr(doctor.shutil, "which", lambda name: None)
+    monkeypatch.setattr(doctor, "_which", lambda name: None)
     checks = doctor.check_environment()
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
     assert [c["name"] for c in required_failures] == ["ruff"]
