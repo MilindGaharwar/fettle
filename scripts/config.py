@@ -124,6 +124,13 @@ DEFAULTS: dict[str, Any] = {
             "cooldown_seconds": 300,
             "reminder_style": "compact",
         },
+        "coverage": {
+            "enabled": False,
+            "threshold": 80,
+            "mode": "advisory",
+            "scope": "changed_lines",
+            "max_staleness_seconds": 0,
+        },
         "bash_audit": {
             "enabled": False,
             "capture_command": False,

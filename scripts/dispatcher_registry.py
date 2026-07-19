@@ -29,6 +29,7 @@ from stop_quality_gate import run_check as stop_quality_gate_run
 
 # Phase 4 checks (audit, never blocks)
 from bash_audit import run_check as bash_audit_run
+from coverage_gate import run_check as coverage_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
@@ -143,6 +144,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=50,
         budget_ms=300,
+    ),
+    # Stop — coverage (advisory by default, after blocking checks)
+    CheckSpec(
+        name="coverage_gate",
+        run=coverage_gate_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=55,
+        budget_ms=100,
     ),
     # Audit (never blocks, runs last)
     CheckSpec(
