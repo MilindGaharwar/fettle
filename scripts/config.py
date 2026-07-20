@@ -124,6 +124,12 @@ DEFAULTS: dict[str, Any] = {
             "cooldown_seconds": 300,
             "reminder_style": "compact",
         },
+        "complexity": {
+            "enabled": True,
+            "enforce": False,
+            "max_cyclomatic": 10,
+            "max_cognitive": 15,
+        },
         "coverage": {
             "enabled": False,
             "threshold": 80,
