@@ -166,7 +166,7 @@ def scan_ui(file_path: str, content: str, ui_cfg: dict | None = None) -> list[st
 def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> list[str]:
     """BLOCKING (threshold+ files): Enforce plan for multi-file changes."""
     cfg = plan_cfg or {}
-    threshold = int(cfg.get("threshold", 3))
+    threshold = cfg.get("threshold")
     plan_dir_name = str(cfg.get("plan_dir", "docs"))
     max_age_s = float(cfg.get("max_age_hours", 1)) * 3600
 
@@ -178,9 +178,12 @@ def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> lis
         session.append(file_path)
     _save_tracking(session)
 
-    if len(session) < threshold:
+    # Check if any threshold is met
+    trigger_reason = _check_plan_triggers(session, file_path, cwd, cfg, threshold)
+    if not trigger_reason:
         return []
 
+    # Check if a plan exists
     docs_dir = Path(cwd) / plan_dir_name
     if docs_dir.is_dir():
         for f in docs_dir.iterdir():
@@ -188,9 +191,81 @@ def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> lis
                 return []
 
     return [
-        f"PLANNING: {len(session)} implementation files edited without a recent plan in {plan_dir_name}/ "
+        f"PLANNING: {trigger_reason} without a recent plan in {plan_dir_name}/ "
         f"(disable via [gates.plan] enabled=false in .fettle.toml)"
     ]
+
+
+def _check_plan_triggers(session: list[str], file_path: str, cwd: str, cfg: dict, threshold) -> str:
+    """Check all plan triggers, return reason string or empty."""
+    import fnmatch
+
+    # File count threshold (original behavior)
+    if threshold is not None and len(session) >= int(threshold):
+        return f"{len(session)} implementation files edited (threshold: {threshold})"
+
+    # Risk path detection
+    risk_paths = cfg.get("risk_paths", [])
+    if risk_paths:
+        rel_path = os.path.relpath(file_path, cwd) if os.path.isabs(file_path) else file_path
+        for pattern in risk_paths:
+            if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(f"/{rel_path}", f"/{pattern}"):
+                return f"risk path matched: {rel_path} ({pattern})"
+
+    # Module count threshold
+    module_threshold = cfg.get("module_threshold")
+    if module_threshold is not None:
+        module_roots = cfg.get("module_roots", ["src", "packages"])
+        modules = _count_modules(session, cwd, module_roots)
+        if len(modules) >= int(module_threshold):
+            return f"{len(modules)} modules affected (threshold: {module_threshold})"
+
+    # Line estimation threshold
+    line_threshold = cfg.get("line_threshold")
+    if line_threshold is not None:
+        diff_timeout = float(cfg.get("diff_timeout_ms", 500)) / 1000.0
+        added_lines = _estimate_added_lines(cwd, diff_timeout)
+        if added_lines >= int(line_threshold):
+            return f"{added_lines} lines added (threshold: {line_threshold})"
+
+    return ""
+
+
+def _count_modules(session: list[str], cwd: str, module_roots: list[str]) -> set[str]:
+    """Derive top-level modules from edited file paths."""
+    modules: set[str] = set()
+    for fpath in session:
+        rel = os.path.relpath(fpath, cwd) if os.path.isabs(fpath) else fpath
+        parts = rel.replace("\\", "/").split("/")
+        for root in module_roots:
+            if parts[0] == root and len(parts) > 1:
+                modules.add(parts[1])
+                break
+        else:
+            modules.add("_root")
+    return modules
+
+
+def _estimate_added_lines(cwd: str, timeout: float) -> int:
+    """Estimate total added lines via git diff --numstat."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "diff", "--numstat"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if proc.returncode != 0:
+            return 0
+        total = 0
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[0] != "-":
+                try:
+                    total += int(parts[0])
+                except ValueError:
+                    continue
+        return total
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return 0
 
 
 def scan_bootstrap(file_path: str, cwd: str) -> list[str]:
