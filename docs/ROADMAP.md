@@ -18,7 +18,9 @@ This roadmap is committed before implementation begins and updated as releases s
 | v0.5.0 | Adaptive enforcement platform (profiles, tiers, adapters, CI loop, dispatcher) | WP-67..WP-115 | **Shipped** (see [WORKPACKAGES-v050.md](WORKPACKAGES-v050.md)) |
 | v0.6.0 | **Trust & precision** — the harness proves itself | WP-116..WP-121 | **Shipped** |
 | v0.7.0 | **Reach** — same policy at every chokepoint | WP-122..WP-126 | **Shipped with distribution exceptions** |
-| v0.8.0 | **Governance & agent audit** — enterprise operability | WP-127..WP-132 | Planned |
+| v0.8.0 | **Discipline integration** — advisory contract, link pilot, budget, audit, coverage | WP-A..WP-G | **Shipped** |
+| v0.9.0 | **Engineering discipline enforcement** — branch coverage, complexity, plan thresholds, TDD | WP-H..WP-K | **Shipped** |
+| v1.0.0 | **Governance & agent audit** — enterprise operability | WP-127..WP-132 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 
