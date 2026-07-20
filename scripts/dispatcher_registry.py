@@ -30,6 +30,7 @@ from stop_quality_gate import run_check as stop_quality_gate_run
 # Phase 4 checks (audit, never blocks)
 from bash_audit import run_check as bash_audit_run
 from coverage_gate import run_check as coverage_gate_run
+from complexity_check import run_check as complexity_check_run
 
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
@@ -144,6 +145,16 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=50,
         budget_ms=300,
+    ),
+    # PostToolUse — complexity (Python only)
+    CheckSpec(
+        name="complexity_check",
+        run=complexity_check_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".py"}),
+        order=35,
+        budget_ms=100,
     ),
     # Stop — coverage (advisory by default, after blocking checks)
     CheckSpec(
