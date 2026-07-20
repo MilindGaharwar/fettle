@@ -25,6 +25,11 @@ DEFAULTS: dict[str, Any] = {
             "plan_dir": "docs",
             "plan_glob": "*plan*.md",
             "max_age_hours": 1,
+            "risk_paths": [],
+            "module_threshold": None,
+            "module_roots": ["src", "packages"],
+            "line_threshold": None,
+            "diff_timeout_ms": 500,
         },
         "ux_spec": {
             "enabled": False,
