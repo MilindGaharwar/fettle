@@ -31,6 +31,7 @@ from stop_quality_gate import run_check as stop_quality_gate_run
 from bash_audit import run_check as bash_audit_run
 from coverage_gate import run_check as coverage_gate_run
 from complexity_check import run_check as complexity_check_run
+from tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
@@ -145,6 +146,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=50,
         budget_ms=300,
+    ),
+    # PreToolUse + PostToolUse — TDD ordering
+    CheckSpec(
+        name="tdd_gate",
+        run=tdd_gate_run,
+        events=frozenset({"PreToolUse", "PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=15,
+        budget_ms=50,
     ),
     # PostToolUse — complexity (Python only)
     CheckSpec(
