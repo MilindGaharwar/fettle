@@ -78,6 +78,80 @@ def _parse_coverage_json(coverage_path: Path) -> dict[str, set[int]]:
     return result
 
 
+def _parse_branch_data(coverage_path: Path) -> tuple[dict[str, set[tuple]], dict[str, set[tuple]]]:
+    """Parse branch arcs from coverage.json.
+
+    Returns (executed_branches, missing_branches) as {abs_path: set_of_(from,to)_tuples}.
+    """
+    try:
+        data = json.loads(coverage_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}, {}
+
+    executed: dict[str, set[tuple]] = {}
+    missing: dict[str, set[tuple]] = {}
+    files_data = data.get("files", {})
+
+    for name, entry in files_data.items():
+        abs_path = os.path.abspath(name)
+        exec_arcs = entry.get("executed_branches", [])
+        miss_arcs = entry.get("missing_branches", [])
+
+        if isinstance(exec_arcs, list) and exec_arcs:
+            executed[abs_path] = {
+                (arc[0], arc[1]) for arc in exec_arcs
+                if isinstance(arc, list) and len(arc) >= 2
+            }
+        if isinstance(miss_arcs, list) and miss_arcs:
+            missing[abs_path] = {
+                (arc[0], arc[1]) for arc in miss_arcs
+                if isinstance(arc, list) and len(arc) >= 2
+            }
+
+    return executed, missing
+
+
+def _check_branch_coverage(
+    edited_files: dict[str, set[int]],
+    coverage_path: Path,
+    threshold: float,
+) -> list[str]:
+    """Check branch coverage for edited lines. Returns failure messages."""
+    executed_branches, missing_branches = _parse_branch_data(coverage_path)
+
+    if not executed_branches and not missing_branches:
+        logger.debug("fettle: branch_data_unavailable")
+        return []
+
+    total_covered = 0
+    total_missing = 0
+
+    for filepath, edited_lines in edited_files.items():
+        abs_path = os.path.abspath(filepath)
+        file_exec = executed_branches.get(abs_path, set())
+        file_miss = missing_branches.get(abs_path, set())
+
+        if not file_exec and not file_miss:
+            continue
+
+        for arc in file_exec:
+            if arc[0] in edited_lines:
+                total_covered += 1
+        for arc in file_miss:
+            if arc[0] in edited_lines:
+                total_missing += 1
+
+    total = total_covered + total_missing
+    if total == 0:
+        return []
+
+    pct = (total_covered / total) * 100
+    if pct >= threshold:
+        return []
+
+    return [f"Branch coverage: {pct:.0f}% ({total_covered}/{total} branches from edited lines)"]
+
+
 def run_check(ctx):
     """Stop hook — check diff coverage of edited files."""
     from dispatcher_types import CheckResult
@@ -132,10 +206,16 @@ def run_check(ctx):
             basename = os.path.basename(filepath)
             failures.append(f"{basename}: {pct:.0f}% ({hit}/{len(edited_lines)} lines)")
 
+    # WP-K: Branch coverage check
+    branch_threshold = float(cfg.get("minimum_branch_percent", 0))
+    if branch_threshold > 0:
+        branch_failures = _check_branch_coverage(edited_files, coverage_path, branch_threshold)
+        failures.extend(branch_failures)
+
     if not failures:
         return CheckResult.allow()
 
-    msg = f"Diff coverage below {threshold:.0f}%:\n" + "\n".join(failures[:5])
+    msg = "Diff coverage below threshold:\n" + "\n".join(failures[:5])
     mode = cfg.get("mode", "advisory")
     if mode == "enforce":
         return CheckResult.block(msg, hook_specific_output={
