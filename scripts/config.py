@@ -127,6 +127,7 @@ DEFAULTS: dict[str, Any] = {
         "coverage": {
             "enabled": False,
             "threshold": 80,
+            "minimum_branch_percent": 0,
             "mode": "advisory",
             "scope": "changed_lines",
             "max_staleness_seconds": 0,

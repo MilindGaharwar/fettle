@@ -137,6 +137,69 @@ def test_below_threshold_enforce_blocks(tmp_path):
     assert "20%" in result.message
 
 
+def test_branch_coverage_below_threshold(tmp_path):
+    """Branch coverage below threshold → advisory with branch message."""
+    from coverage_gate import run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\nb\nc\nd\ne\n")
+
+    # 1 executed branch from line 2, 2 missing branches from lines 2 and 3
+    cov_data = {
+        "files": {
+            str(src): {
+                "executed_lines": [1, 2, 3, 4, 5],
+                "executed_branches": [[2, 4]],
+                "missing_branches": [[2, 5], [3, 6]],
+            }
+        }
+    }
+    (tmp_path / "coverage.json").write_text(json.dumps(cov_data))
+    time.sleep(0.01)
+
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-branch", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    time.sleep(0.01)
+
+    ctx = _make_ctx(tmp_path, threshold=80, session_id="test-branch")
+    # Set branch threshold
+    ctx.config["gates"]["coverage"]["minimum_branch_percent"] = 80
+
+    with (patch("config.state_dir", return_value=state_dir / "test-branch"),
+          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
+        result = run_check(ctx)
+    assert result.decision == Decision.ADVISORY
+    assert "Branch coverage" in result.message
+    assert "33%" in result.message
+
+
+def test_branch_data_absent_skips_silently(tmp_path):
+    """No branch data in coverage.json → branch check skipped, line check runs."""
+    from coverage_gate import run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\nb\nc\n")
+
+    cov_data = {"files": {str(src): {"executed_lines": [1, 2, 3]}}}
+    (tmp_path / "coverage.json").write_text(json.dumps(cov_data))
+    time.sleep(0.01)
+
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-nobranch", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    time.sleep(0.01)
+
+    ctx = _make_ctx(tmp_path, threshold=80, session_id="test-nobranch")
+    ctx.config["gates"]["coverage"]["minimum_branch_percent"] = 80
+
+    with (patch("config.state_dir", return_value=state_dir / "test-nobranch"),
+          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3})):
+        result = run_check(ctx)
+    # Line coverage is 100%, branch data absent → passes
+    assert result.decision == Decision.ALLOW
+
+
 def test_stale_coverage_warns(tmp_path):
     """Coverage.json older than edits → staleness advisory."""
     from coverage_gate import run_check
