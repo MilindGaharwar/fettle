@@ -129,6 +129,19 @@ DEFAULTS: dict[str, Any] = {
             "cooldown_seconds": 300,
             "reminder_style": "compact",
         },
+        "tdd": {
+            "enabled": False,
+            "mode": "advisory",
+            "test_patterns": ["tests/test_*.py", "tests/**/test_*.py"],
+            "implementation_roots": ["src/"],
+            "exempt_paths": [
+                "docs/**", "**/*.md", "**/*.toml", "**/*.yaml", "**/*.yml",
+                "**/*.json", "**/*.cfg", "tests/fixtures/**",
+                "**/__pycache__/**", "**/node_modules/**", "**/.venv/**", "**/dist/**",
+            ],
+            "accept_preexisting_tests": True,
+            "path_mappings": {},
+        },
         "complexity": {
             "enabled": True,
             "enforce": False,
