@@ -9,8 +9,10 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v0.7.0** — adaptive enforcement, CI/Action integration, editor
-diagnostics, policy layering, and Claude Code/OpenCode adapters.
+**Status: v0.9.0** — engineering discipline enforcement. Builds on v0.7's
+adaptive platform with: advisory contract, discipline-link pilot, cooperative
+budgets, bash audit, diff coverage (line + branch), function complexity limits,
+enhanced plan thresholds, and TDD phase enforcement.
 
 ## What It Does
 
@@ -228,6 +230,8 @@ Cache key = file content hash + config hash. Skips re-scanning unchanged files.
 | v0.5.0 | Adaptive enforcement platform | **Shipped** |
 | v0.6.0 | Trust and precision | **Shipped** |
 | v0.7.0 | Action, LSP, policy layering, OpenCode adapter | **Shipped** |
+| v0.8.0 | Discipline integration (advisory contract, link pilot, budget, audit, coverage) | **Shipped** |
+| v0.9.0 | Engineering discipline enforcement (branch coverage, complexity, plan thresholds, TDD) | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.
