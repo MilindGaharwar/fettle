@@ -42,6 +42,21 @@ DEFAULTS: dict[str, Any] = {
         },
         "ui_colors": {"enabled": False, "allowed_hex": []},
         "docs": {"enabled": False, "mode": "soft"},  # doc-update-before-push check
+        "spec_audit": {
+            "enabled": False,
+            "audit_path": "docs/spec-audit.md",
+            "base_ref": "main",
+            "spec_patterns": [
+                "docs/*spec*.md",
+                "docs/**/*spec*.md",
+                "docs/*strategy*.md",
+                "docs/**/*strategy*.md",
+                "docs/*architecture*.md",
+                "docs/**/*architecture*.md",
+                "docs/*plan*.md",
+                "docs/**/*plan*.md",
+            ],
+        },
         "tests": {"enabled": False, "browser_test_window_s": 1800},
         "mcp_trust": {"enabled": False},
         # CI must be set up before development. Default on + advisory (a

@@ -27,6 +27,12 @@ allowed_hex = ["#2563eb"]   # your brand palette
 enabled = false
 mode = "soft"         # advisory | soft | enforce
 
+[gates.spec_audit]    # changed strategy/spec docs require current semantic audit — OFF by default
+enabled = false
+audit_path = "docs/spec-audit.md"
+base_ref = "main"        # CI compares committed changes with this branch
+spec_patterns = ["docs/*spec*.md", "docs/**/*spec*.md", "docs/*strategy*.md", "docs/**/*strategy*.md"]
+
 [gates.tests]         # untested-code Stop gate + pre-commit warning — OFF by default
 enabled = false
 

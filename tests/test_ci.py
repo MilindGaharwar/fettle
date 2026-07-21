@@ -41,6 +41,79 @@ def test_run_ci_planted_secret_fails():
     assert boundary["findings"]  # the secret is surfaced
 
 
+def test_run_ci_changed_spec_without_audit_fails():
+    d = _git_repo({
+        ".fettle.toml": "[gates.spec_audit]\nenabled = true\n",
+        "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
+    })
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+        cwd=d,
+        check=True,
+    )
+    with open(os.path.join(d, "docs", "PRODUCT-STRATEGY.md"), "a") as f:
+        f.write("Changed.\n")
+
+    result = ci.run_ci(d)
+    quality = next(g for g in result["gates"] if g["name"] == "quality")
+    assert quality["ok"] is False
+    assert any("SPEC_AUDIT" in finding for finding in quality["findings"])
+
+
+def test_run_ci_baseline_cannot_suppress_spec_audit():
+    d = _git_repo({
+        ".fettle.toml": "[gates.spec_audit]\nenabled = true\n",
+        ".fettle-baseline.json": (
+            '{"fingerprints":["spec_audit:docs/spec-audit.md:1:"]}'
+        ),
+        "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
+    })
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qam", "base"],
+        cwd=d,
+        check=True,
+    )
+    with open(os.path.join(d, "docs", "PRODUCT-STRATEGY.md"), "a") as f:
+        f.write("Changed.\n")
+
+    quality = next(g for g in ci.run_ci(d)["gates"] if g["name"] == "quality")
+    assert quality["ok"] is False
+    assert any("SPEC_AUDIT" in finding for finding in quality["findings"])
+
+
+def test_run_ci_committed_spec_and_audit_pass_on_clean_branch():
+    sections = (
+        "Requirements Matrix",
+        "Fixture And Live Separation",
+        "Adversarial Pass Review",
+        "Non-Goals And Failure Paths",
+        "Residual Risks",
+    )
+    d = _git_repo({
+        ".fettle.toml": "[gates.spec_audit]\nenabled = true\n",
+        "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
+    })
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+        cwd=d,
+        check=True,
+    )
+    subprocess.run(["git", "branch", "-M", "main"], cwd=d, check=True)
+    subprocess.run(["git", "switch", "-qc", "feature"], cwd=d, check=True)
+    with open(os.path.join(d, "docs", "PRODUCT-STRATEGY.md"), "a") as f:
+        f.write("Changed.\n")
+    with open(os.path.join(d, "docs", "spec-audit.md"), "w") as f:
+        f.write("# Audit\n" + "".join(f"\n## {section}\nChecked.\n" for section in sections))
+    subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "audited"],
+        cwd=d,
+        check=True,
+    )
+
+    assert ci.run_ci(d)["ok"] is True
+
+
 def test_regression_fails_closed_when_scanner_raises(monkeypatch):
     """Regression — CI must fail closed, never silently skip a gate: if the
     boundary scanner raises, run_ci reports failure, not pass."""
