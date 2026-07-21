@@ -1,0 +1,107 @@
+{
+  "name": "fettle",
+  "displayName": "Fettle",
+  "description": "Real-time quality enforcement for AI-assisted development — ruff, semgrep, complexity, coverage, and discipline gates",
+  "version": "0.9.0",
+  "publisher": "MilindGaharwar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MilindGaharwar/fettle"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "lint",
+    "quality",
+    "python",
+    "typescript",
+    "ruff",
+    "semgrep",
+    "complexity",
+    "coverage",
+    "ai",
+    "claude"
+  ],
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:go",
+    "onLanguage:rust"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Fettle",
+      "properties": {
+        "fettle.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable Fettle diagnostics"
+        },
+        "fettle.pluginPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Fettle plugin root (auto-detected from ~/.claude/plugins/fettle)"
+        },
+        "fettle.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Python >= 3.11 interpreter (auto-detected)"
+        },
+        "fettle.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run diagnostics on file save"
+        },
+        "fettle.lintOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run diagnostics when a file is opened"
+        },
+        "fettle.showComplexity": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show function complexity annotations"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "fettle.restart",
+        "title": "Fettle: Restart Language Server"
+      },
+      {
+        "command": "fettle.runQualityScan",
+        "title": "Fettle: Run Quality Scan"
+      },
+      {
+        "command": "fettle.showReport",
+        "title": "Fettle: Show Effectiveness Report"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vscode-languageclient": "^9.0.1"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
