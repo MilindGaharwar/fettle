@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config  # noqa: E402
 from _resources import rules_dir  # noqa: E402
+from spec_audit import scan_spec_audit  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -261,7 +262,7 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
     ignore_patterns = _load_ignore(root)
     file_count = len(_collect_py_files(root, ignore_patterns))
 
-    findings = run_ruff(root) + run_semgrep(root)
+    findings = run_ruff(root) + run_semgrep(root) + scan_spec_audit(root, cfg)
     for f in findings:
         if os.path.isabs(f.get("file", "")):
             f["file"] = os.path.relpath(f["file"], root)
@@ -308,7 +309,7 @@ def main() -> int:
     file_count = len(py_files)
 
     # Run tools on the whole directory (they handle file discovery internally)
-    findings = run_ruff(root) + run_semgrep(root)
+    findings = run_ruff(root) + run_semgrep(root) + scan_spec_audit(root, cfg)
 
     # Root-relative paths: keeps committed baselines portable across machines
     # and checkout locations.

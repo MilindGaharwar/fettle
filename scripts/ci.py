@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from boundary_scan import scan_repo  # noqa: E402
+from changeset import get_changed_files, get_vs_base  # noqa: E402
 from config import load_config  # noqa: E402
 
 logger = logging.getLogger("fettle.ci")
@@ -42,20 +43,30 @@ def _gate_quality(root: str, cfg: dict) -> dict:
         from baseline import filter_new_violations, load_baseline
         from quality_scan import load_config as _lc
         from quality_scan import run_ruff, run_semgrep
+        from spec_audit import scan_spec_audit
 
         _cfg = _lc(root)  # sets severity globals inside quality_scan
+        base_ref = cfg.get("gates", {}).get("spec_audit", {}).get("base_ref", "main")
+        changed = {
+            item.path.replace("\\", "/")
+            for item in get_changed_files(root) + get_vs_base(root, base_ref)
+        }
         findings = run_ruff(root) + run_semgrep(root)
         baseline = load_baseline(Path(root))
         if baseline:
             findings = filter_new_violations(findings, baseline)
-        errors = [f for f in findings if f.get("severity") == "error"]
+        findings += scan_spec_audit(root, cfg, changed)
+        errors = [f for f in findings if str(f.get("severity", "")).lower() == "error"]
     except Exception as e:  # noqa: BLE001 — fail closed
         logger.error("quality gate crashed: %s", e, exc_info=True)
         return {"name": "quality", "ok": False, "error": str(e) or repr(e), "findings": []}
     return {
         "name": "quality",
         "ok": not errors,
-        "findings": [f"{f.get('file')}:{f.get('line')} {f.get('code')}" for f in errors],
+        "findings": [
+            f"{f.get('file')}:{f.get('line')} {f.get('code', f.get('rule', ''))}"
+            for f in errors
+        ],
     }
 
 
