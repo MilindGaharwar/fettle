@@ -19,12 +19,17 @@ enhanced plan thresholds, and TDD phase enforcement.
 | Layer | Hook | What runs |
 |-------|------|-----------|
 | **Per-edit lint** | PostToolUse (Write/Edit) | ruff + semgrep on every Python edit |
-| **Pre-write gate** | PreToolUse (Write/Edit) | quality_gate.py (mode-dependent block) |
+| **TDD ordering** | PreToolUse + PostToolUse | Test-before-implementation enforcement (v0.9) |
+| **Complexity** | PostToolUse (Write/Edit) | Cyclomatic + cognitive per modified function (v0.9) |
+| **Lean review** | PostToolUse (Write/Edit) | Over-engineering detection: abstractions, wrappers, large additions (v0.8) |
+| **Pre-write gate** | PreToolUse (Write/Edit) | Plan gate, config protection, UX spec gate |
 | **MCP trust** | PreToolUse (Bash) | Package install allowlist |
+| **Artifact integrity** | PreToolUse (Bash) | Destructive command guard |
 | **Doc freshness** | PostToolUse (Bash) | Warns if implementation changed but no docs updated |
+| **Bash audit** | PostToolUse (Bash) | Structured event logging, privacy-first (v0.8) |
 | **Cross-file** | Stop | Import/contract resolution before response delivery |
-| **UX spec gate** | PreToolUse | Blocks frontend edits without UX spec (opt-in) |
-| **UI colors gate** | PostToolUse | Warns on hardcoded hex outside palette (opt-in) |
+| **Coverage gate** | Stop | Diff line + branch coverage from coverage.json (v0.8/v0.9) |
+| **Discipline link** | PostToolUse | Injects skill reminders when loop/scope/lean gates fire (v0.8) |
 
 ## Intelligence Layer (v0.3.0+)
 
@@ -128,19 +133,42 @@ request annotations. Pin a release tag instead of `main` for stable CI.
 enabled = true
 mode = "advisory"   # advisory | soft | enforce
 
-[gates.ux_spec]
-enabled = false     # Blocks frontend edits without UX spec
+[gates.lean_review]
+mode = "advisory"   # silent | advisory — surfaces over-engineering findings (v0.8)
 
-[gates.ui_colors]
+[gates.complexity]
+enabled = true
+max_cyclomatic = 10
+max_cognitive = 15
+
+[gates.coverage]
 enabled = false
-allowed_hex = ["#1a1a1a", "#ffffff"]
+threshold = 80                  # Line coverage % for changed lines
+minimum_branch_percent = 0      # Branch coverage (0 = disabled)
+
+[gates.tdd]
+enabled = false
+mode = "advisory"               # advisory only in v0.9
+accept_preexisting_tests = true
 
 [gates.plan]
 enabled = false
-threshold = 3       # Files changed before plan required
+threshold = 3                   # Files changed before plan required
+risk_paths = []                 # Globs that auto-require plan (e.g. "**/auth/**")
+module_threshold = null         # Distinct packages, null = disabled
+line_threshold = null           # Added lines, null = disabled
 
-[gates.mcp_trust]
-enabled = false
+[gates.bash_audit]
+enabled = false                 # Privacy-first: opt-in only
+capture_command = false         # If true, applies redaction before logging
+
+[gates.advisory]
+cooldown_seconds = 300
+max_per_turn = 3
+
+[gates.discipline_link]
+enabled = true
+cooldown_seconds = 300
 
 [severity]
 error_rules = ["BLE001", "S110", "S608", "S701"]
@@ -153,19 +181,32 @@ warning_prefixes = ["SIM", "UP"]
 Claude Code Tool Call
     │
     ▼
-PreToolUse ──→ quality_gate.py (mode check)
-             → mcp_trust_gate.py (Bash only)
-             → ux_spec_gate.py (frontend only, opt-in)
+PreToolUse ──→ dispatcher.py selects checks by event + tool + extension:
+             → quality_gate (plan, UX spec)
+             → tdd_gate (test-first ordering)
+             → config_protect, destructive_guard
+             → mcp_trust_gate (Bash only)
     │
     ▼ (tool executes)
     │
-PostToolUse ──→ post_edit.py (ruff + semgrep on .py files)
-              → ui_colors_gate.py (opt-in)
-              → post_bash_doc_check.py (Bash only)
+PostToolUse ──→ dispatcher.py:
+              → post_edit (ruff + semgrep on .py)
+              → post_edit_ts, post_edit_go (language-specific)
+              → complexity_check (cyclomatic + cognitive)
+              → lean_sniffers (over-engineering detection)
+              → bash_audit (structured event logging)
+              → tdd_gate (records test/impl edits)
+              → loop_detect + scope_creep + discipline_link
     │
     ▼
-Stop ──→ stop_quality_gate.py (cross-file import/contract checks)
+Stop ──→ dispatcher.py:
+       → quality_gate (test freshness)
+       → stop_quality_gate (imports + cargo check)
+       → coverage_gate (line + branch coverage)
 ```
+
+All checks route through `dispatcher.py` (single process, per-check budget,
+advisory cap). 17 checks registered, ordered by priority, fail-open on error.
 
 ## Result Taxonomy
 
@@ -219,6 +260,17 @@ event = FettleEvent.from_stdin(HookType.POST_TOOL_USE)
 ### Result Caching (`scripts/cache.py`)
 
 Cache key = file content hash + config hash. Skips re-scanning unchanged files.
+
+## Testing
+
+```bash
+cd ~/.claude/plugins/fettle
+.venv/bin/python -m pytest tests/ -q
+```
+
+**939 tests** across 117 test files covering all checks, adapters, and
+infrastructure. All adapter tests use mocked tool outputs — no eslint, biome,
+tsc, cargo, or semgrep installation required to run the suite.
 
 ## Roadmap
 
