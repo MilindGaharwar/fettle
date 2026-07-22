@@ -1,6 +1,45 @@
 # Changelog
 
-## Unreleased (v0.7.0)
+## v0.9.0 — Engineering Discipline Enforcement
+
+- **WP-K — Branch coverage gate**: extends coverage_gate.py to check
+  missing_branches from coverage.json. Only flags branches originating from
+  edited lines. Config: `gates.coverage.minimum_branch_percent`.
+- **WP-H — Function complexity limits**: new complexity_check.py with
+  cyclomatic and cognitive complexity per modified function (stdlib ast only).
+  Config: `gates.complexity.max_cyclomatic`, `max_cognitive`.
+- **WP-J — Enhanced plan thresholds**: risk paths (auth/security/migration
+  globs), module count, and line estimation independently trigger plan gate.
+  Config: `gates.plan.risk_paths`, `module_threshold`, `line_threshold`.
+- **WP-I — TDD phase enforcement**: detects test-before-implementation ordering.
+  Advisory mode only in v0.9. Config: `gates.tdd`.
+- **VS Code extension**: new `integrations/vscode/` launches LSP server for
+  inline diagnostics in VS Code.
+
+## v0.8.0 — Discipline Integration
+
+- **WP-A — Surface lean findings**: lean_sniffers returns advisory (not just
+  silent JSONL) when `gates.lean_review.mode = "advisory"`.
+- **WP-B — Normalized advisory contract**: Advisory dataclass, persisted
+  AdvisoryDeduplicator, format_advisories renderer, aggregator cross-check cap.
+  Config: `gates.advisory`.
+- **WP-B2 — Migrate lean_sniffers onto AdvisoryDeduplicator**: single dedup
+  mechanism across all advisory output.
+- **WP-C — Discipline link pilot**: loop_detect injects 2-sentence debugging
+  reminder from discipline-debugging (or fallback). Config: `gates.discipline_link`.
+- **WP-D — Cooperative budget enforcement**: per-check deadline in HookContext,
+  overrun logging, lean_sniffers honors dispatcher deadline.
+- **WP-E — Bash structured audit**: privacy-first event logging (hash only by
+  default, opt-in redacted capture). Config: `gates.bash_audit`.
+- **WP-F — Diff coverage gate**: reads pre-existing coverage.json, staleness
+  guard, advisory/enforce per mode. Config: `gates.coverage`.
+- **WP-G — Shared discipline_link helper**: trigger-to-skill mappings ready for
+  expansion after pilot metric passes.
+- **hookEventName fix**: dispatcher now includes hookEventName in all output
+  (fixes Claude Code Stop hook validation error).
+- **bench/doctor PATH fix**: tools at ~/.local/bin found via _which() fallback.
+
+## v0.7.0
 
 - **WP-122 (partial) — Git-installable Python package**: console entry points,
   bundled rule resources, and `python -m fettle`. PyPI publication is deferred
