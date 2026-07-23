@@ -30,6 +30,7 @@ from stop_quality_gate import run_check as stop_quality_gate_run
 # Phase 4 checks (audit, never blocks)
 from bash_audit import run_check as bash_audit_run
 from coverage_gate import run_check as coverage_gate_run
+from worklog import run_check as worklog_run
 from complexity_check import run_check as complexity_check_run
 from tdd_gate import run_check as tdd_gate_run
 
@@ -174,6 +175,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=55,
         budget_ms=100,
+    ),
+    # Stop — worklog (advisory by default)
+    CheckSpec(
+        name="worklog",
+        run=worklog_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=60,
+        budget_ms=50,
     ),
     # Audit (never blocks, runs last)
     CheckSpec(
