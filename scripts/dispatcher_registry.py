@@ -32,6 +32,7 @@ from bash_audit import run_check as bash_audit_run
 from coverage_gate import run_check as coverage_gate_run
 from worklog import run_check as worklog_run
 from complexity_check import run_check as complexity_check_run
+from provenance_gate import run_check as provenance_gate_run
 from tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
@@ -166,6 +167,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         extensions=frozenset({".py"}),
         order=35,
         budget_ms=100,
+    ),
+    # PostToolUse — provenance (new files only)
+    CheckSpec(
+        name="provenance_gate",
+        run=provenance_gate_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write"}),
+        order=62,
+        budget_ms=30,
     ),
     # Stop — coverage (advisory by default, after blocking checks)
     CheckSpec(

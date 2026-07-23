@@ -171,6 +171,14 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "provenance": {
+            "enabled": False,
+            "mode": "none",
+            "marker_text": "",
+            "exempt_paths": [
+                "**/*.json", "**/*.lock", "**/migrations/**", "**/*.generated.*",
+            ],
+        },
         "worklog": {
             "enabled": False,
             "mode": "advisory",
