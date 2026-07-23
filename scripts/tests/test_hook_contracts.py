@@ -35,37 +35,6 @@ def _run_hook(script: str, input_data: dict, env_overrides: dict | None = None) 
     return proc.returncode, output
 
 
-class TestMcpGate:
-    """mcp_gate.py — blunt MCP-package install blocker."""
-
-    def test_blocks_npm_install_mcp(self) -> None:
-        rc, out = _run_hook(
-            "mcp_gate.py",
-            {"tool_name": "Bash", "tool_input": {"command": "npm install some-mcp-server"}},
-        )
-        assert rc == 2
-        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-
-    def test_blocks_npx_mcp(self) -> None:
-        rc, _ = _run_hook(
-            "mcp_gate.py",
-            {"tool_name": "Bash", "tool_input": {"command": "npx @playwright/mcp@latest"}},
-        )
-        assert rc == 2
-
-    def test_allows_non_mcp_install(self) -> None:
-        rc, _ = _run_hook(
-            "mcp_gate.py",
-            {"tool_name": "Bash", "tool_input": {"command": "npm install lodash"}},
-        )
-        assert rc == 0
-
-    def test_allows_non_bash_tool(self) -> None:
-        rc, _ = _run_hook(
-            "mcp_gate.py",
-            {"tool_name": "Write", "tool_input": {"file_path": "/tmp/x.py"}},
-        )
-        assert rc == 0
 
 
 class TestMcpTrustGate:

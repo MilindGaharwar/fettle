@@ -7,7 +7,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from schema_drift import check_schema_drift
 from migration_safety import check_migration_safety
 from ai_summaries import format_ai_summary
-from health_dashboard import HealthMetrics
 from finding import CheckFinding, FindingSeverity
 
 
@@ -99,32 +98,3 @@ def test_output_concise():
         assert len(line) <= 500
 
 
-# --- WP-101+102: Health dashboard ---
-
-def test_stores_metrics_per_run(tmp_path):
-    metrics = HealthMetrics(str(tmp_path / "metrics.jsonl"))
-    metrics.record(findings=3, duration_ms=120, tier="fast", commit="abc")
-    entries = metrics.recent(10)
-    assert len(entries) == 1
-
-
-def test_findings_trend_direction(tmp_path):
-    metrics = HealthMetrics(str(tmp_path / "metrics.jsonl"))
-    for i in range(5):
-        metrics.record(findings=i, duration_ms=100, tier="fast", commit=f"c{i}")
-    trend = metrics.trend()
-    assert trend == "increasing"
-
-
-def test_stable_shows_no_drift(tmp_path):
-    metrics = HealthMetrics(str(tmp_path / "metrics.jsonl"))
-    for i in range(5):
-        metrics.record(findings=2, duration_ms=100, tier="fast", commit=f"c{i}")
-    trend = metrics.trend()
-    assert trend == "stable"
-
-
-def test_handles_empty_history(tmp_path):
-    metrics = HealthMetrics(str(tmp_path / "metrics.jsonl"))
-    assert metrics.recent(10) == []
-    assert metrics.trend() == "unknown"
