@@ -171,6 +171,10 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "worklog": {
+            "enabled": False,
+            "mode": "advisory",
+        },
         "bash_audit": {
             "enabled": False,
             "capture_command": False,
