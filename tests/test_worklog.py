@@ -110,9 +110,17 @@ def test_run_check_valid_entry_allows(tmp_path):
     assert result.decision == Decision.ALLOW
 
 
-def test_run_check_creates_template_on_advisory(tmp_path):
+def test_run_check_does_not_create_template(tmp_path):
+    """Hook should NOT create files as a side-effect — only the command does."""
     ctx = _make_ctx(str(tmp_path), enabled=True, mode="advisory")
     run_check(ctx)
     template = tmp_path / ".fettle" / "worklog" / f"{_today()}.md"
-    assert template.is_file()
-    assert "## Completed" in template.read_text()
+    assert not template.is_file()
+
+
+def test_create_template_via_function(tmp_path):
+    """create_template() explicitly creates the file (for /fettle:worklog command)."""
+    path = create_template(str(tmp_path))
+    assert os.path.isfile(path)
+    content = Path(path).read_text()
+    assert "## Completed" in content

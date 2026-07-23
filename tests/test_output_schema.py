@@ -200,6 +200,19 @@ class TestStopSchema:
         _validate_schema(output, "Stop")
 
 
+class TestSubagentStopSchema:
+    def test_subagent_stop(self):
+        output, rc = _run_dispatcher({
+            "hook_event_name": "SubagentStop",
+            "tool_name": None,
+            "tool_input": {},
+            "cwd": "/tmp",
+            "session_id": "schema-test-subagent-stop",
+        })
+        assert rc == 0
+        _validate_schema(output, "SubagentStop")
+
+
 class TestBlockSchema:
     """Test that block outputs also conform to schema."""
 
