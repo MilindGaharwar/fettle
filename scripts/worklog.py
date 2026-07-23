@@ -22,12 +22,12 @@ Best-practice entry (advisory):
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 
 def _today() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%d")
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 def _worklog_dir(cwd: str) -> Path:
@@ -55,22 +55,27 @@ def _has_valid_entry(worklog_path: Path) -> tuple[bool, str]:
     if len(lines) < 3:
         return False, "worklog entry too short (need at least date + section + 1 item)"
 
-    has_completed = any(
-        line.lower().startswith("## completed") or
-        line.lower().startswith("## done") or
-        line.lower().startswith("## shipped") or
-        line.lower().startswith("## accomplished")
-        for line in lines
-    )
-    if not has_completed:
+    completed_idx = -1
+    for i, line in enumerate(lines):
+        if (line.lower().startswith("## completed") or
+                line.lower().startswith("## done") or
+                line.lower().startswith("## shipped") or
+                line.lower().startswith("## accomplished")):
+            completed_idx = i
+            break
+
+    if completed_idx < 0:
         return False, "worklog missing '## Completed' section"
 
-    content_lines = [
-        line for line in lines
-        if not line.startswith("#") and not line.startswith("---")
-    ]
-    if not content_lines:
-        return False, "worklog has headers but no content"
+    completed_items = []
+    for line in lines[completed_idx + 1:]:
+        if line.startswith("## "):
+            break
+        if line.startswith("- ") and len(line) > 2:
+            completed_items.append(line)
+
+    if not completed_items:
+        return False, "worklog '## Completed' section has no items (add at least one '- item')"
 
     return True, "valid"
 
@@ -84,20 +89,14 @@ def create_template(cwd: str) -> str:
     if filepath.exists():
         return str(filepath)
 
-    template = f"""# Worklog: {_today()}
-
-## Completed
--
-
-## Decisions
--
-
-## Blockers / Risks
-- None
-
-## Next Actions
--
-"""
+    today = _today()
+    template = (
+        "# Worklog: " + today + "\n\n"
+        "## Completed\n-\n\n"
+        "## Decisions\n-\n\n"
+        "## Blockers / Risks\n- None\n\n"
+        "## Next Actions\n-\n"
+    )
     filepath.write_text(template, encoding="utf-8")
     return str(filepath)
 
@@ -118,12 +117,8 @@ def run_check(ctx):
         return CheckResult.allow()
 
     mode = cfg.get("mode", "advisory")
-    template_path = create_template(cwd)
-
-    msg = (
-        f"Worklog: {reason}. "
-        f"Update today's entry at {os.path.relpath(template_path, cwd)} before completing work."
-    )
+    expected_path = os.path.relpath(str(worklog_path), cwd)
+    msg = "Worklog: " + reason + ". Create entry at " + expected_path + " (use /fettle:worklog)."
 
     if mode == "enforce":
         return CheckResult.block(msg, hook_specific_output={
