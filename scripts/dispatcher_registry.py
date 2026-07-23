@@ -33,6 +33,7 @@ from coverage_gate import run_check as coverage_gate_run
 from worklog import run_check as worklog_run
 from complexity_check import run_check as complexity_check_run
 from provenance_gate import run_check as provenance_gate_run
+from boundary_rules import run_check as boundary_rules_run
 from artifact_gate import run_check as artifact_gate_run
 from tdd_gate import run_check as tdd_gate_run
 
@@ -177,6 +178,16 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Bash"}),
         order=11,
         budget_ms=40,
+    ),
+    # PostToolUse — architecture boundary rules
+    CheckSpec(
+        name="boundary_rules",
+        run=boundary_rules_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".py"}),
+        order=65,
+        budget_ms=50,
     ),
     # PostToolUse — provenance (new files only)
     CheckSpec(
