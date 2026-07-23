@@ -171,6 +171,10 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "artifact_integrity": {
+            "enabled": False,
+            "mode": "advisory",
+        },
         "provenance": {
             "enabled": False,
             "mode": "none",

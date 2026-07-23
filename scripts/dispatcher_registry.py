@@ -33,6 +33,7 @@ from coverage_gate import run_check as coverage_gate_run
 from worklog import run_check as worklog_run
 from complexity_check import run_check as complexity_check_run
 from provenance_gate import run_check as provenance_gate_run
+from artifact_gate import run_check as artifact_gate_run
 from tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
@@ -167,6 +168,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         extensions=frozenset({".py"}),
         order=35,
         budget_ms=100,
+    ),
+    # PreToolUse + PostToolUse(Bash) — artifact verification
+    CheckSpec(
+        name="artifact_gate",
+        run=artifact_gate_run,
+        events=frozenset({"PreToolUse", "PostToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=11,
+        budget_ms=40,
     ),
     # PostToolUse — provenance (new files only)
     CheckSpec(
