@@ -171,6 +171,10 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "architecture_boundaries": {
+            "enabled": False,
+            "rules": [],
+        },
         "artifact_integrity": {
             "enabled": False,
             "mode": "advisory",
