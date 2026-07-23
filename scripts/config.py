@@ -208,7 +208,7 @@ DEFAULTS: dict[str, Any] = {
     # Boundary scan: secrets + out-of-project paths (always on) plus a
     # repo-declared forbidden-strings list (sibling projects this package
     # must not reference). Fettle ships no names — each repo fills `forbidden`.
-    "boundary": {"forbidden": []},
+    "boundary": {"forbidden": [], "extra_secret_patterns": []},
     # Project-local semgrep rule extension (scripts/project_rules.py).
     "rules": {
         "extra_dirs": [".fettle/rules"],  # project rule files, relative to root

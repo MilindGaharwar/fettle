@@ -2,6 +2,15 @@
 
 PreToolUse + PostToolUse check that detects whether test files are
 edited before corresponding implementation files. Advisory only in v0.9.
+
+Known limitations (by design):
+- Checks ORDERING only (test file edited before implementation file).
+- Does NOT verify the red phase (test failing before implementation).
+- Does NOT verify the green phase (test passing after implementation).
+- Red/green verification would require parsing test runner output,
+  which is unreliable across frameworks. The ordering check is the
+  enforceable proxy; true red-green-refactor discipline is process
+  guidance (see discipline-testing skill).
 """
 
 from __future__ import annotations

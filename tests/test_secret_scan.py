@@ -74,3 +74,62 @@ def test_is_secret_pattern():
     assert is_secret_pattern("sk-proj-abc123def456ghi789")
     assert not is_secret_pattern("hello world")
     assert not is_secret_pattern("normal_variable_name")
+
+
+# --- WP-L: Azure/GCP patterns ---
+
+
+def test_detects_azure_storage_key(tmp_path):
+    src = tmp_path / "config.py"
+    src.write_text(
+        'CONN = "DefaultEndpointsProtocol=https;AccountName=myacct;'
+        'AccountKey=abc123def456ghi789jkl012mno345pqr678stu901vwx=;EndpointSuffix=core.windows.net"\n'
+    )
+    findings = scan_secrets([str(src)])
+    assert any("Azure Storage" in f.message for f in findings)
+
+
+def test_detects_azure_ad_client_secret(tmp_path):
+    src = tmp_path / "auth.py"
+    src.write_text('client_secret = "abc123~def456.ghi789-jkl012mno345p"\n')
+    findings = scan_secrets([str(src)])
+    assert any("Azure AD" in f.message or "client" in f.message.lower() for f in findings)
+
+
+def test_detects_gcp_service_account_key(tmp_path):
+    src = tmp_path / "creds.json"
+    src.write_text('{"private_key": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE..."}\n')
+    findings = scan_secrets([str(src)])
+    assert any("GCP" in f.message or "Private Key" in f.message for f in findings)
+
+
+def test_detects_gcp_api_key(tmp_path):
+    src = tmp_path / "config.py"
+    src.write_text('GCP_KEY = "AIzaSyA1234567890abcdefghijklmnopqrstuvwx"\n')
+    findings = scan_secrets([str(src)])
+    assert any("GCP API" in f.message for f in findings)
+
+
+def test_detects_bearer_token_in_source(tmp_path):
+    src = tmp_path / "client.py"
+    src.write_text('headers = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc123"}\n')
+    findings = scan_secrets([str(src)])
+    assert any("Bearer" in f.message for f in findings)
+
+
+def test_vault_retrieval_not_flagged(tmp_path):
+    src = tmp_path / "deploy.sh"
+    src.write_text("vault kv get secret/database/password\n")
+    findings = scan_secrets([str(src)])
+    # vault kv get is proper secret retrieval, NOT leakage
+    vault_findings = [f for f in findings if "vault" in f.message.lower()]
+    assert vault_findings == []
+
+
+def test_extra_patterns_from_config(tmp_path):
+    src = tmp_path / "app.py"
+    src.write_text('CUSTOM_TOKEN = "xoxb-1234567890-abcdefghij"\n')
+    # Without custom pattern: might not match
+    # With custom pattern: should match
+    findings = scan_secrets([str(src)], extra_patterns=[r"xoxb-[0-9]+-[a-z]+"])
+    assert len(findings) >= 1
