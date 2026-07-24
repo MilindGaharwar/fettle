@@ -109,6 +109,33 @@ def test_npx_unapproved_blocked():
     assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+# --- Allowlist path resolution (audit D3) ---
+
+def test_default_allowlist_path_expands_home(tmp_path, monkeypatch):
+    """The default ~ path must be expanded — a literal open('~/...') never loads."""
+    monkeypatch.delenv("MCP_ALLOWLIST_PATH", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_dir = tmp_path / ".config" / "fettle"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "mcp-allowlist.json").write_text(
+        json.dumps({"packages": {"left-pad": {"version": "1.0.0"}}})
+    )
+    sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
+    import mcp_trust_gate
+    allowlist = mcp_trust_gate.load_allowlist()
+    assert "left-pad" in allowlist["packages"]
+
+
+def test_write_to_allowlist_absolute_path_blocked(ledger_file):
+    """Writes to the resolved allowlist path (not just the literal ~ form) are denied."""
+    stdout, _, rc = run_gate(
+        {"tool_name": "Write", "tool_input": {"file_path": str(ledger_file), "content": "{}"}}
+    )
+    assert rc == 2
+    parsed = json.loads(stdout.strip())
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_pip_install_blocked():
     stdout, _, rc = run_gate(
         {"tool_name": "Bash", "tool_input": {"command": "pip install some-server"}}

@@ -351,38 +351,55 @@ def sniff_lr008(file_path: str, content: str, changed_lines: set[int] | None,
 
 def sniff_lr012(file_path: str, tree: ast.Module | None, cwd: str,
                 session_id: str) -> list[dict]:
-    """LR012: Duplicate helper name found elsewhere in repo."""
+    """LR012: Duplicate helper name found elsewhere in repo.
+
+    One batched `git grep` for all candidate names — a per-function
+    subprocess with a tiny timeout made detection nondeterministic.
+    """
     if tree is None:
         return []
+    funcs: dict[str, ast.FunctionDef] = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and not node.name.startswith(("_", "test_"))):
+            funcs.setdefault(node.name, node)
+    if not funcs:
+        return []
+    pattern = r"def (" + "|".join(re.escape(n) for n in funcs) + r")\("
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "grep", "-nE", pattern, "--", "*.py"],
+            capture_output=True, text=True, timeout=0.5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+
     candidates = []
-    func_names = [
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-    ]
-    for func in func_names:
-        name = func.name
-        if name.startswith("_") or name.startswith("test_"):
+    reported: set[str] = set()
+    for line in result.stdout.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) < 3:
             continue
-        try:
-            result = subprocess.run(
-                ["git", "-C", cwd, "grep", "-l", f"def {name}(", "--", "*.py"],
-                capture_output=True, text=True, timeout=0.04,
-            )
-            if result.returncode == 0:
-                matches = [
-                    m for m in result.stdout.strip().splitlines()
-                    if os.path.join(cwd, m) != file_path
-                    and os.path.abspath(os.path.join(cwd, m)) != os.path.abspath(file_path)
-                ]
-                if matches:
-                    candidates.append(_make_candidate(
-                        "LR012_DUPLICATE_LOCAL_HELPER_NAME", "reuse",
-                        file_path, cwd, func.lineno, func.end_lineno or func.lineno,
-                        f"def {name}() also in: {matches[0]}",
-                        f"Function '{name}' already exists in {matches[0]}. Consider reuse.",
-                        "high", session_id,
-                    ))
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        rel_path, _lineno, content = parts
+        if os.path.abspath(os.path.join(cwd, rel_path)) == os.path.abspath(file_path):
             continue
+        m = re.search(r"def\s+(\w+)\s*\(", content)
+        if not m:
+            continue
+        name = m.group(1)
+        func = funcs.get(name)
+        if func is None or name in reported:
+            continue
+        reported.add(name)
+        candidates.append(_make_candidate(
+            "LR012_DUPLICATE_LOCAL_HELPER_NAME", "reuse",
+            file_path, cwd, func.lineno, func.end_lineno or func.lineno,
+            f"def {name}() also in: {rel_path}",
+            f"Function '{name}' already exists in {rel_path}. Consider reuse.",
+            "high", session_id,
+        ))
     return candidates
 
 
@@ -607,7 +624,7 @@ def run_check(ctx):
             summary=c.get("message", "")[:120],
             recommended_action=f"{c.get('relative_path', '?')}:{c.get('line_start', '?')}",
             dedupe_key=c.get("dedupe_key", ""),
-            provenance="lean_sniffers@0.7.0",
+            provenance="lean_sniffers@1.0.1",
         )
         if dedup.should_emit(adv):
             dedup.record(adv)

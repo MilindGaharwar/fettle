@@ -18,15 +18,40 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def _finding_key(f: dict) -> str:
+    """Stable identity for a finding across scan and baseline formats."""
+    return f"{f.get('file', '')}:{f.get('line', 0)}:{f.get('code') or f.get('rule', '')}"
+
+
+def _baseline_keys(path: Path) -> set[str]:
+    """Load finding keys from a baseline file (wrapper dict or bare list)."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    items = data.get("findings", []) if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return set()
+    return {_finding_key(f) for f in items if isinstance(f, dict)}
+
+
 def cmd_check(args: argparse.Namespace) -> None:
-    """Run quality checks (CI-friendly, no hook context needed)."""
+    """Run quality checks (CI-friendly, no hook context needed).
+
+    Exit codes: 0 = clean (no error-severity findings), 1 = errors found,
+    2 = usage or environment error. Identical for text and --json output.
+    """
     from config import load_config
     from paths import find_repo_root
+
+    if args.all and args.changed:
+        print("Error: --all and --changed are mutually exclusive", file=sys.stderr)
+        sys.exit(2)
 
     repo_root = find_repo_root()
     if not repo_root:
         print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
     config = load_config(str(repo_root))
     scan_root = Path(args.root).resolve() if args.root else repo_root
@@ -42,21 +67,67 @@ def cmd_check(args: argparse.Namespace) -> None:
             print(f"\n{len(findings)} boundary finding(s)." if findings else "✓ No boundary issues found.")
         sys.exit(1 if findings else 0)
 
+    # --changed: restrict the scan to Python files changed in git.
+    changed_files: list[str] | None = None
+    if args.changed:
+        from changeset import get_changed_files
+        scan_root = repo_root  # changed paths are repo-root-relative
+        changed_files = [
+            str(repo_root / c.path)
+            for c in get_changed_files(str(repo_root))
+            if c.path.endswith(".py") and (repo_root / c.path).is_file()
+        ]
+        if not changed_files:
+            if args.json:
+                print(json.dumps({"findings": [], "file_count": 0}, indent=2))
+            else:
+                print("✓ No changed Python files to check.")
+            sys.exit(0)
+
+    # --fix: apply safe ruff autofixes before scanning.
+    if args.fix:
+        from autofix import fix_file
+        if changed_files is not None:
+            fix_targets = changed_files
+        else:
+            fix_targets = [
+                str(p) for p in scan_root.rglob("*.py")
+                if "__pycache__" not in str(p) and ".venv" not in str(p)
+            ]
+        fix_results = [fix_file(t, config) for t in fix_targets]
+        fix_errors = [r for r in fix_results if r.get("status") == "error"]
+        if not args.json:
+            print(f"Autofix ran on {len(fix_targets)} file(s)"
+                  + (f", {len(fix_errors)} error(s)." if fix_errors else "."))
+
     from quality_scan import scan_project
-    results = scan_project(str(scan_root), config, json_output=args.json)
+    results = scan_project(str(scan_root), config, json_output=args.json,
+                           files=changed_files)
+    findings = results.get("findings", [])
+
+    # --baseline: report only findings absent from the committed baseline.
+    if args.baseline:
+        baseline_path = repo_root / ".fettle-baseline.json"
+        if not baseline_path.exists():
+            print("Error: no .fettle-baseline.json found — run `fettle baseline create` first.",
+                  file=sys.stderr)
+            sys.exit(2)
+        known = _baseline_keys(baseline_path)
+        findings = [f for f in findings if _finding_key(f) not in known]
+        results["findings"] = findings
 
     if args.json:
         print(json.dumps(results, indent=2))
     else:
-        if not results.get("findings"):
+        if not findings:
             print("✓ No issues found.")
         else:
-            for f in results["findings"]:
+            for f in findings:
                 sev = f.get("severity", "info").upper()
                 loc = f"{f.get('file', '')}:{f.get('line', '')}" if f.get("file") else ""
                 print(f"  [{sev}] {loc} {f.get('code', '')} — {f.get('message', '')}")
-            print(f"\n{len(results['findings'])} finding(s).")
-            sys.exit(1 if any(f.get("severity") == "error" for f in results["findings"]) else 0)
+            print(f"\n{len(findings)} finding(s).")
+    sys.exit(1 if any(f.get("severity") == "error" for f in findings) else 0)
 
 
 def cmd_ci(args: argparse.Namespace) -> None:
