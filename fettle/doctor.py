@@ -91,18 +91,26 @@ def check_commit_guards() -> list[dict]:
         return checks
     if not repo_root or not (repo_root / ".pre-commit-config.yaml").is_file():
         return checks
-    hook = repo_root / ".git" / "hooks" / "pre-commit"
+    config_text = ""
     try:
-        wired = hook.is_file() and "pre-commit" in hook.read_text()
+        config_text = (repo_root / ".pre-commit-config.yaml").read_text()
     except OSError:
-        wired = False
-    checks.append({
-        "name": "commit-guards",
-        "required": False,
-        "ok": wired,
-        "detail": "pre-commit hooks wired" if wired
-                  else "repo has .pre-commit-config.yaml but hooks not installed — run: pre-commit install",
-    })
+        pass
+    for stage, hook_name in (("commit", "pre-commit"), ("push", "pre-push")):
+        if stage == "push" and "pre-push" not in config_text:
+            continue  # repo doesn't declare push-stage hooks
+        hook = repo_root / ".git" / "hooks" / hook_name
+        try:
+            wired = hook.is_file() and "pre-commit" in hook.read_text()
+        except OSError:
+            wired = False
+        checks.append({
+            "name": f"{stage}-guards",
+            "required": False,
+            "ok": wired,
+            "detail": f"{hook_name} hooks wired" if wired
+                      else f"declared but not installed — run: pre-commit install --hook-type {hook_name}",
+        })
     return checks
 
 

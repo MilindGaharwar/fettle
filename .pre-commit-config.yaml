@@ -26,3 +26,22 @@ repos:
         language: script
         pass_filenames: false
         files: '^(rules/|\.fettle/rules/|\.lint/semgrep/).*\.ya?ml$'
+      # Repo-consistency tests (fast, <10s): version alignment, schema
+      # anti-drift, CLI exit-code contract. Added 2026-07-24 after a
+      # README-only edit broke the version-alignment gate in CI — docs
+      # changes CAN break consistency tests, so they run at commit time.
+      - id: fettle-consistency
+        name: fettle consistency tests (version/schema/contract)
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m pytest tests/test_cli.py tests/test_config_schema.py -q --no-header -p no:cacheprovider'
+        language: system
+        pass_filenames: false
+        always_run: true
+      # Full suite at push time (~4.5 min): the commit->CI gap closer.
+      # Pushes are batch events; a red CI costs more than the wait.
+      - id: fettle-full-suite
+        name: fettle full test suite (pre-push)
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m pytest tests/ fettle/tests/ -q --no-header -p no:cacheprovider'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
