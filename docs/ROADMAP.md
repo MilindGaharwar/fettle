@@ -23,7 +23,7 @@ This roadmap is committed before implementation begins and updated as releases s
 | v1.0.0 | **Enterprise integration** — security review, threat model, deploy safety, debt dashboard, adapters, SWEBOK gaps | WP-L..WP-X5 | **Shipped** |
 | v1.0.1 | **Trustworthy core** — CLI exit-code contract, working check flags, MCP allowlist path fix, LR012 determinism | WP-133..WP-135 (partial, see [enterprise plan](fettle-enterprise-product-plan.md)) | **Shipped** |
 | v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
-| v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | **In progress** — WP-139/140/141 shipped; finefettle on PyPI ([enterprise plan](fettle-enterprise-product-plan.md)) |
+| v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | **Shipped in main** — all five WPs landed; Homebrew tap outstanding ([enterprise plan](fettle-enterprise-product-plan.md)) |
 | v1.3.0 | **Enterprise operations** — central policy, audit reporting, compliance evidence, supply-chain posture, BDD gate | WP-144..WP-148, WP-154 | Planned |
 | v1.4.0 | **Product surface** — LSP hardening, rule marketplace, Windows, docs site, noise SLOs, semantic impact gate | WP-149..WP-153, WP-155 | Planned |
 

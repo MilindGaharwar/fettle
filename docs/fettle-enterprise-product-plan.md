@@ -127,9 +127,13 @@ exit codes contract-tested; self-scan clean.
   `fettle config --validate` with precise errors; unknown-key warnings;
   schema version field with a migration path. This is the enterprise
   rollout artifact — orgs review a schema, not source code.
+  *Status 2026-07-24: shipped — docs/fettle.schema.json generated from
+  DEFAULTS with an anti-drift test; validate command live.*
 - **WP-143 — Pre-commit & CI parity.** Official `pre-commit` hook repo,
   reusable GitHub Actions workflow, GitLab CI template. One policy file,
   identical findings at editor, commit, and CI chokepoints (extends WP-122+).
+  *Status 2026-07-24: shipped — templates/gitlab-ci.yml added; pre-commit
+  hooks repo and reusable GitHub workflow already existed.*
 
 **Exit criteria:** clean-machine install via `pipx install` + `fettle init`
 on macOS/Linux completes in under 2 minutes with no manual symlinks; same

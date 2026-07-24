@@ -2,6 +2,16 @@
 
 ## Unreleased (v1.2 — Independence arc)
 
+- **WP-142 — Config schema v1**: `fettle config --validate` checks
+  .fettle.toml against the built-in defaults — unknown keys warn (typo'd
+  settings silently doing nothing is the classic config failure), type
+  mismatches error, mode values are vocabulary-checked. A JSON Schema is
+  published at docs/fettle.schema.json, generated from `config.DEFAULTS`;
+  an anti-drift test fails when DEFAULTS change without regeneration.
+- **WP-143 — CI parity templates**: GitLab CI template
+  (templates/gitlab-ci.yml) joins the GitHub Action and pre-commit hooks —
+  one .fettle.toml, identical findings at every chokepoint. Consumer
+  pre-commit template re-pinned from v0.4.2 to v1.0.2.
 - **WP-141 — `fettle init`**: one idempotent command replaces the symlink
   ritual — repo scaffolding (.fettle.toml, .fettle-ignore), Claude Code
   plugin symlink, OpenCode plugin registration, commit-time guard setup
