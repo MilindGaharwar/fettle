@@ -108,17 +108,20 @@ def _severity_order(sev: str) -> int:
 # Tool runners
 # ---------------------------------------------------------------------------
 
-def run_ruff(root: str) -> list[dict]:
+def run_ruff(root: str | list[str]) -> list[dict]:
     ruff = _resolve_tool("ruff")
     if not ruff:
         print("WARNING: ruff not found — skipping ruff checks", file=sys.stderr)
         return []
 
+    targets = [root] if isinstance(root, str) else list(root)
+    if not targets:
+        return []
     ruff_toml = str(rules_dir() / ".ruff.toml")
     cmd = [ruff, "check", "--output-format=json"]
     if os.path.isfile(ruff_toml):
         cmd.extend(["--config", ruff_toml])
-    cmd.append(root)
+    cmd.extend(targets)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     # ruff exits 1 when findings exist — that is expected
@@ -145,18 +148,21 @@ def run_ruff(root: str) -> list[dict]:
     return findings
 
 
-def run_semgrep(root: str) -> list[dict]:
+def run_semgrep(root: str | list[str]) -> list[dict]:
     semgrep = _resolve_tool("semgrep")
     if not semgrep:
         print("WARNING: semgrep not found — skipping semgrep checks", file=sys.stderr)
         return []
 
+    targets = [root] if isinstance(root, str) else list(root)
+    if not targets:
+        return []
     rules_file = str(rules_dir() / "llm-antipatterns.yml")
     if not os.path.isfile(rules_file):
         print("WARNING: semgrep rules file not found — skipping semgrep checks", file=sys.stderr)
         return []
 
-    cmd = [semgrep, "--config", rules_file, "--json", root]
+    cmd = [semgrep, "--config", rules_file, "--json", *targets]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode not in (0, 1):
         print(f"WARNING: semgrep exited {result.returncode}: {result.stderr.strip()[:200]}", file=sys.stderr)
@@ -246,12 +252,14 @@ def _print_json(findings: list[dict], file_count: int) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def scan_project(root: str, config: dict | None = None, json_output: bool = False) -> dict:
+def scan_project(root: str, config: dict | None = None, json_output: bool = False,
+                 files: list[str] | None = None) -> dict:
     """Scan a project and return {"findings": [...], "file_count": N}.
 
     Findings are normalized for programmatic callers (the CLI): `code` alias
     for the rule id and a lowercase `severity`. Pure of argv/exit — main()
-    handles CLI concerns.
+    handles CLI concerns. When *files* is given, only those files are scanned
+    (used by `fettle check --changed`).
     """
     root = os.path.abspath(root)
     cfg = config or load_config(root)
@@ -260,9 +268,14 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
     WARNING_PREFIXES = set(cfg["severity"]["warning_prefixes"])
 
     ignore_patterns = _load_ignore(root)
-    file_count = len(_collect_py_files(root, ignore_patterns))
+    if files is not None:
+        targets: str | list[str] = [os.path.abspath(f) for f in files]
+        file_count = len(targets)
+    else:
+        targets = root
+        file_count = len(_collect_py_files(root, ignore_patterns))
 
-    findings = run_ruff(root) + run_semgrep(root) + scan_spec_audit(root, cfg)
+    findings = run_ruff(targets) + run_semgrep(targets) + scan_spec_audit(root, cfg)
     for f in findings:
         if os.path.isabs(f.get("file", "")):
             f["file"] = os.path.relpath(f["file"], root)
@@ -285,6 +298,9 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
         }
         for f in findings
     ]
+    if files is not None:
+        rel_targets = {os.path.relpath(os.path.abspath(f), root) for f in files}
+        normalized = [f for f in normalized if f["file"] in rel_targets]
     return {"findings": normalized, "file_count": file_count}
 
 

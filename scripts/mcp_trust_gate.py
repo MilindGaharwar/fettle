@@ -11,10 +11,18 @@ import sys
 from typing import NoReturn
 
 
+DEFAULT_ALLOWLIST_PATH = "~/.config/fettle/mcp-allowlist.json"
+
+
+def _allowlist_path() -> str:
+    """Absolute path to the allowlist file (env override or default)."""
+    raw = os.environ.get("MCP_ALLOWLIST_PATH", DEFAULT_ALLOWLIST_PATH)
+    return os.path.abspath(os.path.expanduser(raw))
+
+
 def load_allowlist() -> dict[str, object]:
-    path = os.environ.get("MCP_ALLOWLIST_PATH", "~/.config/fettle/mcp-allowlist.json")
     try:
-        with open(path) as f:
+        with open(_allowlist_path()) as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {"packages": {}, "registries_blocked": [], "protected_paths": []}
@@ -173,13 +181,19 @@ def check_bash(command: str, allowlist: dict[str, object]) -> None:
 
 def check_file_tool(file_path: str, allowlist: dict[str, object]) -> None:
     protected = allowlist.get("protected_paths", [])
-    if file_path == "~/.config/fettle/mcp-allowlist.json":
+    resolved = os.path.abspath(os.path.expanduser(file_path))
+    if file_path == DEFAULT_ALLOWLIST_PATH or resolved == _allowlist_path():
         deny(f"Write to protected path blocked: {file_path}")
     if isinstance(protected, list):
         if file_path in protected:
             deny(f"Write to protected path blocked: {file_path}")
         for p in protected:
-            if isinstance(p, str) and (file_path.startswith(p + "/") or file_path.startswith(p + os.sep)):
+            if not isinstance(p, str):
+                continue
+            p_resolved = os.path.abspath(os.path.expanduser(p))
+            if resolved == p_resolved or resolved.startswith(p_resolved + os.sep):
+                deny(f"Write to protected path blocked: {file_path} (under {p})")
+            if file_path.startswith(p + "/") or file_path.startswith(p + os.sep):
                 deny(f"Write to protected path blocked: {file_path} (under {p})")
 
 
