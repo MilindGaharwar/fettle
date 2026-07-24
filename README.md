@@ -111,36 +111,38 @@ Plus ruff: `BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`, `UP*` as warnings
 ## Installation
 
 ```bash
-# Clone to your projects folder
+# Clone (agent hooks run from the checkout)
 git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle
+cd ~/projects/fettle
 
-# Symlink into Claude Code plugins (hooks require this path)
-ln -s ~/projects/fettle ~/.claude/plugins/fettle
-
-# Install tools
-uv tool install ruff
-uv tool install semgrep   # optional
+# One command wires everything: repo config, Claude Code plugin symlink,
+# OpenCode plugin registration, commit-time guards — idempotent.
+python3 fettle/cli.py init --install-tools
 
 # Verify
-bash ~/.claude/plugins/fettle/scripts/run.sh doctor.py
-```
-
-Hooks auto-activate via `hooks/hooks.json` when symlinked in `~/.claude/plugins/`.
-For OpenCode, register the adapter as described in
-[docs/OPENCODE.md](docs/OPENCODE.md).
-
-The `fettle` name on PyPI belongs to an unrelated project, so the package is
-published as **`finefettle`** (“in fine fettle”) — the command is still
-`fettle`. Until the first PyPI release lands (v1.2 arc), install from GitHub:
-
-```bash
-pip install "git+https://github.com/MilindGaharwar/fettle.git@main"
 fettle doctor
 ```
+
+`fettle init` detects which agents are installed and only wires those; add
+`--dry-run` to preview. Hooks auto-activate via `hooks/hooks.json` once the
+plugin symlink exists. OpenCode details: [docs/OPENCODE.md](docs/OPENCODE.md).
+
+The CLI is also on PyPI — the `fettle` name belongs to an unrelated project,
+so the package is **`finefettle`** (“in fine fettle”); the command is still
+`fettle`:
+
+```bash
+pipx install finefettle
+fettle doctor
+```
+
+(Agent hooks require the git checkout — wheels ship the CLI and rules only;
+`fettle init` will tell you if a checkout is needed.)
 
 ## CLI
 
 ```bash
+fettle init [--install-tools] [--dry-run]
 fettle check [--all] [--changed] [--json] [--fix] [--baseline]
 fettle config --print-effective
 fettle config --explain

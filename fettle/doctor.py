@@ -74,12 +74,44 @@ def check_environment() -> list[dict]:
     return checks
 
 
+def check_commit_guards() -> list[dict]:
+    """Warn when the repo declares pre-commit hooks but they aren't wired (WP-141).
+
+    A .pre-commit-config.yaml without `pre-commit install` means commit-time
+    guards silently don't run — the exact gap behind the 2026-07-24 CI scrub
+    failure. Non-required: repos without pre-commit config are untouched.
+    """
+    import os
+    checks: list[dict] = []
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from fettle.paths import find_repo_root
+        repo_root = find_repo_root()
+    except Exception:  # noqa: BLE001 — doctor must never crash
+        return checks
+    if not repo_root or not (repo_root / ".pre-commit-config.yaml").is_file():
+        return checks
+    hook = repo_root / ".git" / "hooks" / "pre-commit"
+    try:
+        wired = hook.is_file() and "pre-commit" in hook.read_text()
+    except OSError:
+        wired = False
+    checks.append({
+        "name": "commit-guards",
+        "required": False,
+        "ok": wired,
+        "detail": "pre-commit hooks wired" if wired
+                  else "repo has .pre-commit-config.yaml but hooks not installed — run: pre-commit install",
+    })
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    checks = check_environment()
+    checks = check_environment() + check_commit_guards()
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:

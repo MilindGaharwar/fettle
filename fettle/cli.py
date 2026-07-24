@@ -292,6 +292,23 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     subprocess.run([sys.executable, os.path.join(script_dir, "doctor.py")], check=False)
 
 
+def cmd_init(args: argparse.Namespace) -> None:
+    """One-command setup: repo config, agent hooks, commit-time guards (WP-141)."""
+    from fettle.paths import find_repo_root
+    from fettle.init_cmd import print_steps, run_init
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    steps, exit_code = run_init(repo_root, tools=args.install_tools, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps([s.to_dict() for s in steps], indent=2))
+    else:
+        print_steps(steps)
+    sys.exit(exit_code)
+
+
 def cmd_bench(args: argparse.Namespace) -> None:
     """Run the noise benchmark over pinned corpora (WP-118)."""
     from fettle.bench import load_budgets, run_bench
@@ -364,6 +381,12 @@ def main() -> None:
 
     subparsers.add_parser("doctor", help="Environment self-check")
 
+    p_init = subparsers.add_parser("init", help="One-command setup: repo config, agent hooks, commit-time guards")
+    p_init.add_argument("--install-tools", action="store_true",
+                        help="Install pinned ruff/semgrep/pre-commit via uv")
+    p_init.add_argument("--dry-run", action="store_true", help="Show what would be done")
+    p_init.add_argument("--json", action="store_true", help="JSON output")
+
     p_bench = subparsers.add_parser("bench", help="Noise benchmark: findings-per-KLOC vs committed budgets")
     p_bench.add_argument("--corpus", action="append", required=True, metavar="NAME=PATH",
                          help="Named corpus directory (repeatable)")
@@ -419,6 +442,7 @@ def main() -> None:
         "explain": cmd_explain,
         "baseline": cmd_baseline,
         "doctor": cmd_doctor,
+        "init": cmd_init,
         "bench": cmd_bench,
         "ci": cmd_ci,
         "ratchet": cmd_ratchet,

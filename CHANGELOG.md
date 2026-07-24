@@ -2,6 +2,14 @@
 
 ## Unreleased (v1.2 — Independence arc)
 
+- **WP-141 — `fettle init`**: one idempotent command replaces the symlink
+  ritual — repo scaffolding (.fettle.toml, .fettle-ignore), Claude Code
+  plugin symlink, OpenCode plugin registration, commit-time guard setup
+  (.pre-commit-config.yaml + `pre-commit install`), and `--install-tools`
+  for pinned ruff/semgrep/pre-commit via uv (explicit user action — hooks
+  never install anything, per audit D6). `fettle doctor` now warns when a
+  repo declares pre-commit hooks that aren't wired — closing the gap behind
+  the 2026-07-24 CI scrub failure.
 - **WP-140 — Agent abstraction layer**: new `fettle.agents` package — native
   agent payloads (Claude Code hook JSON, OpenCode plugin events) normalize
   into the dispatcher's event model through per-agent translators. Payload

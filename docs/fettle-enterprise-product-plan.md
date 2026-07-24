@@ -120,6 +120,9 @@ exit codes contract-tested; self-scan clean.
   agent(s), replacing the symlink ritual. Remove run.sh auto-install (D6):
   doctor reports missing tools, `fettle init --install-tools` installs them
   **pinned** and once.
+  *Status 2026-07-24: finefettle 1.0.2 on PyPI via Trusted Publishing;
+  `fettle init` shipped (agents, guards, pinned tools, doctor check);
+  Homebrew tap outstanding.*
 - **WP-142 — Config schema v1.** Published JSON Schema for `.fettle.toml`;
   `fettle config --validate` with precise errors; unknown-key warnings;
   schema version field with a migration path. This is the enterprise
