@@ -8,7 +8,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
 
@@ -53,13 +52,13 @@ def explain_entry(entry: dict) -> str:
         lines.append("  To fix: address the violation(s) above.")
         lines.append(f"  To suppress: add `# noqa: {findings[0].get('code', '')}` (ruff) or `# nosemgrep: {findings[0].get('code', '')}` (semgrep)")
     elif status == "tool_error":
-        lines.append(f"  Outcome: Tool error — Fettle could not run the check.")
+        lines.append("  Outcome: Tool error — Fettle could not run the check.")
         lines.append(f"  This is NOT a code quality issue. The tool ({tool}) may be missing or misconfigured.")
-        lines.append(f"  Run `fettle doctor` to diagnose.")
+        lines.append("  Run `fettle doctor` to diagnose.")
     elif status == "config_error":
-        lines.append(f"  Outcome: Configuration error — .fettle.toml may be invalid.")
+        lines.append("  Outcome: Configuration error — .fettle.toml may be invalid.")
     elif status == "skipped":
-        lines.append(f"  Outcome: Skipped — file was not in scope for checking.")
+        lines.append("  Outcome: Skipped — file was not in scope for checking.")
 
     return "\n".join(lines)
 

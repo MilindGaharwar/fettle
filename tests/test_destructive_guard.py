@@ -216,6 +216,30 @@ class TestAllowCommandsOverride:
         assert rc == 0
         assert out is not None
 
+    def test_allow_entry_does_not_forgive_chained_command(self, tmp_path) -> None:
+        """An allow entry must not whitelist a chained command containing it (audit D7)."""
+        cfg = tmp_path / ".fettle.toml"
+        cfg.write_text(
+            '[gates.destructive]\nenabled = true\n'
+            'allow_commands = ["rm -rf node_modules"]\n'
+        )
+        rc, out, _ = _run_hook(
+            "rm -rf node_modules && rm -rf /important", cwd=str(tmp_path)
+        )
+        assert rc == 0
+        assert out is not None  # second segment still flagged
+
+    def test_allow_entry_does_not_match_as_prefix(self, tmp_path) -> None:
+        """An allow entry must not forgive a segment with extra arguments (audit D7)."""
+        cfg = tmp_path / ".fettle.toml"
+        cfg.write_text(
+            '[gates.destructive]\nenabled = true\n'
+            'allow_commands = ["rm -rf node_modules"]\n'
+        )
+        rc, out, _ = _run_hook("rm -rf node_modules /important", cwd=str(tmp_path))
+        assert rc == 0
+        assert out is not None
+
 
 class TestNoFalsePositives:
     def test_does_not_false_positive_on_grep_containing_rm(self) -> None:

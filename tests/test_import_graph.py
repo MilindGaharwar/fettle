@@ -11,7 +11,7 @@ import sys
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
 
-from import_graph import dependents_of, check_imports, check_contracts
+from import_graph import dependents_of, check_imports, check_contracts  # noqa: E402
 
 
 @pytest.fixture

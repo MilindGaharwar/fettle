@@ -15,7 +15,7 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
 from config import state_dir  # noqa: E402
 
-from import_graph import check_imports, check_contracts
+from import_graph import check_imports, check_contracts  # noqa: E402
 
 
 _ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".git")

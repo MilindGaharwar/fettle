@@ -1,0 +1,3 @@
+# Fettle self-scan ignore list — findings in these paths are excluded.
+# tests/fixtures holds intentional rule violations used as test corpora.
+tests/fixtures/*

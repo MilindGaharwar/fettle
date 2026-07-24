@@ -2,13 +2,11 @@
 
 import os
 import sys
-from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from paths import (
-    find_repo_root, resolve_path, is_within_repo,
+    find_repo_root, is_within_repo,
     relative_to_repo, is_implementation_file, is_test_file, is_excluded,
 )
 

@@ -19,7 +19,6 @@ import os
 import sys
 import time
 from collections import Counter
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from trace import get_recent_decisions
@@ -136,22 +135,22 @@ def main() -> None:
     print(f"  Total findings: {report['total_findings']}")
 
     if report["top_violations"]:
-        print(f"\n  Top violations:")
+        print("\n  Top violations:")
         for code, count in report["top_violations"][:5]:
             print(f"    • {code}: {count}×")
 
     if report["most_affected_files"]:
-        print(f"\n  Most affected files:")
+        print("\n  Most affected files:")
         for file, count in report["most_affected_files"][:3]:
             print(f"    • {file}: {count} finding(s)")
 
     if report["tool_errors"]:
-        print(f"\n  Recent tool errors:")
+        print("\n  Recent tool errors:")
         for err in report["tool_errors"][:3]:
             print(f"    • {err['tool']} at {err['ts']}")
 
     if candidates["recalibrate_candidates"]:
-        print(f"\n  Recalibrate candidates (always suppressed):")
+        print("\n  Recalibrate candidates (always suppressed):")
         for code in candidates["recalibrate_candidates"]:
             print(f"    • {code}")
 

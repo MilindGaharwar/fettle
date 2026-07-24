@@ -1,5 +1,5 @@
 {
-  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS.",
+  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS. Timeouts are in seconds (Claude Code hook semantics).",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }
@@ -20,7 +20,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
-            "timeout": 15000
+            "timeout": 15
           }
         ]
       }
@@ -31,7 +31,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/subagent_inject.js",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
-            "timeout": 60000
+            "timeout": 60
           }
         ]
       }
