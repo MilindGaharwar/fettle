@@ -59,8 +59,11 @@ Plus ruff: `BLE001`, `S110`, `S608`, `S701` as errors; `SIM*`, `UP*` as warnings
 ## Installation
 
 ```bash
-# Clone for Claude Code and OpenCode integration
-git clone https://github.com/MilindGaharwar/fettle ~/.claude/plugins/fettle
+# Clone to your projects folder
+git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle
+
+# Symlink into Claude Code plugins (hooks require this path)
+ln -s ~/projects/fettle ~/.claude/plugins/fettle
 
 # Install tools
 uv tool install ruff
@@ -70,7 +73,7 @@ uv tool install semgrep   # optional
 bash ~/.claude/plugins/fettle/scripts/run.sh doctor.py
 ```
 
-Hooks auto-activate via `hooks/hooks.json` when installed in `~/.claude/plugins/`.
+Hooks auto-activate via `hooks/hooks.json` when symlinked in `~/.claude/plugins/`.
 For OpenCode, register the adapter as described in
 [docs/OPENCODE.md](docs/OPENCODE.md).
 
