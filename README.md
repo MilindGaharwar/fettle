@@ -9,10 +9,10 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v0.9.0** — engineering discipline enforcement. Builds on v0.7's
-adaptive platform with: advisory contract, discipline-link pilot, cooperative
-budgets, bash audit, diff coverage (line + branch), function complexity limits,
-enhanced plan thresholds, and TDD phase enforcement.
+**Status: v1.0.0** — enterprise integration + SWEBOK v4 coverage. Full
+engineering discipline enforcement with external tool adapters (SonarQube,
+Black Duck, Pact), security review, threat modeling, deployment safety,
+technical debt quantification, mutation testing, and requirements traceability.
 
 ## What It Does
 

@@ -20,7 +20,8 @@ This roadmap is committed before implementation begins and updated as releases s
 | v0.7.0 | **Reach** — same policy at every chokepoint | WP-122..WP-126 | **Shipped with distribution exceptions** |
 | v0.8.0 | **Discipline integration** — advisory contract, link pilot, budget, audit, coverage | WP-A..WP-G | **Shipped** |
 | v0.9.0 | **Engineering discipline enforcement** — branch coverage, complexity, plan thresholds, TDD | WP-H..WP-K | **Shipped** |
-| v1.0.0 | **Governance & agent audit** — enterprise operability | WP-127..WP-132 | Planned |
+| v1.0.0 | **Enterprise integration** — security review, threat model, deploy safety, debt dashboard, adapters, SWEBOK gaps | WP-L..WP-X5 | **Shipped** |
+| v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 
