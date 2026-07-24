@@ -5,7 +5,7 @@
 # Consumer usage (.gitlab-ci.yml):
 #
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/MilindGaharwar/fettle/v1.0.2/templates/gitlab-ci.yml'
+#     - remote: 'https://raw.githubusercontent.com/MilindGaharwar/fettle/v1.2.0/templates/gitlab-ci.yml'
 #
 #   fettle:
 #     variables:

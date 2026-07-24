@@ -4,7 +4,7 @@ Public API (WP-139): stable entry points for programmatic use. Everything
 else under fettle.* is internal and may change between minor versions.
 """
 
-__version__ = "1.0.2"
+__version__ = "1.2.0"
 
 __all__ = ["__version__", "load_config", "scan_project", "find_repo_root"]
 
