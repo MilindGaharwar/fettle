@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config
 from paths import find_repo_root, is_within_repo, relative_to_repo
-from result import Finding, Severity, make_pass, make_skipped, make_violation
+from result import Finding, Severity, make_pass, make_violation
 from trace import log_decision
 
 
@@ -64,11 +64,7 @@ def main() -> None:
         sys.exit(0)
 
     docs_dir = repo_root / "docs"
-    has_ux_spec = False
-    if docs_dir.exists():
-        for spec_file in docs_dir.glob("*.ux-spec.md"):
-            has_ux_spec = True
-            break
+    has_ux_spec = any(docs_dir.glob("*.ux-spec.md")) if docs_dir.exists() else False
 
     if has_ux_spec:
         log_decision(hook="PreToolUse", status="pass", tool="ux_spec", file=rel_path, session_id=session_id)
@@ -80,7 +76,7 @@ def main() -> None:
                 tool="ux_spec_gate",
                 severity=Severity.WARNING,
                 path=rel_path,
-                message=f"Frontend file edited without UX spec. Create docs/<feature>.ux-spec.md first. Disable: [gates.ux_spec] enabled = false",
+                message="Frontend file edited without UX spec. Create docs/<feature>.ux-spec.md first. Disable: [gates.ux_spec] enabled = false",
             )
         ])
 

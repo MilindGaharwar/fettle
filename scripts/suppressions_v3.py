@@ -309,7 +309,7 @@ def cmd_suppressions(args: argparse.Namespace) -> None:
 
     elif action == "report":
         report = suppressions_report(project_root)
-        print(f"── Suppressions Report ──\n")
+        print("── Suppressions Report ──\n")
         print(f"  Total: {report['total']}")
         print(f"  Active: {report['active']}")
         print(f"  Expired: {report['expired']}")

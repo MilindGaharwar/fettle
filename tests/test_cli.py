@@ -135,3 +135,50 @@ def test_check_changed_no_changes_exits_0(tmp_path, monkeypatch, capsys):
     assert exc_info.value.code == 0
     assert "No changed" in capsys.readouterr().out
 
+
+# --- Version reporting and alignment (WP-138 / audit D5) ---
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def test_version_flag(capsys):
+    import re
+    from cli import main
+    with patch("sys.argv", ["fettle", "--version"]), pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert re.match(r"^fettle \d+\.\d+\.\d+", out)
+
+
+def test_version_metadata_aligned():
+    """pyproject, package __version__, CHANGELOG, and README must agree.
+
+    Release gate: the repo shipped with pyproject at 0.7.0 while docs
+    claimed v1.0.0 (audit D5). This test makes that drift impossible.
+    """
+    import re
+    import tomllib
+
+    with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
+        pyproject_version = tomllib.load(fh)["project"]["version"]
+
+    with open(os.path.join(_REPO_ROOT, "scripts", "__init__.py")) as fh:
+        init_version = re.search(r'__version__ = "([^"]+)"', fh.read()).group(1)
+
+    with open(os.path.join(_REPO_ROOT, "CHANGELOG.md")) as fh:
+        changelog_version = re.search(r"^## v(\d+\.\d+\.\d+)", fh.read(), re.MULTILINE).group(1)
+
+    with open(os.path.join(_REPO_ROOT, "README.md")) as fh:
+        readme_version = re.search(r"\*\*Status: v(\d+\.\d+\.\d+)\*\*", fh.read()).group(1)
+
+    assert pyproject_version == init_version == changelog_version == readme_version
+
+
+def test_cli_version_matches_pyproject():
+    import tomllib
+    from cli import _version
+    with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
+        assert _version() == tomllib.load(fh)["project"]["version"]
+
+

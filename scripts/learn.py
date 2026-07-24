@@ -202,7 +202,7 @@ def main() -> None:
         print("  Failed to generate rule. Is Ollama running?")
         sys.exit(1)
 
-    print(f"\n  Generated rule:")
+    print("\n  Generated rule:")
     print(f"    ID: {rule.get('rule_id', '?')}")
     print(f"    Severity: {rule.get('severity', '?')}")
     print(f"    Message: {rule.get('message', '?')}")

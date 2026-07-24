@@ -71,10 +71,13 @@ def _check_segment(segment: str) -> str | None:
     return None
 
 
-def _is_allowed(cmd: str, allow_list: list[str]) -> bool:
-    """Check if the full command matches an allow-list entry."""
-    normalized = cmd.strip()
-    return any(allowed.strip() in normalized for allowed in allow_list)
+def _is_allowed(segment: str, allow_list: list[str]) -> bool:
+    """A segment is allowed only if it exactly matches an allow-list entry
+    (whitespace-normalized). Substring matching would let an allow entry
+    forgive an entire chained command (`rm -rf node_modules; rm -rf ~`).
+    """
+    normalized = " ".join(segment.split())
+    return any(" ".join(a.split()) == normalized for a in allow_list)
 
 
 def main() -> None:
@@ -104,12 +107,11 @@ def main() -> None:
             with contextlib.suppress(re.error):
                 COMPILED_PATTERNS.append(re.compile(pat, re.IGNORECASE))
 
-    if _is_allowed(command, allow_commands):
-        sys.exit(0)
-
     segments = _normalize_command(command)
     matched = None
     for seg in segments:
+        if _is_allowed(seg, allow_commands):
+            continue
         matched = _check_segment(seg)
         if matched:
             break
@@ -166,12 +168,11 @@ def run_check(ctx):
             with contextlib.suppress(re.error):
                 COMPILED_PATTERNS.append(re.compile(pat, re.IGNORECASE))
 
-    if _is_allowed(command, allow_commands):
-        return CheckResult.allow()
-
     segments = _normalize_command(command)
     matched = None
     for seg in segments:
+        if _is_allowed(seg, allow_commands):
+            continue
         matched = _check_segment(seg)
         if matched:
             break

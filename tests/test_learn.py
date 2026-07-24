@@ -1,12 +1,8 @@
 """Tests for scripts/learn.py"""
 
-import json
 import os
 import sys
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from learn import _generate_semgrep_yaml, _save_rule, list_learned_rules

@@ -18,6 +18,23 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def _version() -> str:
+    """Fettle version — pyproject.toml in clone mode, package metadata when installed."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            import tomllib
+            with open(pyproject, "rb") as fh:
+                return tomllib.load(fh)["project"]["version"]
+        except (OSError, KeyError, ValueError):
+            pass
+    try:
+        from importlib.metadata import version
+        return version("fettle")
+    except Exception:  # noqa: BLE001 — version display must never crash the CLI
+        return "unknown"
+
+
 def _finding_key(f: dict) -> str:
     """Stable identity for a finding across scan and baseline formats."""
     return f"{f.get('file', '')}:{f.get('line', 0)}:{f.get('code') or f.get('rule', '')}"
@@ -326,6 +343,7 @@ def cmd_lsp(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
+    parser.add_argument("--version", action="version", version=f"fettle {_version()}")
     subparsers = parser.add_subparsers(dest="command")
 
     p_check = subparsers.add_parser("check", help="Run quality checks")

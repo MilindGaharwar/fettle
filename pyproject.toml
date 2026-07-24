@@ -48,3 +48,20 @@ fettle = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# Self-lint config — tests/fixtures contains intentional violations used as
+# rule-pack test corpora and must never pollute lint output (audit D9).
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "SIM", "UP", "B"]
+ignore = [
+    "SIM105",  # contextlib.suppress — try/except is clearer in hook hot paths
+    "SIM108",  # ternary — explicit if/else preferred for readability
+    "SIM117",  # nested with — allowed where line length would suffer
+    "UP042",   # StrEnum migration tracked for the v1.2 package restructure
+    "UP035",   # typing imports — same arc
+    "SIM102", "SIM110", "SIM114", "SIM115",  # style-only, cleaned incrementally
+    "B905",    # zip strict= — not applicable on all supported call sites
+]

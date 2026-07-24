@@ -25,6 +25,27 @@ for the full enterprise arc (WP-133..WP-153).
 - **LR012 duplicate-helper sniffer (D4)**: replaced per-function `git grep`
   calls with a 40 ms timeout by one batched grep with a 0.5 s timeout —
   detection was nondeterministic under load (and its test flaky).
+- **Hook launcher no longer auto-installs tools (D6)**: `run.sh` ran an
+  unpinned `uv tool install ruff/semgrep` inside the hook path on every
+  invocation where a tool was missing — a supply-chain and latency risk.
+  Missing tools are now reported by `fettle doctor` and skipped with a
+  warning by the individual checks.
+- **Destructive-guard allowlist matching (D7)**: `allow_commands` entries
+  now match a whole command segment exactly (whitespace-normalized).
+  Substring matching let one allowed entry forgive an entire chained
+  command (`rm -rf node_modules; rm -rf ~`).
+- **Hook timeouts corrected to seconds (D8)**: `hooks.json` declared
+  10000/15000/60000 — Claude Code interprets hook timeouts in seconds, so a
+  hung hook could block a session for hours. Now 10/15/60 s (5 s SubagentStart).
+
+### Added
+- `fettle --version` — reads pyproject.toml in clone mode, package metadata
+  when pip-installed.
+- Release-gate test asserting pyproject, `__version__`, CHANGELOG, and README
+  versions all agree.
+- Ruff self-lint config in pyproject.toml and a `.fettle-ignore` excluding
+  `tests/fixtures` (intentional-violation corpora) from self-scans (D9);
+  repo is now self-check clean.
 
 ### Internal
 - `quality_scan.scan_project()` accepts a `files=` parameter for targeted

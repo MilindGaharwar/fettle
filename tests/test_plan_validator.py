@@ -2,7 +2,6 @@
 
 import sys
 import os
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
@@ -256,7 +255,7 @@ def test_pipeline_completeness_fails_without_transition():
 
 def test_pipeline_completeness_passes_with_transition():
     wp = make_wp("WP-1 Ingestion pipeline", [
-        ("Write ingest_episode setting processed=0", "TDD", "pytest passes"),
+        ("Write ingest_episode setting processed=0", "TDD", "pytest passes"),  # fettle:queue-consumer-verified consumer=validator-test-data
         ("Wire extraction consumer end-to-end", "INTEGRATION", "facts > 0 after ingest"),
         ("Guard incident INC-2026-0501-B", "REGRESSION", "test_pipeline_e2e passes"),
         ("Run ingest_episode; assert facts > 0 and processed=1 transition confirmed", "LIVE",
@@ -308,7 +307,7 @@ def test_health_inversion_passes_with_inversion_test():
 def test_regression_incident_b_as_written_rejected():
     """Exact shape of incident INC-2026-0501-B."""
     wp = make_wp("WP-2 Entity extraction pipeline", [
-        ("Implement ingest_episode storing processed=0", "TDD", "pytest: episode_id returned, journal has rows"),
+        ("Implement ingest_episode storing processed=0", "TDD", "pytest: episode_id returned, journal has rows"),  # fettle:queue-consumer-verified consumer=validator-test-data
         ("Wire bridge hooks to call ingest_episode", "INTEGRATION", "bridge calls ingest_episode on every message"),
         ("Guard journal row insertion — regression for missing row test", "REGRESSION",
          "test_journal_append passes: episode row exists in journal.db"),

@@ -179,7 +179,6 @@ def format_report(report: dict) -> str:
 
 def main():
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(description="Fettle requirements traceability")
     parser.add_argument("--root", default=".", help="Project root")

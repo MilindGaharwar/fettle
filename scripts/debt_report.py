@@ -158,7 +158,6 @@ def format_debt_report(report: dict) -> str:
 
 
 def main():
-    import sys
     import argparse
 
     parser = argparse.ArgumentParser(description="Fettle debt report")
