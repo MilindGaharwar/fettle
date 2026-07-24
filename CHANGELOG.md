@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.0.0 — Enterprise Integration + SWEBOK Coverage
+
+### Enterprise Features (v1.0 plan)
+- **WP-L — Extended secret scanner**: Azure Storage, Azure AD, GCP Service Account,
+  GCP API Key, Bearer Token patterns. Config: `boundary.extra_secret_patterns`.
+- **WP-N — Provenance policy gate**: 4 modes (none/manifest/marker/commit) for
+  AI-generated code disclosure. PostToolUse(Write), new files only.
+- **WP-O — Artifact verification gate**: PreToolUse(Bash) blocks publish without
+  signed/scanned evidence. Evidence bound to exact artifact identity + exit code.
+- **WP-P — Security review command**: `/fettle:security-review` orchestrating ruff
+  S-rules + semgrep p/owasp-top-ten with CWE references.
+- **WP-Q — Threat model command**: `/fettle:threat-model` STRIDE template with
+  auto-detected entry points, data stores, and auth mechanisms.
+- **WP-R — PR review orchestration**: `/fettle:pr-review` aggregates quality scan +
+  coverage + complexity + breaking-change detection.
+- **WP-S — SonarQube adapter**: IntegrationAdapter protocol, quality gate + issues API.
+- **WP-T — Black Duck/Polaris adapter**: CLI invocation, SARIF parsing, subprocess security.
+- **WP-U — Pact adapter**: Broker API for contract verification status.
+- **WP-V — Architecture boundary rules**: import direction enforcement from .fettle.toml rules.
+- **WP-W — ADR + Architecture discipline skills** in Disciplines plugin.
+
+### SWEBOK v4 Gap Coverage
+- **WP-X1 — Technical debt dashboard**: TODO/suppression count, complexity trend, A-E rating.
+- **WP-X2 — Deployment safety gate**: PreToolUse(Bash) verifies tests ran, health endpoint
+  exists, no debug flags before deploy commands.
+- **WP-X3 — Release gate**: CHANGELOG/semver enforcement on `git tag`.
+- **WP-X4 — Mutation testing command**: wraps mutmut, changed files only, configurable threshold.
+- **WP-X5 — Requirements traceability**: links spec files to tests via naming + markers.
+
+### Infrastructure
+- **IntegrationAdapter protocol**: shared 5-state result model (pass/fail/unavailable/
+  misconfigured/not_enabled) with configurable fail-open/fail-closed.
+- **Codebase rationalization**: deleted 11 dead modules + 6 orphaned tests (-1,585 lines).
+- **JSON schema contract tests**: 16 tests validating dispatcher output against Claude Code schema.
+- **TypeScript adapter tests**: 21 dedicated integration tests.
+- **Worklog gate**: daily worklog enforcement at Stop hook.
+- **CI fix**: resolved semgrep false positive on f-strings.
+
 ## v0.9.0 — Engineering Discipline Enforcement
 
 - **WP-K — Branch coverage gate**: extends coverage_gate.py to check
