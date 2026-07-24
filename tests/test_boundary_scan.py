@@ -10,9 +10,9 @@ import sys
 import tempfile
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
+sys.path.insert(0, os.path.join(PLUGIN_DIR))
 
-from boundary_scan import scan_repo, scan_text  # noqa: E402
+from fettle.boundary_scan import scan_repo, scan_text  # noqa: E402
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"   # synthetic, non-credential shape that SHOULD flag
 AWS_EXAMPLE = "AKIAIOSFODNN7EXAMPLE"  # AWS docs convention — must NOT flag

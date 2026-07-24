@@ -4,14 +4,14 @@
 - id: fettle-check
   name: fettle check (changed files)
   description: Run Fettle quality checks on the changed files before commit.
-  entry: scripts/pre_commit_check.sh
+  entry: fettle/pre_commit_check.sh
   language: script
   pass_filenames: false
   always_run: true
 - id: fettle-rules-validate
   name: fettle rules validate
   description: Validate project-local semgrep rule files (.fettle/rules, .lint/semgrep) — an invalid pack silently disables all its rules.
-  entry: scripts/pre_commit_rules_validate.sh
+  entry: fettle/pre_commit_rules_validate.sh
   language: script
   pass_filenames: false
   files: '^(\.fettle/rules/|\.lint/semgrep/).*\.ya?ml$'

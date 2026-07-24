@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(command: str = "ls -la", config_overrides: dict | None = None,
@@ -49,10 +49,10 @@ def _make_ctx(command: str = "ls -la", config_overrides: dict | None = None,
 
 def test_disabled_no_file(tmp_path):
     """When disabled, no audit file is created."""
-    from bash_audit import run_check
+    from fettle.bash_audit import run_check
 
     ctx = _make_ctx(config_overrides={"enabled": False})
-    with patch("config.state_dir", return_value=tmp_path / "sess"):
+    with patch("fettle.config.state_dir", return_value=tmp_path / "sess"):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
     assert not (tmp_path / "sess" / "bash_events.jsonl").exists()
@@ -60,13 +60,13 @@ def test_disabled_no_file(tmp_path):
 
 def test_enabled_no_capture_hash_only(tmp_path):
     """Enabled without capture_command: logs hash, no command text."""
-    from bash_audit import run_check
+    from fettle.bash_audit import run_check
 
     session_dir = tmp_path / "test-audit"
     session_dir.mkdir(parents=True)
 
     ctx = _make_ctx(command="echo secret_password=abc123")
-    with patch("config.state_dir", return_value=session_dir):
+    with patch("fettle.config.state_dir", return_value=session_dir):
         result = run_check(ctx)
 
     assert result.decision == Decision.ALLOW
@@ -81,7 +81,7 @@ def test_enabled_no_capture_hash_only(tmp_path):
 
 def test_capture_with_redaction(tmp_path):
     """With capture_command=true, secrets are redacted."""
-    from bash_audit import run_check
+    from fettle.bash_audit import run_check
 
     session_dir = tmp_path / "test-audit-redact"
     session_dir.mkdir(parents=True)
@@ -90,7 +90,7 @@ def test_capture_with_redaction(tmp_path):
         command="curl -H 'Authorization: Bearer sk-abc123' https://api.example.com",
         config_overrides={"capture_command": True},
     )
-    with patch("config.state_dir", return_value=session_dir):
+    with patch("fettle.config.state_dir", return_value=session_dir):
         result = run_check(ctx)
 
     assert result.decision == Decision.ALLOW
@@ -103,7 +103,7 @@ def test_capture_with_redaction(tmp_path):
 
 def test_invalid_regex_fail_closed(tmp_path):
     """Invalid redaction regex: command not written (fail_closed)."""
-    from bash_audit import run_check
+    from fettle.bash_audit import run_check
 
     session_dir = tmp_path / "test-audit-failclose"
     session_dir.mkdir(parents=True)
@@ -119,7 +119,7 @@ def test_invalid_regex_fail_closed(tmp_path):
             },
         },
     )
-    with patch("config.state_dir", return_value=session_dir):
+    with patch("fettle.config.state_dir", return_value=session_dir):
         result = run_check(ctx)
 
     assert result.decision == Decision.ALLOW

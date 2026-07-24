@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from entry_points import check_entry_points
+from fettle.entry_points import check_entry_points
 
 
 def test_valid_entry_point_passes(tmp_path):

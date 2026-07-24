@@ -3,10 +3,10 @@
 import json
 from unittest.mock import patch
 
-from integration_base import IntegrationStatus, IntegrationReport, format_integration_report
-from sonar_adapter import SonarQubeAdapter
-from blackduck_adapter import BlackDuckAdapter
-from pact_adapter import PactAdapter
+from fettle.integration_base import IntegrationStatus, IntegrationReport, format_integration_report
+from fettle.sonar_adapter import SonarQubeAdapter
+from fettle.blackduck_adapter import BlackDuckAdapter
+from fettle.pact_adapter import PactAdapter
 
 
 class TestIntegrationBase:
@@ -17,7 +17,7 @@ class TestIntegrationBase:
         assert "TestTool" in output
 
     def test_format_report_with_findings(self):
-        from integration_base import IntegrationFinding
+        from fettle.integration_base import IntegrationFinding
         report = IntegrationReport(
             status=IntegrationStatus.FAIL,
             findings=[IntegrationFinding(severity="HIGH", message="vuln found", file="app.py", line=5)],

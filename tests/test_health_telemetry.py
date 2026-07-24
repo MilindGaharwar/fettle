@@ -13,9 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-import health_telemetry
-
-
+from fettle import health_telemetry
 # ──────────────────────────────────────────────────────────────────────
 # Recording load events
 # ──────────────────────────────────────────────────────────────────────

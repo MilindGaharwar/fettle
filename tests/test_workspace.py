@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from workspace import (
+from fettle.workspace import (
     discover_workspaces,
     route_file_to_workspace,
 )

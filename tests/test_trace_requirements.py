@@ -1,6 +1,6 @@
 """WP-X5 — Requirements Traceability tests."""
 
-from trace_requirements import trace_requirements, _spec_to_key, _test_to_key, format_report
+from fettle.trace_requirements import trace_requirements, _spec_to_key, _test_to_key, format_report
 
 
 def test_spec_to_key():

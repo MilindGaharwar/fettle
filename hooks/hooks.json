@@ -1,5 +1,5 @@
 {
-  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS. Timeouts are in seconds (Claude Code hook semantics).",
+  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS. Timeouts are in seconds (Claude Code hook semantics). scripts/ is a compat symlink to fettle/ (one-release deprecation window).",
   "hooks": {
     "PreToolUse": [
       {

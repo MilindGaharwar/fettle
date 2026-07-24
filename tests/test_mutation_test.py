@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from mutation_test import compute_score, run_mutation_test, _parse_results, format_report
+from fettle.mutation_test import compute_score, run_mutation_test, _parse_results, format_report
 
 
 def test_compute_score_all_killed():
@@ -32,24 +32,24 @@ def test_parse_results_summary_line():
 
 
 def test_tool_missing():
-    with patch("mutation_test._has_mutmut", return_value=False):
+    with patch("fettle.mutation_test._has_mutmut", return_value=False):
         report = run_mutation_test(".", {"paths": ["src/"]})
     assert report["status"] == "tool_missing"
     assert "mutmut" in report["message"]
 
 
 def test_nothing_to_mutate():
-    with (patch("mutation_test._has_mutmut", return_value=True),
-          patch("mutation_test._get_changed_py_files", return_value=[])):
+    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
+          patch("fettle.mutation_test._get_changed_py_files", return_value=[])):
         report = run_mutation_test(".", {"paths": ["src/"]})
     assert report["status"] == "nothing_to_mutate"
 
 
 def test_completed_below_threshold():
     mock_results = {"status": "completed", "survivors": ["mutant 1"], "killed": 5, "survived": 5}
-    with (patch("mutation_test._has_mutmut", return_value=True),
-          patch("mutation_test._get_changed_py_files", return_value=["src/app.py"]),
-          patch("mutation_test._run_mutmut", return_value=mock_results)):
+    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
+          patch("fettle.mutation_test._get_changed_py_files", return_value=["src/app.py"]),
+          patch("fettle.mutation_test._run_mutmut", return_value=mock_results)):
         report = run_mutation_test(".", {"paths": ["src/"], "threshold": 70, "timeout_s": 60})
     assert report["status"] == "completed"
     assert report["score"] == 50.0
@@ -58,9 +58,9 @@ def test_completed_below_threshold():
 
 def test_completed_above_threshold():
     mock_results = {"status": "completed", "survivors": [], "killed": 9, "survived": 1}
-    with (patch("mutation_test._has_mutmut", return_value=True),
-          patch("mutation_test._get_changed_py_files", return_value=["src/app.py"]),
-          patch("mutation_test._run_mutmut", return_value=mock_results)):
+    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
+          patch("fettle.mutation_test._get_changed_py_files", return_value=["src/app.py"]),
+          patch("fettle.mutation_test._run_mutmut", return_value=mock_results)):
         report = run_mutation_test(".", {"paths": ["src/"], "threshold": 70, "timeout_s": 60})
     assert report["passed"] is True
     assert report["score"] == 90.0

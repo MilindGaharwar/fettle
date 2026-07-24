@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from dep_check import (
+from fettle.dep_check import (
     extract_imports,
     get_declared_deps,
     check_undeclared,

@@ -10,7 +10,7 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(file_content: str, mode: str = "advisory", cwd: str = "") -> tuple[HookContext, str]:
@@ -62,7 +62,7 @@ def _make_ctx(file_content: str, mode: str = "advisory", cwd: str = "") -> tuple
 
 def test_silent_mode_with_findings_returns_allow():
     """In silent mode, even with findings, run_check returns allow."""
-    from lean_sniffers import run_check
+    from fettle.lean_sniffers import run_check
 
     code = textwrap.dedent("""\
         class MyServiceFactory:
@@ -71,7 +71,7 @@ def test_silent_mode_with_findings_returns_allow():
     """)
     ctx, path = _make_ctx(code, mode="silent")
     try:
-        with patch("lean_sniffers._get_changed_lines", return_value=None):
+        with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
             result = run_check(ctx)
         assert result.decision == Decision.ALLOW
     finally:
@@ -80,7 +80,7 @@ def test_silent_mode_with_findings_returns_allow():
 
 def test_advisory_mode_with_findings_returns_advisory():
     """In advisory mode, findings produce an advisory result."""
-    from lean_sniffers import run_check
+    from fettle.lean_sniffers import run_check
 
     code = textwrap.dedent("""\
         class MyServiceFactory:
@@ -89,7 +89,7 @@ def test_advisory_mode_with_findings_returns_advisory():
     """)
     ctx, path = _make_ctx(code, mode="advisory")
     try:
-        with patch("lean_sniffers._get_changed_lines", return_value=None):
+        with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
             result = run_check(ctx)
         assert result.decision == Decision.ADVISORY
         assert result.message is not None
@@ -102,7 +102,7 @@ def test_advisory_mode_with_findings_returns_advisory():
 
 def test_advisory_mode_no_findings_returns_allow():
     """In advisory mode, if no findings, returns allow."""
-    from lean_sniffers import run_check
+    from fettle.lean_sniffers import run_check
 
     code = textwrap.dedent("""\
         def hello():
@@ -110,7 +110,7 @@ def test_advisory_mode_no_findings_returns_allow():
     """)
     ctx, path = _make_ctx(code, mode="advisory")
     try:
-        with patch("lean_sniffers._get_changed_lines", return_value=None):
+        with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
             result = run_check(ctx)
         assert result.decision == Decision.ALLOW
     finally:
@@ -119,7 +119,7 @@ def test_advisory_mode_no_findings_returns_allow():
 
 def test_advisory_caps_at_three_findings():
     """Advisory output shows at most 3 findings plus a summary."""
-    from lean_sniffers import run_check
+    from fettle.lean_sniffers import run_check
 
     code = textwrap.dedent("""\
         class FactoryManager:
@@ -140,7 +140,7 @@ def test_advisory_caps_at_three_findings():
     """)
     ctx, path = _make_ctx(code, mode="advisory")
     try:
-        with patch("lean_sniffers._get_changed_lines", return_value=None):
+        with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
             result = run_check(ctx)
         assert result.decision == Decision.ADVISORY
         lines = result.message.split("\n")
@@ -153,7 +153,7 @@ def test_advisory_caps_at_three_findings():
 
 def test_advisory_deduplicates_findings():
     """Duplicate dedupe_keys are collapsed."""
-    from lean_sniffers import run_check
+    from fettle.lean_sniffers import run_check
 
     # A single-method class triggers LR004 once per class — no natural dupes.
     # But LR002 (abstraction name) triggers on class line AND LR004 on same class.
@@ -168,7 +168,7 @@ def test_advisory_deduplicates_findings():
     """)
     ctx, path = _make_ctx(code, mode="advisory")
     try:
-        with patch("lean_sniffers._get_changed_lines", return_value=None):
+        with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
             result = run_check(ctx)
         assert result.decision == Decision.ADVISORY
         # Each finding should appear only once (unique dedupe_keys)

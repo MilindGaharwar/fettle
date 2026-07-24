@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from suppressions_v3 import (
+from fettle.suppressions_v3 import (
     Suppression,
     load_suppressions,
     save_suppressions,

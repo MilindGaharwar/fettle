@@ -4,13 +4,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from ci_diagnose import (
+from fettle.ci_diagnose import (
     diagnose_failure,
     compare_coverage,
     suggest_new_gates,
     ResultHistory,
 )
-from ci_ingest import CIFailure, FailureClass
+from fettle.ci_ingest import CIFailure, FailureClass
 
 
 def test_diagnose_explains_test_failure():

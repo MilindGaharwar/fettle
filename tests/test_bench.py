@@ -17,7 +17,7 @@ import pytest
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
-from bench import BenchResult, load_budgets, run_bench  # noqa: E402
+from fettle.bench import BenchResult, load_budgets, run_bench  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 

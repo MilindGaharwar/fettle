@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(cwd: Path, session_id: str = "test-cov", mode: str = "advisory",
@@ -55,17 +55,17 @@ def _write_edits_jsonl(state_dir: Path, session_id: str, files: list[str]):
 
 def test_no_coverage_json_allows(tmp_path):
     """No coverage.json → silent allow."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     ctx = _make_ctx(tmp_path)
-    with patch("config.state_dir", return_value=tmp_path / "state" / "test-cov"):
+    with patch("fettle.config.state_dir", return_value=tmp_path / "state" / "test-cov"):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 
 
 def test_above_threshold_allows(tmp_path):
     """Coverage above threshold → allow."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("line1\nline2\nline3\nline4\nline5\n")
@@ -82,15 +82,15 @@ def test_above_threshold_allows(tmp_path):
     time.sleep(0.01)
 
     ctx = _make_ctx(tmp_path, threshold=80)
-    with (patch("config.state_dir", return_value=state_dir / "test-cov"),
-          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 
 
 def test_below_threshold_advisory(tmp_path):
     """Coverage below threshold in advisory mode → advisory."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("a\nb\nc\nd\ne\n")
@@ -106,8 +106,8 @@ def test_below_threshold_advisory(tmp_path):
     time.sleep(0.01)
 
     ctx = _make_ctx(tmp_path, threshold=80, mode="advisory")
-    with (patch("config.state_dir", return_value=state_dir / "test-cov"),
-          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "40%" in result.message
@@ -115,7 +115,7 @@ def test_below_threshold_advisory(tmp_path):
 
 def test_below_threshold_enforce_blocks(tmp_path):
     """Coverage below threshold in enforce mode → block."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("a\nb\nc\nd\ne\n")
@@ -130,8 +130,8 @@ def test_below_threshold_enforce_blocks(tmp_path):
     time.sleep(0.01)
 
     ctx = _make_ctx(tmp_path, threshold=80, mode="enforce")
-    with (patch("config.state_dir", return_value=state_dir / "test-cov"),
-          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
         result = run_check(ctx)
     assert result.decision == Decision.BLOCK
     assert "20%" in result.message
@@ -139,7 +139,7 @@ def test_below_threshold_enforce_blocks(tmp_path):
 
 def test_branch_coverage_below_threshold(tmp_path):
     """Branch coverage below threshold → advisory with branch message."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("a\nb\nc\nd\ne\n")
@@ -166,8 +166,8 @@ def test_branch_coverage_below_threshold(tmp_path):
     # Set branch threshold
     ctx.config["gates"]["coverage"]["minimum_branch_percent"] = 80
 
-    with (patch("config.state_dir", return_value=state_dir / "test-branch"),
-          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-branch"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2, 3, 4, 5})):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "Branch coverage" in result.message
@@ -176,7 +176,7 @@ def test_branch_coverage_below_threshold(tmp_path):
 
 def test_branch_data_absent_skips_silently(tmp_path):
     """No branch data in coverage.json → branch check skipped, line check runs."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("a\nb\nc\n")
@@ -193,8 +193,8 @@ def test_branch_data_absent_skips_silently(tmp_path):
     ctx = _make_ctx(tmp_path, threshold=80, session_id="test-nobranch")
     ctx.config["gates"]["coverage"]["minimum_branch_percent"] = 80
 
-    with (patch("config.state_dir", return_value=state_dir / "test-nobranch"),
-          patch("coverage_gate._get_changed_lines", return_value={1, 2, 3})):
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-nobranch"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2, 3})):
         result = run_check(ctx)
     # Line coverage is 100%, branch data absent → passes
     assert result.decision == Decision.ALLOW
@@ -202,7 +202,7 @@ def test_branch_data_absent_skips_silently(tmp_path):
 
 def test_stale_coverage_warns(tmp_path):
     """Coverage.json older than edits → staleness advisory."""
-    from coverage_gate import run_check
+    from fettle.coverage_gate import run_check
 
     src = tmp_path / "app.py"
     src.write_text("hello\n")
@@ -218,7 +218,7 @@ def test_stale_coverage_warns(tmp_path):
     edits_file.touch()
 
     ctx = _make_ctx(tmp_path, threshold=80)
-    with patch("config.state_dir", return_value=state_dir / "test-cov"):
+    with patch("fettle.config.state_dir", return_value=state_dir / "test-cov"):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "stale" in result.message

@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from dispatcher_types import Decision, HookContext, HookInput
-from worklog import _has_valid_entry, _today, create_template, run_check
+from fettle.dispatcher_types import Decision, HookContext, HookInput
+from fettle.worklog import _has_valid_entry, _today, create_template, run_check
 
 
 def _make_ctx(cwd: str, enabled: bool = True, mode: str = "advisory"):

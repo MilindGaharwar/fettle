@@ -2,7 +2,7 @@
 
 import textwrap
 
-from threat_model import generate_threat_model, _find_entry_points, _find_data_stores
+from fettle.threat_model import generate_threat_model, _find_entry_points, _find_data_stores
 
 
 def test_generates_stride_template(tmp_path):

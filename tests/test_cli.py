@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 
 def test_cli_help(capsys):
-    from cli import main
+    from fettle.cli import main
     with pytest.raises(SystemExit) as exc_info, patch("sys.argv", ["fettle"]):
         main()
     assert exc_info.value.code == 0
@@ -19,7 +19,7 @@ def test_cli_help(capsys):
 def test_cli_config_effective(capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".git").mkdir()
-    from cli import main
+    from fettle.cli import main
     with patch("sys.argv", ["fettle", "config", "--print-effective"]):
         main()
     output = capsys.readouterr().out
@@ -30,7 +30,7 @@ def test_cli_config_effective_honors_mode_override(capsys, tmp_path, monkeypatch
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FETTLE_GATE_MODE", "enforce")
     (tmp_path / ".git").mkdir()
-    from cli import main
+    from fettle.cli import main
     with patch("sys.argv", ["fettle", "config", "--print-effective"]):
         main()
     output = capsys.readouterr().out
@@ -40,7 +40,7 @@ def test_cli_config_effective_honors_mode_override(capsys, tmp_path, monkeypatch
 def test_cli_doctor(tmp_path, monkeypatch):
     """Doctor command runs without crashing."""
     monkeypatch.chdir(tmp_path)
-    from cli import cmd_doctor
+    from fettle.cli import cmd_doctor
     import argparse
     args = argparse.Namespace()
     cmd_doctor(args)
@@ -64,10 +64,10 @@ def _run_check(tmp_path, monkeypatch, argv, findings):
     """Run `fettle check` in-process with scan_project mocked out."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".git").mkdir(exist_ok=True)
-    from cli import main
-    with patch("quality_scan.scan_project",
+    from fettle.cli import main
+    with patch("fettle.quality_scan.scan_project",
                return_value={"findings": findings, "file_count": 1}), \
-         patch("paths.find_repo_root", return_value=tmp_path), \
+         patch("fettle.paths.find_repo_root", return_value=tmp_path), \
          patch("sys.argv", ["fettle", "check", *argv]), \
          pytest.raises(SystemExit) as exc_info:
         main()
@@ -96,8 +96,8 @@ def test_check_all_and_changed_conflict_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_check_outside_repo_exits_2(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    from cli import main
-    with patch("paths.find_repo_root", return_value=None), \
+    from fettle.cli import main
+    with patch("fettle.paths.find_repo_root", return_value=None), \
          patch("sys.argv", ["fettle", "check"]), \
          pytest.raises(SystemExit) as exc_info:
         main()
@@ -126,9 +126,9 @@ def test_check_baseline_reports_new_findings(tmp_path, monkeypatch, capsys):
 
 def test_check_changed_no_changes_exits_0(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    from cli import main
-    with patch("paths.find_repo_root", return_value=tmp_path), \
-         patch("changeset.get_changed_files", return_value=[]), \
+    from fettle.cli import main
+    with patch("fettle.paths.find_repo_root", return_value=tmp_path), \
+         patch("fettle.changeset.get_changed_files", return_value=[]), \
          patch("sys.argv", ["fettle", "check", "--changed"]), \
          pytest.raises(SystemExit) as exc_info:
         main()
@@ -143,7 +143,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def test_version_flag(capsys):
     import re
-    from cli import main
+    from fettle.cli import main
     with patch("sys.argv", ["fettle", "--version"]), pytest.raises(SystemExit) as exc_info:
         main()
     assert exc_info.value.code == 0
@@ -177,7 +177,7 @@ def test_version_metadata_aligned():
 
 def test_cli_version_matches_pyproject():
     import tomllib
-    from cli import _version
+    from fettle.cli import _version
     with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
         assert _version() == tomllib.load(fh)["project"]["version"]
 

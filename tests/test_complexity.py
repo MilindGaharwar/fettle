@@ -6,8 +6,8 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-from complexity_check import _cyclomatic, _cognitive, analyze_functions, run_check
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.complexity_check import _cyclomatic, _cognitive, analyze_functions, run_check
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _parse_func(code: str) -> ast.FunctionDef:
@@ -152,7 +152,7 @@ def monster(a, b, c, d, e, f, g, h, i, j, k):
     src.write_text(code)
 
     ctx = _make_ctx(str(src))
-    with patch("lean_sniffers._get_changed_lines", return_value=None):
+    with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "monster" in result.message
@@ -164,7 +164,7 @@ def test_run_check_allows_simple_function(tmp_path):
     src.write_text("def hello():\n    return 'world'\n")
 
     ctx = _make_ctx(str(src))
-    with patch("lean_sniffers._get_changed_lines", return_value=None):
+    with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 

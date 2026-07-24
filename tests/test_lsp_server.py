@@ -7,9 +7,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-import lsp_server
-from finding import CheckFinding, FindingSeverity
-from lsp_server import (
+from fettle import lsp_server
+from fettle.finding import CheckFinding, FindingSeverity
+from fettle.lsp_server import (
     FettleLSPServer,
     decode_header,
     encode_message,

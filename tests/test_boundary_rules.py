@@ -3,7 +3,7 @@
 import textwrap
 from pathlib import Path
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(file_path: str, cwd: str, rules: list[dict], enabled: bool = True):
@@ -33,7 +33,7 @@ def _make_ctx(file_path: str, cwd: str, rules: list[dict], enabled: bool = True)
 
 
 def test_disabled_allows(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "ui" / "page.py"
     src.parent.mkdir()
     src.write_text("from infrastructure import db\n")
@@ -42,7 +42,7 @@ def test_disabled_allows(tmp_path):
 
 
 def test_no_rules_allows(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "ui" / "page.py"
     src.parent.mkdir()
     src.write_text("from infrastructure import db\n")
@@ -51,7 +51,7 @@ def test_no_rules_allows(tmp_path):
 
 
 def test_allowed_import_passes(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "ui" / "page.py"
     src.parent.mkdir()
     src.write_text("from domain import models\n")
@@ -61,7 +61,7 @@ def test_allowed_import_passes(tmp_path):
 
 
 def test_denied_import_advisory(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "domain" / "service.py"
     src.parent.mkdir()
     src.write_text("from infrastructure import database\n")
@@ -73,7 +73,7 @@ def test_denied_import_advisory(tmp_path):
 
 
 def test_non_matching_rule_allows(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "utils" / "helpers.py"
     src.parent.mkdir()
     src.write_text("from infrastructure import cache\n")
@@ -83,7 +83,7 @@ def test_non_matching_rule_allows(tmp_path):
 
 
 def test_non_python_file_skipped(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "config.toml"
     src.write_text("[database]\nurl = 'postgres://'\n")
     rules = [{"from": "**", "to": "**", "allow": False}]
@@ -92,7 +92,7 @@ def test_non_python_file_skipped(tmp_path):
 
 
 def test_multiple_violations_reported(tmp_path):
-    from boundary_rules import run_check
+    from fettle.boundary_rules import run_check
     src = tmp_path / "ui" / "page.py"
     src.parent.mkdir()
     src.write_text(textwrap.dedent("""

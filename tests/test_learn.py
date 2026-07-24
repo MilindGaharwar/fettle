@@ -5,7 +5,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from learn import _generate_semgrep_yaml, _save_rule, list_learned_rules
+from fettle.learn import _generate_semgrep_yaml, _save_rule, list_learned_rules
 
 
 def test_generate_semgrep_yaml():

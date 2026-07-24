@@ -4,9 +4,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from adapters import get_adapter, list_adapters
-from adapters.python_adapter import PythonAdapter
-from profile import detect_profile
+from fettle.adapters import get_adapter, list_adapters
+from fettle.adapters.python_adapter import PythonAdapter
+from fettle.profile import detect_profile
 
 
 def test_adapter_registry_discovers_python():

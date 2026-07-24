@@ -10,19 +10,19 @@ repos:
     hooks:
       - id: scrub-audit
         name: scrub audit (no private strings)
-        entry: bash scripts/scrub_audit.sh
+        entry: bash fettle/scrub_audit.sh
         language: system
         pass_filenames: false
         always_run: true
       - id: fettle-check
         name: fettle check (changed files)
-        entry: scripts/pre_commit_check.sh
+        entry: fettle/pre_commit_check.sh
         language: script
         pass_filenames: false
         always_run: true
       - id: fettle-rules-validate
         name: fettle rules validate
-        entry: scripts/pre_commit_rules_validate.sh
+        entry: fettle/pre_commit_rules_validate.sh
         language: script
         pass_filenames: false
         files: '^(rules/|\.fettle/rules/|\.lint/semgrep/).*\.ya?ml$'

@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from profile import detect_profile
+from fettle.profile import detect_profile
 
 
 def test_detects_python_from_pyproject_toml(tmp_path):

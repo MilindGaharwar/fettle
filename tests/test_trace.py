@@ -6,7 +6,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from trace import log_decision, get_recent_decisions, rotate_trace
+from fettle.trace import log_decision, get_recent_decisions, rotate_trace
 
 
 def test_log_decision_creates_file(tmp_path, monkeypatch):

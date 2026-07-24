@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from adapters.typescript_adapter import TypeScriptAdapter
-from finding import FindingSeverity
-from profile import Profile
+from fettle.adapters.typescript_adapter import TypeScriptAdapter
+from fettle.finding import FindingSeverity
+from fettle.profile import Profile
 
 
 @dataclass

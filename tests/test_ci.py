@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
+sys.path.insert(0, os.path.join(PLUGIN_DIR))
 
 import ci  # noqa: E402
 

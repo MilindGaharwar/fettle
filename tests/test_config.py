@@ -9,7 +9,7 @@ import pytest
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 sys.path.insert(0, SCRIPTS)
 
-from config import DEFAULTS, load_config, state_dir, trace_path  # noqa: E402
+from fettle.config import DEFAULTS, load_config, state_dir, trace_path  # noqa: E402
 
 
 # --- load_config layering ---

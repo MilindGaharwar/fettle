@@ -39,10 +39,6 @@ Changelog = "https://github.com/MilindGaharwar/fettle/blob/main/CHANGELOG.md"
 [tool.setuptools]
 packages = ["fettle", "fettle.adapters"]
 
-[tool.setuptools.package-dir]
-fettle = "scripts"
-"fettle.adapters" = "scripts/adapters"
-
 [tool.setuptools.package-data]
 fettle = ["py.typed"]
 

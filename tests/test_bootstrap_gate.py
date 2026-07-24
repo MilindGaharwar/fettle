@@ -7,9 +7,9 @@ import sys
 import tempfile
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
+sys.path.insert(0, os.path.join(PLUGIN_DIR))
 
-from quality_gate import scan_bootstrap  # noqa: E402
+from fettle.quality_gate import scan_bootstrap  # noqa: E402
 
 WORKFLOW = os.path.join(".github", "workflows", "fettle.yml")
 

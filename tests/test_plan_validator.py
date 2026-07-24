@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from plan_validator import validate_plan
+from fettle.plan_validator import validate_plan
 
 
 # ---------------------------------------------------------------------------
