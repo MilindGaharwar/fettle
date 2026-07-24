@@ -1,12 +1,29 @@
-"""Fettle trace — persistent logging of hook decisions for explain and reporting.
+"""Fettle trace — persistent, append-only audit log of hook decisions.
 
 Writes to $XDG_STATE_HOME/fettle/trace.jsonl (one JSON object per line).
-Each entry records: timestamp, hook, status, tool, file, findings, duration.
+
+Schema v2 (WP-145 — stable, versioned; consumers must tolerate unknown keys):
+    schema      int    — audit schema version (this file: 2)
+    timestamp   str    — local ISO-8601
+    ts          float  — unix epoch
+    hook        str    — hook/gate that decided
+    status      str    — pass | violation | blocked | tool_error | ...
+    tool        str
+    file        str
+    repo        str    — repo root basename ('' when indeterminate) — enables
+                         cross-repo aggregation (`fettle report --org`)
+    findings    list[dict]
+    duration_ms float
+    session_id  str
+
+v1 entries (no `schema`/`repo` keys) remain readable forever.
 """
 
 import json
 import os
 import time
+
+AUDIT_SCHEMA_VERSION = 2
 
 
 def _get_trace_path() -> str:
@@ -14,6 +31,20 @@ def _get_trace_path() -> str:
     trace_dir = os.path.join(state_dir, "fettle")
     os.makedirs(trace_dir, exist_ok=True)
     return os.path.join(trace_dir, "trace.jsonl")
+
+
+def _repo_name(file: str) -> str:
+    """Best-effort repo identity for org-level aggregation — never raises."""
+    try:
+        probe = os.path.dirname(os.path.abspath(file)) if file else os.getcwd()
+        while probe and probe != os.path.dirname(probe):
+            if os.path.isdir(os.path.join(probe, ".git")) or \
+               os.path.isfile(os.path.join(probe, ".fettle.toml")):
+                return os.path.basename(probe)
+            probe = os.path.dirname(probe)
+    except OSError:
+        pass
+    return ""
 
 
 def log_decision(
@@ -27,12 +58,14 @@ def log_decision(
 ) -> None:
     """Log a hook decision to the trace file."""
     entry = {
+        "schema": AUDIT_SCHEMA_VERSION,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "ts": time.time(),
         "hook": hook,
         "status": status,
         "tool": tool,
         "file": file,
+        "repo": _repo_name(file),
         "findings": findings or [],
         "duration_ms": round(duration_ms, 2),
         "session_id": session_id,

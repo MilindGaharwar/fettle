@@ -2,6 +2,12 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **WP-145 — Audit & reporting**: trace entries carry a versioned audit
+  schema (v2: adds `schema` + `repo` fields; v1 entries remain readable).
+  New `fettle report [--org]` CLI — `--org` rolls decisions up per repo
+  (decisions, violations, blocks, tool errors, top codes) for platform-team
+  visibility. `fettle check --junit FILE` emits JUnit XML for enterprise CI
+  dashboards (GitLab/Jenkins/Azure DevOps), joining the existing SARIF output.
 - **WP-144 — Central policy distribution**: `[extends]` in .fettle.toml
   layers a digest-pinned org policy under repo config (defaults → org →
   repo → env). Content-addressed cache means a synced policy never goes
