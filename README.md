@@ -9,12 +9,13 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v1.0.2** — enterprise integration + SWEBOK v4 coverage, plus the
-Phase 0 “trustworthy core” fixes (CLI exit-code contract, working
-`--changed`/`--fix`/`--baseline`, MCP allowlist path resolution). Full
-engineering discipline enforcement with external tool adapters (SonarQube,
-Black Duck, Pact), security review, threat modeling, deployment safety,
-technical debt quantification, mutation testing, and requirements traceability.
+**Status: v1.2.0** — the Independence release: real `fettle` package
+namespace, agent abstraction layer with per-agent conformance contracts
+(Claude Code, OpenCode), one-command `fettle init`, validated config schema,
+and CI parity across GitHub, GitLab, and pre-commit — on top of the v1.0
+enterprise integration + SWEBOK v4 coverage (SonarQube/Black Duck/Pact
+adapters, security review, threat modeling, deployment safety, debt
+quantification, mutation testing, requirements traceability).
 Next arc: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
 
 ## What It Does

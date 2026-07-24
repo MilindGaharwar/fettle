@@ -37,7 +37,7 @@ PRE_COMMIT_CONFIG = """\
 # The same policy your editor hooks and CI enforce, before a commit exists.
 repos:
   - repo: https://github.com/MilindGaharwar/fettle
-    rev: v1.0.2   # pin a tag; bump deliberately
+    rev: v1.2.0   # pin a tag; bump deliberately
     hooks:
       - id: fettle-check
       - id: fettle-rules-validate

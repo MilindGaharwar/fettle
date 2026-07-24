@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased (v1.2 — Independence arc)
+## v1.2.0 — Independence
+
+The engine decouples from any single agent: real package namespace,
+agent abstraction with conformance contracts, one-command setup,
+validated config schema, and CI parity across GitHub/GitLab/pre-commit.
 
 - **WP-142 — Config schema v1**: `fettle config --validate` checks
   .fettle.toml against the built-in defaults — unknown keys warn (typo'd
