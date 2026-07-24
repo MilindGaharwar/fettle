@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.2 — finefettle on PyPI
+
+- **Package renamed to `finefettle` on PyPI** (“in fine fettle”) — the
+  `fettle` name belongs to an unrelated project. Console script and import
+  name remain `fettle`.
+- **Trusted Publishing release workflow**: pushing a `v*` tag builds,
+  tests, smoke-tests the wheel, and publishes to PyPI via GitHub OIDC —
+  no long-lived tokens. Tag must match pyproject version (enforced).
+- **Commit-time guards**: repo now runs scrub-audit + fettle-check +
+  rules-validate as pre-commit hooks (`pre-commit install`); the CI
+  scrub-audit failure of 2026-07-24 (leaked local path in a plan doc)
+  is caught before a commit exists.
+
 ## v1.0.1 — Trustworthy Core (Phase 0 hotfix arc)
 
 Correctness fixes from the 2026-07 full-repo audit (D1–D4). See
