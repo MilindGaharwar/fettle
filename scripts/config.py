@@ -171,6 +171,13 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "release": {
+            "enabled": False,
+            "mode": "advisory",
+            "changelog_path": "CHANGELOG.md",
+            "require_semver": True,
+            "check_breaking_changes": True,
+        },
         "architecture_boundaries": {
             "enabled": False,
             "rules": [],
