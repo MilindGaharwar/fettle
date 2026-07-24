@@ -131,6 +131,13 @@ def cmd_check(args: argparse.Namespace) -> None:
         findings = [f for f in findings if _finding_key(f) not in known]
         results["findings"] = findings
 
+    # --junit: write JUnit XML for enterprise CI dashboards (WP-145).
+    if getattr(args, "junit", None):
+        from fettle.junit import findings_to_junit
+        Path(args.junit).write_text(findings_to_junit(findings))
+        if not args.json:
+            print(f"JUnit report written to {args.junit}")
+
     if args.json:
         print(json.dumps(results, indent=2))
     else:
@@ -335,6 +342,37 @@ def cmd_init(args: argparse.Namespace) -> None:
     sys.exit(exit_code)
 
 
+def cmd_report(args: argparse.Namespace) -> None:
+    """Effectiveness metrics from the audit trail; --org rolls up per repo (WP-145)."""
+    from fettle.report import compute_effectiveness, compute_org_report
+
+    data = compute_org_report(args.days) if args.org else compute_effectiveness(args.days)
+    if args.json:
+        print(json.dumps(data, indent=2))
+        sys.exit(1 if "error" in data else 0)
+    if "error" in data:
+        print(data["error"])
+        sys.exit(1)
+    if args.org:
+        print(f"── Fettle Org Report ({data['period_days']}d, "
+              f"{data['total_repos']} repo(s), {data['total_decisions']} decisions) ──\n")
+        for repo, s in data["repos"].items():
+            print(f"  {repo}")
+            print(f"    decisions: {s['decisions']}  violations: {s['violations']} "
+                  f"({s['violation_rate_pct']}%)  blocked: {s['blocked']}  "
+                  f"tool errors: {s['tool_errors']}")
+            for code, count in s["top_codes"]:
+                print(f"      {code}: {count}")
+    else:
+        print(f"── Fettle Effectiveness ({data['period_days']}d) ──\n")
+        print(f"  decisions: {data['total_decisions']}  "
+              f"pass: {data['pass_rate_pct']}%  violations: {data['violation_rate_pct']}%  "
+              f"tool errors: {data['tool_error_rate_pct']}%")
+        for code, count in data["top_violations"]:
+            print(f"    {code}: {count}")
+    sys.exit(0)
+
+
 def cmd_policy(args: argparse.Namespace) -> None:
     """Sync or inspect the digest-pinned org policy (WP-144)."""
     import tomllib
@@ -439,6 +477,7 @@ def main() -> None:
     p_check.add_argument("--baseline", action="store_true", help="Only report new violations")
     p_check.add_argument("--boundaries", action="store_true", help="Scan for secrets, out-of-project paths, and repo-forbidden strings")
     p_check.add_argument("--root", help="File or directory to scan (default: repository root)")
+    p_check.add_argument("--junit", metavar="FILE", help="Write findings as JUnit XML (CI dashboards)")
 
     p_config = subparsers.add_parser("config", help="Show configuration")
     p_config.add_argument("--print-effective", action="store_true", help="Show merged effective config")
@@ -464,6 +503,11 @@ def main() -> None:
     policy_sub.add_parser("sync", help="Fetch, digest-verify, and cache the org policy")
     policy_sub.add_parser("status", help="Show pin and cache state")
     p_policy.set_defaults(policy_action="sync")
+
+    p_report = subparsers.add_parser("report", help="Effectiveness metrics from the audit trail")
+    p_report.add_argument("--org", action="store_true", help="Aggregate per repo (cross-repo rollup)")
+    p_report.add_argument("--days", type=int, default=30, help="Reporting window (default 30)")
+    p_report.add_argument("--json", action="store_true", help="JSON output")
 
     p_bench = subparsers.add_parser("bench", help="Noise benchmark: findings-per-KLOC vs committed budgets")
     p_bench.add_argument("--corpus", action="append", required=True, metavar="NAME=PATH",
@@ -522,6 +566,7 @@ def main() -> None:
         "doctor": cmd_doctor,
         "init": cmd_init,
         "policy": cmd_policy,
+        "report": cmd_report,
         "bench": cmd_bench,
         "ci": cmd_ci,
         "ratchet": cmd_ratchet,

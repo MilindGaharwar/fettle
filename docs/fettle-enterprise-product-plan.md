@@ -156,6 +156,8 @@ findings from hook, CLI, and CI on a reference repo.
   decision (already partially in `trace.py`) with a stable schema; `fettle
   report --org` aggregates across repos; SARIF everywhere (already present)
   plus JUnit XML output for enterprise CI dashboards.
+  *Status 2026-07-24: shipped — audit schema v2 (versioned, repo-attributed),
+  `fettle report --org`, `fettle check --junit`.*
 - **WP-146 — Compliance mapping.** Rules carry `metadata.compliance` tags
   (CWE already partially present; add OWASP ASVS, SOC 2 CC-series mapping);
   `fettle report --compliance` emits an evidence table. Aligns with the

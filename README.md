@@ -144,11 +144,12 @@ fettle doctor
 
 ```bash
 fettle init [--install-tools] [--dry-run]
-fettle check [--all] [--changed] [--json] [--fix] [--baseline]
+fettle check [--all] [--changed] [--json] [--fix] [--baseline] [--junit FILE]
 fettle config --print-effective
 fettle config --explain
 fettle config --validate
 fettle policy sync|status
+fettle report [--org] [--days N]
 fettle explain [--last N]
 fettle baseline create|update
 fettle doctor

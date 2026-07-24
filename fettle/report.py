@@ -73,6 +73,50 @@ def compute_effectiveness(days: int = 30) -> dict:
     }
 
 
+def compute_org_report(days: int = 30) -> dict:
+    """WP-145: aggregate decisions per repo — the org-level rollup.
+
+    v1 entries without a `repo` key aggregate under '(unattributed)'.
+    """
+    entries = get_recent_decisions(limit=50000)
+    cutoff = time.time() - (days * 86400)
+    recent = [e for e in entries if e.get("ts", 0) > cutoff]
+    if not recent:
+        return {"error": f"No trace data in the last {days} days."}
+
+    repos: dict[str, dict] = {}
+    for e in recent:
+        repo = e.get("repo") or "(unattributed)"
+        stats = repos.setdefault(repo, {
+            "decisions": 0, "violations": 0, "blocked": 0,
+            "tool_errors": 0, "findings": 0, "top_codes": Counter(),
+        })
+        stats["decisions"] += 1
+        status = e.get("status", "")
+        if status == "violation":
+            stats["violations"] += 1
+        elif status in ("blocked", "block"):
+            stats["blocked"] += 1
+        elif status == "tool_error":
+            stats["tool_errors"] += 1
+        for f in e.get("findings", []):
+            stats["findings"] += 1
+            stats["top_codes"][f.get("code", "unknown")] += 1
+
+    for stats in repos.values():
+        stats["top_codes"] = stats["top_codes"].most_common(5)
+        stats["violation_rate_pct"] = round(
+            stats["violations"] / max(stats["decisions"], 1) * 100, 1)
+
+    return {
+        "period_days": days,
+        "repos": dict(sorted(repos.items(),
+                             key=lambda kv: kv[1]["decisions"], reverse=True)),
+        "total_repos": len(repos),
+        "total_decisions": len(recent),
+    }
+
+
 def identify_candidates(days: int = 30) -> dict:
     """Identify rules to retire or recalibrate."""
     entries = get_recent_decisions(limit=10000)
