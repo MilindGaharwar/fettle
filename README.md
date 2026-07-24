@@ -50,6 +50,14 @@ Fettle hooks the agent's own tool calls (PreToolUse/PostToolUse/Stop), so the
 finding lands **inside the session that caused it**, where the agent can still
 fix it with full context.
 
+The governance model is **Human in Control, not Human in the Loop**: you set
+policy once (`.fettle.toml`, advisory → enforce per gate) and retain full
+authority over outcomes without approving every step. Gates are automatable,
+agent-assessable checks — never manual approval meetings. Fail-open design
+and strict latency budgets mean enforcement never becomes the bottleneck.
+(The AI-Native Large-Scale Agile Manifesto, arXiv:2605.07717, names exactly
+this model — Fettle is the assurance layer for it.)
+
 ### What's genuinely different
 
 - **Incident-derived rules.** `/fettle:learn` turns a real production incident
