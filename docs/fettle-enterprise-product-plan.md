@@ -151,6 +151,14 @@ findings from hook, CLI, and CI on a reference repo.
   `health_telemetry.py`: anonymous counters only (gate fired / blocked /
   overridden), documented payload, org-level opt-in via central policy,
   default **off**. No code, paths, or identifiers ever leave the machine.
+- **WP-154 — Verification-first (BDD) gate.** Strengthen `tdd_gate` from
+  *test-before-implementation* to *spec-derived tests as a contract before
+  code*: opt-in `[gates.bdd]` requiring Given–When–Then scenarios in the
+  active spec, linked to tests via the existing `trace_requirements`
+  machinery (WP-X5). Grounded in the AI-Native Manifesto's
+  "New Assurance" principle (Britto et al., arXiv:2605.07717): requirements
+  locked upfront, tests validate the spec — not just the implementation —
+  and agents manage scenario overlap at scale.
 
 **Exit criteria:** a platform team can roll out one policy to N repos, prove
 what it enforced, and produce compliance evidence without touching any repo.
@@ -174,6 +182,30 @@ what it enforced, and produce compliance evidence without touching any repo.
   release: findings-per-KLOC budgets, p95 hook latency budgets
   (250/400/600 ms), false-positive rate from `fp_stamp.py` data. Enterprises
   buy measured noise floors, not rule counts.
+- **WP-155 — Semantic impact gate.** Extend the cross-file Stop check
+  (`import_graph.py`) with knowledge-graph-backed impact analysis
+  (kgraph integration): on multi-file changes, traverse
+  requirement → code → test → defect links and surface blast-radius
+  warnings inside the agent session. Implements the "semantic layer"
+  cross-domain impact analysis from the AI-Native Manifesto (§3.1) —
+  fact-grounded gating rather than pattern matching alone.
+
+---
+
+## 3b. Research Grounding
+
+The AI-Native Large-Scale Agile Manifesto (Britto, Palmgren, Saini, Ohlin —
+Ericsson/BTH, arXiv:2605.07717) independently validates Fettle's core bets
+and supplies shared vocabulary worth adopting:
+
+| Manifesto principle | Fettle counterpart |
+|---|---|
+| "Gates must be automatable, agent-assessable quality checks, not approval meetings" (§2.1) | The product thesis — hook-time enforcement |
+| **Human in Control**, not Human in the Loop (§2.2) | Advisory→enforce ratchet, fail-open budgets: authority without bottleneck |
+| Living knowledge that the system using it maintains (§2.3) | Incident-derived rules with citations, evidence-based promotion, expiring suppressions |
+| Verification-first / BDD at scale (§2.4) | `tdd_gate` today; WP-154 closes the gap |
+| Orchestrated agent workforces (§2.5) | Subagent injection + v1.1 governance arc (per-agent audit) |
+| Blueprints with local adaptation (§2.6) | WP-144 central policy + repo-level overrides |
 
 ---
 
@@ -200,9 +232,9 @@ gantt
     section Phase 1 (v1.2)
     Independence (WP-139..143)          :p1, after p0, 2M
     section Phase 2 (v1.3)
-    Enterprise ops (WP-144..148)        :p2, after p1, 2M
+    Enterprise ops (WP-144..148, 154)   :p2, after p1, 2M
     section Phase 3 (v1.4+)
-    Surface & ecosystem (WP-149..153)   :p3, after p2, 3M
+    Surface & ecosystem (WP-149..153, 155) :p3, after p2, 3M
 ```
 
 Rough effort (single senior engineer, following the v1.0 plan's calibration
