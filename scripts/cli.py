@@ -30,7 +30,7 @@ def _version() -> str:
             pass
     try:
         from importlib.metadata import version
-        return version("fettle")
+        return version("finefettle")
     except Exception:  # noqa: BLE001 — version display must never crash the CLI
         return "unknown"
 

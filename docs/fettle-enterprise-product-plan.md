@@ -107,8 +107,9 @@ exit codes contract-tested; self-scan clean.
   `claude_code.py`, `opencode.py`. Hook payload parsing lives only in
   translators; the dispatcher consumes `AgentEvent` exclusively. Conformance
   fixture suite per agent so payload drift is caught by tests, not users.
-- **WP-141 — First-class distribution.** Publish to PyPI under an available
-  name (`fettle-qa` or negotiate the `fettle` name); `uv tool install` /
+- **WP-141 — First-class distribution.** Publish to PyPI as **`finefettle`**
+  (name verified available 2026-07-24; the `fettle` name is taken by an
+  unrelated project — console script remains `fettle`); `uv tool install` /
   `pipx` / Homebrew tap; `fettle init` bootstraps hooks for the detected
   agent(s), replacing the symlink ritual. Remove run.sh auto-install (D6):
   doctor reports missing tools, `fettle init --install-tools` installs them
@@ -234,7 +235,7 @@ that estimates double once tests/docs/fixtures are included):
 
 | Risk | Mitigation |
 |---|---|
-| PyPI `fettle` name unavailable | Ship as `fettle-qa` with `fettle` console script; pursue name transfer in parallel |
+| PyPI `fettle` name unavailable | **Decided 2026-07-24: ship as `finefettle`** with `fettle` console script; publish a placeholder release early to secure the name |
 | Package restructure breaks symlink installs | One-release shim window (WP-139) + doctor migration warning |
 | Agent hook APIs drift (Claude Code / OpenCode) | Translator conformance fixtures (WP-140); payload changes fail tests, not users |
 | Scope creep vs. v1.1 governance plan | WP-146 explicitly merges with WP-127..132; single roadmap table owns sequencing |

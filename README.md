@@ -121,8 +121,9 @@ Hooks auto-activate via `hooks/hooks.json` when symlinked in `~/.claude/plugins/
 For OpenCode, register the adapter as described in
 [docs/OPENCODE.md](docs/OPENCODE.md).
 
-The `fettle` name on PyPI belongs to an unrelated project. Install this Fettle
-CLI from GitHub instead:
+The `fettle` name on PyPI belongs to an unrelated project, so the package is
+published as **`finefettle`** (“in fine fettle”) — the command is still
+`fettle`. Until the first PyPI release lands (v1.2 arc), install from GitHub:
 
 ```bash
 pip install "git+https://github.com/MilindGaharwar/fettle.git@main"

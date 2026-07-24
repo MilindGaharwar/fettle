@@ -1,0 +1,28 @@
+# Fettle's own commit-time verification — the same guards CI runs, enforced
+# before a commit can exist. CI is the backstop, never the first line:
+# the 2026-07-24 scrub-audit failure reached CI only because nothing ran
+# at commit time. Setup (once per clone):
+#
+#   uv tool install pre-commit && pre-commit install
+#
+repos:
+  - repo: local
+    hooks:
+      - id: scrub-audit
+        name: scrub audit (no private strings)
+        entry: bash scripts/scrub_audit.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: fettle-check
+        name: fettle check (changed files)
+        entry: scripts/pre_commit_check.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+      - id: fettle-rules-validate
+        name: fettle rules validate
+        entry: scripts/pre_commit_rules_validate.sh
+        language: script
+        pass_filenames: false
+        files: '^(rules/|\.fettle/rules/|\.lint/semgrep/).*\.ya?ml$'
