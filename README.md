@@ -148,6 +148,7 @@ fettle check [--all] [--changed] [--json] [--fix] [--baseline]
 fettle config --print-effective
 fettle config --explain
 fettle config --validate
+fettle policy sync|status
 fettle explain [--last N]
 fettle baseline create|update
 fettle doctor

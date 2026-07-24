@@ -1094,6 +1094,20 @@
         }
       },
       "additionalProperties": false
+    },
+    "extends": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "default": ""
+        },
+        "sha256": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

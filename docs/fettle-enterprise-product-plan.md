@@ -148,6 +148,10 @@ findings from hook, CLI, and CI on a reference repo.
   pinned (commit SHA / digest), cached with TTL, layered under repo config
   via the existing `policy_layers.py` precedence. Offline-safe: stale cache
   warns, never blocks.
+  *Status 2026-07-24: shipped — https+sha256 digest pinning (content-
+  addressed cache, so TTL is unnecessary: the digest IS the version);
+  cache-only in hooks; `fettle policy sync|status` + doctor check. OCI
+  artifacts deferred.*
 - **WP-145 — Audit & reporting.** Append-only JSONL audit log of every gate
   decision (already partially in `trace.py`) with a stable schema; `fettle
   report --org` aggregates across repos; SARIF everywhere (already present)

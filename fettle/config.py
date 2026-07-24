@@ -245,6 +245,10 @@ DEFAULTS: dict[str, Any] = {
         "extra_dirs": [".fettle/rules"],  # project rule files, relative to root
         "promise_apis": [],  # extra APIs for unawaited-promise (TS/JS)
     },
+    # WP-144: central policy distribution — digest-pinned org policy layered
+    # UNDER this repo's config (defaults → org → repo → env). Cache-only in
+    # hooks; `fettle policy sync` fetches.
+    "extends": {"url": "", "sha256": ""},
 }
 
 CONFIG_FILENAME = ".fettle.toml"
@@ -273,6 +277,13 @@ def load_config(cwd: str | None = None) -> dict[str, Any]:
         try:
             with open(config_path, "rb") as fh:
                 file_cfg = tomllib.load(fh)
+            # WP-144: org policy (cache-only — never network in the hook path)
+            # merges under the repo's own config: defaults → org → repo.
+            if file_cfg.get("extends"):
+                from fettle.policy_remote import resolve_cached_policy
+                org_cfg = resolve_cached_policy(file_cfg)
+                if org_cfg:
+                    cfg = _deep_merge(cfg, org_cfg)
             cfg = _deep_merge(cfg, file_cfg)
         except (tomllib.TOMLDecodeError, OSError) as e:
             # Fail-visible: a broken config must not silently revert to defaults.

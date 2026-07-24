@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (v1.3 — Enterprise Operations arc)
+
+- **WP-144 — Central policy distribution**: `[extends]` in .fettle.toml
+  layers a digest-pinned org policy under repo config (defaults → org →
+  repo → env). Content-addressed cache means a synced policy never goes
+  stale; sha256 verified on fetch AND on every cache read (tampered cache
+  files are discarded). Hooks resolve cache-only — never any network in
+  the hook path. New `fettle policy sync|status`; doctor warns on
+  configured-but-unsynced policies. Offline-safe by design.
+
 ## v1.2.0 — Independence
 
 The engine decouples from any single agent: real package namespace,

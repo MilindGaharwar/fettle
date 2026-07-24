@@ -14,6 +14,28 @@ fettle config --validate
 Unknown keys are warnings (they silently do nothing — the classic typo
 failure mode); type mismatches are errors.
 
+## Central policy (`[extends]`, WP-144)
+
+An org-wide policy file can be layered UNDER a repo's config
+(defaults → org policy → repo `.fettle.toml` → env):
+
+```toml
+[extends]
+url = "https://raw.githubusercontent.com/acme/policy/<commit>/fettle-org.toml"
+sha256 = "9f2c…"   # content digest — the pin is mandatory
+```
+
+- **Digest-pinned**: the sha256 is verified on fetch and on every cache
+  read; changed remote content is rejected until the pin is updated
+  deliberately. Compute with `shasum -a 256 <file>`.
+- **Never network in hooks**: hooks resolve the policy from cache only.
+  `fettle policy sync` fetches (HTTPS only, 1 MiB cap); `fettle policy
+  status` shows pin + cache state; `fettle doctor` warns when a configured
+  policy isn't synced.
+- **Offline-safe**: an unsynced or unreachable policy degrades to local
+  config with a warning — enforcement never breaks because a server is down.
+- One hop only: an org policy cannot itself contain `[extends]`.
+
 ## Example
 
 ```toml
