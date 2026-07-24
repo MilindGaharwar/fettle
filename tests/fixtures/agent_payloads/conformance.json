@@ -1,0 +1,97 @@
+{
+  "description": "Conformance fixtures (WP-140): pairs of native agent payloads that MUST normalize to the same HookInput. When an agent changes its payload shape, update its translator until these pass again.",
+  "cases": [
+    {
+      "name": "pre_edit",
+      "expect": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "file_path": "/repo/src/app.py",
+        "cwd": "/repo",
+        "session_id": "s-1"
+      },
+      "claude_code": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/repo/src/app.py", "old_string": "a", "new_string": "b"},
+        "cwd": "/repo",
+        "session_id": "s-1"
+      },
+      "opencode": {
+        "type": "tool.execute.before",
+        "tool": "edit",
+        "args": {"filePath": "/repo/src/app.py", "oldString": "a", "newString": "b"},
+        "directory": "/repo",
+        "sessionID": "s-1"
+      }
+    },
+    {
+      "name": "post_write",
+      "expect": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "file_path": "/repo/new.py",
+        "cwd": "/repo",
+        "session_id": "s-2"
+      },
+      "claude_code": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/repo/new.py", "content": "x = 1\n"},
+        "cwd": "/repo",
+        "session_id": "s-2"
+      },
+      "opencode": {
+        "type": "tool.execute.after",
+        "tool": "write",
+        "args": {"filePath": "/repo/new.py", "content": "x = 1\n"},
+        "directory": "/repo",
+        "sessionID": "s-2"
+      }
+    },
+    {
+      "name": "pre_bash",
+      "expect": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "command": "rm -rf build",
+        "cwd": "/repo",
+        "session_id": "s-3"
+      },
+      "claude_code": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf build"},
+        "cwd": "/repo",
+        "session_id": "s-3"
+      },
+      "opencode": {
+        "type": "tool.execute.before",
+        "tool": "bash",
+        "args": {"command": "rm -rf build"},
+        "directory": "/repo",
+        "sessionID": "s-3"
+      }
+    },
+    {
+      "name": "stop",
+      "expect": {
+        "hook_event_name": "Stop",
+        "tool_name": null,
+        "cwd": "/repo",
+        "session_id": "s-4"
+      },
+      "claude_code": {
+        "hook_event_name": "Stop",
+        "tool_input": {},
+        "cwd": "/repo",
+        "session_id": "s-4"
+      },
+      "opencode": {
+        "type": "session.idle",
+        "properties": {"sessionID": "s-4"},
+        "directory": "/repo"
+      }
+    }
+  ]
+}

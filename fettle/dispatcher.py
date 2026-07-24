@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 from fettle.config import load_config  # noqa: E402
 from fettle.dispatcher_aggregate import Aggregator  # noqa: E402
 from fettle.dispatcher_registry import select_checks  # noqa: E402
-from fettle.dispatcher_types import CheckResult, HookContext, HookInput  # noqa: E402
+from fettle.dispatcher_types import CheckResult, HookContext  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
@@ -69,26 +69,15 @@ def main() -> int:
         print(_empty_output())
         return 0
 
-    event_name = str(payload.get("hook_event_name") or "")
-
+    # WP-140: agent-specific payload parsing lives ONLY in fettle.agents.
+    # The dispatcher consumes the normalized event model exclusively.
     try:
-        cwd_raw = payload.get("cwd") or os.getcwd()
-        cwd = Path(cwd_raw)
-        tool_input = payload.get("tool_input") or {}
-        if not isinstance(tool_input, dict):
-            tool_input = {}
-
-        hook_input = HookInput(
-            hook_event_name=event_name,
-            tool_name=payload.get("tool_name"),
-            tool_input=tool_input,
-            cwd=cwd,
-            session_id=payload.get("session_id"),
-            raw=payload,
-        )
+        from fettle.agents import normalize
+        hook_input = normalize(payload, fallback_cwd=os.getcwd())
     except Exception:  # noqa: BLE001 — fail-open by design
-        print(_empty_output(event_name))
+        print(_empty_output(str(payload.get("hook_event_name") or "")))
         return 0
+    cwd = hook_input.cwd
 
     try:
         config = load_config(str(cwd))

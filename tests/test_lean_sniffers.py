@@ -26,6 +26,9 @@ def _run_hook(
 ) -> tuple[int, str, str]:
     """Run lean_sniffers.py, return (rc, stdout, stderr)."""
     env = os.environ.copy()
+    # Deterministic under load: the production 200 ms budget can expire before
+    # any sniffer runs when the whole suite is executing (observed flake).
+    env.setdefault("FETTLE_LEAN_MAX_RUNTIME_MS", "10000")
     if env_overrides:
         env.update(env_overrides)
     input_data = {

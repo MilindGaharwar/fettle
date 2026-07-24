@@ -44,6 +44,8 @@ def _run_sniffers(
     """Run lean_sniffers.py and return candidates from state."""
     env = os.environ.copy()
     env["FETTLE_LEAN_STATE_DIR"] = state_dir
+    # Deterministic under load — see test_lean_sniffers._run_hook.
+    env.setdefault("FETTLE_LEAN_MAX_RUNTIME_MS", "10000")
     input_data = {
         "hook_event_name": "PostToolUse",
         "tool_name": "Write",
