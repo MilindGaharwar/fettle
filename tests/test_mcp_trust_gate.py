@@ -120,8 +120,8 @@ def test_default_allowlist_path_expands_home(tmp_path, monkeypatch):
     (cfg_dir / "mcp-allowlist.json").write_text(
         json.dumps({"packages": {"left-pad": {"version": "1.0.0"}}})
     )
-    sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
-    import mcp_trust_gate
+    sys.path.insert(0, os.path.join(PLUGIN_DIR))
+    from fettle import mcp_trust_gate
     allowlist = mcp_trust_gate.load_allowlist()
     assert "left-pad" in allowlist["packages"]
 

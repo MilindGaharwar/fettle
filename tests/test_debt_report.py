@@ -1,6 +1,6 @@
 """WP-X1 — Technical Debt Dashboard tests."""
 
-from debt_report import _scan_markers, _compute_rating, generate_debt_report, format_debt_report
+from fettle.debt_report import _scan_markers, _compute_rating, generate_debt_report, format_debt_report
 
 
 def test_scan_counts_todos(tmp_path):

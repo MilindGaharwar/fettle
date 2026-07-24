@@ -19,9 +19,9 @@ import pytest
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
-from config import load_config  # noqa: E402
-from project_rules import extra_rule_configs, generate_promise_rule  # noqa: E402
+sys.path.insert(0, os.path.join(PLUGIN_DIR))
+from fettle.config import load_config  # noqa: E402
+from fettle.project_rules import extra_rule_configs, generate_promise_rule  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 

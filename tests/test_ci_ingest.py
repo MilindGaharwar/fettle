@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from ci_ingest import (
+from fettle.ci_ingest import (
     classify_failure,
     FailureClass,
     CIFailure,

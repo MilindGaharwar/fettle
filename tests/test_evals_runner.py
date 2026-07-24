@@ -15,8 +15,8 @@ import pytest
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 EVALS_DIR = os.path.join(PLUGIN_DIR, "evals", "scenarios")
 
-sys.path.insert(0, os.path.join(PLUGIN_DIR, "scripts"))
-from evals_runner import (  # noqa: E402
+sys.path.insert(0, os.path.join(PLUGIN_DIR))
+from fettle.evals_runner import (  # noqa: E402
     Scenario,
     Verdict,
     discover_scenarios,

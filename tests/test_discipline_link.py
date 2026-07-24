@@ -1,6 +1,6 @@
 """WP-G — Shared discipline_link helper tests."""
 
-from discipline_link import get_reminder, TRIGGER_SKILL_MAP
+from fettle.discipline_link import get_reminder, TRIGGER_SKILL_MAP
 
 
 def _make_config(tmp_path, enabled=True, cooldown=300):

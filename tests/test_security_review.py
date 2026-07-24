@@ -4,7 +4,7 @@ import json
 import textwrap
 from unittest.mock import patch, MagicMock
 
-from security_review import (
+from fettle.security_review import (
     run_security_review,
     format_report,
     _run_ruff_security,
@@ -14,9 +14,11 @@ from security_review import (
 
 def test_ruff_security_finds_sql_injection(tmp_path):
     src = tmp_path / "app.py"
+    # The in-string nosemgrep exempts this intentional fixture from repo-level
+    # semgrep scans; the test itself exercises ruff (S608), which ignores it.
     src.write_text(textwrap.dedent("""
         def get_user(user_id):
-            query = f"SELECT * FROM users WHERE id = {user_id}"
+            query = f"SELECT * FROM users WHERE id = {user_id}"  # nosemgrep
             return db.execute(query)
     """))
     findings = _run_ruff_security(str(tmp_path))
@@ -28,13 +30,13 @@ def test_ruff_security_finds_sql_injection(tmp_path):
 def test_ruff_missing_returns_empty(tmp_path):
     src = tmp_path / "app.py"
     src.write_text("x = 1\n")
-    with patch("security_review.subprocess.run", side_effect=FileNotFoundError):
+    with patch("fettle.security_review.subprocess.run", side_effect=FileNotFoundError):
         findings = _run_ruff_security(str(tmp_path))
     assert findings == []
 
 
 def test_semgrep_missing_returns_empty(tmp_path):
-    with patch("security_review.subprocess.run", side_effect=FileNotFoundError):
+    with patch("fettle.security_review.subprocess.run", side_effect=FileNotFoundError):
         findings = _run_semgrep_owasp(str(tmp_path))
     assert findings == []
 
@@ -56,7 +58,7 @@ def test_semgrep_parses_results(tmp_path):
     mock_result.stdout = mock_output
     mock_result.returncode = 0
 
-    with patch("security_review.subprocess.run", return_value=mock_result):
+    with patch("fettle.security_review.subprocess.run", return_value=mock_result):
         findings = _run_semgrep_owasp(str(tmp_path))
     assert len(findings) == 1
     assert findings[0]["cwe"] == "CWE-89"
@@ -65,7 +67,7 @@ def test_semgrep_parses_results(tmp_path):
 
 def test_full_review_deduplicates(tmp_path):
     src = tmp_path / "app.py"
-    src.write_text('query = f"SELECT * FROM t WHERE id = {x}"\n')
+    src.write_text('query = f"SELECT * FROM t WHERE id = {x}"\n')  # nosemgrep: sql-fstring — intentional vulnerable fixture
 
     report = run_security_review(str(tmp_path))
     # Same finding from both tools should be deduped

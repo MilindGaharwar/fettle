@@ -4,8 +4,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from adapters import get_adapter, list_adapters
-from profile import Profile
+from fettle.adapters import get_adapter, list_adapters
+from fettle.profile import Profile
 
 
 def test_registry_has_all_adapters():
@@ -52,7 +52,7 @@ def test_typescript_lint_handles_missing_tools(tmp_path):
 
 
 def test_rust_lint_handles_missing_cargo(tmp_path):
-    from adapters.rust_adapter import RustAdapter
+    from fettle.adapters.rust_adapter import RustAdapter
     adapter = RustAdapter(cwd=str(tmp_path))
     adapter._runner.run = lambda cmd: type("R", (), {"tool_missing": True, "returncode": -1, "stdout": "", "stderr": ""})()
     findings = adapter.lint("fast", [])
@@ -60,7 +60,7 @@ def test_rust_lint_handles_missing_cargo(tmp_path):
 
 
 def test_go_lint_handles_missing_go(tmp_path):
-    from adapters.go_adapter import GoAdapter
+    from fettle.adapters.go_adapter import GoAdapter
     adapter = GoAdapter(cwd=str(tmp_path))
     adapter._runner.run = lambda cmd: type("R", (), {"tool_missing": True, "returncode": -1, "stdout": "", "stderr": ""})()
     findings = adapter.lint("fast", [])

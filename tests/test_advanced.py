@@ -4,10 +4,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from schema_drift import check_schema_drift
-from migration_safety import check_migration_safety
-from ai_summaries import format_ai_summary
-from finding import CheckFinding, FindingSeverity
+from fettle.schema_drift import check_schema_drift
+from fettle.migration_safety import check_migration_safety
+from fettle.ai_summaries import format_ai_summary
+from fettle.finding import CheckFinding, FindingSeverity
 
 
 # --- WP-98: Schema drift ---

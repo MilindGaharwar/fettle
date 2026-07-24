@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from config_v050 import load_policy
+from fettle.config_v050 import load_policy
 
 
 def test_default_config_works_with_no_file(tmp_path):

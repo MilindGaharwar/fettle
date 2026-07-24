@@ -5,7 +5,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from report import compute_effectiveness, identify_candidates
+from fettle.report import compute_effectiveness, identify_candidates
 
 
 def test_compute_effectiveness_no_data(tmp_path, monkeypatch):
@@ -16,7 +16,7 @@ def test_compute_effectiveness_no_data(tmp_path, monkeypatch):
 
 def test_compute_effectiveness_with_data(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    from trace import log_decision
+    from fettle.trace import log_decision
     log_decision(hook="PostToolUse", status="pass", tool="ruff", file="app.py")
     log_decision(hook="PostToolUse", status="violation", tool="ruff", file="bad.py",
                  findings=[{"code": "F401", "message": "unused", "file": "bad.py"}])

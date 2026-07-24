@@ -34,8 +34,8 @@ RULES_DIR = PLUGIN_DIR / "rules"
 FIXTURE_ROOT = PLUGIN_DIR / "tests" / "fixtures" / "rulepacks"
 
 sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
-from project_rules import generate_promise_rule  # noqa: E402
-from semgrep_util import validate_rule_pack  # noqa: E402
+from fettle.project_rules import generate_promise_rule  # noqa: E402
+from fettle.semgrep_util import validate_rule_pack  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 

@@ -7,9 +7,9 @@ size cap, and Aggregator max_per_turn enforcement.
 import json
 import time
 
-from advisory import Advisory, AdvisoryDeduplicator, Severity, format_advisories
-from dispatcher_aggregate import Aggregator
-from dispatcher_types import CheckResult
+from fettle.advisory import Advisory, AdvisoryDeduplicator, Severity, format_advisories
+from fettle.dispatcher_aggregate import Aggregator
+from fettle.dispatcher_types import CheckResult
 
 
 def _make_advisory(rule_id: str = "TEST001", summary: str = "Test finding") -> Advisory:

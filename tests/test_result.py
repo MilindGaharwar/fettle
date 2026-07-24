@@ -5,7 +5,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from result import (
+from fettle.result import (
     Finding, ResultStatus, Severity,
     make_pass, make_violation, make_tool_error, make_config_error, make_skipped,
 )

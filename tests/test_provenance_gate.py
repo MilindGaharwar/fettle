@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(file_path: str, cwd: str, mode: str = "marker",
@@ -37,7 +37,7 @@ def _make_ctx(file_path: str, cwd: str, mode: str = "marker",
 
 
 def test_disabled_allows(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "new.py"
     src.write_text("x = 1\n")
     ctx = _make_ctx(str(src), str(tmp_path), enabled=False)
@@ -45,7 +45,7 @@ def test_disabled_allows(tmp_path):
 
 
 def test_mode_none_allows(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "new.py"
     src.write_text("x = 1\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="none")
@@ -53,42 +53,42 @@ def test_mode_none_allows(tmp_path):
 
 
 def test_marker_mode_new_file_without_marker_advisory(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "new_module.py"
     src.write_text("def hello(): pass\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="marker", marker_text="AI-generated")
-    with patch("provenance_gate._is_new_file", return_value=True):
+    with patch("fettle.provenance_gate._is_new_file", return_value=True):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "marker" in result.message.lower()
 
 
 def test_marker_mode_new_file_with_marker_allows(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "new_module.py"
     src.write_text("# AI-generated\ndef hello(): pass\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="marker", marker_text="AI-generated")
-    with patch("provenance_gate._is_new_file", return_value=True):
+    with patch("fettle.provenance_gate._is_new_file", return_value=True):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 
 
 def test_marker_mode_existing_file_allows(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "existing.py"
     src.write_text("x = 1\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="marker", marker_text="AI-generated")
-    with patch("provenance_gate._is_new_file", return_value=False):
+    with patch("fettle.provenance_gate._is_new_file", return_value=False):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 
 
 def test_manifest_mode_records_silently(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "new_file.py"
     src.write_text("x = 1\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="manifest")
-    with patch("provenance_gate._is_new_file", return_value=True):
+    with patch("fettle.provenance_gate._is_new_file", return_value=True):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
     manifest = tmp_path / ".fettle" / "provenance.jsonl"
@@ -98,20 +98,20 @@ def test_manifest_mode_records_silently(tmp_path):
 
 
 def test_exempt_json_file_not_checked(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "data.json"
     src.write_text("{}\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="marker", marker_text="AI-generated")
-    with patch("provenance_gate._is_new_file", return_value=True):
+    with patch("fettle.provenance_gate._is_new_file", return_value=True):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW
 
 
 def test_binary_file_exempt(tmp_path):
-    from provenance_gate import run_check
+    from fettle.provenance_gate import run_check
     src = tmp_path / "image.png"
     src.write_bytes(b"\x89PNG\r\n")
     ctx = _make_ctx(str(src), str(tmp_path), mode="marker", marker_text="AI-generated")
-    with patch("provenance_gate._is_new_file", return_value=True):
+    with patch("fettle.provenance_gate._is_new_file", return_value=True):
         result = run_check(ctx)
     assert result.decision == Decision.ALLOW

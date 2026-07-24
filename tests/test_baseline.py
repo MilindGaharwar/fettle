@@ -6,7 +6,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from baseline import create_baseline, load_baseline, filter_new_violations, _fingerprint
+from fettle.baseline import create_baseline, load_baseline, filter_new_violations, _fingerprint
 
 
 def test_create_baseline(tmp_path):

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(command: str, cwd: str, enabled: bool = True, mode: str = "advisory"):
@@ -35,19 +35,19 @@ def _make_ctx(command: str, cwd: str, enabled: bool = True, mode: str = "advisor
 
 
 def test_disabled_allows(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     ctx = _make_ctx("git tag v1.0.0", str(tmp_path), enabled=False)
     assert run_check(ctx).decision == Decision.ALLOW
 
 
 def test_non_tag_command_allows(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     ctx = _make_ctx("git commit -m 'hello'", str(tmp_path))
     assert run_check(ctx).decision == Decision.ALLOW
 
 
 def test_tag_with_changelog_entry_allows(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## v1.2.3\n\n- Feature\n")
     ctx = _make_ctx("git tag v1.2.3", str(tmp_path))
     result = run_check(ctx)
@@ -55,7 +55,7 @@ def test_tag_with_changelog_entry_allows(tmp_path):
 
 
 def test_tag_without_changelog_entry_advisory(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## v1.0.0\n\n- Old\n")
     ctx = _make_ctx("git tag v2.0.0", str(tmp_path))
     result = run_check(ctx)
@@ -64,7 +64,7 @@ def test_tag_without_changelog_entry_advisory(tmp_path):
 
 
 def test_tag_without_changelog_file_advisory(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     ctx = _make_ctx("git tag v1.0.0", str(tmp_path))
     result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
@@ -72,7 +72,7 @@ def test_tag_without_changelog_file_advisory(tmp_path):
 
 
 def test_invalid_semver_advisory(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## v1.2\n")
     ctx = _make_ctx("git tag v1.2", str(tmp_path))
     # "1.2" is not valid semver — but our regex won't match it either
@@ -86,7 +86,7 @@ def test_invalid_semver_advisory(tmp_path):
 
 
 def test_annotated_tag_parsed(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## v3.0.0\n- Big release\n")
     ctx = _make_ctx("git tag -a v3.0.0 -m 'release 3.0'", str(tmp_path))
     result = run_check(ctx)
@@ -94,7 +94,7 @@ def test_annotated_tag_parsed(tmp_path):
 
 
 def test_enforce_mode_blocks(tmp_path):
-    from release_gate import run_check
+    from fettle.release_gate import run_check
     ctx = _make_ctx("git tag v1.0.0", str(tmp_path), mode="enforce")
     result = run_check(ctx)
     assert result.decision == Decision.BLOCK

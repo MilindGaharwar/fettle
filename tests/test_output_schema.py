@@ -217,8 +217,8 @@ class TestBlockSchema:
     """Test that block outputs also conform to schema."""
 
     def test_block_output_via_aggregator(self):
-        from dispatcher_aggregate import Aggregator
-        from dispatcher_types import CheckResult
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
 
         agg = Aggregator(total_budget_ms=400, hook_event_name="PreToolUse")
         agg.add_result("test_gate", CheckResult.block("Blocked", hook_specific_output={
@@ -232,8 +232,8 @@ class TestBlockSchema:
         assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_block_with_advisory_context(self):
-        from dispatcher_aggregate import Aggregator
-        from dispatcher_types import CheckResult
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
 
         agg = Aggregator(total_budget_ms=400, hook_event_name="PreToolUse")
         agg.add_result("advisor", CheckResult.advisory("Warning first", hook_specific_output={

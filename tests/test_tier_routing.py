@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from tier_routing import (
+from fettle.tier_routing import (
     resolve_tier,
     scope_files_for_tier,
 )

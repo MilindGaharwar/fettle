@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(command: str, event: str = "PreToolUse", session_id: str = "test-artifact",
@@ -29,33 +29,33 @@ def _make_ctx(command: str, event: str = "PreToolUse", session_id: str = "test-a
 
 
 def test_disabled_allows(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
     ctx = _make_ctx("docker push myimg:v1", enabled=False)
-    with patch("artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
+    with patch("fettle.artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
         assert run_check(ctx).decision == Decision.ALLOW
 
 
 def test_non_publish_command_allows(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
     ctx = _make_ctx("ls -la")
-    with patch("artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
+    with patch("fettle.artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
         assert run_check(ctx).decision == Decision.ALLOW
 
 
 def test_publish_without_evidence_advisory(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
     ctx = _make_ctx("docker push ghcr.io/org/app:v1", session_id="no-ev")
-    with patch("artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
+    with patch("fettle.artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "verification evidence" in result.message
 
 
 def test_publish_with_evidence_allows(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
 
     ev_path = tmp_path / "ev.jsonl"
-    with patch("artifact_gate._evidence_path", return_value=ev_path):
+    with patch("fettle.artifact_gate._evidence_path", return_value=ev_path):
         # Record verification evidence
         ctx_verify = _make_ctx("cosign sign ghcr.io/org/app:v1", event="PostToolUse", session_id="with-ev")
         run_check(ctx_verify)
@@ -67,10 +67,10 @@ def test_publish_with_evidence_allows(tmp_path):
 
 
 def test_failed_verification_not_valid_evidence(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
 
     ev_path = tmp_path / "ev.jsonl"
-    with patch("artifact_gate._evidence_path", return_value=ev_path):
+    with patch("fettle.artifact_gate._evidence_path", return_value=ev_path):
         # Record FAILED verification (exit_code=1)
         ctx_verify = _make_ctx("cosign sign ghcr.io/org/app:v1", event="PostToolUse", session_id="fail-ev")
         ctx_verify.input = HookInput(
@@ -88,10 +88,10 @@ def test_failed_verification_not_valid_evidence(tmp_path):
 
 
 def test_rebuild_invalidates_evidence(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
 
     ev_path = tmp_path / "ev.jsonl"
-    with patch("artifact_gate._evidence_path", return_value=ev_path):
+    with patch("fettle.artifact_gate._evidence_path", return_value=ev_path):
         # Verify
         ctx_v = _make_ctx("cosign sign ghcr.io/org/app:v1", event="PostToolUse", session_id="rebuild")
         run_check(ctx_v)
@@ -107,8 +107,8 @@ def test_rebuild_invalidates_evidence(tmp_path):
 
 
 def test_enforce_mode_blocks(tmp_path):
-    from artifact_gate import run_check
+    from fettle.artifact_gate import run_check
     ctx = _make_ctx("docker push ghcr.io/org/app:v1", session_id="enforce", mode="enforce")
-    with patch("artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
+    with patch("fettle.artifact_gate._evidence_path", return_value=tmp_path / "ev.jsonl"):
         result = run_check(ctx)
     assert result.decision == Decision.BLOCK

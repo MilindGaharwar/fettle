@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from _resources import rules_dir
+from fettle._resources import rules_dir
 
 
 def test_rules_dir_contains_builtin_configs():

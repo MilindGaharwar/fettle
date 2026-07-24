@@ -102,6 +102,9 @@ exit codes contract-tested; self-scan clean.
   adapters, surfaces), no `sys.path.insert`, public API defined in
   `fettle/__init__.py` with `__all__`. Keep `scripts/*.py` as thin shims for
   one release (deprecation window for existing symlink installs).
+  *Status 2026-07-24: namespace, absolute imports, public API, and `scripts`
+  compat symlink shipped; internal subpackage reorg (core/gates/surfaces)
+  deferred to a later pass.*
 - **WP-140 — Agent abstraction layer.** `AgentEvent` normalized model
   (edit / bash / stop / session-start) with per-agent translators:
   `claude_code.py`, `opencode.py`. Hook payload parsing lives only in

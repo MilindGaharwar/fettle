@@ -23,7 +23,7 @@ def test_skips_when_disabled(tmp_path, monkeypatch):
         "session_id": "test",
     })
 
-    from ux_spec_gate import main
+    from fettle.ux_spec_gate import main
     with patch("sys.stdin", io.StringIO(data)):
         with pytest.raises(SystemExit) as exc_info:
             main()
@@ -42,7 +42,7 @@ def test_skips_non_frontend_file(tmp_path, monkeypatch):
         "session_id": "test",
     })
 
-    from ux_spec_gate import main
+    from fettle.ux_spec_gate import main
     with patch("sys.stdin", io.StringIO(data)):
         with pytest.raises(SystemExit) as exc_info:
             main()

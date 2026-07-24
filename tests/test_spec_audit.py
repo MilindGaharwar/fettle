@@ -2,8 +2,8 @@
 
 import subprocess
 
-from config import DEFAULTS
-from spec_audit import REQUIRED_SECTIONS, scan_spec_audit
+from fettle.config import DEFAULTS
+from fettle.spec_audit import REQUIRED_SECTIONS, scan_spec_audit
 
 
 def _git(root, *args):

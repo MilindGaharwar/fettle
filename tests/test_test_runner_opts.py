@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from test_runner_opts import (
+from fettle.test_runner_opts import (
     build_pytest_args,
     record_failures,
     get_last_failures,

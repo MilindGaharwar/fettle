@@ -5,7 +5,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from paths import (
+from fettle.paths import (
     find_repo_root, is_within_repo,
     relative_to_repo, is_implementation_file, is_test_file, is_excluded,
 )

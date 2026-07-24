@@ -51,13 +51,13 @@ jobs:
           sudo apt-get install -yq --no-install-recommends shellcheck cargo
 
       - name: Scrub audit (no private strings)
-        run: bash scripts/scrub_audit.sh
+        run: bash fettle/scrub_audit.sh
 
       - name: Doctor
-        run: python scripts/doctor.py
+        run: python fettle/doctor.py
 
       - name: Tests
-        run: python -m pytest tests/ scripts/tests/ -q
+        run: python -m pytest tests/ fettle/tests/ -q
 
       - name: Self-scan (dogfood)
-        run: python scripts/quality_scan.py --root scripts --json > /dev/null
+        run: python fettle/quality_scan.py --root fettle --json > /dev/null

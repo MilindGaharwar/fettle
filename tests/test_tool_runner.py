@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from tool_runner import (
+from fettle.tool_runner import (
     ToolRunner,
     FakeRunner,
     RunResult,

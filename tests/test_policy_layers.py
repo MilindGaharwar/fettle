@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from policy_layers import (
+from fettle.policy_layers import (
     PolicyLayer,
     discover_layers,
     explain_config,
@@ -32,7 +32,7 @@ def test_defaults_only_when_no_files(tmp_path):
 
 def test_defaults_resolution_matches_builtin():
     """resolve_config with only defaults returns a copy of DEFAULTS."""
-    from config import DEFAULTS
+    from fettle.config import DEFAULTS
 
     layer = PolicyLayer(name="defaults", source="built-in", config=DEFAULTS.copy(), priority=0)
     cfg = resolve_config([layer])
@@ -404,7 +404,7 @@ def test_load_config_layered_no_files(tmp_path, monkeypatch):
     # Clear any FETTLE_GATE_MODE
     monkeypatch.delenv("FETTLE_GATE_MODE", raising=False)
 
-    from config import DEFAULTS
+    from fettle.config import DEFAULTS
 
     cfg = load_config_layered(str(tmp_path))
     assert cfg["gates"]["lint"]["mode"] == DEFAULTS["gates"]["lint"]["mode"]

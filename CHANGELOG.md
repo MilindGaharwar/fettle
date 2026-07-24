@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (v1.2 — Independence arc)
+
+- **WP-139 — Package restructure**: `scripts/` renamed to `fettle/` — a real
+  package namespace with absolute `fettle.*` imports throughout (~470 import
+  sites rewritten). Fettle no longer pollutes `sys.path` with collision-prone
+  top-level names (`config`, `cache`, `profile`…). Public API defined in
+  `fettle/__init__.py` (`load_config`, `scan_project`, `find_repo_root`,
+  `__version__`), lazily loaded. A `scripts` → `fettle` symlink keeps existing
+  hook configs and muscle memory working for one release (deprecation window).
+  Internal subpackage reorganization (core/gates/surfaces) deferred.
+
 ## v1.0.2 — finefettle on PyPI
 
 - **Package renamed to `finefettle` on PyPI** (“in fine fettle”) — the

@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from secret_scan import scan_secrets, is_secret_pattern
+from fettle.secret_scan import scan_secrets, is_secret_pattern
 
 
 def test_detects_aws_key_pattern(tmp_path):

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher_types import Decision, HookContext, HookInput
+from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
 def _make_ctx(config_overrides: dict | None = None, session_id: str = "test-disc"):
@@ -48,7 +48,7 @@ def _make_ctx(config_overrides: dict | None = None, session_id: str = "test-disc
 
 def _trigger_loop(ctx, tmp_path, count=3):
     """Fire loop_detect enough times to trigger the advisory."""
-    from loop_detect import run_check
+    from fettle.loop_detect import run_check
 
     state_dir = str(tmp_path / "sessions")
     results = []
@@ -116,7 +116,7 @@ def test_cooldown_suppresses_repeated_reminder(tmp_path):
     ctx = _make_ctx(config_overrides=cfg, session_id="disc-cooldown")
 
     state_dir = str(tmp_path / "sessions")
-    from loop_detect import run_check
+    from fettle.loop_detect import run_check
 
     with patch.dict(os.environ, {"FETTLE_LOOP_STATE_DIR": state_dir}):
         # Trigger 3 times to hit threshold — first trigger gets reminder
