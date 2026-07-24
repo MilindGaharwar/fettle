@@ -21,7 +21,11 @@ This roadmap is committed before implementation begins and updated as releases s
 | v0.8.0 | **Discipline integration** — advisory contract, link pilot, budget, audit, coverage | WP-A..WP-G | **Shipped** |
 | v0.9.0 | **Engineering discipline enforcement** — branch coverage, complexity, plan thresholds, TDD | WP-H..WP-K | **Shipped** |
 | v1.0.0 | **Enterprise integration** — security review, threat model, deploy safety, debt dashboard, adapters, SWEBOK gaps | WP-L..WP-X5 | **Shipped** |
+| v1.0.1 | **Trustworthy core** — CLI exit-code contract, working check flags, MCP allowlist path fix, LR012 determinism | WP-133..WP-135 (partial, see [enterprise plan](fettle-enterprise-product-plan.md)) | **Shipped** |
 | v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
+| v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | Planned ([enterprise plan](fettle-enterprise-product-plan.md)) |
+| v1.3.0 | **Enterprise operations** — central policy, audit reporting, compliance evidence, supply-chain posture | WP-144..WP-148 | Planned |
+| v1.4.0 | **Product surface** — LSP hardening, rule marketplace, Windows, docs site, noise SLOs | WP-149..WP-153 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 

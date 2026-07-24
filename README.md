@@ -9,10 +9,13 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v1.0.0** — enterprise integration + SWEBOK v4 coverage. Full
+**Status: v1.0.1** — enterprise integration + SWEBOK v4 coverage, plus the
+Phase 0 “trustworthy core” fixes (CLI exit-code contract, working
+`--changed`/`--fix`/`--baseline`, MCP allowlist path resolution). Full
 engineering discipline enforcement with external tool adapters (SonarQube,
 Black Duck, Pact), security review, threat modeling, deployment safety,
 technical debt quantification, mutation testing, and requirements traceability.
+Next arc: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
 
 ## What It Does
 
@@ -96,6 +99,20 @@ fettle baseline create|update
 fettle doctor
 fettle lsp
 ```
+
+`fettle check` flags:
+
+| Flag | Effect |
+|------|--------|
+| `--changed` | Scan only git-changed Python files (staged, unstaged, untracked) |
+| `--fix` | Apply safe ruff autofixes before scanning |
+| `--baseline` | Report only findings not in `.fettle-baseline.json` |
+| `--json` | Machine-readable output (same exit codes as text mode) |
+| `--all` | Scan the whole tree (default; conflicts with `--changed`) |
+
+Exit codes: `0` no error-severity findings · `1` error findings present ·
+`2` usage or environment error. Identical for text and `--json` output —
+safe to gate CI on.
 
 ## GitHub Actions
 

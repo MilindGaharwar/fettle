@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.0.1 — Trustworthy Core (Phase 0 hotfix arc)
+
+Correctness fixes from the 2026-07 full-repo audit (D1–D4). See
+[docs/fettle-enterprise-product-plan.md](docs/fettle-enterprise-product-plan.md)
+for the full enterprise arc (WP-133..WP-153).
+
+### Fixed
+- **CLI exit-code contract (D1)**: `fettle check` now exits `0` (clean),
+  `1` (error-severity findings), `2` (usage/environment error) — identically
+  in text and `--json` modes. Previously `--json` always exited 0, silently
+  passing CI gates.
+- **`fettle check` flags wired (D2)**: `--changed` scans only git-changed
+  Python files (via changeset detection), `--fix` applies safe ruff autofixes
+  before scanning, `--baseline` reports only findings absent from
+  `.fettle-baseline.json` (accepts both wrapper-dict and legacy list formats).
+  `--all` and `--changed` together is now a usage error. All four flags were
+  previously accepted but ignored.
+- **MCP trust gate allowlist path (D3)**: the default
+  `~/.config/fettle/mcp-allowlist.json` path is now `expanduser`-resolved —
+  the literal `~` was never expanded, so the default allowlist never loaded.
+  Protected-path checks also resolve paths, blocking writes to the allowlist
+  via its absolute path, not just the literal `~` form.
+- **LR012 duplicate-helper sniffer (D4)**: replaced per-function `git grep`
+  calls with a 40 ms timeout by one batched grep with a 0.5 s timeout —
+  detection was nondeterministic under load (and its test flaky).
+
+### Internal
+- `quality_scan.scan_project()` accepts a `files=` parameter for targeted
+  scans; `run_ruff`/`run_semgrep` accept target lists.
+- 12 new regression tests pin the exit-code contract and allowlist resolution.
+- Version metadata aligned (pyproject said 0.7.0 while docs said v1.0.0).
+
 ## v1.0.0 — Enterprise Integration + SWEBOK Coverage
 
 ### Enterprise Features (v1.0 plan)
