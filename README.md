@@ -302,47 +302,49 @@ Every hook returns one of:
 
 ## Extensibility
 
-### Checker Protocol (`scripts/checker.py`)
+### Check Registry (`fettle/dispatcher_registry.py`)
+
+Every gate is a `CheckSpec` (name, events, matcher, budget, run function)
+in one declarative table; the dispatcher selects and runs applicable checks
+per hook event under per-check and per-event latency budgets.
+
+### Agent Translators (`fettle/agents/`)
 
 ```python
-class Checker(ABC):
-    name: str
-    file_extensions: set[str]
-    def is_available(self) -> AvailabilityResult: ...
-    def check(self, context: CheckContext) -> list[Finding]: ...
-    def can_fix(self) -> bool: ...
+from fettle.agents import detect_agent, normalize
+hook_input = normalize(payload, fallback_cwd=os.getcwd())
+# Claude Code hook JSON and native OpenCode plugin events both normalize
+# to the same event model — conformance-tested per agent (WP-140).
 ```
 
-Built-in: `RuffChecker`, `SemgrepChecker`. Register custom: `register_checker(MyChecker())`.
+### Language Adapters (`fettle/adapters/`)
 
-### Policy Engine (`scripts/policy.py`)
+Python, TypeScript, Rust, and Go adapters implement a common protocol
+(`get_adapter(extension)`); external tools (SonarQube, Black Duck, Pact)
+follow the `IntegrationAdapter` protocol with fail-open/fail-closed policy
+per integration.
 
-```python
-decision = evaluate_policy("PostToolUse", "src/app.py", config)
-# → PolicyDecision(should_check=True, checkers=['ruff', 'semgrep'], block_on_error=False)
-```
-
-### Event Model (`scripts/event.py`)
+### Event Model (`fettle/event.py`)
 
 ```python
 event = FettleEvent.from_stdin(HookType.POST_TOOL_USE)
 # → typed, normalized: event.is_python, event.file_extension, event.repo_root
 ```
 
-### Result Caching (`scripts/cache.py`)
+### Result Caching (`fettle/cache.py`)
 
 Cache key = file content hash + config hash. Skips re-scanning unchanged files.
 
 ## Testing
 
 ```bash
-cd ~/.claude/plugins/fettle
-.venv/bin/python -m pytest tests/ -q
+cd ~/projects/fettle
+.venv/bin/python -m pytest tests/ fettle/tests/ -q
 ```
 
-**939 tests** across 117 test files covering all checks, adapters, and
-infrastructure. All adapter tests use mocked tool outputs — no eslint, biome,
-tsc, cargo, or semgrep installation required to run the suite.
+**1100+ tests** across 120+ test files covering all checks, adapters, agent
+translators, and infrastructure. All adapter tests use mocked tool outputs —
+no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 
 ## Roadmap
 
@@ -356,6 +358,10 @@ tsc, cargo, or semgrep installation required to run the suite.
 | v0.7.0 | Action, LSP, policy layering, OpenCode adapter | **Shipped** |
 | v0.8.0 | Discipline integration (advisory contract, link pilot, budget, audit, coverage) | **Shipped** |
 | v0.9.0 | Engineering discipline enforcement (branch coverage, complexity, plan thresholds, TDD) | **Shipped** |
+| v1.0.0 | Enterprise integration (security review, threat model, deploy safety, adapters, SWEBOK gaps) | **Shipped** |
+| v1.0.1 | Trustworthy core (audit fixes D1–D9, exit-code contract, `--version`) | **Shipped** |
+| v1.0.2 | finefettle on PyPI, Trusted Publishing, commit-time guards | **Shipped** |
+| v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **In progress** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.

@@ -54,6 +54,9 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 | `FETTLE_STATE_DIR` | Base dir for per-session state (default `$XDG_STATE_HOME/fettle`) |
 | `FETTLE_EDIT_TRACKING` | Override the per-session edit-tracking file path |
 | `FETTLE_TRACE_DIR` | Override the trace directory |
+| `FETTLE_LEAN_MAX_RUNTIME_MS` | Override the lean-sniffer wall-clock budget (default 200 ms; test harnesses pin a high value for determinism) |
+| `FETTLE_LEAN_STATE_DIR` | Override the lean-review session state directory |
+| `MCP_ALLOWLIST_PATH` | Override the MCP trust-gate allowlist path (default `~/.config/fettle/mcp-allowlist.json`) |
 
 ## State model
 
