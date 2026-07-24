@@ -34,6 +34,47 @@ Next arc: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
 | **Coverage gate** | Stop | Diff line + branch coverage from coverage.json (v0.8/v0.9) |
 | **Discipline link** | PostToolUse | Injects skill reminders when loop/scope/lean gates fire (v0.8) |
 
+## Why Fettle
+
+Fettle occupies a gap none of the adjacent tool categories cover: **enforcement
+at the moment AI generates code**, not minutes or days later.
+
+| Category | When it acts | What it misses |
+|----------|--------------|----------------|
+| Linters & SAST (ruff, semgrep, SonarLint) | On demand / in editor | Not wired into agent sessions; no process enforcement; you configure and run them yourself |
+| Commit hooks (pre-commit, Husky) | At commit time | Bad code already sits in the working tree; agents iterate dozens of edits per commit |
+| CI quality gates (SonarQube, CodeQL) | At push/PR time | Feedback arrives after the agent session ended — the context that produced the bug is gone |
+| AI code-review bots | At PR time | Review comments, not enforcement; nothing stops the pattern from being written again |
+
+Fettle hooks the agent's own tool calls (PreToolUse/PostToolUse/Stop), so the
+finding lands **inside the session that caused it**, where the agent can still
+fix it with full context.
+
+### What's genuinely different
+
+- **Incident-derived rules.** `/fettle:learn` turns a real production incident
+  into a semgrep rule with test fixtures and an incident citation. The rules
+  catalog isn't a generic style guide — every LLM-antipattern rule traces to
+  something that actually broke.
+- **Noise is a measured budget, not a hope.** `fettle bench` tracks
+  findings-per-KLOC against committed budgets; rules are promoted
+  advisory → enforce (and demoted back) based on evidence via `fettle ratchet`.
+  A quality tool that doesn't measure its own false-positive rate becomes
+  ignored wallpaper.
+- **Process gates, not just pattern matching.** TDD ordering, plan-before-edit,
+  diff coverage, complexity ceilings, over-engineering (lean) review,
+  destructive-command guard, and an MCP package supply-chain gate — the
+  engineering discipline around the code, not only the code.
+- **One policy, every chokepoint.** The same `.fettle.toml` drives agent hooks,
+  the CLI, pre-commit, CI (GitHub Action + SARIF), and the LSP server. No
+  drift between what the editor warns about and what CI blocks.
+- **Fail-open by design.** Hooks run under strict latency budgets and never
+  crash or hang an agent session over an environment problem — enforcement
+  degrades visibly (doctor, trace log) instead of breaking your flow.
+- **Suppressions with expiry and owner.** Every suppression carries a reason,
+  an owner, and an expiry date — expired suppressions resurface as findings
+  instead of rotting silently.
+
 ## Intelligence Layer (v0.3.0+)
 
 | Feature | Command | Description |
