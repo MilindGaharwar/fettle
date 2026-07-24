@@ -94,7 +94,7 @@
 | 6 | Write failing test: command on a service with HTTP routes produces non-empty threat model | TDD | Test fails before auto-population logic, passes after |
 | 7 | Integration test: run on a fixture Flask app, verify entry points and data stores detected | INTEGRATION | Fixture app with 3 routes and 1 DB connection → threat model lists all 3 entry points and the data store |
 | 8 | Regression test: command on an empty directory produces a valid template with "no entry points detected" rather than crashing | REGRESSION | Empty project produces valid markdown template with explicit "none detected" notes; no crash, no stack trace |
-| 9 | Live verification: run threat-model on this project | LIVE | `bash scripts/run.sh threat_model.py --name sol-orchestrator --root /Users/MMILIND/projects/sol-orchestrator` produces docs/threat-model-sol-orchestrator.md |
+| 9 | Live verification: run threat-model on this project | LIVE | `bash scripts/run.sh threat_model.py --name example-project --root ~/projects/example-project` produces docs/threat-model-example-project.md |
 
 ---
 

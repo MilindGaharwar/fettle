@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fettle"
+name = "finefettle"
 version = "1.0.1"
 description = "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived rules for Claude Code"
 readme = "README.md"
