@@ -9,7 +9,7 @@ findings before they reach production — ruff linting, semgrep pattern matching
 and **incident-derived LLM-antipattern rules** layered into a defense model that
 catches issues at the point of creation rather than in code review.
 
-**Status: v1.0.1** — enterprise integration + SWEBOK v4 coverage, plus the
+**Status: v1.0.2** — enterprise integration + SWEBOK v4 coverage, plus the
 Phase 0 “trustworthy core” fixes (CLI exit-code contract, working
 `--changed`/`--fix`/`--baseline`, MCP allowlist path resolution). Full
 engineering discipline enforcement with external tool adapters (SonarQube,

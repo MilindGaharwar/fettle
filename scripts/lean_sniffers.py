@@ -624,7 +624,7 @@ def run_check(ctx):
             summary=c.get("message", "")[:120],
             recommended_action=f"{c.get('relative_path', '?')}:{c.get('line_start', '?')}",
             dedupe_key=c.get("dedupe_key", ""),
-            provenance="lean_sniffers@1.0.1",
+            provenance="lean_sniffers@1.0.2",
         )
         if dedup.should_emit(adv):
             dedup.record(adv)

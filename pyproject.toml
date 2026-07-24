@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finefettle"
-version = "1.0.1"
+version = "1.0.2"
 description = "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived rules for Claude Code"
 readme = "README.md"
 license = "MIT"
