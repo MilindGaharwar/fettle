@@ -2,6 +2,18 @@
 
 ## Unreleased (v1.2 — Independence arc)
 
+- **WP-140 — Agent abstraction layer**: new `fettle.agents` package — native
+  agent payloads (Claude Code hook JSON, OpenCode plugin events) normalize
+  into the dispatcher's event model through per-agent translators. Payload
+  parsing lives only in translators; the dispatcher consumes normalized
+  events exclusively. Conformance fixture suite asserts both agents'
+  payloads normalize identically — payload drift breaks tests, not users.
+  The dispatcher now accepts OpenCode's native event shapes directly (the
+  TypeScript shim's pre-shaping keeps working during the deprecation window).
+- **Lean sniffer determinism**: `FETTLE_LEAN_MAX_RUNTIME_MS` env override —
+  the 200 ms production budget could expire before any sniffer ran on a
+  loaded machine, making hook behavior (and its tests) nondeterministic.
+  Tests now run with a deterministic budget.
 - **WP-139 — Package restructure**: `scripts/` renamed to `fettle/` — a real
   package namespace with absolute `fettle.*` imports throughout (~470 import
   sites rewritten). Fettle no longer pollutes `sys.path` with collision-prone

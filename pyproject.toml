@@ -37,7 +37,7 @@ Repository = "https://github.com/MilindGaharwar/fettle"
 Changelog = "https://github.com/MilindGaharwar/fettle/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["fettle", "fettle.adapters"]
+packages = ["fettle", "fettle.adapters", "fettle.agents"]
 
 [tool.setuptools.package-data]
 fettle = ["py.typed"]

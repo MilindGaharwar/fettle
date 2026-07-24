@@ -110,6 +110,9 @@ exit codes contract-tested; self-scan clean.
   `claude_code.py`, `opencode.py`. Hook payload parsing lives only in
   translators; the dispatcher consumes `AgentEvent` exclusively. Conformance
   fixture suite per agent so payload drift is caught by tests, not users.
+  *Status 2026-07-24: shipped as `fettle.agents` — detection, translators,
+  conformance fixtures, and dispatcher integration; normalized model is the
+  existing `HookInput`.*
 - **WP-141 — First-class distribution.** Publish to PyPI as **`finefettle`**
   (name verified available 2026-07-24; the `fettle` name is taken by an
   unrelated project — console script remains `fettle`); `uv tool install` /
