@@ -1,24 +1,66 @@
 # Fettle
 
-> **fettle** *(v.)* — to trim and clean a rough casting fresh from the mold.
-> *"In fine fettle"* — in excellent condition.
+[![PyPI](https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen)](https://pypi.org/project/finefettle/)
+[![CI](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml/badge.svg)](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://pypi.org/project/finefettle/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-Quality enforcement for AI-assisted development. Fettle intercepts code
-mutations made by Claude Code or OpenCode, runs static analysis in real time, and surfaces
-findings before they reach production — ruff linting, semgrep pattern matching,
-and **incident-derived LLM-antipattern rules** layered into a defense model that
-catches issues at the point of creation rather than in code review.
+> **fettle** *(v.)* — foundry term: to trim and clean a rough casting fresh
+> from the mold. *"In fine fettle"* — in excellent condition.
 
-**Status: v1.2.0** — the Independence release: real `fettle` package
-namespace, agent abstraction layer with per-agent conformance contracts
-(Claude Code, OpenCode), one-command `fettle init`, validated config schema,
-and CI parity across GitHub, GitLab, and pre-commit — on top of the v1.0
-enterprise integration + SWEBOK v4 coverage (SonarQube/Black Duck/Pact
-adapters, security review, threat modeling, deployment safety, debt
-quantification, mutation testing, requirements traceability).
-Next arc: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
+**The quality harness for AI-generated code — enforcement at the moment of
+creation, not days later in code review.**
+
+AI agents write code at machine speed; your review process still runs at
+human speed. Every linter, CI gate, and review bot you already have fires
+*after* the agent session that produced the bug has ended — the context is
+gone, and the same antipattern gets written again tomorrow. Fettle hooks the
+agent's own tool calls (Claude Code, OpenCode) and runs static analysis,
+process gates, and **incident-derived LLM-antipattern rules** on every edit,
+*inside the session*, where the agent can still fix it with full context.
+
+```text
+  agent writes code ─▶ Fettle gate fires ─▶ finding lands in-session ─▶ agent fixes it
+       (ms)              (≤400ms budget)        (same context)           (immediately)
+```
+
+## 60-Second Start
+
+```bash
+git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle
+cd ~/projects/fettle && python3 fettle/cli.py init --install-tools
+fettle doctor        # verify — hooks are live in your next agent session
+```
+
+CLI-only (hooks need the checkout): `pipx install finefettle`
+
+**Status: v1.2.0 “Independence”** — real package namespace, agent
+abstraction with per-agent conformance contracts, one-command setup,
+validated config schema, CI parity across GitHub/GitLab/pre-commit — on top
+of v1.0's enterprise integration (SonarQube/Black Duck/Pact adapters,
+security review, threat modeling, deployment safety, mutation testing,
+requirements traceability). Roadmap: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
 
 ## What It Does
+
+```mermaid
+flowchart LR
+    subgraph agents ["AI Agents"]
+        CC[Claude Code]
+        OC[OpenCode]
+    end
+    subgraph fettle ["Fettle"]
+        T["fettle.agents<br/>translators"] --> D["Dispatcher<br/>latency-budgeted"]
+        D --> G["30+ gates<br/>lint · TDD · complexity · lean<br/>destructive · MCP trust · coverage"]
+        G --> A["Audit trail<br/>versioned JSONL"]
+    end
+    subgraph chokepoints ["Same policy everywhere"]
+        P[pre-commit] ~~~ CI["GitHub / GitLab CI"] ~~~ L[LSP / editor]
+    end
+    CC -- "hook events" --> T
+    OC -- "native events" --> T
+    fettle -. "one .fettle.toml" .-> chokepoints
+```
 
 | Layer | Hook | What runs |
 |-------|------|-----------|
@@ -83,6 +125,21 @@ this model — Fettle is the assurance layer for it.)
 - **Suppressions with expiry and owner.** Every suppression carries a reason,
   an owner, and an expiry date — expired suppressions resurface as findings
   instead of rotting silently.
+- **It polices its own development.** Fettle's commit-time guards blocked two
+  of Fettle's own commits during recent development (an intentional-fixture
+  scan hit and a broad-except in new code). The harness that doesn't pass its
+  own bar doesn't ship.
+
+## Enterprise Operations (v1.3 arc, shipping now)
+
+| Capability | How |
+|---|---|
+| **Central policy** | `[extends]` in `.fettle.toml` layers a digest-pinned org policy under repo config — content-addressed (sha256 verified on fetch *and* every cache read), cache-only in hooks (zero network in the hook path), offline-safe. `fettle policy sync\|status` |
+| **Audit trail** | Every gate decision logged to versioned, append-only JSONL with repo attribution — prove what was enforced, when, where |
+| **Org reporting** | `fettle report --org` rolls up decisions/violations/blocks per repo for platform teams |
+| **CI dashboards** | SARIF (GitHub code scanning) + JUnit XML (`fettle check --junit` — GitLab, Jenkins, Azure DevOps) |
+| **Config governance** | Published [JSON Schema](docs/fettle.schema.json), `fettle config --validate` with typo-catching unknown-key warnings — orgs review a schema, not source code |
+| **Supply-chain stance** | Tokenless releases (PyPI Trusted Publishing/OIDC), pinned tool installs only on explicit user action — hooks never install anything |
 
 ## Intelligence Layer (v0.3.0+)
 
@@ -346,7 +403,7 @@ cd ~/projects/fettle
 .venv/bin/python -m pytest tests/ fettle/tests/ -q
 ```
 
-**1100+ tests** across 120+ test files covering all checks, adapters, agent
+**1150+ tests** across 120+ test files covering all checks, adapters, agent
 translators, and infrastructure. All adapter tests use mocked tool outputs —
 no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 
@@ -365,7 +422,8 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.0.0 | Enterprise integration (security review, threat model, deploy safety, adapters, SWEBOK gaps) | **Shipped** |
 | v1.0.1 | Trustworthy core (audit fixes D1–D9, exit-code contract, `--version`) | **Shipped** |
 | v1.0.2 | finefettle on PyPI, Trusted Publishing, commit-time guards | **Shipped** |
-| v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **In progress** |
+| v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **Shipped** |
+| v1.3.0 | Enterprise operations: central policy, audit/org reporting, JUnit, compliance evidence | **In progress** — WP-144/145 shipped |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.
