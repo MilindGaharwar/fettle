@@ -161,12 +161,38 @@ def cmd_ci(args: argparse.Namespace) -> None:
 
 
 def cmd_config(args: argparse.Namespace) -> None:
-    """Show effective configuration."""
+    """Show or validate configuration."""
     from fettle.paths import find_repo_root
     from fettle.policy_layers import discover_layers, load_config_layered
 
     repo_root = find_repo_root()
     project_root = repo_root or __import__("pathlib").Path.cwd()
+
+    if getattr(args, "validate", False):
+        import tomllib
+        from fettle.config_schema import validate_config
+        config_path = project_root / ".fettle.toml"
+        if not config_path.is_file():
+            print("No .fettle.toml found — defaults apply, nothing to validate.")
+            sys.exit(0)
+        try:
+            with open(config_path, "rb") as fh:
+                user_cfg = tomllib.load(fh)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            print(f"✗ {config_path}: not parseable TOML — {exc}", file=sys.stderr)
+            sys.exit(1)
+        errors, warnings = validate_config(user_cfg)
+        for w in warnings:
+            print(f"  [WARN] {w}")
+        for e in errors:
+            print(f"  [ERROR] {e}")
+        if errors:
+            print(f"\n✗ {config_path}: {len(errors)} error(s), {len(warnings)} warning(s)")
+            sys.exit(1)
+        print(f"\n✓ {config_path}: valid"
+              + (f" ({len(warnings)} warning(s))" if warnings else ""))
+        sys.exit(0)
+
     layers = discover_layers(project_root)
     config = load_config_layered(str(project_root))
 
@@ -180,7 +206,7 @@ def cmd_config(args: argparse.Namespace) -> None:
         from fettle.policy_layers import _print_explain
         _print_explain(layers)
     else:
-        print("Use --print-effective or --explain to inspect merged config.")
+        print("Use --print-effective, --explain, or --validate to inspect config.")
 
 
 def cmd_explain(args: argparse.Namespace) -> None:
@@ -372,6 +398,7 @@ def main() -> None:
     p_config = subparsers.add_parser("config", help="Show configuration")
     p_config.add_argument("--print-effective", action="store_true", help="Show merged effective config")
     p_config.add_argument("--explain", action="store_true", help="Show the source of each effective value")
+    p_config.add_argument("--validate", action="store_true", help="Validate .fettle.toml against the config schema")
 
     p_explain = subparsers.add_parser("explain", help="Explain last hook decision")
     p_explain.add_argument("--last", action="store_true", default=True)

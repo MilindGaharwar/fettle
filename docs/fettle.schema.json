@@ -1,0 +1,1100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MilindGaharwar/fettle/blob/main/docs/fettle.schema.json",
+  "title": "Fettle configuration (.fettle.toml)",
+  "description": "Schema v1, generated from fettle.config.DEFAULTS. Validate locally with: fettle config --validate",
+  "x-fettle-schema-version": 1,
+  "type": "object",
+  "properties": {
+    "gates": {
+      "type": "object",
+      "properties": {
+        "lint": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "cross_file": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "threshold": {
+              "type": "integer",
+              "default": 3
+            },
+            "plan_dir": {
+              "type": "string",
+              "default": "docs"
+            },
+            "plan_glob": {
+              "type": "string",
+              "default": "*plan*.md"
+            },
+            "max_age_hours": {
+              "type": "integer",
+              "default": 1
+            },
+            "risk_paths": {
+              "type": "array"
+            },
+            "module_threshold": {},
+            "module_roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "src",
+                "packages"
+              ]
+            },
+            "line_threshold": {},
+            "diff_timeout_ms": {
+              "type": "integer",
+              "default": 500
+            }
+          },
+          "additionalProperties": false
+        },
+        "ux_spec": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "frontend_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "frontend/src/pages/",
+                "frontend/src/components/",
+                "src/pages/",
+                "src/components/"
+              ]
+            },
+            "exempt": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "components/ui/",
+                "utils/",
+                "hooks/",
+                "stores/",
+                "api/",
+                "test",
+                ".test.",
+                ".spec."
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "ui_colors": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "allowed_hex": {
+              "type": "array"
+            }
+          },
+          "additionalProperties": false
+        },
+        "docs": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "soft",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "spec_audit": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "audit_path": {
+              "type": "string",
+              "default": "docs/spec-audit.md"
+            },
+            "base_ref": {
+              "type": "string",
+              "default": "main"
+            },
+            "spec_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "docs/*spec*.md",
+                "docs/**/*spec*.md",
+                "docs/*strategy*.md",
+                "docs/**/*strategy*.md",
+                "docs/*architecture*.md",
+                "docs/**/*architecture*.md",
+                "docs/*plan*.md",
+                "docs/**/*plan*.md"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "tests": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "browser_test_window_s": {
+              "type": "integer",
+              "default": 1800
+            }
+          },
+          "additionalProperties": false
+        },
+        "mcp_trust": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "ci_bootstrap": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "destructive": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "extra_patterns": {
+              "type": "array"
+            },
+            "allow_commands": {
+              "type": "array"
+            }
+          },
+          "additionalProperties": false
+        },
+        "config_protect": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "extra_patterns": {
+              "type": "array"
+            },
+            "allow_patterns": {
+              "type": "array"
+            }
+          },
+          "additionalProperties": false
+        },
+        "loop_detect": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "threshold": {
+              "type": "integer",
+              "default": 3
+            },
+            "window": {
+              "type": "integer",
+              "default": 7
+            }
+          },
+          "additionalProperties": false
+        },
+        "scope_creep": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "warning_threshold": {
+              "type": "integer",
+              "default": 15
+            },
+            "critical_threshold": {
+              "type": "integer",
+              "default": 25
+            },
+            "reset_on_commit": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "commit_message": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "feat",
+                "fix",
+                "docs",
+                "style",
+                "refactor",
+                "perf",
+                "test",
+                "build",
+                "ci",
+                "chore",
+                "revert"
+              ]
+            },
+            "max_subject_length": {
+              "type": "integer",
+              "default": 72
+            },
+            "require_conventional": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "subagent": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "injection_file": {
+              "type": "string",
+              "default": ""
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "lean_review": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "silent",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "tier1": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "max_runtime_ms": {
+                  "type": "integer",
+                  "default": 200
+                },
+                "sniffers": {
+                  "type": "object",
+                  "properties": {
+                    "LR001_DEPENDENCY_ADDED": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "LR002_NEW_ABSTRACTION_NAME": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "LR003_PASS_THROUGH_WRAPPER": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "LR004_SINGLE_METHOD_CLASS": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "LR008_LARGE_ADDITION": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "LR012_DUPLICATE_LOCAL_HELPER_NAME": {
+                      "type": "boolean",
+                      "default": true
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "thresholds": {
+                  "type": "object",
+                  "properties": {
+                    "large_added_lines": {
+                      "type": "integer",
+                      "default": 120
+                    },
+                    "large_function_lines": {
+                      "type": "integer",
+                      "default": 60
+                    },
+                    "large_class_lines": {
+                      "type": "integer",
+                      "default": 80
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "tier2": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "model": {
+                  "type": "string",
+                  "default": "qwen2.5-coder:7b"
+                },
+                "ollama_url": {
+                  "type": "string",
+                  "default": "http://localhost:11434"
+                },
+                "ollama_timeout_ms": {
+                  "type": "integer",
+                  "default": 6000
+                },
+                "high_confidence_threshold": {
+                  "type": "number",
+                  "default": 0.85
+                },
+                "max_findings": {
+                  "type": "integer",
+                  "default": 3
+                }
+              },
+              "additionalProperties": false
+            },
+            "paths": {
+              "type": "object",
+              "properties": {
+                "ignore": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [
+                    "**/__pycache__/**",
+                    "**/.venv/**",
+                    "**/node_modules/**",
+                    "**/dist/**",
+                    "**/build/**",
+                    "**/migrations/**"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "advisory": {
+          "type": "object",
+          "properties": {
+            "cooldown_seconds": {
+              "type": "integer",
+              "default": 300
+            },
+            "dedup_window_seconds": {
+              "type": "integer",
+              "default": 900
+            },
+            "max_per_turn": {
+              "type": "integer",
+              "default": 3
+            },
+            "max_total_bytes": {
+              "type": "integer",
+              "default": 2048
+            },
+            "allow_escalation": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "discipline_link": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "skills_path": {
+              "type": "string",
+              "default": "~/.claude/plugins/disciplines/skills"
+            },
+            "cooldown_seconds": {
+              "type": "integer",
+              "default": 300
+            },
+            "reminder_style": {
+              "type": "string",
+              "default": "compact"
+            }
+          },
+          "additionalProperties": false
+        },
+        "tdd": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "test_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "tests/test_*.py",
+                "tests/**/test_*.py"
+              ]
+            },
+            "implementation_roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "src/"
+              ]
+            },
+            "exempt_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "docs/**",
+                "**/*.md",
+                "**/*.toml",
+                "**/*.yaml",
+                "**/*.yml",
+                "**/*.json",
+                "**/*.cfg",
+                "tests/fixtures/**",
+                "**/__pycache__/**",
+                "**/node_modules/**",
+                "**/.venv/**",
+                "**/dist/**"
+              ]
+            },
+            "accept_preexisting_tests": {
+              "type": "boolean",
+              "default": true
+            },
+            "path_mappings": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "complexity": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "enforce": {
+              "type": "boolean",
+              "default": false
+            },
+            "max_cyclomatic": {
+              "type": "integer",
+              "default": 10
+            },
+            "max_cognitive": {
+              "type": "integer",
+              "default": 15
+            }
+          },
+          "additionalProperties": false
+        },
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "threshold": {
+              "type": "integer",
+              "default": 80
+            },
+            "minimum_branch_percent": {
+              "type": "integer",
+              "default": 0
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "default": "changed_lines"
+            },
+            "max_staleness_seconds": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "deploy_safety": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "require_tests": {
+              "type": "boolean",
+              "default": true
+            },
+            "require_changelog": {
+              "type": "boolean",
+              "default": false
+            },
+            "require_health_endpoint": {
+              "type": "boolean",
+              "default": true
+            },
+            "check_debug_flags": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "release": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "changelog_path": {
+              "type": "string",
+              "default": "CHANGELOG.md"
+            },
+            "require_semver": {
+              "type": "boolean",
+              "default": true
+            },
+            "check_breaking_changes": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "architecture_boundaries": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "rules": {
+              "type": "array"
+            }
+          },
+          "additionalProperties": false
+        },
+        "artifact_integrity": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "none",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            },
+            "marker_text": {
+              "type": "string",
+              "default": ""
+            },
+            "exempt_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "**/*.json",
+                "**/*.lock",
+                "**/migrations/**",
+                "**/*.generated.*"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "worklog": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "commit",
+                "enforce",
+                "manifest",
+                "marker",
+                "none",
+                "off",
+                "silent",
+                "soft",
+                "strict"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "bash_audit": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "capture_command": {
+              "type": "boolean",
+              "default": false
+            },
+            "capture_exit_code": {
+              "type": "boolean",
+              "default": true
+            },
+            "capture_duration": {
+              "type": "boolean",
+              "default": true
+            },
+            "retention_days": {
+              "type": "integer",
+              "default": 14
+            },
+            "redaction": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "replacement": {
+                  "type": "string",
+                  "default": "[REDACTED]"
+                },
+                "patterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [
+                    "(?i)(api[_-]?key|password|secret|token)\\s*[=:]\\s*\\S+",
+                    "(?i)bearer\\s+\\S+"
+                  ]
+                },
+                "fail_closed": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "severity": {
+      "type": "object",
+      "properties": {
+        "error_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "BLE001",
+            "S110",
+            "S608",
+            "S701"
+          ]
+        },
+        "warning_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "SIM",
+            "UP"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "properties": {
+        "ruff_config": {
+          "type": "string",
+          "default": ""
+        },
+        "trace_dir": {
+          "type": "string",
+          "default": ".fettle"
+        }
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "default": "claude_code"
+        },
+        "endpoint": {
+          "type": "string",
+          "default": ""
+        },
+        "model": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "boundary": {
+      "type": "object",
+      "properties": {
+        "forbidden": {
+          "type": "array"
+        },
+        "extra_secret_patterns": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "extra_dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".fettle/rules"
+          ]
+        },
+        "promise_apis": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

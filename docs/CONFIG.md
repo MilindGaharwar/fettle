@@ -3,6 +3,17 @@
 Fettle reads a single optional `.fettle.toml` at your project root. Layering
 (later wins): built-in defaults → `.fettle.toml` → environment variables.
 
+A machine-readable schema is published at
+[fettle.schema.json](fettle.schema.json) (generated from the built-in
+defaults; a test keeps it current). Validate your config locally:
+
+```bash
+fettle config --validate
+```
+
+Unknown keys are warnings (they silently do nothing — the classic typo
+failure mode); type mismatches are errors.
+
 ## Example
 
 ```toml

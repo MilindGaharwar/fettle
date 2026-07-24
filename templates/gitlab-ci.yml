@@ -1,0 +1,49 @@
+# Fettle GitLab CI template (WP-143) — same policy as the GitHub Action
+# and pre-commit hooks: one .fettle.toml, identical findings at every
+# chokepoint.
+#
+# Consumer usage (.gitlab-ci.yml):
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/MilindGaharwar/fettle/v1.0.2/templates/gitlab-ci.yml'
+#
+#   fettle:
+#     variables:
+#       FETTLE_MODE: enforce   # advisory (default) | enforce
+#
+# Or copy this job into your pipeline directly.
+
+fettle:
+  image: python:3.12-slim
+  stage: test
+  variables:
+    FETTLE_MODE: advisory
+    GIT_DEPTH: "0" # full history — --changed and baseline diffs need it
+  before_script:
+    - pip install --quiet finefettle ruff==0.15.20 semgrep==1.168.0
+  script:
+    - fettle config --validate
+    - |
+      set +e
+      fettle check --all --json > fettle-findings.json
+      rc=$?
+      set -e
+      python - <<'PY'
+      import json, sys
+      data = json.load(open("fettle-findings.json"))
+      findings = data.get("findings", [])
+      errors = [f for f in findings if f.get("severity") == "error"]
+      for f in findings[:50]:
+          print(f"[{f['severity'].upper()}] {f['file']}:{f['line']} {f['code']} — {f['message'][:120]}")
+      print(f"\n{len(findings)} finding(s), {len(errors)} error(s).")
+      PY
+    - |
+      if [ "$FETTLE_MODE" = "enforce" ] && [ "$rc" -ne 0 ]; then
+        echo "Fettle gate failed (FETTLE_MODE=enforce)."
+        exit "$rc"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - fettle-findings.json
+    expire_in: 30 days

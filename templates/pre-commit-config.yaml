@@ -3,7 +3,7 @@
 # (VS Code, Claude Code, plain terminal): the same policy at every chokepoint.
 repos:
   - repo: https://github.com/MilindGaharwar/fettle
-    rev: v0.4.2   # pin a tag; bump deliberately
+    rev: v1.0.2   # pin a tag; bump deliberately
     hooks:
       - id: fettle-check
       - id: fettle-rules-validate
