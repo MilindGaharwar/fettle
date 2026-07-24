@@ -106,12 +106,50 @@ def check_commit_guards() -> list[dict]:
     return checks
 
 
+def check_org_policy() -> list[dict]:
+    """Warn when [extends] is configured but the org policy isn't cached (WP-144).
+
+    Hooks resolve org policy cache-only (no network in the hook path), so a
+    configured-but-unsynced policy silently doesn't apply until someone runs
+    `fettle policy sync` — exactly the kind of gap doctor exists to surface.
+    """
+    import os
+    import tomllib
+    checks: list[dict] = []
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fettle.paths import find_repo_root
+    from fettle.policy_remote import PolicyError, load_cached, parse_extends
+    try:
+        repo_root = find_repo_root()
+        if not repo_root or not (repo_root / ".fettle.toml").is_file():
+            return checks
+        with open(repo_root / ".fettle.toml", "rb") as fh:
+            raw_cfg = tomllib.load(fh)
+        extends = parse_extends(raw_cfg)
+        if extends is None:
+            return checks
+        cached = load_cached(extends) is not None
+        checks.append({
+            "name": "org-policy",
+            "required": False,
+            "ok": cached,
+            "detail": "org policy cached (digest verified)" if cached
+                      else "[extends] configured but policy not cached — run: fettle policy sync",
+        })
+    except (PolicyError, OSError, ValueError) as exc:  # ValueError covers TOMLDecodeError
+        checks.append({
+            "name": "org-policy", "required": False, "ok": False,
+            "detail": f"[extends] invalid: {exc}",
+        })
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    checks = check_environment() + check_commit_guards()
+    checks = check_environment() + check_commit_guards() + check_org_policy()
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:

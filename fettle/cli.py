@@ -335,6 +335,51 @@ def cmd_init(args: argparse.Namespace) -> None:
     sys.exit(exit_code)
 
 
+def cmd_policy(args: argparse.Namespace) -> None:
+    """Sync or inspect the digest-pinned org policy (WP-144)."""
+    import tomllib
+    from fettle.paths import find_repo_root
+    from fettle.policy_remote import (
+        PolicyError, fetch_and_cache, load_cached, parse_extends,
+    )
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository.", file=sys.stderr)
+        sys.exit(2)
+    config_path = repo_root / ".fettle.toml"
+    raw_cfg = {}
+    if config_path.is_file():
+        with open(config_path, "rb") as fh:
+            raw_cfg = tomllib.load(fh)
+    try:
+        extends = parse_extends(raw_cfg)
+    except PolicyError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        sys.exit(1)
+    if extends is None:
+        print("No [extends] in .fettle.toml — this repo uses local policy only.")
+        sys.exit(0)
+
+    if args.policy_action == "status":
+        cached = load_cached(extends)
+        print(f"  url:    {extends['url']}")
+        print(f"  sha256: {extends['sha256']}")
+        print(f"  cache:  {'✓ present (digest verified)' if cached is not None else '✗ not cached — run: fettle policy sync'}")
+        sys.exit(0 if cached is not None else 1)
+
+    # sync (default)
+    try:
+        policy = fetch_and_cache(extends)
+    except PolicyError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        sys.exit(1)
+    top_keys = ", ".join(sorted(policy.keys())) or "(empty)"
+    print(f"✓ org policy synced and digest-verified ({extends['sha256'][:16]}…)")
+    print(f"  sections: {top_keys}")
+    sys.exit(0)
+
+
 def cmd_bench(args: argparse.Namespace) -> None:
     """Run the noise benchmark over pinned corpora (WP-118)."""
     from fettle.bench import load_budgets, run_bench
@@ -414,6 +459,12 @@ def main() -> None:
     p_init.add_argument("--dry-run", action="store_true", help="Show what would be done")
     p_init.add_argument("--json", action="store_true", help="JSON output")
 
+    p_policy = subparsers.add_parser("policy", help="Sync or inspect the digest-pinned org policy ([extends])")
+    policy_sub = p_policy.add_subparsers(dest="policy_action")
+    policy_sub.add_parser("sync", help="Fetch, digest-verify, and cache the org policy")
+    policy_sub.add_parser("status", help="Show pin and cache state")
+    p_policy.set_defaults(policy_action="sync")
+
     p_bench = subparsers.add_parser("bench", help="Noise benchmark: findings-per-KLOC vs committed budgets")
     p_bench.add_argument("--corpus", action="append", required=True, metavar="NAME=PATH",
                          help="Named corpus directory (repeatable)")
@@ -470,6 +521,7 @@ def main() -> None:
         "baseline": cmd_baseline,
         "doctor": cmd_doctor,
         "init": cmd_init,
+        "policy": cmd_policy,
         "bench": cmd_bench,
         "ci": cmd_ci,
         "ratchet": cmd_ratchet,
