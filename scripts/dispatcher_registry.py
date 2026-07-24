@@ -35,6 +35,7 @@ from complexity_check import run_check as complexity_check_run
 from provenance_gate import run_check as provenance_gate_run
 from boundary_rules import run_check as boundary_rules_run
 from artifact_gate import run_check as artifact_gate_run
+from release_gate import run_check as release_gate_run
 from tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
@@ -169,6 +170,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         extensions=frozenset({".py"}),
         order=35,
         budget_ms=100,
+    ),
+    # PreToolUse(Bash) — release/tag validation
+    CheckSpec(
+        name="release_gate",
+        run=release_gate_run,
+        events=frozenset({"PreToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=12,
+        budget_ms=50,
     ),
     # PreToolUse + PostToolUse(Bash) — artifact verification
     CheckSpec(
