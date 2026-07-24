@@ -171,6 +171,14 @@ DEFAULTS: dict[str, Any] = {
             "scope": "changed_lines",
             "max_staleness_seconds": 0,
         },
+        "deploy_safety": {
+            "enabled": False,
+            "mode": "advisory",
+            "require_tests": True,
+            "require_changelog": False,
+            "require_health_endpoint": True,
+            "check_debug_flags": True,
+        },
         "release": {
             "enabled": False,
             "mode": "advisory",
