@@ -170,6 +170,17 @@ DEFAULTS: dict[str, Any] = {
             "enabled": False,
             "mode": "advisory",
         },
+        # Stage 7 (S7.1, closes WP2): functional test verification. The Stop
+        # gate demands a fresh green `fettle verify` stamp for sessions that
+        # edited code; `fettle verify` runs the discovered test command
+        # (scope: impacted subset via edit tracking, or full suite).
+        "verify": {
+            "enabled": False,
+            "mode": "advisory",
+            "scope": "impacted",
+            "timeout_s": 120,
+            "parallel": False,
+        },
         "complexity": {
             "enabled": True,
             "enforce": False,

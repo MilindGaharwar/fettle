@@ -40,6 +40,7 @@ from fettle.deploy_gate import run_check as deploy_gate_run
 from fettle.bdd_gate import run_check as bdd_gate_run
 from fettle.claims_gate import run_check as claims_gate_run
 from fettle.tdd_gate import run_check as tdd_gate_run
+from fettle.verify_gate import run_check as verify_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
@@ -237,6 +238,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Write"}),
         order=62,
         budget_ms=30,
+    ),
+    # Stop — fresh green `fettle verify` stamp required (Stage 7, S7.1)
+    CheckSpec(
+        name="verify_gate",
+        run=verify_gate_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=52,
+        budget_ms=100,
     ),
     # Stop — coverage (advisory by default, after blocking checks)
     CheckSpec(

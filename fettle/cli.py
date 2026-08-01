@@ -677,6 +677,40 @@ def cmd_work(args: argparse.Namespace) -> None:
     sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
 
 
+def cmd_verify(args: argparse.Namespace) -> None:
+    """Run the project's test suite and record the verification stamp.
+
+    Exit codes: 0 = suite green, 1 = red/timeout, 2 = no test command found.
+    """
+    from fettle.config import load_config
+    from fettle.paths import find_repo_root
+    from fettle.verify_gate import run_verify
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+    config = load_config(root)
+    session_id = os.environ.get("CLAUDE_SESSION_ID")
+    stamp = run_verify(root, config, full=args.full, session_id=session_id)
+
+    if args.json:
+        print(json.dumps(stamp, indent=2))
+    else:
+        if not stamp["command"]:
+            print(f"Error: {stamp['error']}", file=sys.stderr)
+        else:
+            state = "green" if stamp["ok"] else "RED"
+            print(f"verify: {state} — {stamp['command']} "
+                  f"({stamp['scope']}, {stamp['duration_s']}s)")
+            if stamp["error"]:
+                print(stamp["error"], file=sys.stderr)
+    if not stamp["command"]:
+        sys.exit(2)
+    sys.exit(0 if stamp["ok"] else 1)
+
+
 def cmd_uat(args: argparse.Namespace) -> None:
     """Agentic UAT (WP3, Stage 5).
 
@@ -912,6 +946,12 @@ def main() -> None:
                          help="Report broken evidence chains")
     p_links.add_argument("--json", action="store_true", help="JSON output")
 
+    p_verify = subparsers.add_parser(
+        "verify", help="Run the test suite and record a verification stamp")
+    p_verify.add_argument("--full", action="store_true",
+                          help="Run the full suite (ignore impacted-test scoping)")
+    p_verify.add_argument("--json", action="store_true", help="JSON output")
+
     p_uat = subparsers.add_parser("uat", help="Agentic UAT (WP3)")
     uat_sub = p_uat.add_subparsers(dest="uat_action")
     p_uat_doc = uat_sub.add_parser("doctor", help="Surface detection + capability probe")
@@ -960,6 +1000,7 @@ def main() -> None:
         "work": cmd_work,
         "links": cmd_links,
         "uat": cmd_uat,
+        "verify": cmd_verify,
     }
     commands[args.command](args)
 

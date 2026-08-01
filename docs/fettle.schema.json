@@ -682,6 +682,38 @@
           },
           "additionalProperties": false
         },
+        "verify": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "enforce"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "default": "impacted"
+            },
+            "timeout_s": {
+              "type": "integer",
+              "default": 120,
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "parallel": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
         "complexity": {
           "type": "object",
           "properties": {
