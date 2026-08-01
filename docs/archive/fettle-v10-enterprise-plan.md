@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # Fettle v1.0 — Enterprise Integration Plan
 
 **Authored by:** Claude Opus, reviewed by GPT-5.6 Sol

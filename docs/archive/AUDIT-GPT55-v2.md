@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # Fettle Architectural Audit — GPT 5.5 (2026-07-14)
 
 > Full review of Fettle v0.5.0-phase8 by GPT 5.5 through an external model gateway.

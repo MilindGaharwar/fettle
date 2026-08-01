@@ -19,8 +19,8 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [x] B6. WP6 Wayfinder review → 04-wp6-wayfinder-review.md
 - [x] B7. WP7 Git worktrees design → 09-stage4 doc (implemented, Stage 4)
 - [x] B8. WP8 Adjacent projects review → 05-wp8-adjacent-projects.md
-- [ ] B9. WP9 Whole-system consistency pass
-- [ ] B10. Consolidated prioritised roadmap with WP dependencies
+- [~] B9. WP9 Whole-system consistency pass (S7.2 config debts done; S7.3 hygiene done)
+- [~] B10. Consolidated prioritised roadmap with WP dependencies
 
 ## Phase C — Implementation (Stage 0 underway; stages approved 2026-08-01)
 - [x] C0. Stage 0 failure-visibility hardening (complete)
@@ -42,6 +42,23 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S4.2 worktree spine + .git-file audit (16 tests)
   - [x] S4.3 work items + claims + [gates.claims] (21 tests)
   - [x] S4.4 docs + work note
+- [x] C5. Stage 5 — WP3 agentic UAT (highest priority)
+  - [x] S5.1 [uat] config + surface detection + capability probe
+  - [x] S5.2 session core (worktree isolation, persona prompt, runner)
+  - [x] S5.3 reconciler (CONFIRMED/CONTRADICTED/BLOCKED/UNOBSERVED verdicts)
+  - [x] S5.4 manual fallback walkthroughs + `fettle uat attest`
+  - [x] S5.5 web surface (playwright extra) + consent + redaction
+  - [x] S5.6 docs + work note
+- [x] C6. Stage 6 — semantic layer thin slice
+  - [x] S6.1 link fusion + `fettle links <id>|--orphans`
+  - [x] S6.2 graphify consume-optional enrichment + docs
+- [~] C7. Stage 7 — WP9 consistency + roadmap
+  - [x] S7.1 [gates.verify] + `fettle verify` (closes WP2 execution gap)
+  - [x] S7.2 config debts: subagent.mode removed, complexity mode
+        unified, docs 'soft' deprecated, stale comments fixed
+  - [x] S7.3 hygiene: plan docs → docs/archive/ (frozen-status banner),
+        work notes unified under docs/engagement/worknotes/, TODO current
+  - [ ] S7.4 docs (verify gate) + consolidated roadmap (B10) + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

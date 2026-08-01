@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # Fettle v0.5.0 — Adaptive Quality Enforcement
 
 > Make Fettle dynamically adapt to any project, any stack. Catch CI failures locally before push.

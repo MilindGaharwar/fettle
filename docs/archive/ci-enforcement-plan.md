@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # CI enforcement plan — the gate that can't be skipped
 
 Status: ACTIVE — 2026-07-08.

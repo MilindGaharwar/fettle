@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # Fettle Single Dispatcher Spec (v2 Foundation)
 
 ## Executive Summary

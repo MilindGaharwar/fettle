@@ -1,3 +1,5 @@
+> **Archived (2026-08-01, WP9 consistency pass):** executed or superseded planning document, kept for historical record. Statuses inside are frozen as of archival.
+
 # Fettle v0.5.0 Work Packages — Adaptive Quality Enforcement
 
 > Restructured based on GPT 5.5 review (2026-07-12). Addresses: foundational gaps moved early, oversized WPs split, adapter protocol ahead of checkers, result schema before output.
