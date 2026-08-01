@@ -1,4 +1,9 @@
-# Fettle
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/wordmark-light.svg" alt="fettle" height="88">
+  </picture>
+</p>
 
 [![PyPI](https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen)](https://pypi.org/project/finefettle/)
 [![CI](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml/badge.svg)](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml)

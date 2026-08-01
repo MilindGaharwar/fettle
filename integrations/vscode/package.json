@@ -4,6 +4,7 @@
   "description": "Real-time quality enforcement for AI-assisted development — ruff, semgrep, complexity, coverage, and discipline gates",
   "version": "0.9.0",
   "publisher": "MilindGaharwar",
+  "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",

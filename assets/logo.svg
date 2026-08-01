@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="fettle: a healthy pulse">
+  <!-- fettle — "in fine fettle": in good health. A steady, healthy pulse. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E8833A"/>
+      <stop offset="1" stop-color="#F5A623"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#20242E"/>
+  <polyline points="18,64 42,64 54,36 72,92 84,64 110,64"
+            fill="none" stroke="url(#g)" stroke-width="9"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
