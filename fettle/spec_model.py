@@ -26,6 +26,12 @@ _ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _REQ_RE = re.compile(r"^[-*]\s+(R\d+)\.\s+(.+)$")
 _SCENARIO_RE = re.compile(r"^###\s+(S\d+)\.\s+(.+?)(?:\s*\(traces\s+([^)]+)\))?\s*$")
 _GWT_RE = re.compile(r"^[-*]\s+(Given|When|Then)\b", re.IGNORECASE)
+_TRACE_MARKER_RE = re.compile(r"(?:#|//)\s*traces?:\s*(.+?)\s*$")
+
+#: Test files eligible for trace markers (Python and JS/TS conventions).
+_TEST_NAME_RE = re.compile(
+    r"(^test_.+\.py$)|(_test\.py$)|(\.(test|spec)\.(js|jsx|ts|tsx|mjs|cjs)$)"
+)
 
 _SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
@@ -227,3 +233,92 @@ def lint_specs(root: str) -> list[dict]:
                                          f"Scope glob '{pattern}' matches nothing — binding is inert.",
                                          "Fix the glob or remove it from 'scope:'."))
     return findings
+
+
+def extract_trace_markers(text: str) -> list[str]:
+    """All ``# traces:`` / ``// traces:`` marker values in a file (comma-split)."""
+    markers: list[str] = []
+    for line in text.splitlines():
+        m = _TRACE_MARKER_RE.search(line)
+        if m:
+            markers.extend(p.strip() for p in m.group(1).split(",") if p.strip())
+    return markers
+
+
+def _iter_test_files(root: Path) -> list[Path]:
+    out = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or any(part in _SKIP_DIRS for part in p.parts):
+            continue
+        if _TEST_NAME_RE.search(p.name):
+            out.append(p)
+    return out
+
+
+def scenario_coverage(root: str) -> dict:
+    """Scenario→test coverage evidence artifact.
+
+    Reports passes (which test covers which scenario), not only gaps —
+    a gate consumer must be able to show evidence of success. Only
+    scenario-granular markers (``<spec-id>/S<n>``) count as coverage;
+    whole-spec markers (``<spec-id>``) are reported separately as coarse
+    traces. Unknown marker targets are surfaced, never dropped.
+    """
+    root_path = Path(root)
+    specs = [s for s, _ in discover_specs(root) if s is not None and s.spec_id]
+    by_id = {s.spec_id: s for s in specs}
+    if not by_id:  # no specs: markers are meaningless, don't scan tests
+        return {"specs": [], "unknown_traces": [],
+                "totals": {"scenarios": 0, "covered": 0, "coverage_percent": 100.0}}
+
+    scenario_tests: dict[str, list[str]] = {}  # "<spec-id>/S<n>" -> test paths
+    spec_tests: dict[str, list[str]] = {}  # "<spec-id>" -> test paths
+    unknown: list[dict] = []
+    for test in _iter_test_files(root_path):
+        rel = str(test.relative_to(root_path))
+        try:
+            text = test.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for marker in extract_trace_markers(text):
+            spec_part, _, scen_part = marker.partition("/")
+            spec = by_id.get(spec_part)
+            if spec is None:
+                if _ID_RE.match(spec_part):  # ignore non-spec-shaped markers (e.g. WP ids)
+                    unknown.append({"test": rel, "marker": marker,
+                                    "reason": f"no spec with id '{spec_part}'"})
+                continue
+            if not scen_part:
+                spec_tests.setdefault(spec_part, []).append(rel)
+            elif any(s.id == scen_part for s in spec.scenarios):
+                scenario_tests.setdefault(marker, []).append(rel)
+            else:
+                unknown.append({"test": rel, "marker": marker,
+                                "reason": f"spec '{spec_part}' has no scenario {scen_part}"})
+
+    report_specs: list[dict] = []
+    total = covered = 0
+    for spec in specs:
+        rows = []
+        for scen in spec.scenarios:
+            tests = scenario_tests.get(f"{spec.spec_id}/{scen.id}", [])
+            rows.append({"id": scen.id, "title": scen.title,
+                         "covered": bool(tests), "covered_by": tests})
+            total += 1
+            covered += bool(tests)
+        report_specs.append({
+            "id": spec.spec_id, "path": spec.path, "status": spec.status,
+            "scenarios": rows,
+            "spec_level_traces": spec_tests.get(spec.spec_id, []),
+            "covered": sum(1 for r in rows if r["covered"]),
+            "total": len(rows),
+        })
+    return {
+        "specs": report_specs,
+        "unknown_traces": unknown,
+        "totals": {
+            "scenarios": total,
+            "covered": covered,
+            "coverage_percent": round(100 * covered / total, 1) if total else 100.0,
+        },
+    }

@@ -470,13 +470,30 @@ def cmd_spec(args: argparse.Namespace) -> None:
     Exit codes: 0 = clean, 1 = error findings, 2 = usage/environment error.
     """
     from fettle.paths import find_repo_root
-    from fettle.spec_model import discover_specs, lint_specs
+    from fettle.spec_model import discover_specs, lint_specs, scenario_coverage
 
     repo_root = find_repo_root()
     if not repo_root:
         print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
         sys.exit(2)
     root = str(repo_root)
+
+    if args.spec_action == "coverage":
+        report = scenario_coverage(root)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            for s in report["specs"]:
+                print(f"  {s['id']} ({s['status']}): {s['covered']}/{s['total']} scenarios covered")
+                for row in s["scenarios"]:
+                    mark = "\u2713" if row["covered"] else "\u2717"
+                    by = f" \u2190 {', '.join(row['covered_by'])}" if row["covered_by"] else ""
+                    print(f"    {mark} {row['id']}. {row['title']}{by}")
+            for u in report["unknown_traces"]:
+                print(f"  [WARNING] {u['test']}: marker '{u['marker']}' \u2014 {u['reason']}")
+            t = report["totals"]
+            print(f"\n{t['covered']}/{t['scenarios']} scenarios covered ({t['coverage_percent']}%).")
+        sys.exit(0)
 
     if args.spec_action == "list":
         rows = []
@@ -608,6 +625,8 @@ def main() -> None:
     p_spec_lint.add_argument("--json", action="store_true", help="JSON output")
     p_spec_list = spec_sub.add_parser("list", help="List discovered specs")
     p_spec_list.add_argument("--json", action="store_true", help="JSON output")
+    p_spec_cov = spec_sub.add_parser("coverage", help="Scenario\u2192test trace coverage report")
+    p_spec_cov.add_argument("--json", action="store_true", help="JSON evidence artifact")
     p_spec.set_defaults(spec_action="lint")
 
     args = parser.parse_args()

@@ -10,9 +10,11 @@ import pytest
 
 from fettle.spec_model import (
     discover_specs,
+    extract_trace_markers,
     is_spec_text,
     lint_specs,
     parse_spec,
+    scenario_coverage,
 )
 
 VALID_SPEC = """\
@@ -222,3 +224,96 @@ class TestCLI:
         result = self._run(repo)
         assert result.returncode == 0
         assert "valid" in result.stdout
+
+
+class TestTraceMarkers:
+    def test_python_marker(self):
+        assert extract_trace_markers("# traces: checkout-flow/S1\n") == ["checkout-flow/S1"]
+
+    def test_js_marker(self):
+        assert extract_trace_markers("// traces: checkout-flow/S2\n") == ["checkout-flow/S2"]
+
+    def test_comma_separated(self):
+        assert extract_trace_markers("# traces: a-b/S1, a-b/S2\n") == ["a-b/S1", "a-b/S2"]
+
+    def test_singular_form_and_multiple_lines(self):
+        text = "# trace: x-y/S1\ncode()\n# traces: x-y/S2\n"
+        assert extract_trace_markers(text) == ["x-y/S1", "x-y/S2"]
+
+    def test_no_marker(self):
+        assert extract_trace_markers("def test_x():\n    pass\n") == []
+
+
+class TestScenarioCoverage:
+    @pytest.fixture
+    def repo(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "docs" / "checkout.md").write_text(VALID_SPEC)
+        return tmp_path
+
+    def test_covered_scenario_lists_evidence(self, repo):
+        (repo / "tests" / "test_cart.py").write_text(
+            "# traces: checkout-flow/S1\ndef test_total():\n    pass\n")
+        report = scenario_coverage(str(repo))
+        spec = report["specs"][0]
+        s1 = next(r for r in spec["scenarios"] if r["id"] == "S1")
+        assert s1["covered"] and s1["covered_by"] == ["tests/test_cart.py"]
+        s2 = next(r for r in spec["scenarios"] if r["id"] == "S2")
+        assert not s2["covered"] and s2["covered_by"] == []
+        assert report["totals"] == {
+            "scenarios": 2, "covered": 1, "coverage_percent": 50.0}
+
+    def test_spec_level_marker_is_coarse_not_coverage(self, repo):
+        (repo / "tests" / "test_cart.py").write_text(
+            "# traces: checkout-flow\ndef test_total():\n    pass\n")
+        report = scenario_coverage(str(repo))
+        spec = report["specs"][0]
+        assert spec["covered"] == 0
+        assert spec["spec_level_traces"] == ["tests/test_cart.py"]
+
+    def test_unknown_scenario_marker_surfaced(self, repo):
+        (repo / "tests" / "test_cart.py").write_text("# traces: checkout-flow/S9\n")
+        report = scenario_coverage(str(repo))
+        assert report["unknown_traces"][0]["reason"] == "spec 'checkout-flow' has no scenario S9"
+
+    def test_unknown_spec_marker_surfaced(self, repo):
+        (repo / "tests" / "test_cart.py").write_text("# traces: no-such-spec/S1\n")
+        report = scenario_coverage(str(repo))
+        assert "no spec with id" in report["unknown_traces"][0]["reason"]
+
+    def test_non_spec_shaped_marker_ignored(self, repo):
+        (repo / "tests" / "test_cart.py").write_text("# traces: WP-154\n")
+        report = scenario_coverage(str(repo))
+        assert report["unknown_traces"] == []
+
+    def test_js_test_file_scanned(self, repo):
+        (repo / "tests" / "cart.test.ts").write_text("// traces: checkout-flow/S2\n")
+        report = scenario_coverage(str(repo))
+        s2 = next(r for r in report["specs"][0]["scenarios"] if r["id"] == "S2")
+        assert s2["covered_by"] == ["tests/cart.test.ts"]
+
+    def test_no_scenarios_is_100_percent(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        report = scenario_coverage(str(tmp_path))
+        assert report["totals"]["coverage_percent"] == 100.0
+
+    def test_cli_coverage_json(self, repo):
+        (repo / "tests" / "test_cart.py").write_text(
+            "# traces: checkout-flow/S1, checkout-flow/S2\n")
+        result = subprocess.run(
+            [sys.executable, "-m", "fettle.cli", "spec", "coverage", "--json"],
+            capture_output=True, text=True, cwd=str(repo),
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["totals"]["covered"] == 2
+
+    def test_cli_coverage_human(self, repo):
+        result = subprocess.run(
+            [sys.executable, "-m", "fettle.cli", "spec", "coverage"],
+            capture_output=True, text=True, cwd=str(repo),
+        )
+        assert result.returncode == 0
+        assert "0/2 scenarios covered" in result.stdout
