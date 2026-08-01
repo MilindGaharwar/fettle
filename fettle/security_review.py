@@ -40,8 +40,12 @@ _CWE_MAP = {
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
 
-def _run_ruff_security(target: str) -> list[dict]:
-    """Run ruff with S-rules only (Python security checks)."""
+def _run_ruff_security(target: str) -> tuple[list[dict], str | None]:
+    """Run ruff with S-rules only. Returns (findings, error).
+
+    A tool failure is returned, never swallowed — a security review that
+    silently scanned nothing is worse than no review at all.
+    """
     findings = []
     try:
         result = subprocess.run(
@@ -60,13 +64,13 @@ def _run_ruff_security(target: str) -> list[dict]:
                     "cwe": _CWE_MAP.get(code, ""),
                     "tool": "ruff",
                 })
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
-    return findings
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError) as exc:
+        return findings, f"ruff: {type(exc).__name__}: {exc}"
+    return findings, None
 
 
-def _run_semgrep_owasp(target: str) -> list[dict]:
-    """Run semgrep with OWASP rules if available."""
+def _run_semgrep_owasp(target: str) -> tuple[list[dict], str | None]:
+    """Run semgrep with OWASP rules. Returns (findings, error)."""
     findings = []
     try:
         result = subprocess.run(
@@ -87,9 +91,9 @@ def _run_semgrep_owasp(target: str) -> list[dict]:
                     "cwe": extra.get("metadata", {}).get("cwe", ""),
                     "tool": "semgrep",
                 })
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
-    return findings
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError) as exc:
+        return findings, f"semgrep: {type(exc).__name__}: {exc}"
+    return findings, None
 
 
 def _has_tool(name: str) -> bool:
@@ -105,16 +109,23 @@ def run_security_review(target: str) -> dict:
     findings: list[dict] = []
     tools_used: list[str] = []
     tools_missing: list[str] = []
+    tool_errors: list[str] = []
 
     if _has_tool("ruff"):
         tools_used.append("ruff (S-rules, Python)")
-        findings.extend(_run_ruff_security(target))
+        ruff_findings, ruff_error = _run_ruff_security(target)
+        findings.extend(ruff_findings)
+        if ruff_error:
+            tool_errors.append(ruff_error)
     else:
         tools_missing.append("ruff")
 
     if _has_tool("semgrep"):
         tools_used.append("semgrep (p/owasp-top-ten, multi-language)")
-        findings.extend(_run_semgrep_owasp(target))
+        semgrep_findings, semgrep_error = _run_semgrep_owasp(target)
+        findings.extend(semgrep_findings)
+        if semgrep_error:
+            tool_errors.append(semgrep_error)
     else:
         tools_missing.append("semgrep")
 
@@ -135,6 +146,7 @@ def run_security_review(target: str) -> dict:
         "findings": unique,
         "tools_used": tools_used,
         "tools_missing": tools_missing,
+        "tool_errors": tool_errors,
         "target": target,
         "coverage_note": (
             "Python: ruff S-rules + semgrep OWASP. "
@@ -150,6 +162,13 @@ def format_report(report: dict) -> str:
     lines.append("**Tools used:** " + ", ".join(report["tools_used"] or ["none"]))
     if report["tools_missing"]:
         lines.append("**Tools missing:** " + ", ".join(report["tools_missing"]))
+    if report.get("tool_errors"):
+        lines.append("")
+        lines.append("## ⚠ INCOMPLETE REVIEW — tool failures")
+        for err in report["tool_errors"]:
+            lines.append("- " + err)
+        lines.append("Findings below may be missing entire tool coverage. "
+                     "Fix the environment and re-run.")
     lines.append("**Note:** " + report["coverage_note"])
     lines.append("")
 
@@ -187,6 +206,10 @@ def main():
     else:
         print(format_report(report))
 
+    # Exit contract mirrors `fettle check`: 0 clean, 1 findings, 2 env/tool
+    # failure. A partial security scan is an environment failure, not a pass.
+    if report["tool_errors"]:
+        return 2
     return 1 if report["findings"] else 0
 
 

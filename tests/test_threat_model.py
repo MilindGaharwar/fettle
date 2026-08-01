@@ -29,7 +29,8 @@ def test_detects_flask_routes(tmp_path):
         def create_user():
             return {}
     """))
-    entry_points = _find_entry_points(str(tmp_path))
+    entry_points, errors = _find_entry_points(str(tmp_path))
+    assert errors == []
     assert len(entry_points) >= 2
 
 
@@ -38,7 +39,8 @@ def test_detects_database_connections(tmp_path):
         from sqlalchemy import create_engine
         engine = create_engine("postgresql://localhost/mydb")
     """))
-    stores = _find_data_stores(str(tmp_path))
+    stores, errors = _find_data_stores(str(tmp_path))
+    assert errors == []
     assert len(stores) >= 1
     assert any("create_engine" in s for s in stores)
 
@@ -55,3 +57,22 @@ def test_model_contains_auto_detected_sections(tmp_path):
     assert "Entry Points (auto-detected)" in model
     assert "Data Stores (auto-detected)" in model
     assert "Authentication Mechanisms (auto-detected)" in model
+
+
+def test_probe_failure_marks_model_incomplete(tmp_path, monkeypatch):
+    """Stage-0: dead grep probes must not read as 'nothing to threat-model'."""
+    import subprocess as sp
+    from fettle import threat_model as tm
+
+    def boom(*args, **kwargs):
+        raise sp.TimeoutExpired(cmd="grep", timeout=10)
+
+    monkeypatch.setattr(tm.subprocess, "run", boom)
+    model = generate_threat_model(str(tmp_path), "svc")
+    assert "Auto-detection incomplete" in model
+
+
+def test_clean_probes_have_no_incomplete_banner(tmp_path):
+    (tmp_path / "app.py").write_text("x = 1\n")
+    model = generate_threat_model(str(tmp_path), "svc")
+    assert "Auto-detection incomplete" not in model

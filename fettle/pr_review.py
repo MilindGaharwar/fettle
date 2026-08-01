@@ -47,9 +47,11 @@ def _run_quality_scan(root: str) -> dict:
         )
         if result.stdout.strip():
             return json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
-    return {"findings": [], "summary": {}}
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError) as exc:
+        # Never present a failed scan as zero findings.
+        return {"findings": [], "summary": {},
+                "error": f"{type(exc).__name__}: {exc}"}
+    return {"findings": [], "summary": {}, "error": "quality scan produced no output"}
 
 
 def _get_coverage(root: str) -> str:
@@ -98,6 +100,20 @@ def generate_pr_review(root: str) -> str:
     breaking = _detect_breaking_changes(root, files)
     summary = quality.get("summary", {})
 
+    if quality.get("error"):
+        quality_lines = [
+            "## Quality Scan",
+            "- ⚠ UNAVAILABLE — scan failed: " + quality["error"],
+            "- Do not treat this PR as scanned.",
+        ]
+    else:
+        quality_lines = [
+            "## Quality Scan",
+            "- Errors: " + str(summary.get("errors", 0)),
+            "- Warnings: " + str(summary.get("warnings", 0)),
+            "- Info: " + str(summary.get("info", 0)),
+        ]
+
     lines = [
         "# PR Review",
         "",
@@ -106,10 +122,7 @@ def generate_pr_review(root: str) -> str:
         diff_stat or "(no diff stat available)",
         "```",
         "",
-        "## Quality Scan",
-        "- Errors: " + str(summary.get("errors", 0)),
-        "- Warnings: " + str(summary.get("warnings", 0)),
-        "- Info: " + str(summary.get("info", 0)),
+        *quality_lines,
         "",
         "## Coverage",
         "- " + coverage,

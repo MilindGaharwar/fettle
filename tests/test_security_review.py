@@ -21,24 +21,27 @@ def test_ruff_security_finds_sql_injection(tmp_path):
             query = f"SELECT * FROM users WHERE id = {user_id}"  # nosemgrep
             return db.execute(query)
     """))
-    findings = _run_ruff_security(str(tmp_path))
+    findings, error = _run_ruff_security(str(tmp_path))
+    assert error is None
     sql_findings = [f for f in findings if f["code"] == "S608"]
     assert len(sql_findings) >= 1
     assert sql_findings[0]["cwe"] == "CWE-89 (SQL Injection)"
 
 
-def test_ruff_missing_returns_empty(tmp_path):
+def test_ruff_missing_returns_error(tmp_path):
     src = tmp_path / "app.py"
     src.write_text("x = 1\n")
     with patch("fettle.security_review.subprocess.run", side_effect=FileNotFoundError):
-        findings = _run_ruff_security(str(tmp_path))
+        findings, error = _run_ruff_security(str(tmp_path))
     assert findings == []
+    assert error is not None and "ruff" in error
 
 
-def test_semgrep_missing_returns_empty(tmp_path):
+def test_semgrep_missing_returns_error(tmp_path):
     with patch("fettle.security_review.subprocess.run", side_effect=FileNotFoundError):
-        findings = _run_semgrep_owasp(str(tmp_path))
+        findings, error = _run_semgrep_owasp(str(tmp_path))
     assert findings == []
+    assert error is not None and "semgrep" in error
 
 
 def test_semgrep_parses_results(tmp_path):
@@ -59,10 +62,32 @@ def test_semgrep_parses_results(tmp_path):
     mock_result.returncode = 0
 
     with patch("fettle.security_review.subprocess.run", return_value=mock_result):
-        findings = _run_semgrep_owasp(str(tmp_path))
+        findings, error = _run_semgrep_owasp(str(tmp_path))
+    assert error is None
     assert len(findings) == 1
     assert findings[0]["cwe"] == "CWE-89"
     assert findings[0]["tool"] == "semgrep"
+
+
+def test_tool_failure_marks_report_incomplete(tmp_path):
+    """Stage-0: a security review with a dead tool must say so, loudly."""
+    (tmp_path / "app.py").write_text("x = 1\n")
+    with (
+        patch("fettle.security_review._has_tool", return_value=True),
+        patch("fettle.security_review.subprocess.run",
+              side_effect=FileNotFoundError("gone")),
+    ):
+        report = run_security_review(str(tmp_path))
+    assert len(report["tool_errors"]) == 2
+    text = format_report(report)
+    assert "INCOMPLETE REVIEW" in text
+
+
+def test_clean_report_has_no_tool_errors(tmp_path):
+    (tmp_path / "app.py").write_text("x = 1\n")
+    report = run_security_review(str(tmp_path))
+    assert report["tool_errors"] == []
+    assert "INCOMPLETE REVIEW" not in format_report(report)
 
 
 def test_full_review_deduplicates(tmp_path):

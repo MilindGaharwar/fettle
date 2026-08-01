@@ -109,7 +109,16 @@ def _cargo_check(rs_path: str) -> list[str]:
             text=True,
             timeout=60,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # Toolchain exists but the check could not run — fail-open for the
+        # session, but never silently: leave a tool_error on the audit trail.
+        # (log_decision itself warns on stderr if the trace is unwritable.)
+        import contextlib
+        with contextlib.suppress(Exception):
+            from fettle.trace import log_decision
+            log_decision(hook="stop-gate", status="tool_error", tool="cargo",
+                         file=rs_path,
+                         findings=[{"detail": f"{type(exc).__name__}: {exc}"[:500]}])
         return []
 
     errors: list[str] = []

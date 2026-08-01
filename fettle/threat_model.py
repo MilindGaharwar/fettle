@@ -12,7 +12,30 @@ import subprocess
 from pathlib import Path
 
 
-def _find_entry_points(root: str) -> list[str]:
+def _grep_probe(patterns: list[str], grep_args: list[str], root: str,
+                per_pattern_limit: int, total_limit: int) -> tuple[list[str], list[str]]:
+    """Run grep probes. Returns (matches, probe_errors).
+
+    Probe failures are returned, not swallowed — an empty section caused by a
+    dead grep must not read as "nothing to threat-model here".
+    """
+    matches: list[str] = []
+    errors: list[str] = []
+    for pat in patterns:
+        try:
+            result = subprocess.run(
+                ["grep", *grep_args, pat, root],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines()[:per_pattern_limit]:
+                matches.append(line.strip())
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            errors.append(f"probe '{pat}' failed: {type(exc).__name__}")
+            continue
+    return matches[:total_limit], errors
+
+
+def _find_entry_points(root: str) -> tuple[list[str], list[str]]:
     """Grep for HTTP route decorators and API endpoint definitions."""
     patterns = [
         r"@app\.(get|post|put|delete|patch)\(",
@@ -22,21 +45,14 @@ def _find_entry_points(root: str) -> list[str]:
         r"path\(['\"]",
         r"router\.(get|post|put|delete)\(",
     ]
-    entry_points: list[str] = []
-    for pat in patterns:
-        try:
-            result = subprocess.run(
-                ["grep", "-rEn", "--include=*.py", "--include=*.ts", "--include=*.js", pat, root],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in result.stdout.splitlines()[:20]:
-                entry_points.append(line.strip())
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            continue
-    return entry_points[:30]
+    return _grep_probe(
+        patterns,
+        ["-rEn", "--include=*.py", "--include=*.ts", "--include=*.js"],
+        root, per_pattern_limit=20, total_limit=30,
+    )
 
 
-def _find_data_stores(root: str) -> list[str]:
+def _find_data_stores(root: str) -> tuple[list[str], list[str]]:
     """Grep for database connections, file writes, cache usage."""
     patterns = [
         r"create_engine\(",
@@ -48,21 +64,14 @@ def _find_data_stores(root: str) -> list[str]:
         r"open\(.+['\"]w",
         r"S3Client\(",
     ]
-    stores: list[str] = []
-    for pat in patterns:
-        try:
-            result = subprocess.run(
-                ["grep", "-rEn", "--include=*.py", "--include=*.ts", pat, root],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in result.stdout.splitlines()[:10]:
-                stores.append(line.strip())
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            continue
-    return stores[:20]
+    return _grep_probe(
+        patterns,
+        ["-rEn", "--include=*.py", "--include=*.ts"],
+        root, per_pattern_limit=10, total_limit=20,
+    )
 
 
-def _find_auth_mechanisms(root: str) -> list[str]:
+def _find_auth_mechanisms(root: str) -> tuple[list[str], list[str]]:
     """Grep for authentication patterns."""
     patterns = [
         r"jwt\.",
@@ -74,32 +83,35 @@ def _find_auth_mechanisms(root: str) -> list[str]:
         r"api_key",
         r"token.*verify",
     ]
-    auth: list[str] = []
-    for pat in patterns:
-        try:
-            result = subprocess.run(
-                ["grep", "-rEni", "--include=*.py", "--include=*.ts", pat, root],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in result.stdout.splitlines()[:10]:
-                auth.append(line.strip())
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            continue
-    return auth[:15]
+    return _grep_probe(
+        patterns,
+        ["-rEni", "--include=*.py", "--include=*.ts"],
+        root, per_pattern_limit=10, total_limit=15,
+    )
 
 
 def generate_threat_model(root: str, service_name: str) -> str:
     """Generate a STRIDE-based threat model template with auto-populated data."""
-    entry_points = _find_entry_points(root)
-    data_stores = _find_data_stores(root)
-    auth_mechanisms = _find_auth_mechanisms(root)
+    entry_points, ep_errors = _find_entry_points(root)
+    data_stores, ds_errors = _find_data_stores(root)
+    auth_mechanisms, auth_errors = _find_auth_mechanisms(root)
+    probe_errors = ep_errors + ds_errors + auth_errors
 
     ep_section = "\n".join("- " + ep for ep in entry_points) if entry_points else "- None detected (add manually)"
     ds_section = "\n".join("- " + ds for ds in data_stores) if data_stores else "- None detected (add manually)"
     auth_section = "\n".join("- " + a for a in auth_mechanisms) if auth_mechanisms else "- None detected (add manually)"
+    probe_note = ""
+    if probe_errors:
+        probe_note = (
+            "\n> ⚠ **Auto-detection incomplete** — "
+            + str(len(probe_errors))
+            + " probe(s) failed; sections below may be missing real entries. "
+            + "Verify manually. (" + "; ".join(probe_errors[:3]) + ")\n"
+        )
 
     template = (
-        "# Threat Model: " + service_name + "\n\n"
+        "# Threat Model: " + service_name + "\n"
+        + probe_note + "\n"
         "## 1. System Overview\n\n"
         "**Service:** " + service_name + "\n"
         "**Scope:** [Define what is in/out of scope]\n"
