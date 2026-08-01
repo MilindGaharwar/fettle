@@ -36,6 +36,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from fettle.dispatcher_types import CheckResult, HookContext
@@ -185,11 +186,13 @@ def run_ci_status(
     *,
     wait: bool = False,
     sha: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Query (and optionally await) the CI verdict for a commit; write stamp.
 
     Returns the stamp dict, also persisted to .fettle/ci-status.json:
     ok, sha, overall, runs, reproduce, error, ts. Never raises.
+    ``progress`` (CLI only) receives a one-line status per poll.
     """
     gate_cfg = config.get("gates", {}).get("ci", {})
     timeout_s = int(gate_cfg.get("timeout_s", 900))
@@ -207,6 +210,10 @@ def run_ci_status(
     stamp["sha"] = sha
 
     deadline = time.monotonic() + timeout_s
+    start = time.monotonic()
+    # Right after a push, GitHub needs a few seconds to *create* the runs;
+    # in wait mode, treat early "no-runs" as pending for a grace period.
+    no_runs_grace = time.monotonic() + 60
     overall, detail = "pending", ""
     runs: list[dict] = []
     while True:
@@ -217,8 +224,19 @@ def run_ci_status(
             return stamp
         runs = queried
         overall, detail = summarize(runs)
-        if overall != "pending" or not wait or time.monotonic() >= deadline:
+        still_waiting = overall == "pending" or (
+            overall == "no-runs" and time.monotonic() < no_runs_grace
+        )
+        if not still_waiting or not wait or time.monotonic() >= deadline:
             break
+        if progress is not None:
+            elapsed = int(time.monotonic() - start)
+            done = sum(1 for r in runs if r.get("status") == "completed")
+            state = (
+                f"{done}/{len(runs)} runs completed" if runs
+                else "waiting for runs to appear"
+            )
+            progress(f"  … {state} ({elapsed}s elapsed, next poll in {poll_s}s)")
         time.sleep(min(poll_s, max(0.0, deadline - time.monotonic())))
 
     if overall == "pending" and wait:

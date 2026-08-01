@@ -174,6 +174,10 @@ def cmd_ci(args: argparse.Namespace) -> None:
         stamp = run_ci_status(
             str(root), load_config(str(root)),
             wait=(action == "wait"), sha=getattr(args, "sha", None),
+            progress=(
+                None if getattr(args, "json", False)
+                else lambda line: print(line, file=sys.stderr, flush=True)
+            ),
         )
         if getattr(args, "json", False):
             print(json.dumps(stamp, indent=2))

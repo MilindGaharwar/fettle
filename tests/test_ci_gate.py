@@ -153,6 +153,41 @@ class TestRunCIStatus:
         assert stamp["overall"] == "pending"
         assert q.call_count == 1
 
+    def test_wait_reports_progress(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        answers = iter([
+            ([_run("CI", status="in_progress", conclusion="")], ""),
+            ([_run("CI")], ""),
+        ])
+        lines: list[str] = []
+        with patch.object(ci_gate, "_query_runs", side_effect=lambda *a: next(answers)), \
+             patch.object(ci_gate.time, "sleep"):
+            stamp = ci_gate.run_ci_status(
+                str(repo), _cfg(), wait=True, progress=lines.append)
+        assert stamp["ok"] is True
+        assert len(lines) == 1
+        assert "0/1 runs completed" in lines[0]
+
+    def test_wait_grace_period_for_runs_to_appear(self, tmp_path: Path) -> None:
+        # Right after a push GitHub hasn't created runs yet: wait mode must
+        # keep polling through early no-runs instead of reporting no-runs.
+        repo = _git_repo(tmp_path)
+        answers = iter([([], ""), ([_run("CI")], "")])
+        lines: list[str] = []
+        with patch.object(ci_gate, "_query_runs", side_effect=lambda *a: next(answers)), \
+             patch.object(ci_gate.time, "sleep"):
+            stamp = ci_gate.run_ci_status(
+                str(repo), _cfg(), wait=True, progress=lines.append)
+        assert stamp["ok"] is True
+        assert "waiting for runs to appear" in lines[0]
+
+    def test_status_no_runs_is_immediate(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        with patch.object(ci_gate, "_query_runs", return_value=([], "")) as q:
+            stamp = ci_gate.run_ci_status(str(repo), _cfg(), wait=False)
+        assert stamp["overall"] == "no-runs"
+        assert q.call_count == 1
+
 
 # ── push recorder ─────────────────────────────────────────────────────────
 

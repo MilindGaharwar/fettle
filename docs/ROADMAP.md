@@ -24,32 +24,35 @@ This roadmap is committed before implementation begins and updated as releases s
 | v1.0.1 | **Trustworthy core** — CLI exit-code contract, working check flags, MCP allowlist path fix, LR012 determinism | WP-133..WP-135 (partial, see [enterprise plan](fettle-enterprise-product-plan.md)) | **Shipped** |
 | v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
 | v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | **Shipped** — Homebrew tap outstanding ([enterprise plan](fettle-enterprise-product-plan.md)) |
-| v1.3.0 | **Enterprise operations + evidence loop** — central policy, audit reporting, BDD gate, agent infrastructure, agentic UAT, semantic links, verify gate | WP-144..WP-145, WP-154, engagement stages 0–7 | **In progress** — WP-144/145 shipped; stages 0–7 shipped (see below); WP-146..148 remaining |
+| v1.3.0 | **Enterprise operations + evidence loop** — central policy, audit reporting, BDD gate, agent infrastructure, agentic UAT, semantic links, verify gate, remote CI gate | WP-144..WP-145, WP-154, engagement stages 0–8 | **In progress** — WP-144/145 + stages 0–8 shipped; WP-146..148 slated to move to v1.3.x (see consolidated roadmap) |
 | v1.4.0 | **Product surface** — LSP hardening, rule marketplace, Windows, docs site, noise SLOs, semantic impact gate | WP-149..WP-153, WP-155 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 
 ## Consolidated forward roadmap (2026-08)
 
-Outcome of the 2026-08 engagement (stages 0–7, work notes under
+Outcome of the 2026-08 engagement (stages 0–8, work notes under
 [engagement/worknotes/](engagement/worknotes/)): fail-visible foundation,
 living specs + `[gates.bdd]`, agent infrastructure (runners protocol,
 worktrees, work items + claims), agentic UAT (`fettle uat`), semantic link
 layer (`fettle links`), functional-test verification (`[gates.verify]` +
-`fettle verify`), and a whole-system consistency pass (WP9). Executed plan
+`fettle verify`), a whole-system consistency pass (WP9), and the remote CI
+verification gate (`[gates.ci]` + `fettle ci status|wait` — incident-driven:
+a pushed commit is not done until its remote verdict is green). Executed plan
 documents now live in [archive/](archive/).
 
 Priorities below are ordered; each names what it depends on.
 
 | # | Item | Depends on | Why now / trigger |
 |---|---|---|---|
-| 1 | **v1.3 remainder**: WP-146 compliance evidence, WP-147 supply-chain posture, WP-148 health telemetry hardening | WP-144/145 (shipped) | Release-blocking for v1.3.0 |
-| 2 | **Runner adapters** — codex, gemini, opencode behind the Stage-4 `fettle.runners` protocol | Stage 4 protocol (shipped, claude-only) | Multiplies UAT + agent-infra value across hosts |
-| 3 | **Advisory → gate graduation** — `[uat]` gating mode, `[gates.bdd]`/`[gates.verify]` enforce defaults | Field evidence from stages 3/5/7 telemetry | Evidence-driven; graduate only what has proven low-noise |
-| 4 | **Evaluator-optimizer UAT loop** — agent retries with reconciler feedback | Stage 5 reconciler + #2 | After UAT verdict corpus accrues |
-| 5 | **WP-155 semantic impact gate** — block on broken req→scenario→test chains | Stage 6 links + #3 | v1.4; builds directly on `fettle links --orphans` |
-| 6 | **Distribution** — Homebrew tap, Windows support, docs site | WP-149/151/152 | v1.2 exception + v1.4 product surface |
-| 7 | **Persistent semantic store** | #5, only if on-demand fusion gets slow | Deferred by design — the repository is the database |
+| 1 | **Release cut: v1.3.0** — version bump, CHANGELOG cut, tag; gets stages 0–8 into `finefettle` on PyPI | Stages 0–8 (shipped), green remote CI | Nine stages of shipped value sit unreleased; WP-146..148 move to v1.3.x (none block the release) |
+| 2 | **v1.3.x remainder**: WP-146 compliance evidence, WP-147 supply-chain posture, WP-148 health telemetry hardening | WP-144/145 (shipped) | Enterprise pull; decoupled from the release cut |
+| 3 | **Runner adapters** — codex, gemini, opencode behind the Stage-4 `fettle.runners` protocol | Stage 4 protocol (shipped, claude-only) | Multiplies UAT + agent-infra value across hosts |
+| 4 | **Advisory → gate graduation** — `[uat]` gating mode, `[gates.bdd]`/`[gates.verify]`/`[gates.ci]` enforce defaults | Field evidence from stages 3/5/7/8 telemetry | Evidence-driven; graduate only what has proven low-noise (this repo dogfoods `[gates.ci]` enforce) |
+| 5 | **Evaluator-optimizer UAT loop** — agent retries with reconciler feedback | Stage 5 reconciler + #3 | After UAT verdict corpus accrues |
+| 6 | **WP-155 semantic impact gate** — block on broken req→scenario→test chains | Stage 6 links + #4 | v1.4; builds directly on `fettle links --orphans` |
+| 7 | **Distribution** — Homebrew tap, Windows support, docs site | WP-149/151/152 | v1.2 exception + v1.4 product surface |
+| 8 | **Persistent semantic store** | #6, only if on-demand fusion gets slow | Deferred by design — the repository is the database |
 
 **Trigger-based consideration — compiled hot-path shim (Go/Rust).** No port is
 planned: Fettle mostly orchestrates external tools (ruff, semgrep, pytest), so
