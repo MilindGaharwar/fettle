@@ -2,6 +2,17 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 6 — Semantic layer (Pillar 2, thin slice)**: `fettle links` —
+  one deterministic link graph fused on demand from artifacts already in
+  git: specs (requirements/scenarios), trace-marked tests, work items,
+  UAT verdicts, operator attestations. No persisted index — the
+  repository is the database. `fettle links <id>` shows everything
+  attached to any known ID (unknown → exit 2 with closest matches);
+  `fettle links --orphans` reports broken evidence chains with concrete
+  fixes. Graphify consume-optional (D3 closed): when
+  `graphify-out/graph.json` exists, spec scopes gain `scopes` edges to
+  the code files graphify extracted; absent or malformed → identical
+  behavior minus enrichment, never an error.
 - **Stage 5 — Agentic UAT (WP3)**: `fettle uat` — acceptance testing by
   an autonomous agent acting as a first-time user, independent of the
   repo's own test suite. `uat doctor` detects surfaces (cli/api/web/

@@ -156,6 +156,31 @@ class TestOrphans:
         assert format_orphans([]).startswith("\u2713")
 
 
+class TestGraphifyEnrichment:
+    def test_scopes_edges_when_graph_present(self, tmp_path):
+        repo = _repo(tmp_path)
+        out = repo / "graphify-out"
+        out.mkdir()
+        (out / "graph.json").write_text(json.dumps({"nodes": [
+            {"id": "n1", "file": "src/greet.py"},
+            {"id": "n2", "file": "lib/other.py"},
+            {"id": "n3"}]}))
+        g = build_graph(str(repo), _cfg())
+        assert g.nodes["src/greet.py"] == {"kind": "code", "source": "graphify"}
+        assert {"src": "greeter", "label": "scopes", "dst": "src/greet.py"} in g.edges
+        assert "lib/other.py" not in g.nodes  # outside spec scope
+
+    def test_absent_or_malformed_graph_degrades_silently(self, tmp_path):
+        repo = _repo(tmp_path)
+        g = build_graph(str(repo), _cfg())  # absent
+        assert not any(n.get("kind") == "code" for n in g.nodes.values())
+        out = repo / "graphify-out"
+        out.mkdir()
+        (out / "graph.json").write_text("{broken")
+        g = build_graph(str(repo), _cfg())  # malformed
+        assert not any(n.get("kind") == "code" for n in g.nodes.values())
+
+
 class TestCLI:
     def test_links_id_json(self, tmp_path):
         repo = _repo(tmp_path)

@@ -62,6 +62,32 @@ def _uat_evidence(root: str, config: dict) -> tuple[list[dict], list[dict]]:
     return verdicts, load_attestations(root)
 
 
+def _graphify_files(root: str) -> list[str]:
+    """Code file paths from graphify-out/graph.json, when present.
+
+    Consume-optional (design doc 11 §3): fettle never requires or shells
+    out to graphify; an absent or unreadable graph degrades to no
+    enrichment. Node shape is probed defensively — any of file/path/
+    file_path attributes counts.
+    """
+    graph_path = Path(root) / "graphify-out" / "graph.json"
+    try:
+        data = json.loads(graph_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    nodes = data.get("nodes", data if isinstance(data, list) else [])
+    files: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        for key in ("file", "path", "file_path"):
+            value = node.get(key)
+            if isinstance(value, str) and value:
+                files.add(value.lstrip("./"))
+                break
+    return sorted(files)
+
+
 def build_graph(root: str, config: dict | None = None) -> Graph:
     """Fuse all repo artifacts into one link graph. Deterministic."""
     from fettle.spec_model import discover_specs, scenario_coverage
@@ -71,8 +97,16 @@ def build_graph(root: str, config: dict | None = None) -> Graph:
     g = Graph()
 
     specs = [s for s, _ in discover_specs(root) if s is not None and s.spec_id]
+    graphify_files = _graphify_files(root)
     for spec in specs:
         g.add_node(spec.spec_id, "spec", path=spec.path, status=spec.status)
+        if spec.scope and graphify_files:
+            import fnmatch
+            touched = sorted({f for f in graphify_files
+                              if any(fnmatch.fnmatch(f, pat) for pat in spec.scope)})
+            for code_file in touched:
+                g.add_node(code_file, "code", source="graphify")
+                g.add_edge(spec.spec_id, "scopes", code_file)
         for rid, text in spec.requirements.items():
             g.add_node(f"{spec.spec_id}/{rid}", "requirement", text=text)
         for scen in spec.scenarios:
