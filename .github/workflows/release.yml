@@ -16,6 +16,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write      # Sigstore signing for the attestation
+      attestations: write  # store provenance in the repo's attestation log
     steps:
       - uses: actions/checkout@v4
 
@@ -52,10 +56,32 @@ jobs:
           /tmp/smoke/bin/fettle --version
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir; d = rules_dir(); assert d.is_dir() and any(d.glob('*.yml')), d"
 
+      # WP-147: SLSA provenance + Sigstore signatures for every artifact,
+      # via GitHub's native attestation (verify: `gh attestation verify`).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
+      # WP-147: CycloneDX SBOM of the smoke venv — exactly the wheel that
+      # ships plus its (empty) runtime dependency set. Kept out of dist/ so
+      # the PyPI publish step only sees real distributions.
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          python -m pip install --quiet cyclonedx-bom
+          mkdir -p sbom
+          cyclonedx-py environment /tmp/smoke/bin/python \
+            --output-reproducible -o "sbom/finefettle-${GITHUB_REF_NAME#v}.cdx.json"
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
 
   publish:
     needs: build
@@ -72,3 +98,30 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # WP-147: GitHub release carries the artifacts + SBOM alongside PyPI, so
+  # the SBOM is published per release, not buried in a workflow artifact.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4  # gh release needs a repo context
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Create GitHub release with artifacts + SBOM
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* sbom/* \
+            --verify-tag --generate-notes

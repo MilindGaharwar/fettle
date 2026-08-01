@@ -78,6 +78,14 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S10.3 `fettle report --compliance [--json]` evidence table
         (fired/blocked per control from the audit trail; unmapped surfaced)
   - [x] S10.4 tests (test_compliance.py) + docs + work note
+- [x] C11. Stage 11 — WP-147 supply-chain posture
+  - [x] S11.1 release.yml: Sigstore/SLSA provenance (attest-build-provenance)
+        + CycloneDX SBOM from the smoke venv + GitHub release w/ artifacts
+  - [x] S11.2 fettle/supply_chain.py: PINNED_TOOLS canonical home +
+        RECORD hash verification (stdlib-only, offline)
+  - [x] S11.3 `fettle doctor --verify-hashes` (tampering = required
+        failure; drift = warn; not-installed = skipped, surfaced)
+  - [x] S11.4 tests (test_supply_chain.py) + docs + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

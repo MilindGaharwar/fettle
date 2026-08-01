@@ -353,7 +353,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     """Run environment self-check."""
     import subprocess
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    subprocess.run([sys.executable, os.path.join(script_dir, "doctor.py")], check=False)
+    cmd = [sys.executable, os.path.join(script_dir, "doctor.py")]
+    if getattr(args, "verify_hashes", False):
+        cmd.append("--verify-hashes")
+    subprocess.run(cmd, check=False)
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -881,7 +884,9 @@ def main() -> None:
     p_baseline = subparsers.add_parser("baseline", help="Manage violation baselines")
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")
 
-    subparsers.add_parser("doctor", help="Environment self-check")
+    p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
+    p_doctor.add_argument("--verify-hashes", dest="verify_hashes", action="store_true",
+                          help="Verify pinned tools against wheel RECORD hashes (WP-147)")
 
     p_init = subparsers.add_parser("init", help="One-command setup: repo config, agent hooks, commit-time guards")
     p_init.add_argument("--install-tools", action="store_true",

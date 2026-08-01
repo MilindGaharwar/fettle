@@ -255,10 +255,15 @@ def check_config_valid() -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--verify-hashes", action="store_true",
+                        help="Verify pinned tools' installed files against wheel RECORD hashes (WP-147)")
     args = parser.parse_args()
 
     checks = (check_environment() + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health())
+    if args.verify_hashes:
+        from fettle.supply_chain import verify_tool_hashes
+        checks += verify_tool_hashes()
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:

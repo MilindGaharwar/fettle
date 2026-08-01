@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Stage 11 — WP-147 supply-chain posture**: releases now ship with
+  Sigstore-signed SLSA provenance (GitHub native attestation on every
+  artifact — verify with `gh attestation verify`) and a CycloneDX SBOM
+  generated from the exact wheel that publishes, attached to the GitHub
+  release. Consumer side: `fettle doctor --verify-hashes` checks each
+  pinned tool's installed files against its wheel RECORD hashes —
+  tampering is a required failure, version drift a warning, and tools
+  not installed as Python distributions are reported as skipped, never
+  silently omitted. `PINNED_TOOLS` moved to its canonical home in
+  `fettle/supply_chain.py` (init_cmd re-exports).
 - **Stage 10 — WP-146 compliance evidence**: every bundled rule and ruff
   security code now carries CWE / OWASP ASVS / SOC 2 tags
   (`metadata.compliance` in the rule packs, canonical mapping in
