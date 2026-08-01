@@ -16,8 +16,14 @@ from pathlib import Path
 
 CHECKPOINT_NAME = "uat-session.json"
 
-#: Surfaces the session core can drive today. web arrives in S5.5.
+#: Surfaces the session core can always drive. web needs playwright (S5.5).
 DRIVABLE_SURFACES = frozenset({"cli", "api", "library"})
+
+_CONSENT_TEXT = (
+    "UAT sessions launch an autonomous agent with permission checks disabled "
+    "inside an isolated worktree. It will run commands and, for web surfaces, "
+    "drive a browser against your app. Re-run with --yes to consent."
+)
 
 _PROMPT_HEADER = """\
 You are a first-time user performing acceptance testing of this software.
@@ -80,6 +86,14 @@ def build_prompt(surface: str, scenarios: list[dict], uat_cfg: dict) -> str:
     else:
         access = ("Discover the entry point the way a user would (README, --help); "
                   "if none is documented, that itself is a finding.")
+    if surface == "web":
+        access += ("\nUse playwright (already installed) to drive a real browser "
+                   "against the app — navigate, click, and read the page exactly "
+                   "as a person would. Never bypass the UI by calling APIs or "
+                   "reading the database directly.\n"
+                   "If a step needs credentials or a permission grant you do not "
+                   "have, STOP that scenario and report OUTCOME: could-not-attempt "
+                   "with exactly what is needed. Never invent or reuse credentials.")
     parts = [_PROMPT_HEADER.format(surface=surface, access=access)]
     for s in scenarios:
         parts.append(f"\n### {s['id']}: {s['title']}")
@@ -109,12 +123,28 @@ def _write_checkpoint(worktree: str, data: dict) -> str:
         return f"cannot write checkpoint: {exc}"
 
 
+def _redact_secrets(transcript: str) -> tuple[str, int]:
+    """Secrets never persist through the transcript (doc 10 §4)."""
+    from fettle.boundary_scan import scan_text
+    findings = [f for f in scan_text(transcript) if "secret" in f.message.lower()
+                or "key" in f.message.lower() or "token" in f.message.lower()]
+    if not findings:
+        return transcript, 0
+    lines = transcript.splitlines()
+    hit_lines = {f.line for f in findings if 1 <= f.line <= len(lines)}
+    for i in hit_lines:
+        lines[i - 1] = "[REDACTED: possible secret removed from transcript]"
+    return "\n".join(lines) + "\n", len(hit_lines)
+
+
 def run_session(root: str, config: dict, surface: str,
-                runner=None, session_id: str = "") -> SessionResult:
+                runner=None, session_id: str = "",
+                consent: bool = False) -> SessionResult:
     """Full session for one surface. Returns a SessionResult, never raises.
 
     `runner` may be any object with .run(prompt, cwd, timeout_s) (test seam);
-    defaults to the configured agent runner.
+    defaults to the configured agent runner. `consent` must be explicit —
+    sessions run an agent with permission checks disabled.
     """
     from fettle.runners import get_runner
     from fettle.uat.doctor import probe
@@ -125,9 +155,20 @@ def run_session(root: str, config: dict, surface: str,
     session_id = session_id or f"uat-{time.strftime('%Y%m%d-%H%M%S')}"
     result = SessionResult(session_id=session_id, surface=surface)
 
-    if surface not in DRIVABLE_SURFACES:
-        result.error = (f"surface '{surface}' is not drivable yet "
-                        f"(supported: {', '.join(sorted(DRIVABLE_SURFACES))}); "
+    if not consent:
+        result.error = _CONSENT_TEXT
+        return result
+
+    if surface == "web":
+        from fettle.uat.doctor import _playwright_available
+        if not _playwright_available():
+            result.error = ("web surface needs browser automation: "
+                            "pip install 'finefettle[uat]' — or run "
+                            "'fettle uat manual' for hand-testing steps")
+            return result
+    elif surface not in DRIVABLE_SURFACES:
+        result.error = (f"surface '{surface}' is not drivable "
+                        f"(supported: {', '.join(sorted(DRIVABLE_SURFACES | {'web'}))}); "
                         "run 'fettle uat doctor' for manual steps")
         return result
 
@@ -181,8 +222,11 @@ def run_session(root: str, config: dict, surface: str,
 
     transcript_path = Path(wt_path) / ".fettle" / f"{session_id}-transcript.txt"
     try:
-        transcript_path.write_text(run.transcript, encoding="utf-8")
+        clean, redacted = _redact_secrets(run.transcript)
+        transcript_path.write_text(clean, encoding="utf-8")
         result.transcript_path = str(transcript_path)
+        if redacted:
+            checkpoint["redacted_lines"] = redacted
     except OSError as exc:
         result.error = f"cannot persist transcript: {exc}"
 

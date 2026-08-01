@@ -106,11 +106,11 @@ class TestScenariosAndPrompt:
 
 
 class TestRunSession:
-    def _run(self, repo, runner=None, surface="cli"):
+    def _run(self, repo, runner=None, surface="cli", consent=True):
         with patch("fettle.runners.claude.shutil.which",
                    return_value="/usr/bin/claude"):
             return run_session(str(repo), _cfg(), surface,
-                               runner=runner or FakeRunner())
+                               runner=runner or FakeRunner(), consent=consent)
 
     def test_happy_path(self, tmp_path):
         repo = _git_repo(tmp_path)
@@ -148,14 +148,39 @@ class TestRunSession:
 
     def test_undrivable_surface_names_doctor(self, tmp_path):
         repo = _git_repo(tmp_path)
-        result = self._run(repo, surface="web")
+        result = self._run(repo, surface="kiosk")
         assert result.status == "error"
         assert "not drivable" in result.error and "uat doctor" in result.error
+
+    def test_no_consent_blocks_with_explanation(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        result = self._run(repo, consent=False)
+        assert result.status == "error"
+        assert "--yes" in result.error and "permission checks disabled" in result.error
+
+    def test_web_without_playwright_points_to_extra_and_manual(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        with patch("fettle.uat.doctor._playwright_available", return_value=False):
+            result = self._run(repo, surface="web")
+        assert result.status == "error"
+        assert "finefettle[uat]" in result.error and "uat manual" in result.error
+
+    def test_secret_redacted_from_transcript(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        leaky = ("SCENARIO: greeter/S1\n"
+                 "OBSERVED: config shows AWS_SECRET_ACCESS_KEY "
+                 "AKIAIOSFODNN7REALKEY\n"
+                 "OUTCOME: matches\n")
+        result = self._run(repo, FakeRunner(transcript=leaky))
+        stored = Path(result.transcript_path).read_text()
+        assert "AKIAIOSFODNN7REALKEY" not in stored
+        assert "REDACTED" in stored
 
     def test_capability_gap_blocks(self, tmp_path):
         repo = _git_repo(tmp_path)
         with patch("fettle.runners.claude.shutil.which", return_value=None):
-            result = run_session(str(repo), _cfg(), "cli", runner=FakeRunner())
+            result = run_session(str(repo), _cfg(), "cli",
+                                 runner=FakeRunner(), consent=True)
         assert result.status == "error"
         assert "capability gap" in result.error
 
@@ -168,12 +193,22 @@ class TestRunSession:
 
 
 class TestCLI:
+    def test_uat_run_requires_consent(self, tmp_path):
+        import json as _json
+        repo = _git_repo(tmp_path)
+        r = subprocess.run(
+            [sys.executable, "-m", "fettle.cli", "uat", "run", "--json"],
+            cwd=repo, capture_output=True, text=True)
+        assert r.returncode == 1
+        data = _json.loads(r.stdout)
+        assert "--yes" in data["error"]
+
     def test_uat_run_json_with_gap(self, tmp_path):
         import json as _json
         repo = _git_repo(tmp_path)
         r = subprocess.run(
             [sys.executable, "-m", "fettle.cli", "uat", "run",
-             "--surface", "web", "--json"],
+             "--surface", "kiosk", "--yes", "--json"],
             cwd=repo, capture_output=True, text=True)
         assert r.returncode == 1
         data = _json.loads(r.stdout)

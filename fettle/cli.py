@@ -656,7 +656,7 @@ def cmd_uat(args: argparse.Namespace) -> None:
     if getattr(args, "uat_action", "doctor") == "run":
         from fettle.uat.reconcile import format_verdicts, reconcile_session
         from fettle.uat.session import run_session
-        result = run_session(root, config, args.surface)
+        result = run_session(root, config, args.surface, consent=args.yes)
         verdicts = []
         if result.status == "completed":
             verdicts, _cp, rec_err = reconcile_session(root, result.worktree)
@@ -872,6 +872,9 @@ def main() -> None:
     p_uat_run = uat_sub.add_parser("run", help="Run a UAT session on one surface")
     p_uat_run.add_argument("--surface", default="cli",
                            help="Surface to test (default: cli)")
+    p_uat_run.add_argument("--yes", action="store_true",
+                           help="Consent: the session runs an autonomous agent "
+                                "with permission checks disabled in an isolated worktree")
     p_uat_run.add_argument("--json", action="store_true", help="JSON output")
     p_uat_rep = uat_sub.add_parser("report", help="Reconcile a session's transcript into verdicts")
     p_uat_rep.add_argument("--worktree", required=True, help="Session worktree path")
