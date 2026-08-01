@@ -475,4 +475,4 @@ distribution work.
 
 ## License
 
-MIT (c) Milind Gaharwar
+MIT (c) Milind 
