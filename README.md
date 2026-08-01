@@ -92,17 +92,17 @@ flowchart LR
 | Layer | Hook | What runs |
 |-------|------|-----------|
 | **Per-edit lint** | PostToolUse (Write/Edit) | ruff + semgrep on every Python edit |
-| **TDD ordering** | PreToolUse + PostToolUse | Test-before-implementation enforcement (v0.9) |
-| **Complexity** | PostToolUse (Write/Edit) | Cyclomatic + cognitive per modified function (v0.9) |
-| **Lean review** | PostToolUse (Write/Edit) | Over-engineering detection: abstractions, wrappers, large additions (v0.8) |
+| **TDD ordering** | PreToolUse + PostToolUse | Test-before-implementation ordering — `advisory` warns, `strict` blocks |
+| **Complexity** | PostToolUse (Write/Edit) | Cyclomatic + cognitive per modified function |
+| **Lean review** | PostToolUse (Write/Edit) | Over-engineering detection: abstractions, wrappers, large additions |
 | **Pre-write gate** | PreToolUse (Write/Edit) | Plan gate, config protection, UX spec gate |
 | **MCP trust** | PreToolUse (Bash) | Package install allowlist |
 | **Artifact integrity** | PreToolUse (Bash) | Destructive command guard |
 | **Doc freshness** | PostToolUse (Bash) | Warns if implementation changed but no docs updated |
-| **Bash audit** | PostToolUse (Bash) | Structured event logging, privacy-first (v0.8) |
+| **Bash audit** | PostToolUse (Bash) | Structured event logging, privacy-first |
 | **Cross-file** | Stop | Import/contract resolution before response delivery |
-| **Coverage gate** | Stop | Diff line + branch coverage from coverage.json (v0.8/v0.9) |
-| **Discipline link** | PostToolUse | Injects skill reminders when loop/scope/lean gates fire (v0.8) |
+| **Coverage gate** | Stop | Diff line + branch coverage from coverage.json |
+| **Discipline link** | PostToolUse | Injects skill reminders when loop/scope/lean gates fire |
 
 ## Why Fettle
 
@@ -161,7 +161,7 @@ this model — Fettle is the assurance layer for it.)
   scan hit and a broad-except in new code). The harness that doesn't pass its
   own bar doesn't ship.
 
-## Enterprise Operations (v1.3 arc, shipping now)
+## Enterprise Operations (v1.3 arc)
 
 | Capability | How |
 |---|---|
@@ -172,7 +172,7 @@ this model — Fettle is the assurance layer for it.)
 | **Config governance** | Published [JSON Schema](docs/fettle.schema.json), `fettle config --validate` with typo-catching unknown-key warnings — orgs review a schema, not source code |
 | **Supply-chain stance** | Tokenless releases (PyPI Trusted Publishing/OIDC), pinned tool installs only on explicit user action — hooks never install anything |
 
-## Intelligence Layer (v0.3.0+)
+## Intelligence Layer
 
 | Feature | Command | Description |
 |---------|---------|-------------|
@@ -286,13 +286,17 @@ For centralized adoption, call
 `.github/workflows/fettle-reusable.yml`; both surfaces support SARIF and pull
 request annotations. Pin a release tag instead of `main` for stable CI.
 
-## Slash Commands (12)
+## Slash Commands (17)
 
 | Command | Purpose |
 |---------|---------|
 | `/fettle:quality` | Full project scan |
 | `/fettle:preflight` | Pre-deployment FMEA checklist |
 | `/fettle:ops-review` | Operational readiness review |
+| `/fettle:security-review` | Security-focused review (ruff S-rules + semgrep OWASP patterns) |
+| `/fettle:threat-model` | STRIDE threat model with auto-populated entry points and data stores |
+| `/fettle:pr-review` | PR review report: quality scan + coverage + complexity + breaking changes |
+| `/fettle:review` | Independent cross-review of a file using a different LLM |
 | `/fettle:plan-activate` | Start a plan (required before edits in enforce mode) |
 | `/fettle:plan-complete` | Mark plan done |
 | `/fettle:mcp-approve` | Approve an MCP package |
@@ -301,6 +305,8 @@ request annotations. Pin a release tag instead of `main` for stable CI.
 | `/fettle:explain` | Explain last hook decision |
 | `/fettle:baseline` | Manage violation baselines |
 | `/fettle:report` | Effectiveness metrics |
+| `/fettle:lean-debt` | Report `fettle:lean:` markers — deliberate simplifications + upgrade triggers |
+| `/fettle:worklog` | Create or view daily worklog entries |
 
 ## Configuration
 
@@ -312,7 +318,7 @@ enabled = true
 mode = "advisory"   # advisory | soft | enforce
 
 [gates.lean_review]
-mode = "advisory"   # silent | advisory — surfaces over-engineering findings (v0.8)
+mode = "advisory"   # silent | advisory — surfaces over-engineering findings
 
 [gates.complexity]
 enabled = true
@@ -327,7 +333,8 @@ minimum_branch_percent = 0      # Branch coverage (0 = disabled)
 
 [gates.tdd]
 enabled = false
-mode = "advisory"               # advisory only in v0.9
+mode = "advisory"               # advisory | strict — strict BLOCKS implementation
+                                # edits with no prior test edit
 accept_preexisting_tests = true
 
 [gates.bdd]
@@ -373,9 +380,10 @@ warning_prefixes = ["SIM", "UP"]
 ## Architecture
 
 ```
-Claude Code Tool Call
+Agent tool call (Claude Code · Codex CLI · Gemini CLI · OpenCode)
     │
-    ▼
+    ▼  fettle.agents — translate to one event model
+    │
 PreToolUse ──→ dispatcher.py selects checks by event + tool + extension:
              → quality_gate (plan, UX spec)
              → tdd_gate (test-first ordering)
@@ -403,7 +411,7 @@ Stop ──→ dispatcher.py:
 ```
 
 All checks route through `dispatcher.py` (single process, per-check budget,
-advisory cap). 17 checks registered, ordered by priority, fail-open on error.
+advisory cap). 28 checks registered, ordered by priority, fail-open on error.
 
 ## Result Taxonomy
 

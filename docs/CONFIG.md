@@ -113,6 +113,23 @@ spec_patterns = ["docs/*spec*.md", "docs/**/*spec*.md", "docs/*strategy*.md", "d
 [gates.tests]         # untested-code Stop gate + pre-commit warning — OFF by default
 enabled = false
 
+[gates.tdd]           # test-before-implementation ordering — OFF by default
+enabled = false
+mode = "advisory"     # advisory | strict — strict BLOCKS impl edits with no prior test edit
+accept_preexisting_tests = true
+
+[gates.complexity]    # per-function complexity ceilings — advisory by default
+enabled = true
+mode = "advisory"     # advisory | enforce
+max_cyclomatic = 10
+max_cognitive = 15
+
+[gates.coverage]      # diff coverage at Stop — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+threshold = 80        # line coverage % for changed lines (0–100)
+minimum_branch_percent = 0   # branch coverage (0 = disabled)
+
 [gates.bdd]           # living-spec scenario coverage (see fettle spec) — OFF by default
 enabled = false
 mode = "advisory"     # advisory | enforce
@@ -170,7 +187,7 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 ## State model
 
 - **Per-session state** (edit tracking, plan-gate counters, browser-test marker)
-  lives under `$XDG_STATE_HOME/fettle/<session_id>/` — concurrent Claude Code
+  lives under `$XDG_STATE_HOME/fettle/<session_id>/` — concurrent agent
   sessions never see each other's state.
 - **Per-project trace** (`.fettle/trace.jsonl`) records findings, metrics, and
-  gate errors — the raw material for the effectiveness report (v0.4.0).
+  gate errors — the raw material for `fettle report`.

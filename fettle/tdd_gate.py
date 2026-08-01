@@ -1,7 +1,8 @@
 """WP-I — TDD Phase Enforcement.
 
 PreToolUse + PostToolUse check that detects whether test files are
-edited before corresponding implementation files. Advisory only in v0.9.
+edited before corresponding implementation files. Two modes:
+`advisory` (warn) and `strict` (block the implementation edit).
 
 Known limitations (by design):
 - Checks ORDERING only (test file edited before implementation file).
