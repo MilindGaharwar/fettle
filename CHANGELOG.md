@@ -2,6 +2,19 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 8 — Remote CI verification gate**: `[gates.ci]` + `fettle ci
+  status|wait` — born from a real incident: remote CI was red for eight
+  consecutive runs while local pre-push stayed green (subprocess CLI
+  tests needed an editable install the CI checkout lacked). The gate
+  closes the loop: a PostToolUse hook records every `git push` in the
+  session; the Stop gate (100 ms budget) then requires a fresh stamp
+  proving the pushed commit's remote verdict is green — missing, stale,
+  wrong-commit, or red all surface as unverified, with the failing run
+  named and a local reproduction command from the failure-ingest
+  pipeline (`ci_ingest`/`ci_diagnose` gain their first real caller).
+  `fettle ci wait` polls GitHub Actions (gh CLI, REST fallback) and
+  writes the stamp. OFF by default, advisory first; Fettle's own repo
+  runs it in enforce mode.
 - **Stage 7 — Functional-test verification + consistency pass (WP2, WP9)**:
   `[gates.verify]` + `fettle verify` — the CLI runs the discovered test
   suite (honors `[profile].test_command`; `scope = "impacted"` maps edited

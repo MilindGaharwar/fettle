@@ -59,6 +59,14 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S7.3 hygiene: plan docs → docs/archive/ (frozen-status banner),
         work notes unified under docs/engagement/worknotes/, TODO current
   - [x] S7.4 docs (verify gate) + consolidated roadmap (B10) + work note
+- [x] C8. Stage 8 — remote CI verification gate (incident-driven)
+  - [x] S8.0 incident root-cause: CI red ×8 since Stage 3 (subprocess CLI
+        tests needed editable install) — fixed in ci.yml, verified green
+  - [x] S8.1 [gates.ci]: push recorder (PostToolUse) + Stop stamp check
+        + `fettle ci status|wait` (gh CLI, REST fallback) (31 tests)
+  - [x] S8.2 failure ingest wired: red run → ci_ingest/ci_diagnose →
+        reproduction command in the gate message
+  - [x] S8.3 docs + work note + dogfood (enforce mode in .fettle.toml)
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

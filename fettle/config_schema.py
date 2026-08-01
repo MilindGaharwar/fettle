@@ -56,6 +56,7 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.bdd.mode": frozenset({"advisory", "enforce"}),
     "gates.claims.mode": frozenset({"advisory", "enforce"}),
     "gates.verify.mode": frozenset({"advisory", "enforce"}),
+    "gates.ci.mode": frozenset({"advisory", "enforce"}),
     "gates.complexity.mode": frozenset({"advisory", "enforce"}),
     "uat.mode": frozenset({"report"}),
     "gates.coverage.mode": frozenset({"advisory", "enforce"}),
@@ -94,6 +95,8 @@ RANGES: dict[str, tuple[float | None, float | None]] = {
     "gates.lean_review.tier2.max_findings": (1, None),
     "uat.timeout_s": (1, 86400),
     "gates.verify.timeout_s": (1, 3600),
+    "gates.ci.timeout_s": (1, 7200),
+    "gates.ci.poll_s": (1, 300),
 }
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")

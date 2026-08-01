@@ -183,6 +183,15 @@ DEFAULTS: dict[str, Any] = {
             "timeout_s": 120,
             "parallel": False,
         },
+        # Stage 8: remote CI verification. A `git push` this session demands
+        # a fresh green CI verdict for the pushed sha before Stop; the
+        # verdict is fetched by `fettle ci status|wait` (never by the gate).
+        "ci": {
+            "enabled": False,
+            "mode": "advisory",
+            "timeout_s": 900,
+            "poll_s": 15,
+        },
         "complexity": {
             "enabled": True,
             "mode": "advisory",

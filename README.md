@@ -219,6 +219,8 @@ fettle uat attest <spec/Sn> --outcome ... --observed ...
 fettle links <id> [--json]        # semantic layer: everything attached to an id
 fettle links --orphans            # broken evidence chains (req→scenario→test/UAT)
 fettle verify [--full] [--json]   # run the test suite, record verification stamp
+fettle ci status [--json]         # remote CI verdict for HEAD (gh, REST fallback)
+fettle ci wait [--json]           # poll remote CI to completion, record stamp
 fettle baseline create|update
 fettle doctor
 fettle lsp
@@ -307,6 +309,10 @@ mode = "advisory"               # claim-before-work in fettle worktrees (Stage 4
 [gates.verify]
 enabled = false
 mode = "advisory"               # advisory | enforce — fresh green `fettle verify` stamp at Stop
+
+[gates.ci]
+enabled = false
+mode = "advisory"               # advisory | enforce — pushed this session ⇒ remote CI verified green
 
 [gates.plan]
 enabled = false

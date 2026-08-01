@@ -103,6 +103,12 @@ scope = "impacted"    # impacted (edited files → tests by name) | full
 timeout_s = 120       # 1–3600; timeouts surface as unverified, never silently
 parallel = false      # pytest-xdist when available
 
+[gates.ci]            # remote CI verified green after push (fettle ci wait) — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+timeout_s = 900       # 1–7200; max wall time `fettle ci wait` polls for a verdict
+poll_s = 15           # 1–300; seconds between remote polls
+
 [worktrees]           # per-work-item worktree root (fettle worktree …)
 root = ".fettle/worktrees"
 

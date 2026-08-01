@@ -153,15 +153,42 @@ def cmd_check(args: argparse.Namespace) -> None:
 
 
 def cmd_ci(args: argparse.Namespace) -> None:
-    """Reproduce CI locally, or scaffold the workflow with `ci init`."""
+    """Reproduce CI locally, scaffold the workflow, or verify the remote verdict."""
     from fettle import ci as ci_mod
-    if getattr(args, "ci_action", None) == "init":
+    action = getattr(args, "ci_action", None)
+    if action == "init":
         out = ci_mod.init_ci(args.root, dry_run=getattr(args, "dry_run", False))
         if getattr(args, "dry_run", False):
             print(out)
         else:
             print("Wrote .github/workflows/fettle.yml and seeded .fettle.toml [boundary].")
         return
+    if action in ("status", "wait"):
+        from fettle.ci_gate import run_ci_status
+        from fettle.config import load_config
+        from fettle.paths import find_repo_root
+        root = find_repo_root()
+        if root is None:
+            print("✗ not inside a git repository", file=sys.stderr)
+            sys.exit(2)
+        stamp = run_ci_status(
+            str(root), load_config(str(root)),
+            wait=(action == "wait"), sha=getattr(args, "sha", None),
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(stamp, indent=2))
+        else:
+            mark = "✓" if stamp["ok"] else "✗"
+            print(f"{mark} CI {stamp['overall']} — {stamp['sha'][:12]}")
+            for r in stamp["runs"]:
+                print(f"  {r['name']}: {r['conclusion'] or r['status']}")
+            if stamp.get("error"):
+                print(f"  {stamp['error']}")
+            if stamp.get("reproduce"):
+                print(f"  Reproduce locally: {stamp['reproduce']}")
+        if stamp["ok"]:
+            sys.exit(0)
+        sys.exit(2 if stamp["overall"] in ("error", "no-runs") else 1)
     result = ci_mod.run_ci(args.root)
     rc = ci_mod._print_result(result)
     sys.exit(rc)
@@ -878,6 +905,12 @@ def main() -> None:
     p_ci_init = ci_sub.add_parser("init", help="Write .github/workflows/fettle.yml")
     p_ci_init.add_argument("--dry-run", action="store_true")
     p_ci_init.add_argument("--root", default=".")
+    for _action, _help in (("status", "One-shot remote CI verdict for a commit"),
+                           ("wait", "Poll remote CI to completion, then report")):
+        p_ci_a = ci_sub.add_parser(_action, help=_help)
+        p_ci_a.add_argument("--sha", default=None, help="Commit to check (default: HEAD)")
+        p_ci_a.add_argument("--json", action="store_true")
+        p_ci_a.add_argument("--root", default=".")
 
     # WP-119: Ratchet workflow
     p_ratchet = subparsers.add_parser("ratchet", help="Evidence-based rule promotion/demotion")

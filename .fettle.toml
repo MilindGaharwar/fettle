@@ -19,3 +19,8 @@ capture_command = false
 enabled = true
 threshold = 80
 mode = "advisory"
+
+# Stage 8: never declare done while remote CI is red (or unverified).
+[gates.ci]
+enabled = true
+mode = "enforce"

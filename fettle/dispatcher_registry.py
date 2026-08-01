@@ -29,6 +29,8 @@ from fettle.stop_quality_gate import run_check as stop_quality_gate_run
 
 # Phase 4 checks (audit, never blocks)
 from fettle.bash_audit import run_check as bash_audit_run
+from fettle.ci_gate import record_push as ci_push_record_run
+from fettle.ci_gate import run_check as ci_gate_run
 from fettle.coverage_gate import run_check as coverage_gate_run
 from fettle.worklog import run_check as worklog_run
 from fettle.complexity_check import run_check as complexity_check_run
@@ -246,6 +248,24 @@ CHECKS: tuple[CheckSpec, ...] = (
         events=frozenset({"Stop"}),
         tools=None,
         order=52,
+        budget_ms=100,
+    ),
+    # PostToolUse(Bash) — record `git push` for the CI gate (Stage 8)
+    CheckSpec(
+        name="ci_push_record",
+        run=ci_push_record_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=45,
+        budget_ms=100,
+    ),
+    # Stop — pushed commits demand a fresh green remote CI verdict (Stage 8)
+    CheckSpec(
+        name="ci_gate",
+        run=ci_gate_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=53,
         budget_ms=100,
     ),
     # Stop — coverage (advisory by default, after blocking checks)

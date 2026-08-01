@@ -706,6 +706,36 @@
           },
           "additionalProperties": false
         },
+        "ci": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "enforce"
+              ]
+            },
+            "timeout_s": {
+              "type": "integer",
+              "default": 900,
+              "minimum": 1,
+              "maximum": 7200
+            },
+            "poll_s": {
+              "type": "integer",
+              "default": 15,
+              "minimum": 1,
+              "maximum": 300
+            }
+          },
+          "additionalProperties": false
+        },
         "complexity": {
           "type": "object",
           "properties": {
