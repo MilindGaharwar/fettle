@@ -21,9 +21,14 @@ v1 entries (no `schema`/`repo` keys) remain readable forever.
 
 import json
 import os
+import sys
 import time
 
 AUDIT_SCHEMA_VERSION = 2
+
+# One-time stderr warning flag: audit-log loss must be visible (WP: Stage-0
+# failure-visibility), but must never spam or break the hook path.
+_write_failure_warned = False
 
 
 def _get_trace_path() -> str:
@@ -55,8 +60,13 @@ def log_decision(
     findings: list[dict] | None = None,
     duration_ms: float = 0.0,
     session_id: str = "",
-) -> None:
-    """Log a hook decision to the trace file."""
+) -> bool:
+    """Log a hook decision to the trace file.
+
+    Returns True when the entry was durably appended. On write failure the
+    entry is lost, but the failure is surfaced once per process on stderr —
+    loss of the audit log must never be silent.
+    """
     entry = {
         "schema": AUDIT_SCHEMA_VERSION,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -75,8 +85,50 @@ def log_decision(
         with open(trace_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
             f.flush()
+        return True
+    except OSError as exc:
+        global _write_failure_warned
+        if not _write_failure_warned:
+            print(
+                f"fettle: WARNING — audit trace write failed ({exc}); "
+                "hook decisions are NOT being recorded. Run `fettle doctor`.",
+                file=sys.stderr,
+            )
+            _write_failure_warned = True
+        return False
+
+
+def read_tail(max_bytes: int = 65536) -> list[dict]:
+    """Parse trace entries from the last `max_bytes` of the trace file.
+
+    Cheap recent-history probe (bounded read regardless of file size) for
+    in-hook consumers like the dispatcher's repeated-failure escalation.
+    Never raises; returns [] when the trace is missing or unreadable.
+    """
+    try:
+        trace_path = _get_trace_path()
+        if not os.path.isfile(trace_path):
+            return []
+        size = os.path.getsize(trace_path)
+        with open(trace_path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                f.readline()  # discard partial first line
+            raw = f.read().decode("utf-8", errors="replace")
     except OSError:
-        pass
+        return []
+    entries: list[dict] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            entries.append(parsed)
+    return entries
 
 
 def get_recent_decisions(limit: int = 20) -> list[dict]:

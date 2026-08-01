@@ -62,6 +62,17 @@ class Aggregator:
         self.errors.append({"check": check_name, "error": error})
         self.timings.append(CheckTiming(name=check_name, elapsed_ms=0, decision="error_fail_open"))
 
+    def add_system_advisory(self, text: str) -> None:
+        """Cap-respecting advisory injected by the dispatcher itself
+        (e.g. repeated-check-failure escalation — Stage-0 failure visibility)."""
+        text = text.strip()
+        if not text:
+            return
+        if len(self.advisories) < self.max_advisories_per_turn:
+            self.advisories.append(text)
+        else:
+            self._advisories_suppressed += 1
+
     def record_budget_exhausted(self, next_check_name: str) -> None:
         self.budget_exhausted_before = next_check_name
 

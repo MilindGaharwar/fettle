@@ -9,6 +9,7 @@ Fail-open on all errors. Never crashes the session.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -25,9 +26,56 @@ from fettle.config import load_config  # noqa: E402
 from fettle.dispatcher_aggregate import Aggregator  # noqa: E402
 from fettle.dispatcher_registry import select_checks  # noqa: E402
 from fettle.dispatcher_types import CheckResult, HookContext  # noqa: E402
+from fettle.trace import log_decision, read_tail  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
+
+# Repeated-failure escalation: same check failing this many times within the
+# window turns silent fail-open into a visible in-session advisory.
+_ESCALATION_THRESHOLD = 3
+_ESCALATION_WINDOW_S = 24 * 3600
+
+
+def _trace_dispatch_failure(status: str, detail: str, session_id: str = "") -> None:
+    """Record a dispatcher-level fail-open on the audit trail. Never raises."""
+    # Tracing must never break the hook path; log_decision itself warns on
+    # stderr if the audit log is unwritable, so suppression here is not silent.
+    with contextlib.suppress(Exception):
+        log_decision(
+            hook="dispatcher",
+            status=status,
+            findings=[{"detail": detail[:500]}] if detail else [],
+            session_id=session_id,
+        )
+
+
+def _repeated_failure_checks(errors: list[dict]) -> list[str]:
+    """Names of checks that also failed >= threshold times in the window."""
+    if not errors:
+        return []
+    try:
+        now = time.time()
+        counts: dict[str, int] = {}
+        for entry in read_tail():
+            if entry.get("hook") != "dispatcher" or entry.get("status") != "check_error":
+                continue
+            if now - float(entry.get("ts", 0)) > _ESCALATION_WINDOW_S:
+                continue
+            for finding in entry.get("findings", []):
+                name = finding.get("check", "")
+                if name:
+                    counts[name] = counts.get(name, 0) + 1
+        return [
+            err["check"]
+            for err in errors
+            # The current run's failure is already traced before this check
+            # runs, so the tail count includes it.
+            if counts.get(err["check"], 0) >= _ESCALATION_THRESHOLD
+        ]
+    except Exception as exc:  # noqa: BLE001 — escalation is best-effort
+        logger.error("fettle: failure-escalation probe failed: %s", exc, exc_info=True)
+        return []
 
 
 DEFAULT_EVENT_BUDGETS_MS = {
@@ -65,7 +113,9 @@ def main() -> int:
         payload = json.loads(raw_stdin or "{}")
         if not isinstance(payload, dict):
             payload = {}
-    except Exception:  # noqa: BLE001 — fail-open by design
+    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+        logger.error("fettle: stdin parse failed: %s", exc, exc_info=True)
+        _trace_dispatch_failure("input_error", f"{type(exc).__name__}: {exc}")
         print(_empty_output())
         return 0
 
@@ -74,14 +124,21 @@ def main() -> int:
     try:
         from fettle.agents import normalize
         hook_input = normalize(payload, fallback_cwd=os.getcwd())
-    except Exception:  # noqa: BLE001 — fail-open by design
+    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+        logger.error("fettle: event normalize failed: %s", exc, exc_info=True)
+        _trace_dispatch_failure("input_error", f"normalize: {type(exc).__name__}: {exc}")
         print(_empty_output(str(payload.get("hook_event_name") or "")))
         return 0
     cwd = hook_input.cwd
+    session_id = hook_input.session_id or ""
 
     try:
         config = load_config(str(cwd))
-    except Exception:  # noqa: BLE001 — fail-open by design
+    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+        logger.error("fettle: config load failed: %s", exc, exc_info=True)
+        _trace_dispatch_failure(
+            "config_error", f"{type(exc).__name__}: {exc}", session_id
+        )
         config = {}
 
     budget_ms = _event_budget_ms(config, hook_input.hook_event_name)
@@ -105,7 +162,11 @@ def main() -> int:
 
     try:
         checks = select_checks(ctx)
-    except Exception:  # noqa: BLE001 — fail-open by design
+    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+        logger.error("fettle: check registry failed: %s", exc, exc_info=True)
+        _trace_dispatch_failure(
+            "registry_error", f"{type(exc).__name__}: {exc}", session_id
+        )
         checks = []
 
     for spec in checks:
@@ -144,9 +205,49 @@ def main() -> int:
         if aggregator.has_block:
             break
 
+    # Stage-0 failure visibility: a check crash or budget kill is a fail-open
+    # that MUST leave a persistent record and, when chronic, become visible
+    # in-session. One bounded trace write; escalation reads a bounded tail.
+    if aggregator.errors:
+        _trace_dispatch_failure_findings(aggregator.errors, session_id)
+        for name in _repeated_failure_checks(aggregator.errors):
+            aggregator.add_system_advisory(
+                f"fettle: check '{name}' has failed repeatedly and is being "
+                "skipped (fail-open) — findings may be missed. "
+                "Run `fettle doctor` to diagnose."
+            )
+    if aggregator.budget_exhausted_before:
+        # Suppression is not silent: log_decision warns on stderr if unwritable.
+        with contextlib.suppress(Exception):
+            log_decision(
+                hook="dispatcher",
+                status="budget_exhausted",
+                findings=[{
+                    "skipped_from": aggregator.budget_exhausted_before,
+                    "budget_ms": budget_ms,
+                    "event": hook_input.hook_event_name,
+                }],
+                session_id=session_id,
+            )
+
     output, exit_code = aggregator.finish()
     print(json.dumps(output, separators=(",", ":")))
     return exit_code
+
+
+def _trace_dispatch_failure_findings(errors: list[dict], session_id: str) -> None:
+    """Persist per-check crash details as one trace entry. Never raises."""
+    # Suppression is not silent: log_decision warns on stderr if unwritable.
+    with contextlib.suppress(Exception):
+        log_decision(
+            hook="dispatcher",
+            status="check_error",
+            findings=[
+                {"check": e.get("check", ""), "error": str(e.get("error", ""))[:500]}
+                for e in errors
+            ],
+            session_id=session_id,
+        )
 
 
 if __name__ == "__main__":
