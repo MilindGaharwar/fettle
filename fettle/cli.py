@@ -577,6 +577,47 @@ def cmd_worktree(args: argparse.Namespace) -> None:
     sys.exit(0)
 
 
+def cmd_links(args: argparse.Namespace) -> None:
+    """Semantic layer query surface (Stage 6).
+
+    Exit codes: 0 = ok, 1 = orphans found, 2 = usage error / unknown id.
+    """
+    from fettle.config import load_config
+    from fettle.paths import find_repo_root
+    from fettle.semantic import (build_graph, closest_ids, find_orphans,
+                                 format_links, format_orphans, links_for)
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+    g = build_graph(root, load_config(root))
+
+    if args.orphans:
+        orphans = find_orphans(g)
+        if args.json:
+            print(json.dumps({"orphans": orphans}, indent=2))
+        else:
+            print(format_orphans(orphans))
+        sys.exit(1 if orphans else 0)
+
+    if not args.id:
+        print("Error: give an id to look up, or --orphans", file=sys.stderr)
+        sys.exit(2)
+    info = links_for(g, args.id)
+    if info is None:
+        suggestions = closest_ids(g, args.id)
+        hint = f" Closest known ids: {', '.join(suggestions)}" if suggestions else ""
+        print(f"Error: unknown id '{args.id}'.{hint}", file=sys.stderr)
+        sys.exit(2)
+    if args.json:
+        print(json.dumps(info, indent=2))
+    else:
+        print(format_links(info))
+    sys.exit(0)
+
+
 def cmd_work(args: argparse.Namespace) -> None:
     """Work items + claims (WP5, Stage 4).
 
@@ -865,6 +906,12 @@ def main() -> None:
     p_work_release.add_argument("item_id")
     p_work.set_defaults(work_action="list", json=False)
 
+    p_links = subparsers.add_parser("links", help="Semantic layer: links for an id, or orphans")
+    p_links.add_argument("id", nargs="?", help="Any known id (spec, scenario, test path, work item)")
+    p_links.add_argument("--orphans", action="store_true",
+                         help="Report broken evidence chains")
+    p_links.add_argument("--json", action="store_true", help="JSON output")
+
     p_uat = subparsers.add_parser("uat", help="Agentic UAT (WP3)")
     uat_sub = p_uat.add_subparsers(dest="uat_action")
     p_uat_doc = uat_sub.add_parser("doctor", help="Surface detection + capability probe")
@@ -911,6 +958,7 @@ def main() -> None:
         "spec": cmd_spec,
         "worktree": cmd_worktree,
         "work": cmd_work,
+        "links": cmd_links,
         "uat": cmd_uat,
     }
     commands[args.command](args)
