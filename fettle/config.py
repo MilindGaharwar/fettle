@@ -41,7 +41,9 @@ DEFAULTS: dict[str, Any] = {
                        "test", ".test.", ".spec."],
         },
         "ui_colors": {"enabled": False, "allowed_hex": []},
-        "docs": {"enabled": False, "mode": "soft"},  # doc-update-before-push check
+        # doc-update-before-push check. "soft" is a deprecated alias for
+        # "enforce" (any non-advisory mode blocks) — kept one release (WP9).
+        "docs": {"enabled": False, "mode": "enforce"},
         "spec_audit": {
             "enabled": False,
             "audit_path": "docs/spec-audit.md",
@@ -95,7 +97,7 @@ DEFAULTS: dict[str, Any] = {
             "max_subject_length": 72,
             "require_conventional": True,
         },
-        "subagent": {"enabled": True, "injection_file": "", "mode": "advisory"},
+        "subagent": {"enabled": True, "injection_file": ""},
         "lean_review": {
             "enabled": True,
             "mode": "silent",
@@ -183,6 +185,8 @@ DEFAULTS: dict[str, Any] = {
         },
         "complexity": {
             "enabled": True,
+            "mode": "advisory",
+            # Deprecated: `enforce = true` behaves as mode = "enforce" (WP9).
             "enforce": False,
             "max_cyclomatic": 10,
             "max_cognitive": 15,

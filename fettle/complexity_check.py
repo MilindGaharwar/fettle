@@ -132,7 +132,8 @@ def run_check(ctx):
 
     max_cyc = int(cfg.get("max_cyclomatic", 10))
     max_cog = int(cfg.get("max_cognitive", 15))
-    enforce = cfg.get("enforce", False)
+    # `enforce = true` is the deprecated pre-WP9 vocabulary; either signal blocks.
+    enforce = cfg.get("mode", "advisory") == "enforce" or bool(cfg.get("enforce", False))
 
     try:
         with open(file_path, encoding="utf-8", errors="replace") as f:

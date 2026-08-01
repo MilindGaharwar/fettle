@@ -51,12 +51,12 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.destructive.mode": frozenset({"advisory", "enforce"}),
     "gates.config_protect.mode": frozenset({"advisory", "enforce"}),
     "gates.commit_message.mode": frozenset({"advisory", "enforce"}),
-    "gates.subagent.mode": frozenset({"advisory", "enforce"}),
     "gates.lean_review.mode": frozenset({"silent", "advisory"}),
     "gates.tdd.mode": frozenset({"advisory", "strict"}),
     "gates.bdd.mode": frozenset({"advisory", "enforce"}),
     "gates.claims.mode": frozenset({"advisory", "enforce"}),
     "gates.verify.mode": frozenset({"advisory", "enforce"}),
+    "gates.complexity.mode": frozenset({"advisory", "enforce"}),
     "uat.mode": frozenset({"report"}),
     "gates.coverage.mode": frozenset({"advisory", "enforce"}),
     "gates.deploy_safety.mode": frozenset({"advisory", "enforce"}),
@@ -145,6 +145,21 @@ def _dep_tdd_roots(cfg: dict[str, Any]) -> str | None:
     return None
 
 
+def _dep_docs_soft_alias(cfg: dict[str, Any]) -> str | None:
+    if cfg["gates"]["docs"].get("mode") == "soft":
+        return ("'gates.docs.mode' = 'soft' is a deprecated alias — it behaves "
+                "exactly as 'enforce' (blocks); use 'advisory' or 'enforce'")
+    return None
+
+
+def _dep_complexity_enforce_bool(cfg: dict[str, Any]) -> str | None:
+    if cfg["gates"]["complexity"].get("enforce"):
+        return ("'gates.complexity.enforce' = true is deprecated — use "
+                "'gates.complexity.mode' = 'enforce' (the bool still escalates "
+                "for one release)")
+    return None
+
+
 #: WP4 — cross-field rules: (trigger_path, check(merged_cfg) -> msg|None, severity).
 #: severity "error" = config would misbehave; "warning" = feature is inert or
 #: an unusual-but-coherent policy.
@@ -154,6 +169,8 @@ DEPENDENCIES: tuple[tuple[str, Any, str], ...] = (
     ("gates.lean_review.tier2.enabled", _dep_tier2_backend, "warning"),
     ("gates.ui_colors.enabled", _dep_ui_palette, "warning"),
     ("gates.tdd.enabled", _dep_tdd_roots, "warning"),
+    ("gates.docs.mode", _dep_docs_soft_alias, "warning"),
+    ("gates.complexity.enforce", _dep_complexity_enforce_bool, "warning"),
 )
 
 

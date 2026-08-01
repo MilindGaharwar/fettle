@@ -169,6 +169,43 @@ def test_run_check_allows_simple_function(tmp_path):
     assert result.decision == Decision.ALLOW
 
 
+_MONSTER = textwrap.dedent("""
+def monster(a, b, c, d, e, f, g, h, i, j, k):
+    if a:
+        if b:
+            if c:
+                if d:
+                    if e:
+                        if f:
+                            if g:
+                                if h:
+                                    if i:
+                                        if j:
+                                            if k:
+                                                pass
+""")
+
+
+def test_run_check_mode_enforce_blocks(tmp_path):
+    """WP9: mode='enforce' is the post-unification vocabulary."""
+    src = tmp_path / "complex.py"
+    src.write_text(_MONSTER)
+    ctx = _make_ctx(str(src), {"mode": "enforce"})
+    with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
+        result = run_check(ctx)
+    assert result.decision == Decision.BLOCK
+
+
+def test_run_check_legacy_enforce_bool_still_blocks(tmp_path):
+    """WP9: deprecated `enforce = true` keeps blocking for one release."""
+    src = tmp_path / "complex.py"
+    src.write_text(_MONSTER)
+    ctx = _make_ctx(str(src), {"enforce": True})
+    with patch("fettle.lean_sniffers._get_changed_lines", return_value=None):
+        result = run_check(ctx)
+    assert result.decision == Decision.BLOCK
+
+
 def test_run_check_syntax_error_graceful(tmp_path):
     src = tmp_path / "broken.py"
     src.write_text("def incomplete(:\n")

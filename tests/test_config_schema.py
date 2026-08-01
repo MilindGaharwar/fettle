@@ -187,6 +187,23 @@ class TestDependencyModel:
             "enabled": True, "implementation_roots": []}}})
         assert any("implementation_roots" in w for w in warnings)
 
+    def test_docs_soft_mode_warns_deprecated(self) -> None:
+        errors, warnings = validate_config({"gates": {"docs": {"mode": "soft"}}})
+        assert errors == []  # still a valid mode — one-release tolerance
+        assert any("deprecated" in w and "soft" in w for w in warnings)
+
+    def test_complexity_enforce_bool_warns_deprecated(self) -> None:
+        errors, warnings = validate_config(
+            {"gates": {"complexity": {"enforce": True}}})
+        assert errors == []
+        assert any("deprecated" in w and "complexity" in w for w in warnings)
+
+    def test_complexity_mode_enforce_is_valid(self) -> None:
+        errors, warnings = validate_config(
+            {"gates": {"complexity": {"mode": "enforce"}}})
+        assert errors == []
+        assert warnings == []
+
 
 class TestSchemaGeneration:
     def test_schema_shape(self) -> None:

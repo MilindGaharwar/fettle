@@ -55,7 +55,7 @@ def main() -> None:
     if not os.path.isfile(file_path):
         sys.exit(0)
 
-    # ── Edit tracking for live_test_gate.py ─────────────────────────────
+    # ── Edit tracking (consumed by coverage_gate, verify_gate, doc check) ──────────
     tracking_path: str = os.environ.get(
         "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
     )

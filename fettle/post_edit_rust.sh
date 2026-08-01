@@ -26,7 +26,7 @@ if [[ -z "$CARGO_TOML" ]]; then
     exit 0
 fi
 
-# ── Edit tracking for live_test_gate.py ──────────────────────────────
+# ── Edit tracking (consumed by coverage_gate, verify_gate, doc check) ──
 TRACKING_FILE="${FETTLE_EDIT_TRACKING:-/tmp/fettle-edits.jsonl}"
 python3 - "$FILE_PATH" "$TRACKING_FILE" <<'PYEOF'
 import json, time, sys

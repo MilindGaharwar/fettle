@@ -146,7 +146,7 @@
             },
             "mode": {
               "type": "string",
-              "default": "soft",
+              "default": "enforce",
               "enum": [
                 "advisory",
                 "enforce",
@@ -381,14 +381,6 @@
             "injection_file": {
               "type": "string",
               "default": ""
-            },
-            "mode": {
-              "type": "string",
-              "default": "advisory",
-              "enum": [
-                "advisory",
-                "enforce"
-              ]
             }
           },
           "additionalProperties": false
@@ -720,6 +712,14 @@
             "enabled": {
               "type": "boolean",
               "default": true
+            },
+            "mode": {
+              "type": "string",
+              "default": "advisory",
+              "enum": [
+                "advisory",
+                "enforce"
+              ]
             },
             "enforce": {
               "type": "boolean",
