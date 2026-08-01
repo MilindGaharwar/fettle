@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Stage 10 — WP-146 compliance evidence**: every bundled rule and ruff
+  security code now carries CWE / OWASP ASVS / SOC 2 tags
+  (`metadata.compliance` in the rule packs, canonical mapping in
+  `fettle/compliance.py`, pinned in sync by test). New
+  `fettle report --compliance [--json]` joins the mapping with the audit
+  trail: per control, which rules enforce it and how often they
+  fired/blocked in the window — evidence of enforcement, not a
+  certification. Unmapped fired rules are surfaced, never dropped.
+
 ## v1.3.0 — Evidence Loop
 
 - **Stage 8 — Remote CI verification gate**: `[gates.ci]` + `fettle ci

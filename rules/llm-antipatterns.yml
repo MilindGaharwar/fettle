@@ -3,6 +3,7 @@ rules:
     metadata:
       origin: llm-antipattern
       citation: "Structured tool_use replaced regex parsing of model output across our agents"
+      compliance: {soc2: CC8.1}
     languages: [python]
     severity: ERROR
     paths:
@@ -26,6 +27,7 @@ rules:
     metadata:
       origin: classic
       citation: "Swallowed exceptions repeatedly hid real failures in AI-generated code"
+      compliance: {cwe: CWE-390, asvs: V7.4.2, soc2: CC7.2}
     languages: [python]
     severity: ERROR
     patterns:
@@ -43,6 +45,7 @@ rules:
     metadata:
       origin: classic
       citation: "Broad catches without logging made production failures invisible"
+      compliance: {cwe: CWE-390, asvs: V7.4.2, soc2: CC7.2}
     languages: [python]
     severity: ERROR
     patterns:
@@ -113,6 +116,7 @@ rules:
     metadata:
       origin: llm-antipattern
       citation: "AI-generated HTTP clients repeatedly shipped without timeouts"
+      compliance: {cwe: CWE-400, soc2: CC7.2}
     languages: [python]
     severity: ERROR
     patterns:
@@ -129,6 +133,7 @@ rules:
     metadata:
       origin: security
       citation: "OWASP: SQL injection via string-built queries"
+      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
     languages: [python]
     severity: ERROR
     patterns:
@@ -141,6 +146,7 @@ rules:
     metadata:
       origin: pipeline
       citation: "Wall-clock reads in pipelines broke historical backfills"
+      compliance: {soc2: CC8.1}
     languages: [python]
     severity: WARNING
     paths:
@@ -159,6 +165,7 @@ rules:
     metadata:
       origin: incident
       citation: "INC-2026-0501-A: health dimension returned 1.0 on absent data, masking an outage"
+      compliance: {soc2: CC8.1}
     languages: [python]
     severity: ERROR
     pattern-either:
@@ -193,6 +200,7 @@ rules:
     metadata:
       origin: incident
       citation: "INC-2026-0501-B: write-only queue shipped with no verified consumer"
+      compliance: {soc2: CC8.1}
     languages: [python]
     severity: ERROR
     pattern-regex: "(?m)processed\\s*=\\s*0(?!.*#\\s*fettle:queue-consumer-verified)"
@@ -210,6 +218,7 @@ rules:
     metadata:
       origin: debug-detection
       citation: "WP-113: Leftover debug statements leak into production"
+      compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [python]
     severity: WARNING
     pattern: breakpoint()
@@ -219,6 +228,7 @@ rules:
     metadata:
       origin: debug-detection
       citation: "WP-113: Leftover debug statements leak into production"
+      compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [python]
     severity: WARNING
     pattern-either:
@@ -230,6 +240,7 @@ rules:
     metadata:
       origin: debug-detection
       citation: "WP-113: print() in non-CLI code pollutes logs"
+      compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [python]
     severity: WARNING
     pattern: print(...)
@@ -247,6 +258,7 @@ rules:
     metadata:
       origin: pipeline
       citation: "Partial writes corrupted downstream readers on crash"
+      compliance: {cwe: CWE-662, soc2: CC8.1}
     languages: [python]
     severity: WARNING
     paths:

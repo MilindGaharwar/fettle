@@ -11,6 +11,7 @@ rules:
     metadata:
       origin: fettle-v0.4.0
       citation: "Common AI-generated pattern: try/catch without error handling"
+      compliance: {cwe: CWE-390, asvs: V7.4.2, soc2: CC7.2}
       fix: "Add error logging: catch (e) { console.error('Context:', e); throw e; }"
 
   - id: unawaited-promise
@@ -32,6 +33,7 @@ rules:
     metadata:
       origin: fettle-v0.4.0
       citation: "Fire-and-forget async calls lose errors and create race conditions"
+      compliance: {cwe: CWE-772, soc2: CC8.1}
       fix: "Add await: const result = await fetch(url)"
       note: >-
         Scoped to known promise-returning APIs. Semgrep OSS has no type
@@ -53,6 +55,7 @@ rules:
     metadata:
       origin: fettle-v0.4.0
       citation: "AI-generated fetch calls rarely include timeouts — causes hung processes"
+      compliance: {cwe: CWE-400, soc2: CC7.2}
       fix: "Add signal: fetch(url, { signal: AbortSignal.timeout(10000) })"
 
   - id: string-built-sql-ts
@@ -67,12 +70,14 @@ rules:
     metadata:
       origin: fettle-v0.4.0
       citation: "SQL injection via template literals in AI-generated database code"
+      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
       fix: "Use parameterized queries: db.query('SELECT * FROM t WHERE id = $1', [id])"
 
   - id: debug-console-log
     metadata:
       origin: debug-detection
       citation: "WP-113: Leftover console.log pollutes production logs"
+      compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [typescript, javascript]
     severity: WARNING
     pattern: console.log(...)
@@ -87,6 +92,7 @@ rules:
     metadata:
       origin: debug-detection
       citation: "WP-113: debugger statement halts execution in browser"
+      compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [typescript, javascript]
     severity: ERROR
     pattern: debugger
@@ -109,4 +115,5 @@ rules:
     metadata:
       origin: fettle-v0.4.0
       citation: "LLM output is non-deterministic; regex parsing breaks on format drift"
+      compliance: {soc2: CC8.1}
       fix: "Use structured output: JSON.parse() on tool_use response, or response_format: json"

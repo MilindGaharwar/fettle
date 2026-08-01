@@ -377,6 +377,11 @@ def cmd_report(args: argparse.Namespace) -> None:
     """Effectiveness metrics from the audit trail; --org rolls up per repo (WP-145)."""
     from fettle.report import compute_effectiveness, compute_org_report
 
+    if getattr(args, "compliance", False):
+        from fettle.compliance import compute_compliance_report, render_compliance_table
+        data = compute_compliance_report(args.days)
+        print(json.dumps(data, indent=2) if args.json else render_compliance_table(data))
+        return
     data = compute_org_report(args.days) if args.org else compute_effectiveness(args.days)
     if args.json:
         print(json.dumps(data, indent=2))
@@ -892,6 +897,8 @@ def main() -> None:
 
     p_report = subparsers.add_parser("report", help="Effectiveness metrics from the audit trail")
     p_report.add_argument("--org", action="store_true", help="Aggregate per repo (cross-repo rollup)")
+    p_report.add_argument("--compliance", action="store_true",
+                          help="Evidence table: rules mapped to CWE / OWASP ASVS / SOC 2 (WP-146)")
     p_report.add_argument("--days", type=int, default=30, help="Reporting window (default 30)")
     p_report.add_argument("--json", action="store_true", help="JSON output")
 

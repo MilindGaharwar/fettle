@@ -67,6 +67,17 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S8.2 failure ingest wired: red run → ci_ingest/ci_diagnose →
         reproduction command in the gate message
   - [x] S8.3 docs + work note + dogfood (enforce mode in .fettle.toml)
+- [x] C9. Release v1.3.0 “Evidence Loop” — tagged, published to PyPI
+      (finefettle 1.3.0); release.yml editable-install fix (0f94948);
+      remote CI verified green end to end
+- [x] C10. Stage 10 — WP-146 compliance evidence
+  - [x] S10.1 fettle/compliance.py: canonical rule→CWE/ASVS/SOC 2 mapping
+        (23 bundled rules + ruff S-codes via security_review._CWE_MAP)
+  - [x] S10.2 metadata.compliance tags mirrored in all three rule packs,
+        YAML↔Python sync pinned by test
+  - [x] S10.3 `fettle report --compliance [--json]` evidence table
+        (fired/blocked per control from the audit trail; unmapped surfaced)
+  - [x] S10.4 tests (test_compliance.py) + docs + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
