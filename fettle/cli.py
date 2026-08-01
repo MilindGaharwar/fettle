@@ -703,6 +703,25 @@ def cmd_uat(args: argparse.Namespace) -> None:
             print(format_verdicts(verdicts))
         sys.exit(0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1)
 
+    if getattr(args, "uat_action", "doctor") == "manual":
+        from fettle.uat.manual import format_manual_guide
+        from fettle.uat.session import collect_scenarios
+        print(format_manual_guide(collect_scenarios(root)))
+        sys.exit(0)
+
+    if getattr(args, "uat_action", "doctor") == "attest":
+        import os
+        from fettle.uat.manual import record_attestation
+        entry, err = record_attestation(
+            root, args.scenario_id, args.outcome, args.observed,
+            operator=os.environ.get("USER", ""))
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(2)
+        print(f"Recorded operator attestation for {entry['scenario_id']}: "
+              f"{entry['outcome']} (source: operator)")
+        sys.exit(0)
+
     # default action: doctor
     surfaces, err = resolve_surfaces(root, config)
     if err:
@@ -857,6 +876,13 @@ def main() -> None:
     p_uat_rep = uat_sub.add_parser("report", help="Reconcile a session's transcript into verdicts")
     p_uat_rep.add_argument("--worktree", required=True, help="Session worktree path")
     p_uat_rep.add_argument("--json", action="store_true", help="JSON output")
+    uat_sub.add_parser("manual", help="Print a manual UAT walkthrough from spec scenarios")
+    p_uat_att = uat_sub.add_parser("attest", help="Record an operator-observed scenario outcome")
+    p_uat_att.add_argument("scenario_id", help="e.g. my-spec/S1")
+    p_uat_att.add_argument("--outcome", required=True,
+                           choices=["matches", "differs", "could-not-attempt"])
+    p_uat_att.add_argument("--observed", required=True,
+                           help="What you actually saw (verbatim where possible)")
     p_uat.set_defaults(uat_action="doctor", json=False)
 
     args = parser.parse_args()
