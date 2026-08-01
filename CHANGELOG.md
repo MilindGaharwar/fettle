@@ -2,6 +2,24 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 5 — Agentic UAT (WP3)**: `fettle uat` — acceptance testing by
+  an autonomous agent acting as a first-time user, independent of the
+  repo's own test suite. `uat doctor` detects surfaces (cli/api/web/
+  library, evidence-carrying, overridable via `[uat].surfaces`) and
+  probes capability; every gap reports what's not possible, why, the
+  exact fix, and numbered manual steps. `uat run --surface S --yes`
+  (explicit consent required) provisions an isolated `uat-<timestamp>`
+  worktree with a Stage-4 claim, builds a persona prompt from active
+  specs' GWT scenarios, runs the agent, scrubs suspected secrets from
+  the transcript, and reconciles into per-scenario verdicts: CONFIRMED /
+  CONTRADICTED / BLOCKED / UNOBSERVED (silence is a gap, not a pass) /
+  INDETERMINATE (claimed match without independent evidence — auto-answer
+  detection). Evidence artifact `uat-report.json`; `uat report`
+  re-reconciles past sessions. When automation can't run: `uat manual`
+  prints a numbered Set up/Do/Check walkthrough per scenario and `uat
+  attest` records operator observations as a labeled peer of agent
+  evidence (source: operator). Web surface via optional
+  `pip install 'finefettle[uat]'` (playwright) — core stays stdlib-only.
 - **Stage 4 — Agent infrastructure (WP7 + WP5 + runners)**: `fettle
   worktree create|list|remove` — one git worktree per work item under
   `[worktrees].root` (branch `fettle/<item-id>`; removal refuses when

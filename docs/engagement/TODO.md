@@ -13,7 +13,7 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 ## Phase B — Work-package analysis & design (one doc + work note each)
 - [x] B1. WP1 Opus-5 readiness → 06-wp1-frontier-agent-readiness.md (review + backlog)
 - [x] B2. WP2 Functional testing architecture → 08-stage3-spec-format-and-wp2.md (implemented, Stage 3)
-- [ ] B3. WP3 Agentic UAT design (highest priority)
+- [x] B3. WP3 Agentic UAT design (highest priority) → 10-stage5 doc (implemented, Stage 5)
 - [x] B4. WP4 Configuration / feature dependency model → 07-wp4-config-dependency-model.md (implemented, Stage 2)
 - [x] B5. WP5 Coordination substrate evaluation → 09-stage4 doc (implemented, Stage 4)
 - [x] B6. WP6 Wayfinder review → 04-wp6-wayfinder-review.md

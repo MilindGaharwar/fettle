@@ -99,6 +99,14 @@ mode = "advisory"     # advisory | enforce
 [worktrees]           # per-work-item worktree root (fettle worktree …)
 root = ".fettle/worktrees"
 
+[uat]                 # agentic UAT (fettle uat …)
+surfaces = ["auto"]   # auto-detect, or explicit: ["cli", "api", "web", "library"]
+app_url = ""          # running instance for api/web surfaces
+start_command = ""    # or how to start it (e.g. "npm run dev")
+runner = "claude"     # agent runner driving the session
+timeout_s = 1800      # 1–86400
+mode = "report"       # report only (gating arrives after evidence accrues)
+
 [severity]
 error_rules = ["BLE001", "S110", "S608", "S701"]
 warning_prefixes = ["SIM", "UP"]

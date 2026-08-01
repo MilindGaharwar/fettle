@@ -211,6 +211,11 @@ fettle explain [--last N]
 fettle spec [lint|list|coverage] [--json]
 fettle worktree [create|list|remove] <item-id>
 fettle work [list|claim|release] [item-id]
+fettle uat doctor [--json]        # surface detection + capability probe
+fettle uat run --surface S --yes  # agentic UAT session → verdicts
+fettle uat report --worktree PATH # re-reconcile a past session
+fettle uat manual                 # human walkthrough from spec scenarios
+fettle uat attest <spec/Sn> --outcome ... --observed ...
 fettle baseline create|update
 fettle doctor
 fettle lsp
