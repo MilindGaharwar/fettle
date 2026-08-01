@@ -654,14 +654,23 @@ def cmd_uat(args: argparse.Namespace) -> None:
     config = load_config(root)
 
     if getattr(args, "uat_action", "doctor") == "run":
+        from fettle.uat.reconcile import format_verdicts, reconcile_session
         from fettle.uat.session import run_session
         result = run_session(root, config, args.surface)
+        verdicts = []
+        if result.status == "completed":
+            verdicts, _cp, rec_err = reconcile_session(root, result.worktree)
+            if rec_err:
+                result.error = rec_err
         if args.json:
             print(json.dumps({
                 "session_id": result.session_id, "surface": result.surface,
                 "worktree": result.worktree, "transcript": result.transcript_path,
                 "scenarios": result.scenario_ids, "status": result.status,
                 "error": result.error,
+                "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
+                              "observed": v.observed, "note": v.note}
+                             for v in verdicts],
             }, indent=2))
         else:
             print(f"UAT session {result.session_id} on '{result.surface}': {result.status}")
@@ -669,11 +678,30 @@ def cmd_uat(args: argparse.Namespace) -> None:
                 print(f"  worktree:   {result.worktree}")
             if result.transcript_path:
                 print(f"  transcript: {result.transcript_path}")
-            if result.scenario_ids:
-                print(f"  scenarios:  {', '.join(result.scenario_ids)}")
+            if verdicts:
+                print(format_verdicts(verdicts))
             if result.error:
                 print(f"  error: {result.error}", file=sys.stderr)
-        sys.exit(0 if result.status == "completed" else 1)
+        ok = result.status == "completed" and not result.error and all(
+            v.verdict == "CONFIRMED" for v in verdicts)
+        sys.exit(0 if ok else 1)
+
+    if getattr(args, "uat_action", "doctor") == "report":
+        from fettle.uat.reconcile import format_verdicts, reconcile_session
+        verdicts, cp, err = reconcile_session(root, args.worktree)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(2)
+        if args.json:
+            print(json.dumps({
+                "session_id": cp.get("session_id", ""),
+                "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
+                              "observed": v.observed, "note": v.note}
+                             for v in verdicts],
+            }, indent=2))
+        else:
+            print(format_verdicts(verdicts))
+        sys.exit(0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1)
 
     # default action: doctor
     surfaces, err = resolve_surfaces(root, config)
@@ -826,6 +854,9 @@ def main() -> None:
     p_uat_run.add_argument("--surface", default="cli",
                            help="Surface to test (default: cli)")
     p_uat_run.add_argument("--json", action="store_true", help="JSON output")
+    p_uat_rep = uat_sub.add_parser("report", help="Reconcile a session's transcript into verdicts")
+    p_uat_rep.add_argument("--worktree", required=True, help="Session worktree path")
+    p_uat_rep.add_argument("--json", action="store_true", help="JSON output")
     p_uat.set_defaults(uat_action="doctor", json=False)
 
     args = parser.parse_args()
