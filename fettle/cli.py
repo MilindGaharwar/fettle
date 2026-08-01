@@ -464,6 +464,55 @@ def cmd_lsp(args: argparse.Namespace) -> None:
     lsp_main()
 
 
+def cmd_spec(args: argparse.Namespace) -> None:
+    """Living specifications: lint and list (Stage 3, Pillar 1).
+
+    Exit codes: 0 = clean, 1 = error findings, 2 = usage/environment error.
+    """
+    from fettle.paths import find_repo_root
+    from fettle.spec_model import discover_specs, lint_specs
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+
+    if args.spec_action == "list":
+        rows = []
+        for spec, findings in discover_specs(root):
+            if spec is None:
+                continue
+            errors = sum(1 for f in findings if f["severity"] == "ERROR")
+            rows.append({
+                "id": spec.spec_id, "path": spec.path, "status": spec.status,
+                "requirements": len(spec.requirements),
+                "scenarios": len(spec.scenarios), "lint_errors": errors,
+            })
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        elif not rows:
+            print("No specs found (markdown files with 'fettle-spec' frontmatter).")
+        else:
+            for r in rows:
+                print(f"  {r['id']:<24} {r['status']:<11} "
+                      f"{r['requirements']}R/{r['scenarios']}S  {r['path']}"
+                      + (f"  ({r['lint_errors']} lint error(s))" if r["lint_errors"] else ""))
+        sys.exit(0)
+
+    # default action: lint
+    findings = lint_specs(root)
+    errors = [f for f in findings if f["severity"] == "ERROR"]
+    if args.json:
+        print(json.dumps({"findings": findings, "error_count": len(errors)}, indent=2))
+    else:
+        for f in findings:
+            print(f"  [{f['severity']}] {f['file']}:{f['line']} — {f['message']}")
+            print(f"      fix: {f['fix']}")
+        print(f"\n{len(findings)} finding(s)." if findings else "\u2713 All specs valid.")
+    sys.exit(1 if errors else 0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     parser.add_argument("--version", action="version", version=f"fettle {_version()}")
@@ -552,6 +601,15 @@ def main() -> None:
 
     subparsers.add_parser("lsp", help="Start the LSP server for editor integration (WP-125)")
 
+    p_spec = subparsers.add_parser("spec", help="Living specifications: lint and list")
+    p_spec.add_argument("--json", action="store_true", help="JSON output")
+    spec_sub = p_spec.add_subparsers(dest="spec_action")
+    p_spec_lint = spec_sub.add_parser("lint", help="Validate all discovered specs")
+    p_spec_lint.add_argument("--json", action="store_true", help="JSON output")
+    p_spec_list = spec_sub.add_parser("list", help="List discovered specs")
+    p_spec_list.add_argument("--json", action="store_true", help="JSON output")
+    p_spec.set_defaults(spec_action="lint")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -572,6 +630,7 @@ def main() -> None:
         "ratchet": cmd_ratchet,
         "suppressions": cmd_suppressions,
         "lsp": cmd_lsp,
+        "spec": cmd_spec,
     }
     commands[args.command](args)
 
