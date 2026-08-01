@@ -21,15 +21,8 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
                 "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "soft"
               ]
             }
           },
@@ -54,7 +47,8 @@
             },
             "threshold": {
               "type": "integer",
-              "default": 3
+              "default": 3,
+              "minimum": 1
             },
             "plan_dir": {
               "type": "string",
@@ -66,7 +60,8 @@
             },
             "max_age_hours": {
               "type": "integer",
-              "default": 1
+              "default": 1,
+              "minimum": 1
             },
             "risk_paths": {
               "type": "array"
@@ -85,7 +80,8 @@
             "line_threshold": {},
             "diff_timeout_ms": {
               "type": "integer",
-              "default": 500
+              "default": 500,
+              "minimum": 1
             }
           },
           "additionalProperties": false
@@ -153,15 +149,8 @@
               "default": "soft",
               "enum": [
                 "advisory",
-                "commit",
                 "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "soft"
               ]
             }
           },
@@ -210,7 +199,8 @@
             },
             "browser_test_window_s": {
               "type": "integer",
-              "default": 1800
+              "default": 1800,
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -237,14 +227,6 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
                 "strict"
               ]
             }
@@ -263,15 +245,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "extra_patterns": {
@@ -295,15 +269,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "extra_patterns": {
@@ -324,11 +290,13 @@
             },
             "threshold": {
               "type": "integer",
-              "default": 3
+              "default": 3,
+              "minimum": 1
             },
             "window": {
               "type": "integer",
-              "default": 7
+              "default": 7,
+              "minimum": 1
             }
           },
           "additionalProperties": false
@@ -342,11 +310,13 @@
             },
             "warning_threshold": {
               "type": "integer",
-              "default": 15
+              "default": 15,
+              "minimum": 1
             },
             "critical_threshold": {
               "type": "integer",
-              "default": 25
+              "default": 25,
+              "minimum": 1
             },
             "reset_on_commit": {
               "type": "boolean",
@@ -367,15 +337,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "types": {
@@ -399,7 +361,8 @@
             },
             "max_subject_length": {
               "type": "integer",
-              "default": 72
+              "default": 72,
+              "minimum": 1
             },
             "require_conventional": {
               "type": "boolean",
@@ -424,15 +387,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             }
           },
@@ -450,15 +405,7 @@
               "default": "silent",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "silent"
               ]
             },
             "tier1": {
@@ -470,7 +417,8 @@
                 },
                 "max_runtime_ms": {
                   "type": "integer",
-                  "default": 200
+                  "default": 200,
+                  "minimum": 1
                 },
                 "sniffers": {
                   "type": "object",
@@ -540,15 +488,19 @@
                 },
                 "ollama_timeout_ms": {
                   "type": "integer",
-                  "default": 6000
+                  "default": 6000,
+                  "minimum": 1
                 },
                 "high_confidence_threshold": {
                   "type": "number",
-                  "default": 0.85
+                  "default": 0.85,
+                  "minimum": 0,
+                  "maximum": 1
                 },
                 "max_findings": {
                   "type": "integer",
-                  "default": 3
+                  "default": 3,
+                  "minimum": 1
                 }
               },
               "additionalProperties": false
@@ -581,19 +533,23 @@
           "properties": {
             "cooldown_seconds": {
               "type": "integer",
-              "default": 300
+              "default": 300,
+              "minimum": 0
             },
             "dedup_window_seconds": {
               "type": "integer",
-              "default": 900
+              "default": 900,
+              "minimum": 0
             },
             "max_per_turn": {
               "type": "integer",
-              "default": 3
+              "default": 3,
+              "minimum": 0
             },
             "max_total_bytes": {
               "type": "integer",
-              "default": 2048
+              "default": 2048,
+              "minimum": 0
             },
             "allow_escalation": {
               "type": "boolean",
@@ -615,7 +571,8 @@
             },
             "cooldown_seconds": {
               "type": "integer",
-              "default": 300
+              "default": 300,
+              "minimum": 0
             },
             "reminder_style": {
               "type": "string",
@@ -636,14 +593,6 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
                 "strict"
               ]
             },
@@ -710,11 +659,13 @@
             },
             "max_cyclomatic": {
               "type": "integer",
-              "default": 10
+              "default": 10,
+              "minimum": 1
             },
             "max_cognitive": {
               "type": "integer",
-              "default": 15
+              "default": 15,
+              "minimum": 1
             }
           },
           "additionalProperties": false
@@ -728,26 +679,22 @@
             },
             "threshold": {
               "type": "integer",
-              "default": 80
+              "default": 80,
+              "minimum": 0,
+              "maximum": 100
             },
             "minimum_branch_percent": {
               "type": "integer",
-              "default": 0
+              "default": 0,
+              "minimum": 0,
+              "maximum": 100
             },
             "mode": {
               "type": "string",
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "scope": {
@@ -756,7 +703,8 @@
             },
             "max_staleness_seconds": {
               "type": "integer",
-              "default": 0
+              "default": 0,
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -773,15 +721,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "require_tests": {
@@ -815,15 +755,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             },
             "changelog_path": {
@@ -866,15 +798,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             }
           },
@@ -891,16 +815,10 @@
               "type": "string",
               "default": "none",
               "enum": [
-                "advisory",
                 "commit",
-                "enforce",
                 "manifest",
                 "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "none"
               ]
             },
             "marker_text": {
@@ -934,15 +852,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
-                "commit",
-                "enforce",
-                "manifest",
-                "marker",
-                "none",
-                "off",
-                "silent",
-                "soft",
-                "strict"
+                "enforce"
               ]
             }
           },
@@ -969,7 +879,8 @@
             },
             "retention_days": {
               "type": "integer",
-              "default": 14
+              "default": 14,
+              "minimum": 1
             },
             "redaction": {
               "type": "object",

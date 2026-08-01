@@ -14,7 +14,7 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [x] B1. WP1 Opus-5 readiness → 06-wp1-frontier-agent-readiness.md (review + backlog)
 - [ ] B2. WP2 Functional testing architecture
 - [ ] B3. WP3 Agentic UAT design (highest priority)
-- [ ] B4. WP4 Configuration / feature dependency model
+- [x] B4. WP4 Configuration / feature dependency model → 07-wp4-config-dependency-model.md (implemented, Stage 2)
 - [ ] B5. WP5 Coordination substrate evaluation
 - [x] B6. WP6 Wayfinder review → 04-wp6-wayfinder-review.md
 - [ ] B7. WP7 Git worktrees design

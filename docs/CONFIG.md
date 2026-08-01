@@ -14,6 +14,25 @@ fettle config --validate
 Unknown keys are warnings (they silently do nothing — the classic typo
 failure mode); type mismatches are errors.
 
+## Validation: no invalid config states (WP4)
+
+Beyond types, validation enforces a dependency model so that a config which
+validates behaves as written:
+
+- **Per-gate modes** — each gate accepts only the modes its code honors
+  (e.g. `gates.tdd.mode` is `advisory | strict`; `enforce` there would
+  silently act as advisory). An out-of-vocabulary mode is an **error**.
+- **Numeric ranges** — thresholds and windows are bounds-checked (e.g.
+  `gates.coverage.threshold` must be 0–100). Out of range is an **error**.
+- **Cross-field dependencies** — e.g. `extends.url` without a valid
+  `extends.sha256` pin is an **error**; enabling
+  `gates.architecture_boundaries` with no `rules` is a **warning** (the gate
+  would be inert), as is enabling `gates.ui_colors` with an empty palette or
+  `gates.lean_review.tier2` with a blank model.
+
+`fettle doctor` runs the same validation against your project's
+`.fettle.toml` and reports the first problem it finds.
+
 ## Central policy (`[extends]`, WP-144)
 
 An org-wide policy file can be layered UNDER a repo's config

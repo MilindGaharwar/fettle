@@ -2,6 +2,15 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 2 (WP4) — Config dependency model**: no invalid config states.
+  Validation now enforces per-gate mode vocabularies (a mode a gate's code
+  doesn't honor — e.g. `tdd.mode = "enforce"`, which silently acted as
+  advisory — is an error), numeric ranges (e.g. `coverage.threshold` 0–100),
+  and cross-field dependencies (`extends.url` requires a valid sha256 pin;
+  enabling `architecture_boundaries` without rules, `ui_colors` without a
+  palette, or `lean_review.tier2` with a blank model warns that the feature
+  is inert). The published JSON schema carries the per-gate enums and
+  bounds; `fettle doctor` validates the project's `.fettle.toml`.
 - **Stage 0 — Failure visibility**: no gate, scanner, or telemetry path
   fails silently anymore. Dispatcher fail-open events (input/config/registry
   errors, check crashes, budget exhaustion) are written to the audit trace;

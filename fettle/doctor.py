@@ -207,13 +207,55 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
     return checks
 
 
+def check_config_valid() -> list[dict]:
+    """Validate the project's .fettle.toml against the WP4 dependency model.
+
+    A config that would misbehave (invalid per-gate mode, out-of-range value,
+    broken cross-field dependency) must be surfaced — not silently act as
+    something else.
+    """
+    import os
+    import tomllib
+    checks: list[dict] = []
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fettle.config_schema import validate_config
+    from fettle.paths import find_repo_root
+    try:
+        repo_root = find_repo_root()
+        if not repo_root or not (repo_root / ".fettle.toml").is_file():
+            return checks
+        with open(repo_root / ".fettle.toml", "rb") as fh:
+            raw_cfg = tomllib.load(fh)
+    except (OSError, ValueError) as exc:  # ValueError covers TOMLDecodeError
+        checks.append({
+            "name": "config", "required": False, "ok": False,
+            "detail": f".fettle.toml unreadable: {exc}",
+        })
+        return checks
+    errors, warnings = validate_config(raw_cfg)
+    ok = not errors
+    if ok and not warnings:
+        detail = ".fettle.toml valid"
+    else:
+        parts = [f"{len(errors)} error(s)"] if errors else []
+        if warnings:
+            parts.append(f"{len(warnings)} warning(s)")
+        first = (errors or warnings)[0]
+        detail = (", ".join(parts)
+                  + f" — first: {first} — run: fettle config --validate")
+    checks.append({
+        "name": "config", "required": False, "ok": ok, "detail": detail,
+    })
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     checks = (check_environment() + check_commit_guards() + check_org_policy()
-              + check_dispatch_health())
+              + check_config_valid() + check_dispatch_health())
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:
