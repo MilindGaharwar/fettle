@@ -23,8 +23,6 @@ import argparse
 import logging
 import os
 import re
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -131,27 +129,25 @@ def _evaluate(check: Check, transcript: str, workdir: Path) -> CheckRecord:
     return CheckRecord(check=check, passed=found == wanted, detail=detail)
 
 
-def _claude_runner(prompt: str, cwd: Path) -> str:
-    """LIVE runner — launches `claude -p`. Trusted-operator use only.
+def _invoke_runner(runner, prompt: str, cwd: Path) -> str:
+    """Bridge: AgentRunner (fettle.runners) or plain callable (test seam).
 
-    Runs with --dangerously-skip-permissions (the quorum approach): in
-    non-interactive print mode, permission prompts cannot be answered and
-    stall the run to timeout. Timeout via $FETTLE_EVAL_TIMEOUT_S (default 600).
+    An AgentRunner reporting an error raises — run_scenario maps that to
+    INDETERMINATE (broken experiment), same path as a crashing callable.
     """
-    claude = shutil.which("claude")
-    if not claude:
-        raise RuntimeError("claude CLI not on PATH — live evals unavailable")
-    timeout_s = int(os.environ.get("FETTLE_EVAL_TIMEOUT_S", "600"))
-    proc = subprocess.run(
-        [claude, "-p", "--dangerously-skip-permissions", prompt],
-        capture_output=True, text=True,
-        timeout=timeout_s, cwd=str(cwd),
-    )
-    return proc.stdout
+    if hasattr(runner, "run"):
+        timeout_s = int(os.environ.get("FETTLE_EVAL_TIMEOUT_S", "600"))
+        result = runner.run(prompt, cwd, timeout_s=timeout_s)
+        if result.error:
+            raise RuntimeError(result.error)
+        return result.transcript
+    return runner(prompt, cwd)
 
 
 def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = None) -> RunResult:
-    runner = runner or _claude_runner
+    if runner is None:
+        from fettle.runners import get_runner
+        runner = get_runner("claude")
     workdir = Path(workdir) if workdir else Path.cwd() / "evals-run"
     workdir.mkdir(parents=True, exist_ok=True)
     for rel, content in scenario.setup_files.items():
@@ -159,7 +155,7 @@ def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = N
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
     try:
-        transcript = runner(scenario.prompt, workdir)
+        transcript = _invoke_runner(runner, scenario.prompt, workdir)
     except Exception as e:  # noqa: BLE001 — runner failure is indeterminate (broken experiment), not fail
         logger.warning("eval runner failed for %s: %s", scenario.id, e)
         return RunResult(Verdict.INDETERMINATE, (), f"runner error: {e}")
