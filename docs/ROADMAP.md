@@ -15,7 +15,7 @@ This roadmap is committed before implementation begins and updated as releases s
 | v0.4.0 | Cross-review, TS rules, checker protocol, install UX | WP-14..WP-16 | **Shipped** |
 | v0.4.1 | Rule config repair, anchored scans, precision, project-local rules | — (hotfix arc) | **Shipped** |
 | v0.4.2 | Go post-edit check (built-in pack + project rules) | — (hotfix arc) | **Shipped** |
-| v0.5.0 | Adaptive enforcement platform (profiles, tiers, adapters, CI loop, dispatcher) | WP-67..WP-115 | **Shipped** (see [WORKPACKAGES-v050.md](WORKPACKAGES-v050.md)) |
+| v0.5.0 | Adaptive enforcement platform (profiles, tiers, adapters, CI loop, dispatcher) | WP-67..WP-115 | **Shipped** (see [archive/WORKPACKAGES-v050.md](archive/WORKPACKAGES-v050.md)) |
 | v0.6.0 | **Trust & precision** — the harness proves itself | WP-116..WP-121 | **Shipped** |
 | v0.7.0 | **Reach** — same policy at every chokepoint | WP-122..WP-126 | **Shipped with distribution exceptions** |
 | v0.8.0 | **Discipline integration** — advisory contract, link pilot, budget, audit, coverage | WP-A..WP-G | **Shipped** |
@@ -24,10 +24,41 @@ This roadmap is committed before implementation begins and updated as releases s
 | v1.0.1 | **Trustworthy core** — CLI exit-code contract, working check flags, MCP allowlist path fix, LR012 determinism | WP-133..WP-135 (partial, see [enterprise plan](fettle-enterprise-product-plan.md)) | **Shipped** |
 | v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
 | v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | **Shipped** — Homebrew tap outstanding ([enterprise plan](fettle-enterprise-product-plan.md)) |
-| v1.3.0 | **Enterprise operations** — central policy, audit reporting, compliance evidence, supply-chain posture, BDD gate | WP-144..WP-148, WP-154 | **In progress** — WP-144 (central policy) and WP-145 (audit/org reporting, JUnit) shipped |
+| v1.3.0 | **Enterprise operations + evidence loop** — central policy, audit reporting, BDD gate, agent infrastructure, agentic UAT, semantic links, verify gate | WP-144..WP-145, WP-154, engagement stages 0–7 | **In progress** — WP-144/145 shipped; stages 0–7 shipped (see below); WP-146..148 remaining |
 | v1.4.0 | **Product surface** — LSP hardening, rule marketplace, Windows, docs site, noise SLOs, semantic impact gate | WP-149..WP-153, WP-155 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
+
+## Consolidated forward roadmap (2026-08)
+
+Outcome of the 2026-08 engagement (stages 0–7, work notes under
+[engagement/worknotes/](engagement/worknotes/)): fail-visible foundation,
+living specs + `[gates.bdd]`, agent infrastructure (runners protocol,
+worktrees, work items + claims), agentic UAT (`fettle uat`), semantic link
+layer (`fettle links`), functional-test verification (`[gates.verify]` +
+`fettle verify`), and a whole-system consistency pass (WP9). Executed plan
+documents now live in [archive/](archive/).
+
+Priorities below are ordered; each names what it depends on.
+
+| # | Item | Depends on | Why now / trigger |
+|---|---|---|---|
+| 1 | **v1.3 remainder**: WP-146 compliance evidence, WP-147 supply-chain posture, WP-148 health telemetry hardening | WP-144/145 (shipped) | Release-blocking for v1.3.0 |
+| 2 | **Runner adapters** — codex, gemini, opencode behind the Stage-4 `fettle.runners` protocol | Stage 4 protocol (shipped, claude-only) | Multiplies UAT + agent-infra value across hosts |
+| 3 | **Advisory → gate graduation** — `[uat]` gating mode, `[gates.bdd]`/`[gates.verify]` enforce defaults | Field evidence from stages 3/5/7 telemetry | Evidence-driven; graduate only what has proven low-noise |
+| 4 | **Evaluator-optimizer UAT loop** — agent retries with reconciler feedback | Stage 5 reconciler + #2 | After UAT verdict corpus accrues |
+| 5 | **WP-155 semantic impact gate** — block on broken req→scenario→test chains | Stage 6 links + #3 | v1.4; builds directly on `fettle links --orphans` |
+| 6 | **Distribution** — Homebrew tap, Windows support, docs site | WP-149/151/152 | v1.2 exception + v1.4 product surface |
+| 7 | **Persistent semantic store** | #5, only if on-demand fusion gets slow | Deferred by design — the repository is the database |
+
+**Trigger-based consideration — compiled hot-path shim (Go/Rust).** No port is
+planned: Fettle mostly orchestrates external tools (ruff, semgrep, pytest), so
+a rewrite buys little. The one real win would be interpreter startup inside
+hook budgets (250/400/600 ms). *Trigger:* if `fettle bench` / health telemetry
+shows budget violations attributable to startup in the field, extract only the
+dispatcher entry + stamp-freshness checks into a small static binary that
+exec's Python for slow, rare paths — after first trying lazy imports on the
+dispatcher path.
 
 ## Work packages
 

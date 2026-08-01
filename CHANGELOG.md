@@ -2,6 +2,23 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 7 — Functional-test verification + consistency pass (WP2, WP9)**:
+  `[gates.verify]` + `fettle verify` — the CLI runs the discovered test
+  suite (honors `[profile].test_command`; `scope = "impacted"` maps edited
+  files to tests by name for pytest, falling back to the full suite) and
+  writes a verification stamp; the Stop gate (100 ms budget) checks stamp
+  freshness against tracked edits — stale, missing, or red means
+  unverified. Timeouts and launch failures surface in the stamp, never
+  silently. OFF by default, advisory first (`mode = "enforce"` to block).
+  Config consistency (WP9): vestigial `gates.subagent.mode` removed
+  (unknown keys warn, not error); `[gates.complexity]` gains
+  `mode = "advisory"|"enforce"` (legacy `enforce = true` still honored,
+  with a deprecation warning); `[gates.docs]` `"soft"` is now a deprecated
+  alias for `"enforce"` (one-release tolerance, validation warns).
+  Repo hygiene: 14 executed/superseded planning docs moved to
+  `docs/archive/` with frozen-status banners; work notes unified under
+  `docs/engagement/worknotes/`; consolidated forward roadmap in
+  `docs/ROADMAP.md`.
 - **Stage 6 — Semantic layer (Pillar 2, thin slice)**: `fettle links` —
   one deterministic link graph fused on demand from artifacts already in
   git: specs (requirements/scenarios), trace-marked tests, work items,

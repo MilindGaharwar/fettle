@@ -218,6 +218,7 @@ fettle uat manual                 # human walkthrough from spec scenarios
 fettle uat attest <spec/Sn> --outcome ... --observed ...
 fettle links <id> [--json]        # semantic layer: everything attached to an id
 fettle links --orphans            # broken evidence chains (req→scenario→test/UAT)
+fettle verify [--full] [--json]   # run the test suite, record verification stamp
 fettle baseline create|update
 fettle doctor
 fettle lsp
@@ -281,6 +282,7 @@ mode = "advisory"   # silent | advisory — surfaces over-engineering findings (
 
 [gates.complexity]
 enabled = true
+mode = "advisory"               # advisory | enforce (replaces the old `enforce` bool)
 max_cyclomatic = 10
 max_cognitive = 15
 
@@ -301,6 +303,10 @@ mode = "advisory"               # advisory | enforce — spec scenario coverage 
 [gates.claims]
 enabled = false
 mode = "advisory"               # claim-before-work in fettle worktrees (Stage 4)
+
+[gates.verify]
+enabled = false
+mode = "advisory"               # advisory | enforce — fresh green `fettle verify` stamp at Stop
 
 [gates.plan]
 enabled = false

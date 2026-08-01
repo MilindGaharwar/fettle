@@ -77,7 +77,7 @@ allowed_hex = ["#2563eb"]   # your brand palette
 
 [gates.docs]          # git push requires a doc update after impl edits — OFF by default
 enabled = false
-mode = "soft"         # advisory | soft | enforce
+mode = "enforce"      # advisory | enforce ("soft" is a deprecated alias for enforce)
 
 [gates.spec_audit]    # changed strategy/spec docs require current semantic audit — OFF by default
 enabled = false
@@ -95,6 +95,13 @@ mode = "advisory"     # advisory | enforce
 [gates.claims]        # claim-before-work in fettle worktrees — OFF by default
 enabled = false
 mode = "advisory"     # advisory | enforce
+
+[gates.verify]        # test suite verified green before Stop (fettle verify) — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+scope = "impacted"    # impacted (edited files → tests by name) | full
+timeout_s = 120       # 1–3600; timeouts surface as unverified, never silently
+parallel = false      # pytest-xdist when available
 
 [worktrees]           # per-work-item worktree root (fettle worktree …)
 root = ".fettle/worktrees"
