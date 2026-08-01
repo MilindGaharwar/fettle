@@ -16,9 +16,9 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [ ] B3. WP3 Agentic UAT design (highest priority)
 - [ ] B4. WP4 Configuration / feature dependency model
 - [ ] B5. WP5 Coordination substrate evaluation
-- [ ] B6. WP6 Wayfinder review
+- [x] B6. WP6 Wayfinder review → 04-wp6-wayfinder-review.md
 - [ ] B7. WP7 Git worktrees design
-- [ ] B8. WP8 Adjacent projects review (OpenHive, Graphify, Obsidian)
+- [x] B8. WP8 Adjacent projects review → 05-wp8-adjacent-projects.md
 - [ ] B9. WP9 Whole-system consistency pass
 - [ ] B10. Consolidated prioritised roadmap with WP dependencies
 
