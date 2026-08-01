@@ -11,7 +11,7 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       (API needs username; email has no public match).
 
 ## Phase B — Work-package analysis & design (one doc + work note each)
-- [ ] B1. WP1 Opus-5 readiness (Part A research → Part B review + backlog)
+- [x] B1. WP1 Opus-5 readiness → 06-wp1-frontier-agent-readiness.md (review + backlog)
 - [ ] B2. WP2 Functional testing architecture
 - [ ] B3. WP3 Agentic UAT design (highest priority)
 - [ ] B4. WP4 Configuration / feature dependency model
