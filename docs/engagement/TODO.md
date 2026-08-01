@@ -23,13 +23,13 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [ ] B10. Consolidated prioritised roadmap with WP dependencies
 
 ## Phase C — Implementation (Stage 0 underway; stages approved 2026-08-01)
-- [~] C0. Stage 0 failure-visibility hardening
+- [x] C0. Stage 0 failure-visibility hardening (complete)
   - [x] S0.1 dispatcher trace events + repeated-failure escalation (13 tests)
-  - [ ] S0.2 doctor/report surfacing + trace-writability probe
-  - [ ] S0.3 scanner tool-error surfacing (security_review, threat_model,
-        pr_review, deploy_gate, cargo check)
-  - [ ] S0.4 health_telemetry write-failure visibility
-  - [ ] S0.5 fail-closed posture: enforce-mode security gates (mcp_trust)
+  - [x] S0.2 doctor/report surfacing + trace-writability probe (10 tests)
+  - [x] S0.3 scanner tool-error surfacing (security_review, threat_model,
+        pr_review, cargo check) — exit 2 / incomplete banners / trace entries
+  - [x] S0.4 health_telemetry write-failure visibility (warn-once stderr)
+  - [x] S0.5 fail-closed posture: mcp_trust denies on corrupt allowlist
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

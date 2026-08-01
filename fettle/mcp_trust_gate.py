@@ -20,12 +20,26 @@ def _allowlist_path() -> str:
     return os.path.abspath(os.path.expanduser(raw))
 
 
-def load_allowlist() -> dict[str, object]:
+_EMPTY_ALLOWLIST: dict[str, object] = {"packages": {}, "registries_blocked": [], "protected_paths": []}
+
+
+def load_allowlist() -> tuple[dict[str, object], str | None]:
+    """Load the allowlist. Returns (allowlist, error).
+
+    error is None when the file loaded, or when it simply does not exist
+    (gate enabled but not yet configured). error is a message when the file
+    EXISTS but cannot be read or parsed — callers must fail closed then:
+    a corrupt allowlist silently disabling path/registry protections is
+    exactly the tampering this gate exists to stop.
+    """
+    path = _allowlist_path()
+    if not os.path.exists(path):
+        return dict(_EMPTY_ALLOWLIST), None
     try:
-        with open(_allowlist_path()) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {"packages": {}, "registries_blocked": [], "protected_paths": []}
+        with open(path) as f:
+            return json.load(f), None
+    except (OSError, json.JSONDecodeError) as exc:
+        return dict(_EMPTY_ALLOWLIST), f"{type(exc).__name__}: {exc}"
 
 
 def deny(reason: str) -> NoReturn:
@@ -216,7 +230,12 @@ def main() -> None:
     if not cfg["gates"]["mcp_trust"]["enabled"]:
         sys.exit(0)
 
-    allowlist = load_allowlist()
+    allowlist, allowlist_error = load_allowlist()
+    if allowlist_error:
+        deny(
+            "MCP trust gate is enabled but its allowlist could not be read "
+            f"({allowlist_error}). Failing closed. Fix or restore {_allowlist_path()}."
+        )
 
     if tool_name == "Bash":
         command: str = tool_input.get("command", "")
@@ -296,7 +315,20 @@ def run_check(ctx):
     if not ctx.config.get("gates", {}).get("mcp_trust", {}).get("enabled", False):
         return CheckResult.allow()
 
-    allowlist = load_allowlist()
+    allowlist, allowlist_error = load_allowlist()
+    if allowlist_error:
+        reason = (
+            "MCP trust gate is enabled but its allowlist could not be read "
+            f"({allowlist_error}). Failing closed. Fix or restore {_allowlist_path()}."
+        )
+        return CheckResult.block(
+            reason,
+            hook_specific_output={
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            },
+        )
     tool_name = ctx.tool_name or ""
 
     if tool_name == "Bash":

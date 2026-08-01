@@ -122,7 +122,8 @@ def test_default_allowlist_path_expands_home(tmp_path, monkeypatch):
     )
     sys.path.insert(0, os.path.join(PLUGIN_DIR))
     from fettle import mcp_trust_gate
-    allowlist = mcp_trust_gate.load_allowlist()
+    allowlist, error = mcp_trust_gate.load_allowlist()
+    assert error is None
     assert "left-pad" in allowlist["packages"]
 
 
@@ -294,3 +295,37 @@ def test_install_to_protected_path_blocked():
         {"tool_name": "Bash", "tool_input": {"command": f"sudo install -m 755 /tmp/evil.sh {path}"}}
     )
     assert rc == 2
+
+
+# --- Stage-0: fail-closed on unreadable/corrupt allowlist ---
+
+def test_corrupt_allowlist_fails_closed(ledger_file):
+    """An enabled gate with a corrupt allowlist must deny, not silently allow."""
+    ledger_file.write_text("{not valid json")
+    stdout, _, rc = run_gate(
+        {"tool_name": "Bash", "tool_input": {"command": "echo hello"}}
+    )
+    assert rc == 2
+    parsed = json.loads(stdout.strip())
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Failing closed" in parsed["reason"]
+
+
+def test_missing_allowlist_is_not_an_error(ledger_file):
+    """A missing file means 'not yet configured' — benign commands still pass."""
+    ledger_file.unlink()
+    _, _, rc = run_gate(
+        {"tool_name": "Bash", "tool_input": {"command": "echo hello"}}
+    )
+    assert rc == 0
+
+
+def test_load_allowlist_reports_corruption(tmp_path, monkeypatch):
+    bad = tmp_path / "allowlist.json"
+    bad.write_text("{broken")
+    monkeypatch.setenv("MCP_ALLOWLIST_PATH", str(bad))
+    sys.path.insert(0, PLUGIN_DIR)
+    from fettle import mcp_trust_gate
+    allowlist, error = mcp_trust_gate.load_allowlist()
+    assert error is not None and "JSONDecodeError" in error
+    assert allowlist["packages"] == {}
