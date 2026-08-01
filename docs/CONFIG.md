@@ -92,6 +92,13 @@ enabled = false
 enabled = false
 mode = "advisory"     # advisory | enforce
 
+[gates.claims]        # claim-before-work in fettle worktrees — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+
+[worktrees]           # per-work-item worktree root (fettle worktree …)
+root = ".fettle/worktrees"
+
 [severity]
 error_rules = ["BLE001", "S110", "S608", "S701"]
 warning_prefixes = ["SIM", "UP"]

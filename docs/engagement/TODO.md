@@ -15,9 +15,9 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [x] B2. WP2 Functional testing architecture → 08-stage3-spec-format-and-wp2.md (implemented, Stage 3)
 - [ ] B3. WP3 Agentic UAT design (highest priority)
 - [x] B4. WP4 Configuration / feature dependency model → 07-wp4-config-dependency-model.md (implemented, Stage 2)
-- [ ] B5. WP5 Coordination substrate evaluation
+- [x] B5. WP5 Coordination substrate evaluation → 09-stage4 doc (implemented, Stage 4)
 - [x] B6. WP6 Wayfinder review → 04-wp6-wayfinder-review.md
-- [ ] B7. WP7 Git worktrees design
+- [x] B7. WP7 Git worktrees design → 09-stage4 doc (implemented, Stage 4)
 - [x] B8. WP8 Adjacent projects review → 05-wp8-adjacent-projects.md
 - [ ] B9. WP9 Whole-system consistency pass
 - [ ] B10. Consolidated prioritised roadmap with WP dependencies
@@ -37,6 +37,11 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S3.2 scenario coverage + `fettle spec coverage` evidence (14 tests)
   - [x] S3.3 `[gates.bdd]` scenario-coverage gate (10 tests)
   - [x] S3.4 docs + work note
+- [x] C4. Stage 4 — agent infrastructure
+  - [x] S4.1 fettle.runners protocol + claude adapter (12 tests)
+  - [x] S4.2 worktree spine + .git-file audit (16 tests)
+  - [x] S4.3 work items + claims + [gates.claims] (21 tests)
+  - [x] S4.4 docs + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

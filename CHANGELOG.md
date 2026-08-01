@@ -2,6 +2,19 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 4 — Agent infrastructure (WP7 + WP5 + runners)**: `fettle
+  worktree create|list|remove` — one git worktree per work item under
+  `[worktrees].root` (branch `fettle/<item-id>`; removal refuses when
+  dirty; branches kept). Work items — markdown files with a
+  `fettle-work-item` frontmatter key — plus `fettle work
+  list|claim|release`; claims live in the shared git common dir so every
+  worktree sees them, and stale claims (worktree gone) are takeable. New
+  `[gates.claims]` (off, advisory|enforce): edits in a fettle-managed
+  worktree with no claimed item get an advisory naming the fix. New
+  `fettle.runners` package: outbound AgentRunner protocol (claude adapter
+  first; evals consume it; failures land in `RunnerResult.error`, never
+  silently). `.git`-as-file (linked worktree) handling fixed in trace
+  repo identity and doctor hook checks.
 - **Stage 3 — Living specs (Pillar 1 seed)**: markdown spec format with
   frontmatter (`fettle-spec` key; id/status/scope), numbered requirements,
   and Given/When/Then scenarios that trace to requirements. New `fettle

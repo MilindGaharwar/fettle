@@ -209,6 +209,8 @@ fettle policy sync|status
 fettle report [--org] [--days N]
 fettle explain [--last N]
 fettle spec [lint|list|coverage] [--json]
+fettle worktree [create|list|remove] <item-id>
+fettle work [list|claim|release] [item-id]
 fettle baseline create|update
 fettle doctor
 fettle lsp
@@ -289,6 +291,10 @@ accept_preexisting_tests = true
 enabled = false
 mode = "advisory"               # advisory | enforce — spec scenario coverage (Stage 3)
 
+[gates.claims]
+enabled = false
+mode = "advisory"               # claim-before-work in fettle worktrees (Stage 4)
+
 [gates.plan]
 enabled = false
 threshold = 3                   # Files changed before plan required
@@ -335,6 +341,7 @@ PostToolUse ──→ dispatcher.py:
               → bash_audit (structured event logging)
               → tdd_gate (records test/impl edits)
               → bdd_gate (spec scenario coverage)
+              → claims_gate (claim-before-work in worktrees)
               → loop_detect + scope_creep + discipline_link
     │
     ▼
