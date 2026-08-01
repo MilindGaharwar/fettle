@@ -64,7 +64,7 @@ class TestValidConventionalCommit:
 
     def test_co_authored_by_preserved(self) -> None:
         rc, out, _ = _run_hook(
-            'git commit -m "fix: resolve null pointer\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>"'
+            'git commit -m "fix: resolve null pointer\\n\\nCo-Authored-By: Dev Two <dev.two@example.com>"'
         )
         assert rc == 0
         assert out is None
@@ -140,7 +140,7 @@ class TestHeredocMessage:
         cmd = """git commit -m "$(cat <<'EOF'
 feat: add user authentication
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Dev Two <dev.two@example.com>
 EOF
 )"
 """
@@ -152,7 +152,7 @@ EOF
         cmd = """git commit -m "$(cat <<'EOF'
 just some changes
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Dev Two <dev.two@example.com>
 EOF
 )"
 """

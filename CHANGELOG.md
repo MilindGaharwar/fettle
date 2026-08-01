@@ -2,6 +2,16 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 0 — Failure visibility**: no gate, scanner, or telemetry path
+  fails silently anymore. Dispatcher fail-open events (input/config/registry
+  errors, check crashes, budget exhaustion) are written to the audit trace;
+  a check failing ≥3× in 24h raises an in-session advisory. `fettle doctor`
+  and `fettle report` surface fail-open dispatch events and audit-trace
+  writability. `fettle security-review` exits 2 with an INCOMPLETE REVIEW
+  section when ruff/semgrep fail; `pr-review` marks failed scans UNAVAILABLE;
+  `threat-model` flags failed probes instead of reporting "None detected".
+  Audit-trace and health-telemetry write failures warn once on stderr.
+  The MCP trust gate now fails closed on a corrupt/unreadable allowlist.
 - **WP-145 — Audit & reporting**: trace entries carry a versioned audit
   schema (v2: adds `schema` + `repo` fields; v1 entries remain readable).
   New `fettle report [--org]` CLI — `--org` rolls decisions up per repo
