@@ -653,7 +653,29 @@ def cmd_uat(args: argparse.Namespace) -> None:
     root = str(repo_root)
     config = load_config(root)
 
-    # default (and only, in S5.1) action: doctor
+    if getattr(args, "uat_action", "doctor") == "run":
+        from fettle.uat.session import run_session
+        result = run_session(root, config, args.surface)
+        if args.json:
+            print(json.dumps({
+                "session_id": result.session_id, "surface": result.surface,
+                "worktree": result.worktree, "transcript": result.transcript_path,
+                "scenarios": result.scenario_ids, "status": result.status,
+                "error": result.error,
+            }, indent=2))
+        else:
+            print(f"UAT session {result.session_id} on '{result.surface}': {result.status}")
+            if result.worktree:
+                print(f"  worktree:   {result.worktree}")
+            if result.transcript_path:
+                print(f"  transcript: {result.transcript_path}")
+            if result.scenario_ids:
+                print(f"  scenarios:  {', '.join(result.scenario_ids)}")
+            if result.error:
+                print(f"  error: {result.error}", file=sys.stderr)
+        sys.exit(0 if result.status == "completed" else 1)
+
+    # default action: doctor
     surfaces, err = resolve_surfaces(root, config)
     if err:
         print(f"Error: {err}", file=sys.stderr)
@@ -800,6 +822,10 @@ def main() -> None:
     uat_sub = p_uat.add_subparsers(dest="uat_action")
     p_uat_doc = uat_sub.add_parser("doctor", help="Surface detection + capability probe")
     p_uat_doc.add_argument("--json", action="store_true", help="JSON output")
+    p_uat_run = uat_sub.add_parser("run", help="Run a UAT session on one surface")
+    p_uat_run.add_argument("--surface", default="cli",
+                           help="Surface to test (default: cli)")
+    p_uat_run.add_argument("--json", action="store_true", help="JSON output")
     p_uat.set_defaults(uat_action="doctor", json=False)
 
     args = parser.parse_args()

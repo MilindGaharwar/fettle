@@ -45,6 +45,7 @@ class Scenario:
     line: int
     traces: list[str] = field(default_factory=list)  # e.g. ["R1"]
     steps: list[str] = field(default_factory=list)  # lowercased keywords seen
+    texts: list[str] = field(default_factory=list)  # raw GWT step text
 
 
 @dataclass
@@ -169,6 +170,7 @@ def parse_spec(text: str, path: str = "<spec>") -> tuple[Spec | None, list[dict]
             g = _GWT_RE.match(line.strip())
             if g and current is not None:
                 current.steps.append(g.group(1).lower())
+                current.texts.append(line.strip().lstrip("-* ").strip())
 
     # Cross-checks
     for scen in spec.scenarios:
