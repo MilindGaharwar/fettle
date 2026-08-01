@@ -157,6 +157,13 @@ DEFAULTS: dict[str, Any] = {
             "accept_preexisting_tests": True,
             "path_mappings": {},
         },
+        # Stage 3 (S3.3): scenario-coverage gate over living specs. An edited
+        # impl file inside an active spec's scope requires every scenario of
+        # that spec to have a trace-marked test. Deterministic; no test runs.
+        "bdd": {
+            "enabled": False,
+            "mode": "advisory",
+        },
         "complexity": {
             "enabled": True,
             "enforce": False,

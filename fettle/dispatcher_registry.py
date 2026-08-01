@@ -37,6 +37,7 @@ from fettle.boundary_rules import run_check as boundary_rules_run
 from fettle.artifact_gate import run_check as artifact_gate_run
 from fettle.release_gate import run_check as release_gate_run
 from fettle.deploy_gate import run_check as deploy_gate_run
+from fettle.bdd_gate import run_check as bdd_gate_run
 from fettle.tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
@@ -161,6 +162,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Write", "Edit"}),
         order=15,
         budget_ms=50,
+    ),
+    # PostToolUse — spec scenario coverage (Stage 3, S3.3)
+    CheckSpec(
+        name="bdd_gate",
+        run=bdd_gate_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=16,
+        budget_ms=200,
     ),
     # PostToolUse — complexity (Python only)
     CheckSpec(
