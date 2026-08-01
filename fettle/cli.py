@@ -412,6 +412,44 @@ def cmd_report(args: argparse.Namespace) -> None:
     sys.exit(0)
 
 
+def cmd_telemetry(args: argparse.Namespace) -> None:
+    """Opt-in anonymous counters (WP-148): status / show / send."""
+    from fettle.telemetry import compute_payload, send_payload, telemetry_settings
+
+    action = getattr(args, "telemetry_action", "status") or "status"
+    settings = telemetry_settings()
+
+    if action == "status":
+        state = "ENABLED (org policy)" if settings["enabled"] else "off (default)"
+        print(f"telemetry: {state}")
+        if settings["endpoint"]:
+            print(f"endpoint:  {settings['endpoint']}")
+        if settings["note"]:
+            print(f"note:      {settings['note']}")
+        print("payload:   anonymous counters only — inspect with `fettle telemetry show`")
+        sys.exit(0)
+
+    if action == "show":
+        print(json.dumps(compute_payload(args.days), indent=2))
+        sys.exit(0)
+
+    # send
+    if not settings["enabled"]:
+        print("telemetry is off — only the org's digest-pinned central policy "
+              "([extends]) can enable it; nothing was sent", file=sys.stderr)
+        if settings["note"]:
+            print(f"note: {settings['note']}", file=sys.stderr)
+        sys.exit(1)
+    payload = compute_payload(args.days)
+    if send_payload(payload, settings["endpoint"]):
+        print(f"sent {payload['counters']['decisions']} decision counters "
+              f"({args.days}d) to {settings['endpoint']}")
+        sys.exit(0)
+    print(f"send failed ({settings['endpoint']}) — telemetry never blocks; "
+          "try again later", file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_policy(args: argparse.Namespace) -> None:
     """Sync or inspect the digest-pinned org policy (WP-144)."""
     import tomllib
@@ -900,6 +938,16 @@ def main() -> None:
     policy_sub.add_parser("status", help="Show pin and cache state")
     p_policy.set_defaults(policy_action="sync")
 
+    p_tel = subparsers.add_parser("telemetry",
+                                  help="Opt-in anonymous counters (org policy only, default off)")
+    tel_sub = p_tel.add_subparsers(dest="telemetry_action")
+    tel_sub.add_parser("status", help="Enabled? By whom? Where would it go?")
+    p_tel_show = tel_sub.add_parser("show", help="Print the exact payload that would be sent")
+    p_tel_show.add_argument("--days", type=int, default=30, help="Aggregation window (default 30)")
+    p_tel_send = tel_sub.add_parser("send", help="Send counters to the org endpoint (refused unless org-enabled)")
+    p_tel_send.add_argument("--days", type=int, default=30, help="Aggregation window (default 30)")
+    p_tel.set_defaults(telemetry_action="status")
+
     p_report = subparsers.add_parser("report", help="Effectiveness metrics from the audit trail")
     p_report.add_argument("--org", action="store_true", help="Aggregate per repo (cross-repo rollup)")
     p_report.add_argument("--compliance", action="store_true",
@@ -1038,6 +1086,7 @@ def main() -> None:
         "doctor": cmd_doctor,
         "init": cmd_init,
         "policy": cmd_policy,
+        "telemetry": cmd_telemetry,
         "report": cmd_report,
         "bench": cmd_bench,
         "ci": cmd_ci,

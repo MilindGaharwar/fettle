@@ -86,6 +86,14 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S11.3 `fettle doctor --verify-hashes` (tampering = required
         failure; drift = warn; not-installed = skipped, surfaced)
   - [x] S11.4 tests (test_supply_chain.py) + docs + work note
+- [x] C12. Stage 12 — WP-148 opt-in telemetry (privacy-first)
+  - [x] S12.1 fettle/telemetry.py: payload schema fettle-telemetry/1
+        (anonymous counters only, key set pinned by test)
+  - [x] S12.2 org-only opt-in: enabled honored solely from the digest-pinned
+        [extends] policy; repo-level enable ignored + surfaced; default OFF
+  - [x] S12.3 `fettle telemetry status|show|send` + [telemetry] in schema
+        + docs/CONFIG.md section
+  - [x] S12.4 tests (test_telemetry.py, incl. live-HTTP send) + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

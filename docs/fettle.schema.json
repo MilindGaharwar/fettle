@@ -1118,6 +1118,20 @@
       },
       "additionalProperties": false
     },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "endpoint": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "worktrees": {
       "type": "object",
       "properties": {

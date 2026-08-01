@@ -55,6 +55,27 @@ sha256 = "9f2c…"   # content digest — the pin is mandatory
   config with a warning — enforcement never breaks because a server is down.
 - One hop only: an org policy cannot itself contain `[extends]`.
 
+## Telemetry (`[telemetry]`, WP-148)
+
+Anonymous aggregate counters (decisions / fired / blocked / overridden /
+tool errors) — **default off**, and only the org's digest-pinned central
+policy (`[extends]`) can turn it on. `enabled = true` in a repo's own
+`.fettle.toml` is ignored and surfaced by `fettle telemetry status`.
+
+```toml
+# In the ORG policy file (not the repo config):
+[telemetry]
+enabled = true
+endpoint = "https://telemetry.example.com/ingest"   # https:// required
+```
+
+- `fettle telemetry status` — enabled? by whom? where would it go?
+- `fettle telemetry show [--days N]` — the exact payload that would be sent
+  (schema `fettle-telemetry/1`: integers + fettle version, nothing else —
+  no code, paths, repo names, rule ids, or session ids).
+- `fettle telemetry send [--days N]` — refused unless org-enabled;
+  fire-and-forget with a 5 s timeout, failure never blocks anything.
+
 ## Example
 
 ```toml

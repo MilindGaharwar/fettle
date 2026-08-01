@@ -286,6 +286,10 @@ DEFAULTS: dict[str, Any] = {
     # UNDER this repo's config (defaults → org → repo → env). Cache-only in
     # hooks; `fettle policy sync` fetches.
     "extends": {"url": "", "sha256": ""},
+    # WP-148: opt-in telemetry — anonymous counters only, default OFF.
+    # `enabled` is honored ONLY from the digest-pinned org policy ([extends]);
+    # setting it in a repo's .fettle.toml is ignored and surfaced.
+    "telemetry": {"enabled": False, "endpoint": ""},
     # WP7 (Stage 4): worktree spine — one worktree per work item, branch
     # fettle/<item-id>. Root is inside the checkout (gitignored, scanners
     # skip .fettle).

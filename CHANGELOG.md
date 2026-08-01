@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Stage 12 — WP-148 opt-in telemetry**: anonymous aggregate counters
+  (decisions / fired / blocked / overridden / tool errors) with a fully
+  documented payload (`fettle-telemetry/1`) — no code, paths, repo names,
+  rule ids, or session ids, pinned by test. **Default off**; only the
+  org's digest-pinned central policy (`[extends]`) can enable it — a
+  repo-level `enabled = true` is ignored and surfaced. `fettle telemetry
+  status|show|send`: status explains provenance, show prints the exact
+  payload, send is fire-and-forget (5 s timeout, refused when disabled,
+  failure never blocks anything).
 - **Stage 11 — WP-147 supply-chain posture**: releases now ship with
   Sigstore-signed SLSA provenance (GitHub native attestation on every
   artifact — verify with `gh attestation verify`) and a CycloneDX SBOM
