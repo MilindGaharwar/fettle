@@ -35,6 +35,10 @@ def _get_trace_path() -> str:
     return os.path.join(trace_dir, "trace.jsonl")
 
 
+# One-time stderr warning flag (Stage-0 failure visibility — see trace.py).
+_write_failure_warned = False
+
+
 # ──────────────────────────────────────────────────────────────────────
 # 1. record_loaded_rules — write a health trace entry
 # ──────────────────────────────────────────────────────────────────────
@@ -45,8 +49,13 @@ def record_loaded_rules(
     rules_loaded: int,
     rules_skipped: int,
     config_source: str,
-) -> None:
-    """Append a rules-loaded health entry to the global trace."""
+) -> bool:
+    """Append a rules-loaded health entry to the global trace.
+
+    Returns True on durable append. A write failure warns once per process on
+    stderr (Stage-0 failure visibility): losing the telemetry that exists to
+    detect silent degradation must itself never be silent.
+    """
     entry = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "ts": time.time(),
@@ -63,8 +72,18 @@ def record_loaded_rules(
         with open(trace_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
             f.flush()
-    except OSError:
-        pass
+        return True
+    except OSError as exc:
+        global _write_failure_warned
+        if not _write_failure_warned:
+            import sys
+            print(
+                f"fettle: WARNING — health telemetry write failed ({exc}); "
+                "rule-pack health is NOT being recorded. Run `fettle doctor`.",
+                file=sys.stderr,
+            )
+            _write_failure_warned = True
+        return False
 
 
 # ──────────────────────────────────────────────────────────────────────

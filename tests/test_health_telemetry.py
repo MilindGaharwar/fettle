@@ -58,6 +58,25 @@ def test_record_multiple_entries(tmp_path, monkeypatch):
     assert len(lines) == 3
 
 
+def test_record_returns_true_on_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert health_telemetry.record_loaded_rules("p", 1, 0, "rules/p.yml") is True
+
+
+def test_record_write_failure_warns_once_on_stderr(tmp_path, monkeypatch, capsys):
+    """Stage-0: losing health telemetry must not itself be silent."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")  # XDG_STATE_HOME points at a file → makedirs fails
+    monkeypatch.setenv("XDG_STATE_HOME", str(blocker))
+    monkeypatch.setattr(health_telemetry, "_write_failure_warned", False)
+    assert health_telemetry.record_loaded_rules("p", 1, 0, "rules/p.yml") is False
+    assert health_telemetry.record_loaded_rules("p", 2, 0, "rules/p.yml") is False
+    err = capsys.readouterr().err
+    assert err.count("health telemetry write failed") == 1
+    assert "fettle doctor" in err
+
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Detecting zero-rule packs
 # ──────────────────────────────────────────────────────────────────────
