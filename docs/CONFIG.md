@@ -1,5 +1,9 @@
 # Fettle configuration
 
+> One file drives everything. The same `.fettle.toml` powers agent hooks
+> (Claude Code, Codex CLI, Gemini CLI, OpenCode), the CLI, pre-commit, CI,
+> and the LSP server — set policy once, enforce it at every chokepoint.
+
 Fettle reads a single optional `.fettle.toml` at your project root. Layering
 (later wins): built-in defaults → `.fettle.toml` → environment variables.
 

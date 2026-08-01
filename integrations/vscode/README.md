@@ -1,12 +1,24 @@
-# Fettle for VS Code
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/logo.svg" alt="fettle" width="110">
+</p>
 
-Real-time quality enforcement for AI-assisted development. Surfaces ruff, semgrep, complexity, and custom rule findings as VS Code diagnostics — the same checks that run in Claude Code, Codex CLI, Gemini CLI, and OpenCode hooks.
+<h1 align="center">Fettle for VS Code</h1>
+
+<p align="center"><b>The quality harness for AI-generated code — live in your editor.</b></p>
+
+Surfaces ruff, semgrep, complexity, and incident-derived LLM-antipattern
+findings as native VS Code diagnostics — the *same* checks that run inside
+Claude Code, Codex CLI, Gemini CLI, and OpenCode agent sessions, driven by
+the *same* `.fettle.toml`. What your agent gets blocked on is exactly what
+your editor underlines: one policy, zero drift.
+
+→ Main project: [github.com/MilindGaharwar/fettle](https://github.com/MilindGaharwar/fettle)
 
 ## Features
 
 - **Live diagnostics** on Python, TypeScript, JavaScript, Go, and Rust files
 - **Function complexity** annotations (cyclomatic + cognitive)
-- **Semgrep patterns** including LLM-antipattern rules
+- **Semgrep patterns** including LLM-antipattern rules — each traced to a real incident
 - **Auto-reload** when `.fettle.toml` changes
 - **Commands:** restart server, run full scan, view report
 
