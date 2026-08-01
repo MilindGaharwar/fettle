@@ -77,10 +77,20 @@ class Aggregator:
         self.budget_exhausted_before = next_check_name
 
     def finish(self) -> tuple[dict[str, Any], int]:
-        hso: dict[str, Any] = {}
-        if self.hook_event_name:
-            hso["hookEventName"] = self.hook_event_name
+        """Event-correct hook output (Stage 13 — full hook parity).
 
+        The wire must parse in every supported host. Claude Code and Gemini
+        are lenient, but Codex rejects unknown fields (deny_unknown_fields
+        in codex-rs/hooks schema.rs), so shape follows the event:
+
+        - blocks always carry top-level ``decision: block`` + ``reason``
+          (the documented Claude shape, legal everywhere);
+        - ``permissionDecision`` appears only on PreToolUse — the only
+          event whose output schema defines it;
+        - Stop output never carries ``hookSpecificOutput`` (Codex's Stop
+          wire has no such field); advisories ride ``systemMessage`` and
+          block context folds into ``reason``.
+        """
         # Build advisory context with byte cap
         parts: list[str] = []
         total_bytes = 0
@@ -96,23 +106,43 @@ class Aggregator:
             parts.append(f"... and {self._advisories_suppressed} more advisory(s) suppressed this turn")
 
         advisory_context = "\n\n".join(parts).strip()
+        is_stop = self.hook_event_name in ("Stop", "SubagentStop")
 
         if self.first_block is not None:
-            hso.update(self.first_block.hook_specific_output)
+            reason = (self.first_block.message or "").strip() or "Blocked by Fettle"
+            if is_stop:
+                if advisory_context:
+                    reason = reason + "\n\n" + advisory_context
+                return {"decision": "block", "reason": reason}, 2
+
+            hso: dict[str, Any] = dict(self.first_block.hook_specific_output)
             if "hookEventName" not in hso and self.hook_event_name:
                 hso["hookEventName"] = self.hook_event_name
             if advisory_context:
                 existing = hso.get("additionalContext", "")
-                if existing:
-                    hso["additionalContext"] = advisory_context + "\n\n" + existing
-                else:
-                    hso["additionalContext"] = advisory_context
-            if "permissionDecision" not in hso:
-                hso["permissionDecision"] = "deny"
-            if "permissionDecisionReason" not in hso and self.first_block.message:
-                hso["permissionDecisionReason"] = self.first_block.message
-            return {"hookSpecificOutput": hso}, 2
+                hso["additionalContext"] = (
+                    advisory_context + "\n\n" + existing if existing else advisory_context
+                )
+            if self.hook_event_name == "PreToolUse":
+                if "permissionDecision" not in hso:
+                    hso["permissionDecision"] = "deny"
+                if "permissionDecisionReason" not in hso:
+                    hso["permissionDecisionReason"] = reason
+            else:
+                # Only PreToolUse output defines permission fields; strict
+                # hosts (Codex) reject them elsewhere.
+                hso.pop("permissionDecision", None)
+                hso.pop("permissionDecisionReason", None)
+            return {"decision": "block", "reason": reason, "hookSpecificOutput": hso}, 2
 
+        if is_stop:
+            if advisory_context:
+                return {"systemMessage": advisory_context}, 0
+            return {}, 0
+
+        hso = {}
+        if self.hook_event_name:
+            hso["hookEventName"] = self.hook_event_name
         if advisory_context:
             hso["additionalContext"] = advisory_context
         return {"hookSpecificOutput": hso}, 0

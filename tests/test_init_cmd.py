@@ -63,6 +63,8 @@ class TestAgentDetection:
         named = _by_name(run_init(repo)[0])
         assert named["claude-code"].status == "skipped"
         assert named["opencode"].status == "skipped"
+        assert named["codex"].status == "skipped"
+        assert named["gemini"].status == "skipped"
 
     def test_claude_code_symlink_created(self, repo) -> None:
         (Path.home() / ".claude").mkdir()
@@ -116,6 +118,70 @@ class TestAgentDetection:
         (oc_dir / "config.json").write_text("{not json")
         named = _by_name(run_init(repo)[0])
         assert named["opencode"].status == "action"
+
+    def test_codex_registration(self, repo) -> None:
+        (Path.home() / ".codex").mkdir()
+        named = _by_name(run_init(repo)[0])
+        assert named["codex"].status == "created"
+        assert named["codex-enable"].status == "action"  # features.hooks toggle
+        config = json.loads((Path.home() / ".codex" / "hooks.json").read_text())
+        for event in ("PreToolUse", "PostToolUse", "Stop"):
+            groups = config["hooks"][event]
+            assert any("dispatcher.py" in h["command"]
+                       for g in groups for h in g["hooks"])
+        assert config["hooks"]["PreToolUse"][0]["matcher"] == "Write|Edit|Bash"
+
+    def test_codex_idempotent_and_preserves_existing(self, repo) -> None:
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "hooks.json").write_text(json.dumps({
+            "hooks": {"PreToolUse": [{"matcher": "Bash",
+                                       "hooks": [{"type": "command", "command": "other-hook"}]}]},
+        }))
+        run_init(repo)
+        named = _by_name(run_init(repo)[0])
+        assert named["codex"].status == "ok"
+        config = json.loads((codex_dir / "hooks.json").read_text())
+        pre = config["hooks"]["PreToolUse"]
+        assert any(h["command"] == "other-hook" for g in pre for h in g["hooks"])
+        assert any("dispatcher.py" in h["command"] for g in pre for h in g["hooks"])
+
+    def test_codex_malformed_config_is_action_not_crash(self, repo) -> None:
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "hooks.json").write_text("{not json")
+        named = _by_name(run_init(repo)[0])
+        assert named["codex"].status == "action"
+
+    def test_gemini_registration(self, repo) -> None:
+        (Path.home() / ".gemini").mkdir()
+        named = _by_name(run_init(repo)[0])
+        assert named["gemini"].status == "created"
+        config = json.loads((Path.home() / ".gemini" / "settings.json").read_text())
+        for event in ("BeforeTool", "AfterTool", "AfterAgent"):
+            groups = config["hooks"][event]
+            assert any("dispatcher.py" in h["command"]
+                       for g in groups for h in g["hooks"])
+        before = config["hooks"]["BeforeTool"][0]
+        assert before["matcher"] == "run_shell_command|write_file|replace"
+        assert before["hooks"][0]["timeout"] == 10000  # Gemini timeouts are ms
+
+    def test_gemini_idempotent_and_preserves_existing(self, repo) -> None:
+        gemini_dir = Path.home() / ".gemini"
+        gemini_dir.mkdir()
+        (gemini_dir / "settings.json").write_text(json.dumps({"theme": "dark"}))
+        run_init(repo)
+        named = _by_name(run_init(repo)[0])
+        assert named["gemini"].status == "ok"
+        config = json.loads((gemini_dir / "settings.json").read_text())
+        assert config["theme"] == "dark"
+
+    def test_gemini_malformed_config_is_action_not_crash(self, repo) -> None:
+        gemini_dir = Path.home() / ".gemini"
+        gemini_dir.mkdir()
+        (gemini_dir / "settings.json").write_text("{not json")
+        named = _by_name(run_init(repo)[0])
+        assert named["gemini"].status == "action"
 
 
 class TestPreCommit:

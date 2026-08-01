@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Stage 13 — full hook parity for Codex CLI, Gemini CLI, and OpenCode**:
+  - *Inbound*: new `fettle.agents.codex` and `fettle.agents.gemini`
+    translators — Codex's Claude-compatible wire (detected via its
+    `turn_id` extension, native `shell`/`apply_patch` tool ids mapped
+    defensively) and Gemini's `BeforeTool`/`AfterTool`/`AfterAgent`
+    events with `run_shell_command`/`write_file`/`replace`/`read_file`
+    tools all normalize to the same event model, pinned by shared
+    conformance fixtures across all four agents.
+  - *Event-correct output wire*: blocks now always carry top-level
+    `decision: "block"` + `reason`; `permissionDecision` is emitted on
+    PreToolUse only, and Stop/SubagentStop output never carries
+    `hookSpecificOutput` (Codex parses hook output with
+    deny-unknown-fields — the old blanket shape was illegal there).
+    Stop advisories ride `systemMessage`; a clean Stop is `{}`.
+  - *Registration*: `fettle init` now wires `~/.codex/hooks.json` (with
+    an action step for the `features.hooks` toggle) and
+    `~/.gemini/settings.json` (Gemini timeouts in ms) — idempotent JSON
+    merges that preserve existing entries, like the OpenCode step.
+  - *Outbound*: headless `AgentRunner` adapters for `codex exec
+    --full-auto`, `gemini --yolo -p`, and `opencode run` join `claude`
+    in the runner registry (shared subprocess core, same fail-visible
+    contract); `fettle doctor`/UAT probe all four, and
+    `FETTLE_EVAL_RUNNER` selects the evals agent.
 - **Stage 12 — WP-148 opt-in telemetry**: anonymous aggregate counters
   (decisions / fired / blocked / overridden / tool errors) with a fully
   documented payload (`fettle-telemetry/1`) — no code, paths, repo names,

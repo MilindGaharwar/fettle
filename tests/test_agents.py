@@ -1,8 +1,8 @@
-"""WP-140 — Agent abstraction layer tests.
+"""WP-140 / Stage 13 — Agent abstraction layer tests.
 
-Conformance contract: for every fixture case, the Claude Code payload and
-the native OpenCode payload MUST normalize to the same HookInput fields.
-Payload drift in either agent breaks these tests, not users.
+Conformance contract: for every fixture case, every agent's native payload
+(Claude Code, Codex, Gemini, OpenCode) MUST normalize to the same HookInput
+fields. Payload drift in any agent breaks these tests, not users.
 """
 
 import json
@@ -21,6 +21,8 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "agent_payloads",
 
 with open(FIXTURES) as _fh:
     CASES = json.load(_fh)["cases"]
+
+AGENT_KEYS = ("claude_code", "codex", "gemini", "opencode")
 
 
 def _essence(hook_input) -> dict:
@@ -44,19 +46,31 @@ class TestDetection:
     def test_detects_opencode(self, case) -> None:
         assert detect_agent(case["opencode"]) is AgentKind.OPENCODE
 
+    @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
+    def test_detects_codex(self, case) -> None:
+        assert detect_agent(case["codex"]) is AgentKind.CODEX
+
+    @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
+    def test_detects_gemini(self, case) -> None:
+        assert detect_agent(case["gemini"]) is AgentKind.GEMINI
+
     def test_unknown_shape(self) -> None:
         assert detect_agent({"foo": "bar"}) is AgentKind.UNKNOWN
         assert detect_agent({}) is AgentKind.UNKNOWN
 
 
 class TestConformance:
-    """Both agents' payloads must normalize to identical events."""
+    """All agents' payloads must normalize to identical events."""
 
     @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
     def test_agents_agree(self, case) -> None:
-        cc = normalize(case["claude_code"], fallback_cwd="/fallback")
-        oc = normalize(case["opencode"], fallback_cwd="/fallback")
-        assert _essence(cc) == _essence(oc), f"agents disagree on {case['name']}"
+        essences = {
+            key: _essence(normalize(case[key], fallback_cwd="/fallback"))
+            for key in AGENT_KEYS
+        }
+        baseline = essences["claude_code"]
+        for key, essence in essences.items():
+            assert essence == baseline, f"{key} disagrees on {case['name']}"
 
     @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
     def test_matches_expected(self, case) -> None:
@@ -76,6 +90,10 @@ class TestRobustness:
         {"type": "tool.execute.before"},
         {"type": "tool.execute.before", "tool": 3, "args": None},
         {"type": "session.idle", "properties": "nope"},
+        {"hook_event_name": "BeforeTool"},
+        {"hook_event_name": "BeforeTool", "tool_name": 9, "tool_input": "nope"},
+        {"hook_event_name": "AfterAgent", "cwd": [], "session_id": {}},
+        {"hook_event_name": "PreToolUse", "turn_id": "t-x", "tool_input": None},
     ])
     def test_never_raises(self, payload) -> None:
         hook_input = normalize(payload, fallback_cwd="/fb")
@@ -90,9 +108,22 @@ class TestRobustness:
         payload = {"type": "tool.execute.before", "tool": "webfetch", "args": {}, "directory": "/r"}
         assert normalize(payload, fallback_cwd="/fb").tool_name is None
 
+    def test_gemini_unmapped_tool_passes_through(self) -> None:
+        payload = {"hook_event_name": "BeforeTool", "tool_name": "web_fetch", "tool_input": {}}
+        assert normalize(payload, fallback_cwd="/fb").tool_name == "web_fetch"
+
+    def test_codex_native_tool_names_mapped(self) -> None:
+        payload = {"hook_event_name": "PreToolUse", "turn_id": "t", "tool_name": "shell",
+                   "tool_input": {"command": "ls"}, "cwd": "/r"}
+        assert normalize(payload, fallback_cwd="/fb").tool_name == "Bash"
+
 
 class TestDispatcherEndToEnd:
-    """The dispatcher accepts NATIVE payloads from both agents."""
+    """The dispatcher accepts NATIVE payloads from every agent.
+
+    Stage 13: Stop output is an empty object (or systemMessage) — Codex's
+    strict Stop parser rejects hookSpecificOutput on that event.
+    """
 
     def _run(self, payload: dict) -> tuple[int, dict]:
         proc = subprocess.run(
@@ -109,7 +140,7 @@ class TestDispatcherEndToEnd:
             "directory": str(tmp_path),
         })
         assert rc == 0
-        assert out["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert "hookSpecificOutput" not in out
 
     def test_claude_stop_still_works(self, tmp_path) -> None:
         rc, out = self._run({
@@ -118,4 +149,24 @@ class TestDispatcherEndToEnd:
             "session_id": "e2e-cc",
         })
         assert rc == 0
-        assert out["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert "hookSpecificOutput" not in out
+
+    def test_native_gemini_after_agent(self, tmp_path) -> None:
+        rc, out = self._run({
+            "hook_event_name": "AfterAgent",
+            "cwd": str(tmp_path),
+            "session_id": "e2e-gm",
+            "timestamp": "2026-02-14T00:00:00Z",
+        })
+        assert rc == 0
+        assert "hookSpecificOutput" not in out
+
+    def test_native_codex_stop(self, tmp_path) -> None:
+        rc, out = self._run({
+            "hook_event_name": "Stop",
+            "cwd": str(tmp_path),
+            "session_id": "e2e-cx",
+            "turn_id": "t-e2e",
+        })
+        assert rc == 0
+        assert "hookSpecificOutput" not in out

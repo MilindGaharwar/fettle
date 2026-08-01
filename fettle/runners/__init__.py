@@ -9,7 +9,7 @@ Fail-visible contract: a runner never raises for an expected failure mode
 transcript — failures land in ``RunnerResult.error``.
 
 Adapters are added only alongside a conformance test (no aspirational
-stubs). Current adapters: claude.
+stubs). Current adapters: claude, codex, gemini, opencode.
 """
 
 from __future__ import annotations
@@ -50,11 +50,20 @@ def get_runner(name: str) -> AgentRunner:
     if name == "claude":
         from fettle.runners.claude import ClaudeRunner
         return ClaudeRunner()
+    if name == "codex":
+        from fettle.runners.codex import CodexRunner
+        return CodexRunner()
+    if name == "gemini":
+        from fettle.runners.gemini import GeminiRunner
+        return GeminiRunner()
+    if name == "opencode":
+        from fettle.runners.opencode import OpenCodeRunner
+        return OpenCodeRunner()
     raise ValueError(
         f"unknown agent runner '{name}' (registered: {', '.join(sorted(RUNNER_NAMES))})")
 
 
-RUNNER_NAMES: frozenset[str] = frozenset({"claude"})
+RUNNER_NAMES: frozenset[str] = frozenset({"claude", "codex", "gemini", "opencode"})
 
 
 def detect_runners() -> dict[str, bool]:

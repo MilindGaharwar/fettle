@@ -147,7 +147,7 @@ def _invoke_runner(runner, prompt: str, cwd: Path) -> str:
 def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = None) -> RunResult:
     if runner is None:
         from fettle.runners import get_runner
-        runner = get_runner("claude")
+        runner = get_runner(os.environ.get("FETTLE_EVAL_RUNNER", "claude"))
     workdir = Path(workdir) if workdir else Path.cwd() / "evals-run"
     workdir.mkdir(parents=True, exist_ok=True)
     for rel, content in scenario.setup_files.items():

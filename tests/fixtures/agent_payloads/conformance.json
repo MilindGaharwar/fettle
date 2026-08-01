@@ -23,6 +23,27 @@
         "args": {"filePath": "/repo/src/app.py", "oldString": "a", "newString": "b"},
         "directory": "/repo",
         "sessionID": "s-1"
+      },
+      "codex": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/repo/src/app.py", "old_string": "a", "new_string": "b"},
+        "cwd": "/repo",
+        "session_id": "s-1",
+        "turn_id": "t-1",
+        "transcript_path": "/tmp/t.jsonl",
+        "model": "gpt-5",
+        "permission_mode": "default",
+        "tool_use_id": "tu-1"
+      },
+      "gemini": {
+        "hook_event_name": "BeforeTool",
+        "tool_name": "replace",
+        "tool_input": {"file_path": "/repo/src/app.py", "old_string": "a", "new_string": "b"},
+        "cwd": "/repo",
+        "session_id": "s-1",
+        "transcript_path": "/tmp/t.json",
+        "timestamp": "2026-02-14T00:00:00Z"
       }
     },
     {
@@ -47,6 +68,24 @@
         "args": {"filePath": "/repo/new.py", "content": "x = 1\n"},
         "directory": "/repo",
         "sessionID": "s-2"
+      },
+      "codex": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/repo/new.py", "content": "x = 1\n"},
+        "cwd": "/repo",
+        "session_id": "s-2",
+        "turn_id": "t-2",
+        "tool_use_id": "tu-2"
+      },
+      "gemini": {
+        "hook_event_name": "AfterTool",
+        "tool_name": "write_file",
+        "tool_input": {"file_path": "/repo/new.py", "content": "x = 1\n"},
+        "tool_response": {"success": true},
+        "cwd": "/repo",
+        "session_id": "s-2",
+        "timestamp": "2026-02-14T00:00:00Z"
       }
     },
     {
@@ -71,6 +110,23 @@
         "args": {"command": "rm -rf build"},
         "directory": "/repo",
         "sessionID": "s-3"
+      },
+      "codex": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf build"},
+        "cwd": "/repo",
+        "session_id": "s-3",
+        "turn_id": "t-3",
+        "permission_mode": "full-auto"
+      },
+      "gemini": {
+        "hook_event_name": "BeforeTool",
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "rm -rf build"},
+        "cwd": "/repo",
+        "session_id": "s-3",
+        "timestamp": "2026-02-14T00:00:00Z"
       }
     },
     {
@@ -91,6 +147,19 @@
         "type": "session.idle",
         "properties": {"sessionID": "s-4"},
         "directory": "/repo"
+      },
+      "codex": {
+        "hook_event_name": "Stop",
+        "tool_input": {},
+        "cwd": "/repo",
+        "session_id": "s-4",
+        "turn_id": "t-4"
+      },
+      "gemini": {
+        "hook_event_name": "AfterAgent",
+        "cwd": "/repo",
+        "session_id": "s-4",
+        "timestamp": "2026-02-14T00:00:00Z"
       }
     }
   ]

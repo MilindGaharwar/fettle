@@ -49,6 +49,8 @@ GitHub/GitLab/pre-commit. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 flowchart LR
     subgraph agents ["AI Agents"]
         CC[Claude Code]
+        CX[Codex CLI]
+        GM[Gemini CLI]
         OC[OpenCode]
     end
     subgraph fettle ["Fettle"]
@@ -60,6 +62,8 @@ flowchart LR
         P[pre-commit] ~~~ CI["GitHub / GitLab CI"] ~~~ L[LSP / editor]
     end
     CC -- "hook events" --> T
+    CX -- "hook events" --> T
+    GM -- "hook events" --> T
     OC -- "native events" --> T
     fettle -. "one .fettle.toml" .-> chokepoints
 ```
@@ -176,7 +180,8 @@ git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle
 cd ~/projects/fettle
 
 # One command wires everything: repo config, Claude Code plugin symlink,
-# OpenCode plugin registration, commit-time guards — idempotent.
+# OpenCode plugin registration, Codex + Gemini hook registration,
+# commit-time guards — idempotent.
 python3 fettle/cli.py init --install-tools
 
 # Verify
@@ -408,8 +413,9 @@ per hook event under per-check and per-event latency budgets.
 ```python
 from fettle.agents import detect_agent, normalize
 hook_input = normalize(payload, fallback_cwd=os.getcwd())
-# Claude Code hook JSON and native OpenCode plugin events both normalize
-# to the same event model — conformance-tested per agent (WP-140).
+# Claude Code, Codex CLI, and Gemini CLI hook JSON and native OpenCode
+# plugin events all normalize to the same event model — conformance-tested
+# per agent (WP-140 / Stage 13).
 ```
 
 ### Language Adapters (`fettle/adapters/`)

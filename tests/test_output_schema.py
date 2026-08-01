@@ -1,19 +1,14 @@
 """JSON schema contract tests for dispatcher output.
 
-Validates that all dispatcher output conforms to Claude Code's expected
-hook output schema. Prevents regressions like the hookEventName bug
-(commit ea9f2d4) from shipping again.
+Validates that all dispatcher output conforms to the hook output schema
+shared by Claude Code, Codex, and Gemini CLI. Prevents regressions like
+the hookEventName bug (commit ea9f2d4) from shipping again.
 
-Claude Code schema (from error messages and documentation):
-{
-  "hookSpecificOutput": {
-    "hookEventName": required string ("PreToolUse"|"PostToolUse"|"Stop"|"SubagentStop"),
-    "permissionDecision": optional ("allow"|"deny"|"ask"|"defer"),
-    "permissionDecisionReason": optional string,
-    "additionalContext": optional string,
-    "updatedInput": optional object (PreToolUse only),
-  }
-}
+Stage 13 wire rules (Codex parses output with deny_unknown_fields):
+- PreToolUse/PostToolUse: {"hookSpecificOutput": {...}} (+ top-level
+  decision/reason on block); permissionDecision on PreToolUse ONLY.
+- Stop/SubagentStop: NO hookSpecificOutput — blocks are top-level
+  {decision, reason}; advisories ride systemMessage; else {}.
 
 Exit code semantics:
   0 = allow/advisory (tool proceeds)
@@ -49,7 +44,10 @@ def _run_dispatcher(payload: dict) -> tuple[dict, int]:
 
 
 def _validate_schema(output: dict, expected_event: str, expect_block: bool = False):
-    """Validate output against Claude Code's expected schema."""
+    """Validate output against the shared hook output schema."""
+    if expected_event in ("Stop", "SubagentStop"):
+        _validate_stop_schema(output, expect_block)
+        return
     assert "hookSpecificOutput" in output, "Missing hookSpecificOutput key"
     hso = output["hookSpecificOutput"]
 
@@ -64,6 +62,9 @@ def _validate_schema(output: dict, expected_event: str, expect_block: bool = Fal
     )
 
     if "permissionDecision" in hso:
+        assert expected_event == "PreToolUse", (
+            f"permissionDecision is only legal on PreToolUse output, not {expected_event}"
+        )
         assert hso["permissionDecision"] in VALID_PERMISSION_DECISIONS, (
             f"Invalid permissionDecision: '{hso['permissionDecision']}'"
         )
@@ -90,6 +91,19 @@ def _validate_schema(output: dict, expected_event: str, expect_block: bool = Fal
     }
     for key in hso:
         assert key in allowed_hso_keys, f"Unexpected hookSpecificOutput key: '{key}'"
+
+
+def _validate_stop_schema(output: dict, expect_block: bool = False):
+    """Stop/SubagentStop output: no hookSpecificOutput (Codex strict parser)."""
+    assert "hookSpecificOutput" not in output, (
+        f"Stop output must not carry hookSpecificOutput (Codex rejects it). Got: {output}"
+    )
+    allowed = {"decision", "reason", "systemMessage"}
+    for key in output:
+        assert key in allowed, f"Unexpected Stop output key: '{key}'"
+    if expect_block:
+        assert output.get("decision") == "block"
+        assert isinstance(output.get("reason"), str) and output["reason"]
 
 
 class TestPreToolUseSchema:
@@ -249,6 +263,71 @@ class TestBlockSchema:
         _validate_schema(output, "PreToolUse", expect_block=True)
         assert "Warning context" in output["hookSpecificOutput"]["additionalContext"]
 
+    def test_block_carries_top_level_decision(self):
+        """Blocks always carry the universal decision/reason pair."""
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
+
+        agg = Aggregator(total_budget_ms=400, hook_event_name="PreToolUse")
+        agg.add_result("gate", CheckResult.block("Nope"), 5)
+        output, exit_code = agg.finish()
+        assert exit_code == 2
+        assert output["decision"] == "block"
+        assert output["reason"] == "Nope"
+
+    def test_posttooluse_block_has_no_permission_decision(self):
+        """permissionDecision is PreToolUse-only — Codex rejects it elsewhere."""
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
+
+        agg = Aggregator(total_budget_ms=400, hook_event_name="PostToolUse")
+        agg.add_result("gate", CheckResult.block("Bad edit", hook_specific_output={
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Bad edit",
+        }), 5)
+        output, exit_code = agg.finish()
+        assert exit_code == 2
+        _validate_schema(output, "PostToolUse", expect_block=True)
+        assert output["decision"] == "block"
+        assert "permissionDecision" not in output["hookSpecificOutput"]
+
+    def test_stop_block_is_top_level_only(self):
+        """Codex's Stop output schema has no hookSpecificOutput field at all."""
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
+
+        agg = Aggregator(total_budget_ms=400, hook_event_name="Stop")
+        agg.add_result("advisor", CheckResult.advisory("heads-up", hook_specific_output={
+            "additionalContext": "heads-up",
+        }), 5)
+        agg.add_result("verify", CheckResult.block("Tests never ran"), 5)
+        output, exit_code = agg.finish()
+        assert exit_code == 2
+        _validate_schema(output, "Stop", expect_block=True)
+        assert "Tests never ran" in output["reason"]
+        assert "heads-up" in output["reason"]  # advisory folded into reason
+
+    def test_stop_advisory_rides_system_message(self):
+        from fettle.dispatcher_aggregate import Aggregator
+        from fettle.dispatcher_types import CheckResult
+
+        agg = Aggregator(total_budget_ms=400, hook_event_name="Stop")
+        agg.add_result("advisor", CheckResult.advisory("wrap up notes", hook_specific_output={
+            "additionalContext": "wrap up notes",
+        }), 5)
+        output, exit_code = agg.finish()
+        assert exit_code == 0
+        _validate_schema(output, "Stop")
+        assert output == {"systemMessage": "wrap up notes"}
+
+    def test_stop_clean_is_empty_object(self):
+        from fettle.dispatcher_aggregate import Aggregator
+
+        agg = Aggregator(total_budget_ms=400, hook_event_name="Stop")
+        output, exit_code = agg.finish()
+        assert exit_code == 0
+        assert output == {}
+
 
 class TestEdgeCases:
     def test_empty_payload(self):
@@ -287,7 +366,7 @@ class TestEdgeCases:
         )
         assert proc.returncode == 0
         output = json.loads(proc.stdout.strip())
-        assert "hookSpecificOutput" in output
+        assert output == {}  # eventless no-op is the universal empty object
 
     def test_malformed_json_input(self):
         """Malformed input should produce valid JSON output (fail-open)."""
@@ -301,4 +380,4 @@ class TestEdgeCases:
         )
         assert proc.returncode == 0
         output = json.loads(proc.stdout.strip())
-        assert "hookSpecificOutput" in output
+        assert output == {}  # eventless no-op is the universal empty object

@@ -5,8 +5,10 @@ Idempotent. Detects installed agents and wires everything Fettle needs:
 1. Repo scaffolding    — .fettle.toml, .fettle-ignore (skipped if present)
 2. Claude Code         — ~/.claude/plugins/fettle symlink to the checkout
 3. OpenCode            — plugin registration in ~/.config/opencode/config.json
-4. Commit-time guards  — .pre-commit-config.yaml + `pre-commit install`
-5. --install-tools     — pinned ruff/semgrep/pre-commit via uv (never inside
+4. Codex CLI           — hook registration in ~/.codex/hooks.json
+5. Gemini CLI          — hook registration in ~/.gemini/settings.json
+6. Commit-time guards  — .pre-commit-config.yaml + `pre-commit install`
+7. --install-tools     — pinned ruff/semgrep/pre-commit via uv (never inside
                          hooks; that was audit finding D6)
 
 Every step reports ok / created / skipped / manual-action-needed. Exit 0
@@ -129,6 +131,129 @@ def init_opencode(dry_run: bool) -> list[Step]:
     return [Step("opencode", "created", f"registered plugin in {config_path} — restart OpenCode")]
 
 
+def _dispatcher_command() -> str:
+    """The hook command every host runs — identical across agents."""
+    return f"bash {_plugin_root()}/fettle/run.sh dispatcher.py"
+
+
+def _merge_hook_events(existing: dict, events: dict[str, dict]) -> bool:
+    """Merge fettle hook entries into a Claude-style ``hooks`` mapping.
+
+    ``events`` maps event name -> matcher-group entry. Idempotent: an event
+    whose groups already invoke the fettle dispatcher is left untouched.
+    Returns True when anything changed.
+    """
+    command = _dispatcher_command()
+    changed = False
+    for event, entry in events.items():
+        groups = existing.get(event)
+        if not isinstance(groups, list):
+            groups = []
+        already = any(
+            isinstance(g, dict) and any(
+                isinstance(h, dict) and command == h.get("command")
+                for h in (g.get("hooks") or [])
+            )
+            for g in groups
+        )
+        if already:
+            continue
+        groups.append(entry)
+        existing[event] = groups
+        changed = True
+    return changed
+
+
+def init_codex(dry_run: bool) -> list[Step]:
+    """Register the dispatcher in ~/.codex/hooks.json (Stage 13).
+
+    Codex's hook wire is Claude-compatible; hooks.json uses the same
+    event/matcher schema as the inline [hooks] table in config.toml.
+    JSON is used because the stdlib cannot write TOML. Hooks only fire
+    when `features.hooks = true` in config.toml — reported as an action.
+    """
+    codex_dir = Path.home() / ".codex"
+    if not codex_dir.is_dir():
+        return [Step("codex", "skipped", "~/.codex not found — Codex CLI not installed")]
+    if not _is_clone_mode():
+        return [Step("codex", "action", "hooks require a git checkout — clone fettle and re-run init")]
+
+    command = _dispatcher_command()
+    hooks_path = codex_dir / "hooks.json"
+    try:
+        config = json.loads(hooks_path.read_text()) if hooks_path.is_file() else {}
+        if not isinstance(config, dict):
+            raise ValueError("hooks.json is not an object")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [Step("codex", "action",
+                     f"could not parse {hooks_path} ({exc}) — add fettle hooks manually")]
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    events = {
+        "PreToolUse": {"matcher": "Write|Edit|Bash",
+                       "hooks": [{"type": "command", "command": command, "timeout": 10}]},
+        "PostToolUse": {"matcher": "Write|Edit|Bash|Read",
+                        "hooks": [{"type": "command", "command": command, "timeout": 15}]},
+        "Stop": {"hooks": [{"type": "command", "command": command, "timeout": 60}]},
+    }
+    action = Step("codex-enable", "action",
+                  "ensure `[features] hooks = true` in ~/.codex/config.toml — hooks are off by default")
+    if not _merge_hook_events(hooks, events):
+        return [Step("codex", "ok", f"hooks already registered in {hooks_path}"), action]
+    if dry_run:
+        return [Step("codex", "created", f"(dry-run) would register hooks in {hooks_path}"), action]
+    config["hooks"] = hooks
+    hooks_path.write_text(json.dumps(config, indent=2) + "\n")
+    return [Step("codex", "created", f"registered hooks in {hooks_path}"), action]
+
+
+def init_gemini(dry_run: bool) -> list[Step]:
+    """Register the dispatcher in ~/.gemini/settings.json (Stage 13).
+
+    Gemini events: BeforeTool/AfterTool/AfterAgent; matchers use Gemini's
+    tool vocabulary; timeouts are in MILLISECONDS (unlike Claude/Codex).
+    """
+    gemini_dir = Path.home() / ".gemini"
+    if not gemini_dir.is_dir():
+        return [Step("gemini", "skipped", "~/.gemini not found — Gemini CLI not installed")]
+    if not _is_clone_mode():
+        return [Step("gemini", "action", "hooks require a git checkout — clone fettle and re-run init")]
+
+    command = _dispatcher_command()
+    settings_path = gemini_dir / "settings.json"
+    try:
+        config = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
+        if not isinstance(config, dict):
+            raise ValueError("settings.json is not an object")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [Step("gemini", "action",
+                     f"could not parse {settings_path} ({exc}) — add fettle hooks manually")]
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+
+    def _entry(timeout_ms: int) -> dict:
+        return {"name": "fettle", "type": "command", "command": command, "timeout": timeout_ms}
+
+    events = {
+        "BeforeTool": {"matcher": "run_shell_command|write_file|replace",
+                       "hooks": [_entry(10000)]},
+        "AfterTool": {"matcher": "run_shell_command|write_file|replace|read_file",
+                      "hooks": [_entry(15000)]},
+        "AfterAgent": {"hooks": [_entry(60000)]},
+    }
+    if not _merge_hook_events(hooks, events):
+        return [Step("gemini", "ok", f"hooks already registered in {settings_path}")]
+    if dry_run:
+        return [Step("gemini", "created", f"(dry-run) would register hooks in {settings_path}")]
+    config["hooks"] = hooks
+    settings_path.write_text(json.dumps(config, indent=2) + "\n")
+    return [Step("gemini", "created", f"registered hooks in {settings_path}")]
+
+
 def init_pre_commit(repo_root: Path, dry_run: bool) -> list[Step]:
     steps = []
     config_path = repo_root / ".pre-commit-config.yaml"
@@ -213,6 +338,8 @@ def run_init(repo_root: Path, *, tools: bool = False, dry_run: bool = False) -> 
     steps += init_repo_files(repo_root, dry_run)
     steps += init_claude_code(dry_run)
     steps += init_opencode(dry_run)
+    steps += init_codex(dry_run)
+    steps += init_gemini(dry_run)
     steps += init_pre_commit(repo_root, dry_run)
     if tools:
         steps += install_tools(dry_run)

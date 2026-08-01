@@ -38,8 +38,13 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
         const result = JSON.parse(stdout || "{}")
         const output = result.hookSpecificOutput ?? {}
         resolve({
-          blocked: code === 2 || output.permissionDecision === "deny",
-          message: output.permissionDecisionReason ?? output.additionalContext ?? stderr.trim(),
+          blocked: code === 2 || result.decision === "block" || output.permissionDecision === "deny",
+          message:
+            result.reason ??
+            output.permissionDecisionReason ??
+            output.additionalContext ??
+            result.systemMessage ??
+            stderr.trim(),
         })
       } catch {
         resolve({ blocked: false, message: stderr.trim() || "Fettle returned invalid output" })

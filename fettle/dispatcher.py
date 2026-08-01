@@ -97,8 +97,13 @@ def _event_budget_ms(config: dict, event: str) -> int:
 
 
 def _empty_output(event_name: str = "") -> str:
-    hso = {"hookEventName": event_name} if event_name else {}
-    return json.dumps({"hookSpecificOutput": hso}, separators=(",", ":"))
+    # Codex's Stop output wire has no hookSpecificOutput field and rejects
+    # unknown fields — an empty object is the universal no-op (Stage 13).
+    if event_name in ("Stop", "SubagentStop") or not event_name:
+        return json.dumps({}, separators=(",", ":"))
+    return json.dumps(
+        {"hookSpecificOutput": {"hookEventName": event_name}}, separators=(",", ":")
+    )
 
 
 def main() -> int:

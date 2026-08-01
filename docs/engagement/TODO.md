@@ -94,6 +94,18 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S12.3 `fettle telemetry status|show|send` + [telemetry] in schema
         + docs/CONFIG.md section
   - [x] S12.4 tests (test_telemetry.py, incl. live-HTTP send) + work note
+- [x] C13. Stage 13 — full hook parity: codex / gemini / opencode
+  - [x] S13.1 inbound translators fettle/agents/{codex,gemini}.py +
+        four-agent conformance fixtures (opencode already shipped, WP-140)
+  - [x] S13.2 event-correct output wire: permissionDecision PreToolUse-only,
+        Stop/SubagentStop without hookSpecificOutput (Codex strict parser),
+        top-level decision/reason on every block; opencode plugin updated
+  - [x] S13.3 fettle init: ~/.codex/hooks.json + ~/.gemini/settings.json
+        registration (idempotent merges; gemini timeouts in ms;
+        codex features.hooks surfaced as action)
+  - [x] S13.4 outbound runners codex/gemini/opencode (shared subprocess
+        core, fail-visible), registry + doctor/UAT probes, FETTLE_EVAL_RUNNER
+  - [x] S13.5 tests + docs + work note (capability matrix)
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
