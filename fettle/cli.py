@@ -577,6 +577,65 @@ def cmd_worktree(args: argparse.Namespace) -> None:
     sys.exit(0)
 
 
+def cmd_work(args: argparse.Namespace) -> None:
+    """Work items + claims (WP5, Stage 4).
+
+    Exit codes: 0 = ok, 1 = error findings / refused claim, 2 = usage/env error.
+    """
+    from fettle.paths import find_repo_root
+    from fettle.work_items import (
+        claim_item, discover_work_items, lint_work_items, load_claims, release_item,
+    )
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+
+    if args.work_action == "claim":
+        session = os.environ.get("CLAUDE_SESSION_ID", "") or f"cli-{os.getpid()}"
+        err = claim_item(root, args.item_id, session, root)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✓ claimed {args.item_id}")
+        sys.exit(0)
+
+    if args.work_action == "release":
+        err = release_item(root, args.item_id)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✓ released {args.item_id}")
+        sys.exit(0)
+
+    # default action: list (items + lint findings + claim state)
+    claims = load_claims(root)
+    items = [i for i, _ in discover_work_items(root) if i is not None]
+    findings = lint_work_items(root)
+    if args.json:
+        print(json.dumps({
+            "items": [{
+                "id": i.item_id, "status": i.status, "path": i.path,
+                "spec": i.spec, "claimed_by": claims.get(i.item_id, {}).get("session_id", ""),
+            } for i in items],
+            "findings": findings,
+        }, indent=2))
+    else:
+        if not items:
+            print("No work items found (markdown files with 'fettle-work-item' frontmatter).")
+        for i in items:
+            claim = claims.get(i.item_id, {})
+            claimed = f"  ← claimed by {claim['session_id']}" if claim else ""
+            spec = f"  spec:{i.spec}" if i.spec else ""
+            print(f"  {i.item_id:<28} {i.status:<8} {i.path}{spec}{claimed}")
+        for f in findings:
+            print(f"  [{f['severity']}] {f['file']}:{f['line']} — {f['message']}")
+            print(f"      fix: {f['fix']}")
+    sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     parser.add_argument("--version", action="version", version=f"fettle {_version()}")
@@ -688,6 +747,16 @@ def main() -> None:
                              help="discard uncommitted changes (destructive)")
     p_wt.set_defaults(wt_action="list", json=False)
 
+    p_work = subparsers.add_parser("work", help="Work items + claims (WP5)")
+    work_sub = p_work.add_subparsers(dest="work_action")
+    p_work_list = work_sub.add_parser("list", help="List work items with claim state")
+    p_work_list.add_argument("--json", action="store_true", help="JSON output")
+    p_work_claim = work_sub.add_parser("claim", help="Claim a work item for this checkout")
+    p_work_claim.add_argument("item_id")
+    p_work_release = work_sub.add_parser("release", help="Release a claimed work item")
+    p_work_release.add_argument("item_id")
+    p_work.set_defaults(work_action="list", json=False)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -710,6 +779,7 @@ def main() -> None:
         "lsp": cmd_lsp,
         "spec": cmd_spec,
         "worktree": cmd_worktree,
+        "work": cmd_work,
     }
     commands[args.command](args)
 

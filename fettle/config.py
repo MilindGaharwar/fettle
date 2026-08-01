@@ -164,6 +164,12 @@ DEFAULTS: dict[str, Any] = {
             "enabled": False,
             "mode": "advisory",
         },
+        # Stage 4 (S4.3): claim-before-work in fettle-managed worktrees
+        # (Wayfinder invariant). Main-worktree edits always exempt.
+        "claims": {
+            "enabled": False,
+            "mode": "advisory",
+        },
         "complexity": {
             "enabled": True,
             "enforce": False,

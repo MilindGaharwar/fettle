@@ -38,6 +38,7 @@ from fettle.artifact_gate import run_check as artifact_gate_run
 from fettle.release_gate import run_check as release_gate_run
 from fettle.deploy_gate import run_check as deploy_gate_run
 from fettle.bdd_gate import run_check as bdd_gate_run
+from fettle.claims_gate import run_check as claims_gate_run
 from fettle.tdd_gate import run_check as tdd_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
@@ -171,6 +172,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Write", "Edit"}),
         order=16,
         budget_ms=200,
+    ),
+    # PostToolUse — claim-before-work in fettle worktrees (Stage 4, S4.3)
+    CheckSpec(
+        name="claims_gate",
+        run=claims_gate_run,
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=17,
+        budget_ms=100,
     ),
     # PostToolUse — complexity (Python only)
     CheckSpec(
