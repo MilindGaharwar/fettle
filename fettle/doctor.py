@@ -99,7 +99,10 @@ def check_commit_guards() -> list[dict]:
     for stage, hook_name in (("commit", "pre-commit"), ("push", "pre-push")):
         if stage == "push" and "pre-push" not in config_text:
             continue  # repo doesn't declare push-stage hooks
-        hook = repo_root / ".git" / "hooks" / hook_name
+        # hooks live in the shared git dir — in a linked worktree .git is a file
+        from fettle.worktrees import git_common_dir
+        git_dir = git_common_dir(str(repo_root)) or (repo_root / ".git")
+        hook = git_dir / "hooks" / hook_name
         try:
             wired = hook.is_file() and "pre-commit" in hook.read_text()
         except OSError:

@@ -530,6 +530,53 @@ def cmd_spec(args: argparse.Namespace) -> None:
     sys.exit(1 if errors else 0)
 
 
+def cmd_worktree(args: argparse.Namespace) -> None:
+    """Per-work-item git worktrees (WP7, Stage 4).
+
+    Exit codes: 0 = ok, 1 = git-level failure, 2 = usage/environment error.
+    """
+    from fettle.config import load_config
+    from fettle.paths import find_repo_root
+    from fettle.worktrees import create_worktree, list_worktrees, remove_worktree
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+    config = load_config(root)
+
+    if args.wt_action == "create":
+        path, err = create_worktree(root, args.item_id, config)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(2 if "invalid item id" in err else 1)
+        print(f"✓ worktree ready: {path} (branch fettle/{args.item_id})")
+        sys.exit(0)
+
+    if args.wt_action == "remove":
+        err = remove_worktree(root, args.item_id, config, force=args.force)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✓ worktree {args.item_id} removed (branch fettle/{args.item_id} kept)")
+        sys.exit(0)
+
+    # default action: list
+    rows, err = list_worktrees(root, config)
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(rows, indent=2))
+    else:
+        for r in rows:
+            tag = f"[{r['item']}]" if r.get("managed") else "(main)" if not r.get("bare") else "(bare)"
+            dirty = " — DIRTY" if r.get("dirty") else ""
+            print(f"  {tag:<20} {r.get('branch', '?'):<28} {r['path']}{dirty}")
+    sys.exit(0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     parser.add_argument("--version", action="version", version=f"fettle {_version()}")
@@ -629,6 +676,18 @@ def main() -> None:
     p_spec_cov.add_argument("--json", action="store_true", help="JSON evidence artifact")
     p_spec.set_defaults(spec_action="lint")
 
+    p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
+    wt_sub = p_wt.add_subparsers(dest="wt_action")
+    p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
+    p_wt_create.add_argument("item_id", help="kebab-case work item id")
+    p_wt_list = wt_sub.add_parser("list", help="List worktrees (managed ones annotated)")
+    p_wt_list.add_argument("--json", action="store_true", help="JSON output")
+    p_wt_remove = wt_sub.add_parser("remove", help="Remove a managed worktree (refuses when dirty)")
+    p_wt_remove.add_argument("item_id", help="work item id")
+    p_wt_remove.add_argument("--force", action="store_true",
+                             help="discard uncommitted changes (destructive)")
+    p_wt.set_defaults(wt_action="list", json=False)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -650,6 +709,7 @@ def main() -> None:
         "suppressions": cmd_suppressions,
         "lsp": cmd_lsp,
         "spec": cmd_spec,
+        "worktree": cmd_worktree,
     }
     commands[args.command](args)
 

@@ -1037,6 +1037,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "worktrees": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "default": ".fettle/worktrees"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -256,6 +256,10 @@ DEFAULTS: dict[str, Any] = {
     # UNDER this repo's config (defaults → org → repo → env). Cache-only in
     # hooks; `fettle policy sync` fetches.
     "extends": {"url": "", "sha256": ""},
+    # WP7 (Stage 4): worktree spine — one worktree per work item, branch
+    # fettle/<item-id>. Root is inside the checkout (gitignored, scanners
+    # skip .fettle).
+    "worktrees": {"root": ".fettle/worktrees"},
 }
 
 CONFIG_FILENAME = ".fettle.toml"

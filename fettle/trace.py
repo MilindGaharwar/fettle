@@ -43,7 +43,8 @@ def _repo_name(file: str) -> str:
     try:
         probe = os.path.dirname(os.path.abspath(file)) if file else os.getcwd()
         while probe and probe != os.path.dirname(probe):
-            if os.path.isdir(os.path.join(probe, ".git")) or \
+            # .git may be a file (linked worktree), not only a dir
+            if os.path.exists(os.path.join(probe, ".git")) or \
                os.path.isfile(os.path.join(probe, ".fettle.toml")):
                 return os.path.basename(probe)
             probe = os.path.dirname(probe)
