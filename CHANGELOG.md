@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (v1.3 — Enterprise Operations arc)
+## v1.3.0 — Evidence Loop
 
 - **Stage 8 — Remote CI verification gate**: `[gates.ci]` + `fettle ci
   status|wait` — born from a real incident: remote CI was red for eight

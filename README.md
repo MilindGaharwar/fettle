@@ -34,12 +34,14 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.2.0 “Independence”** — real package namespace, agent
-abstraction with per-agent conformance contracts, one-command setup,
-validated config schema, CI parity across GitHub/GitLab/pre-commit — on top
-of v1.0's enterprise integration (SonarQube/Black Duck/Pact adapters,
-security review, threat modeling, deployment safety, mutation testing,
-requirements traceability). Roadmap: [enterprise product plan](docs/fettle-enterprise-product-plan.md).
+**Status: v1.3.0 “Evidence Loop”** — living specs with scenario-coverage
+gating, agent worktree infrastructure with work-item claims, agentic UAT
+with reconciled verdicts, an on-demand semantic link graph
+(req → scenario → test → verdict), functional-test verification, and a
+remote-CI verification gate — a pushed commit is not done until its remote
+verdict is green. On top of v1.2's real package namespace, agent
+abstraction, validated config schema, and CI parity across
+GitHub/GitLab/pre-commit. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What It Does
 
@@ -455,7 +457,7 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.0.1 | Trustworthy core (audit fixes D1–D9, exit-code contract, `--version`) | **Shipped** |
 | v1.0.2 | finefettle on PyPI, Trusted Publishing, commit-time guards | **Shipped** |
 | v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **Shipped** |
-| v1.3.0 | Enterprise operations: central policy, audit/org reporting, JUnit, compliance evidence | **In progress** — WP-144/145 shipped |
+| v1.3.0 | Evidence Loop: central policy, org reporting, living specs + BDD gate, agent worktrees, agentic UAT, semantic links, verify + remote-CI gates | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.
