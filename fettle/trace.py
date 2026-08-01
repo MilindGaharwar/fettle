@@ -98,6 +98,21 @@ def log_decision(
         return False
 
 
+def probe_writable() -> tuple[bool, str]:
+    """Check the audit trace is appendable — doctor's audit-log health probe.
+
+    Returns (ok, path-or-error). Loss of the audit log must be detectable
+    from outside the log itself.
+    """
+    try:
+        path = _get_trace_path()
+        with open(path, "a"):
+            pass
+        return True, path
+    except OSError as exc:
+        return False, str(exc)
+
+
 def read_tail(max_bytes: int = 65536) -> list[dict]:
     """Parse trace entries from the last `max_bytes` of the trace file.
 

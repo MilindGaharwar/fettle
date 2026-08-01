@@ -152,12 +152,68 @@ def check_org_policy() -> list[dict]:
     return checks
 
 
+def check_dispatch_health(days: int = 7) -> list[dict]:
+    """Surface dispatcher fail-open events and audit-trace writability (Stage 0).
+
+    Check crashes and budget kills are fail-open in-session by design; doctor
+    is where that accumulated debt becomes visible and actionable.
+    """
+    import os
+    import time
+    from collections import Counter
+    checks: list[dict] = []
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fettle.trace import probe_writable, read_tail
+
+    ok, detail = probe_writable()
+    checks.append({
+        "name": "audit-trace",
+        "required": False,
+        "ok": ok,
+        "detail": f"writable at {detail}" if ok
+                  else f"NOT writable ({detail}) — hook decisions are not being recorded",
+    })
+
+    cutoff = time.time() - days * 86400
+    by_status: Counter = Counter()
+    failing: Counter = Counter()
+    for entry in read_tail(max_bytes=262144):
+        if entry.get("hook") != "dispatcher":
+            continue
+        if float(entry.get("ts", 0)) < cutoff:
+            continue
+        status = entry.get("status", "")
+        by_status[status] += 1
+        if status == "check_error":
+            for finding in entry.get("findings", []):
+                name = finding.get("check", "")
+                if name:
+                    failing[name] += 1
+
+    if not by_status:
+        checks.append({
+            "name": "dispatch", "required": False, "ok": True,
+            "detail": f"no fail-open events in the last {days} days",
+        })
+    else:
+        parts = [f"{status}×{count}" for status, count in by_status.most_common()]
+        if failing:
+            worst = ", ".join(f"{name} ({count}×)" for name, count in failing.most_common(3))
+            parts.append(f"failing checks: {worst}")
+        checks.append({
+            "name": "dispatch", "required": False, "ok": False,
+            "detail": f"fail-open events in the last {days} days — " + "; ".join(parts),
+        })
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    checks = check_environment() + check_commit_guards() + check_org_policy()
+    checks = (check_environment() + check_commit_guards() + check_org_policy()
+              + check_dispatch_health())
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:

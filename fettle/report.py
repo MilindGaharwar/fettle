@@ -53,6 +53,19 @@ def compute_effectiveness(days: int = 30) -> dict:
 
     tool_errors = [e for e in recent if e.get("status") == "tool_error"]
 
+    # Stage-0 failure visibility: dispatcher fail-open events (check crashes,
+    # budget kills, input/config/registry failures) are part of effectiveness —
+    # a gate that silently never runs has an effectiveness of zero.
+    dispatch_entries = [e for e in recent if e.get("hook") == "dispatcher"]
+    dispatch_failures = Counter(e.get("status", "unknown") for e in dispatch_entries)
+    failing_checks: Counter = Counter()
+    for e in dispatch_entries:
+        if e.get("status") == "check_error":
+            for f in e.get("findings", []):
+                name = f.get("check", "")
+                if name:
+                    failing_checks[name] += 1
+
     pass_rate = by_status.get("pass", 0) / max(total, 1) * 100
     violation_rate = by_status.get("violation", 0) / max(total, 1) * 100
     error_rate = len(tool_errors) / max(total, 1) * 100
@@ -70,6 +83,8 @@ def compute_effectiveness(days: int = 30) -> dict:
         "top_violations": by_code.most_common(10),
         "most_affected_files": by_file.most_common(5),
         "tool_errors": [{"tool": e.get("tool"), "ts": e.get("timestamp")} for e in tool_errors[:5]],
+        "dispatch_failures": dict(dispatch_failures),
+        "failing_checks": failing_checks.most_common(5),
     }
 
 
@@ -192,6 +207,13 @@ def main() -> None:
         print("\n  Recent tool errors:")
         for err in report["tool_errors"][:3]:
             print(f"    • {err['tool']} at {err['ts']}")
+
+    if report.get("dispatch_failures"):
+        print("\n  Dispatcher fail-open events (checks that silently didn't run):")
+        for status, count in sorted(report["dispatch_failures"].items()):
+            print(f"    • {status}: {count}×")
+        for name, count in report.get("failing_checks", []):
+            print(f"    • failing check: {name} ({count}×)")
 
     if candidates["recalibrate_candidates"]:
         print("\n  Recalibrate candidates (always suppressed):")
