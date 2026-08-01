@@ -1,6 +1,6 @@
 # Fettle for VS Code
 
-Real-time quality enforcement for AI-assisted development. Surfaces ruff, semgrep, complexity, and custom rule findings as VS Code diagnostics — the same checks that run in Claude Code and OpenCode hooks.
+Real-time quality enforcement for AI-assisted development. Surfaces ruff, semgrep, complexity, and custom rule findings as VS Code diagnostics — the same checks that run in Claude Code, Codex CLI, Gemini CLI, and OpenCode hooks.
 
 ## Features
 

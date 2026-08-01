@@ -25,6 +25,7 @@ This roadmap is committed before implementation begins and updated as releases s
 | v1.1.0 | **Governance & agent audit** — compliance mapping, audit trail, cross-repo promotion | WP-127..WP-132 | Planned |
 | v1.2.0 | **Independence** — package restructure, agent abstraction, PyPI distribution, config schema | WP-139..WP-143 | **Shipped** — Homebrew tap outstanding ([enterprise plan](fettle-enterprise-product-plan.md)) |
 | v1.3.0 | **Enterprise operations + evidence loop** — central policy, audit reporting, BDD gate, agent infrastructure, agentic UAT, semantic links, verify gate, remote CI gate | WP-144..WP-145, WP-154, engagement stages 0–8 | **Shipped** — WP-146..148 moved to v1.3.x (see consolidated roadmap) |
+| v1.3.1 | **Parity & provenance** — four-agent hook parity (Claude Code, Codex, Gemini, OpenCode), SLSA provenance + CycloneDX SBOM, compliance evidence (CWE/ASVS/SOC 2), opt-in telemetry | WP-146..WP-148, engagement stages 10–13 | **Shipped** |
 | v1.4.0 | **Product surface** — LSP hardening, rule marketplace, Windows, docs site, noise SLOs, semantic impact gate | WP-149..WP-153, WP-155 | Planned |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.

@@ -1,28 +1,40 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/wordmark-dark.svg">
-    <img src="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/wordmark-light.svg" alt="fettle" height="88">
+    <img src="https://raw.githubusercontent.com/MilindGaharwar/fettle/main/assets/wordmark-light.svg" alt="fettle" height="160">
   </picture>
 </p>
 
-[![PyPI](https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen)](https://pypi.org/project/finefettle/)
-[![CI](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml/badge.svg)](https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://pypi.org/project/finefettle/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+<h3 align="center">The quality harness for AI-generated code</h3>
+
+<p align="center"><b>Enforcement at the moment of creation — not days later in code review.</b></p>
+
+<p align="center">
+  <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
+  <a href="https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml"><img src="https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="#60-second-start">Quick start</a> ·
+  <a href="#why-fettle">Why Fettle</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="docs/CONFIG.md">Configuration</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a>
+</p>
 
 > **fettle** *(v.)* — foundry term: to trim and clean a rough casting fresh
 > from the mold. *"In fine fettle"* — in excellent condition.
-
-**The quality harness for AI-generated code — enforcement at the moment of
-creation, not days later in code review.**
 
 AI agents write code at machine speed; your review process still runs at
 human speed. Every linter, CI gate, and review bot you already have fires
 *after* the agent session that produced the bug has ended — the context is
 gone, and the same antipattern gets written again tomorrow. Fettle hooks the
-agent's own tool calls (Claude Code, OpenCode) and runs static analysis,
-process gates, and **incident-derived LLM-antipattern rules** on every edit,
-*inside the session*, where the agent can still fix it with full context.
+agent's own tool calls (**Claude Code, Codex CLI, Gemini CLI, OpenCode**)
+and runs static analysis, process gates, and **incident-derived
+LLM-antipattern rules** on every edit, *inside the session*, where the agent
+can still fix it with full context.
 
 ```text
   agent writes code ─▶ Fettle gate fires ─▶ finding lands in-session ─▶ agent fixes it
@@ -39,14 +51,18 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.3.0 “Evidence Loop”** — living specs with scenario-coverage
-gating, agent worktree infrastructure with work-item claims, agentic UAT
-with reconciled verdicts, an on-demand semantic link graph
-(req → scenario → test → verdict), functional-test verification, and a
-remote-CI verification gate — a pushed commit is not done until its remote
-verdict is green. On top of v1.2's real package namespace, agent
-abstraction, validated config schema, and CI parity across
-GitHub/GitLab/pre-commit. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: v1.3.1 “Parity & Provenance”** — full hook parity across four
+agents (Claude Code, Codex CLI, Gemini CLI, OpenCode: one harness, one
+policy, conformance-tested translators), Sigstore-signed SLSA provenance
+and a CycloneDX SBOM on every release, compliance evidence reporting
+(CWE / OWASP ASVS / SOC 2 per rule, joined with the audit trail), and
+privacy-first opt-in telemetry that only an org's digest-pinned central
+policy can enable. On top of v1.3.0's evidence loop — living specs with
+scenario-coverage gating, agent worktrees with work-item claims, agentic
+UAT with reconciled verdicts, a semantic link graph
+(req → scenario → test → verdict), and a remote-CI verification gate: a
+pushed commit is not done until its remote verdict is green.
+Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What It Does
 
@@ -114,6 +130,10 @@ this model — Fettle is the assurance layer for it.)
 
 ### What's genuinely different
 
+- **One harness, four agents.** Claude Code, Codex CLI, Gemini CLI, and
+  OpenCode hook events all normalize to one event model through
+  conformance-tested translators — switch agents (or run several) without
+  changing a line of policy.
 - **Incident-derived rules.** `/fettle:learn` turns a real production incident
   into a semgrep rule with test fixtures and an incident citation. The rules
   catalog isn't a generic style guide — every LLM-antipattern rule traces to
@@ -448,7 +468,7 @@ cd ~/projects/fettle
 .venv/bin/python -m pytest tests/ fettle/tests/ -q
 ```
 
-**1150+ tests** across 120+ test files covering all checks, adapters, agent
+**1,500+ tests** across 110+ test files covering all checks, adapters, agent
 translators, and infrastructure. All adapter tests use mocked tool outputs —
 no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 
@@ -469,6 +489,7 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.0.2 | finefettle on PyPI, Trusted Publishing, commit-time guards | **Shipped** |
 | v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **Shipped** |
 | v1.3.0 | Evidence Loop: central policy, org reporting, living specs + BDD gate, agent worktrees, agentic UAT, semantic links, verify + remote-CI gates | **Shipped** |
+| v1.3.1 | Parity & Provenance: four-agent hook parity, SLSA provenance + SBOM, compliance evidence, opt-in telemetry | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.

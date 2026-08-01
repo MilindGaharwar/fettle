@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.1 — Parity & Provenance
 
 - **Stage 13 — full hook parity for Codex CLI, Gemini CLI, and OpenCode**:
   - *Inbound*: new `fettle.agents.codex` and `fettle.agents.gemini`
