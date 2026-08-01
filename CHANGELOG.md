@@ -2,6 +2,15 @@
 
 ## Unreleased (v1.3 — Enterprise Operations arc)
 
+- **Stage 3 — Living specs (Pillar 1 seed)**: markdown spec format with
+  frontmatter (`fettle-spec` key; id/status/scope), numbered requirements,
+  and Given/When/Then scenarios that trace to requirements. New `fettle
+  spec lint` (format errors with concrete fixes), `fettle spec list`, and
+  `fettle spec coverage` (evidence artifact: which scenarios have a
+  trace-marked test via `# traces: <spec-id>/S<n>`). New `[gates.bdd]`
+  (off by default, advisory|enforce): editing an implementation file
+  inside an active spec's scope surfaces scenarios that have no traced
+  test — deterministic, never runs tests.
 - **Stage 2 (WP4) — Config dependency model**: no invalid config states.
   Validation now enforces per-gate mode vocabularies (a mode a gate's code
   doesn't honor — e.g. `tdd.mode = "enforce"`, which silently acted as

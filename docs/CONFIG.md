@@ -88,6 +88,10 @@ spec_patterns = ["docs/*spec*.md", "docs/**/*spec*.md", "docs/*strategy*.md", "d
 [gates.tests]         # untested-code Stop gate + pre-commit warning — OFF by default
 enabled = false
 
+[gates.bdd]           # living-spec scenario coverage (see fettle spec) — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+
 [severity]
 error_rules = ["BLE001", "S110", "S608", "S701"]
 warning_prefixes = ["SIM", "UP"]

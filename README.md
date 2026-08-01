@@ -208,6 +208,7 @@ fettle config --validate
 fettle policy sync|status
 fettle report [--org] [--days N]
 fettle explain [--last N]
+fettle spec [lint|list|coverage] [--json]
 fettle baseline create|update
 fettle doctor
 fettle lsp
@@ -284,6 +285,10 @@ enabled = false
 mode = "advisory"               # advisory only in v0.9
 accept_preexisting_tests = true
 
+[gates.bdd]
+enabled = false
+mode = "advisory"               # advisory | enforce — spec scenario coverage (Stage 3)
+
 [gates.plan]
 enabled = false
 threshold = 3                   # Files changed before plan required
@@ -329,6 +334,7 @@ PostToolUse ──→ dispatcher.py:
               → lean_sniffers (over-engineering detection)
               → bash_audit (structured event logging)
               → tdd_gate (records test/impl edits)
+              → bdd_gate (spec scenario coverage)
               → loop_detect + scope_creep + discipline_link
     │
     ▼

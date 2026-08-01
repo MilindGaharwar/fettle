@@ -12,7 +12,7 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 
 ## Phase B — Work-package analysis & design (one doc + work note each)
 - [x] B1. WP1 Opus-5 readiness → 06-wp1-frontier-agent-readiness.md (review + backlog)
-- [ ] B2. WP2 Functional testing architecture
+- [x] B2. WP2 Functional testing architecture → 08-stage3-spec-format-and-wp2.md (implemented, Stage 3)
 - [ ] B3. WP3 Agentic UAT design (highest priority)
 - [x] B4. WP4 Configuration / feature dependency model → 07-wp4-config-dependency-model.md (implemented, Stage 2)
 - [ ] B5. WP5 Coordination substrate evaluation
@@ -30,6 +30,13 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
         pr_review, cargo check) — exit 2 / incomplete banners / trace entries
   - [x] S0.4 health_telemetry write-failure visibility (warn-once stderr)
   - [x] S0.5 fail-closed posture: mcp_trust denies on corrupt allowlist
+- [x] C2. Stage 2 — WP4 config dependency model (MODE_ENUMS, RANGES,
+      DEPENDENCIES, doctor check, schema regeneration; 17 tests)
+- [x] C3. Stage 3 — spec format + WP2 seed
+  - [x] S3.1 spec_model parser/lint + `fettle spec lint|list` (26 tests)
+  - [x] S3.2 scenario coverage + `fettle spec coverage` evidence (14 tests)
+  - [x] S3.3 `[gates.bdd]` scenario-coverage gate (10 tests)
+  - [x] S3.4 docs + work note
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
