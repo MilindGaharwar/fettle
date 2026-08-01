@@ -1065,6 +1065,46 @@
         }
       },
       "additionalProperties": false
+    },
+    "uat": {
+      "type": "object",
+      "properties": {
+        "surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "auto"
+          ]
+        },
+        "app_url": {
+          "type": "string",
+          "default": ""
+        },
+        "start_command": {
+          "type": "string",
+          "default": ""
+        },
+        "runner": {
+          "type": "string",
+          "default": "claude"
+        },
+        "timeout_s": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "mode": {
+          "type": "string",
+          "default": "report",
+          "enum": [
+            "report"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

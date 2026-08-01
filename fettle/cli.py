@@ -636,6 +636,45 @@ def cmd_work(args: argparse.Namespace) -> None:
     sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
 
 
+def cmd_uat(args: argparse.Namespace) -> None:
+    """Agentic UAT (WP3, Stage 5).
+
+    Exit codes: 0 = ok/ready, 1 = capability gaps, 2 = usage/environment error.
+    """
+    from fettle.config import load_config
+    from fettle.paths import find_repo_root
+    from fettle.uat.doctor import format_report, probe
+    from fettle.uat.surfaces import resolve_surfaces
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    root = str(repo_root)
+    config = load_config(root)
+
+    # default (and only, in S5.1) action: doctor
+    surfaces, err = resolve_surfaces(root, config)
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(2)
+    caps, err = probe(root, config)
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(2)
+    if args.json:
+        print(json.dumps({
+            "surfaces": surfaces,
+            "capabilities": [{
+                "surface": c.surface, "ready": c.ready, "detail": c.detail,
+                "why": c.why, "fix": c.fix, "manual": c.manual,
+            } for c in caps],
+        }, indent=2))
+    else:
+        print(format_report(surfaces, caps))
+    sys.exit(0 if all(c.ready for c in caps) else 1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     parser.add_argument("--version", action="version", version=f"fettle {_version()}")
@@ -757,6 +796,12 @@ def main() -> None:
     p_work_release.add_argument("item_id")
     p_work.set_defaults(work_action="list", json=False)
 
+    p_uat = subparsers.add_parser("uat", help="Agentic UAT (WP3)")
+    uat_sub = p_uat.add_subparsers(dest="uat_action")
+    p_uat_doc = uat_sub.add_parser("doctor", help="Surface detection + capability probe")
+    p_uat_doc.add_argument("--json", action="store_true", help="JSON output")
+    p_uat.set_defaults(uat_action="doctor", json=False)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -780,6 +825,7 @@ def main() -> None:
         "spec": cmd_spec,
         "worktree": cmd_worktree,
         "work": cmd_work,
+        "uat": cmd_uat,
     }
     commands[args.command](args)
 

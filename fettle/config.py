@@ -266,6 +266,17 @@ DEFAULTS: dict[str, Any] = {
     # fettle/<item-id>. Root is inside the checkout (gitignored, scanners
     # skip .fettle).
     "worktrees": {"root": ".fettle/worktrees"},
+    # WP3 (Stage 5): agentic UAT — independent acceptance layer. Surfaces:
+    # auto-detected (cli/api/web/library) unless listed explicitly. mode is
+    # report-only in this stage.
+    "uat": {
+        "surfaces": ["auto"],
+        "app_url": "",
+        "start_command": "",
+        "runner": "claude",
+        "timeout_s": 1800,
+        "mode": "report",
+    },
 }
 
 CONFIG_FILENAME = ".fettle.toml"
