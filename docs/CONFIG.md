@@ -198,6 +198,30 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 | `FETTLE_LEAN_STATE_DIR` | Override the lean-review session state directory |
 | `MCP_ALLOWLIST_PATH` | Override the MCP trust-gate allowlist path (default `~/.config/fettle/mcp-allowlist.json`) |
 
+## Automation recipes (WP-163)
+
+Governed self-evolution runs on a schedule you own — recipes, not a daemon.
+The sensing and drafting steps are autonomous; anything that changes policy
+(`fettle rules promote`, `fettle ratchet promote`) stays a human command.
+
+```cron
+# Weekly digest: friction, emerging failure signatures, rule candidates,
+# ungoverned sessions (read-only)
+0 9 * * 1  cd /path/to/repo && fettle insights --days 7
+
+# Weekly proposal drafting: repeated failure signatures become quarantined
+# rule proposals in rules/proposed/ — never loaded by gates until promoted
+5 9 * * 1  cd /path/to/repo && fettle learn --from-trace --auto-save
+
+# Nightly supply-chain drift check
+0 2 * * *  cd /path/to/repo && fettle doctor --verify-hashes
+```
+
+Review loop: `fettle rules list` → complete any evidence-brief patterns →
+`fettle rules promote <id>` → load via `[rules].extra_dirs` → let
+`fettle ratchet` accumulate fire/FP evidence before `ratchet promote`
+moves it from advisory to enforce.
+
 ## State model
 
 - **Per-session state** (edit tracking, plan-gate counters, browser-test marker)

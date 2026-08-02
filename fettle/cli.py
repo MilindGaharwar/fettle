@@ -671,6 +671,21 @@ def cmd_topology(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def cmd_insights(args: argparse.Namespace) -> None:
+    """Read-only evidence digest (WP-163, C4)."""
+    from fettle.insights import compute_insights, render_insights
+    from fettle.paths import find_repo_root
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)",
+              file=sys.stderr)
+        sys.exit(2)
+    data = compute_insights(Path(repo_root), days=args.days)
+    print(json.dumps(data, indent=2) if args.json else render_insights(data))
+    sys.exit(0)
+
+
 def cmd_rules(args: argparse.Namespace) -> None:
     """Machine-drafted rule file lifecycle (WP-163, C3)."""
     from fettle.paths import find_repo_root
@@ -1174,6 +1189,12 @@ def main() -> None:
                              help="Why the rule is being demoted")
     p_rules.set_defaults(rules_action="list", json=False)
 
+    p_insights = subparsers.add_parser(
+        "insights", help="Read-only digest: friction, signatures, rule pipeline, lineage (WP-163)")
+    p_insights.add_argument("--days", type=int, default=7,
+                            help="Evidence window in days (default 7)")
+    p_insights.add_argument("--json", action="store_true", help="JSON output")
+
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
     p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
@@ -1256,6 +1277,7 @@ def main() -> None:
         "spawn": cmd_spawn,
         "topology": cmd_topology,
         "rules": cmd_rules,
+        "insights": cmd_insights,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
