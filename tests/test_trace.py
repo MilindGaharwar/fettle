@@ -35,3 +35,23 @@ def test_rotate_trace(tmp_path, monkeypatch):
     rotate_trace(max_entries=20)
     entries = get_recent_decisions(limit=100)
     assert len(entries) == 20
+
+
+def test_lineage_fields_empty_when_solo(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.delenv("FETTLE_PARENT_SESSION", raising=False)
+    monkeypatch.delenv("FETTLE_POLICY_CAPSULE", raising=False)
+    log_decision(hook="t", status="pass")
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["parent_session_id"] == ""
+    assert entry["capsule_digest"] == ""
+
+
+def test_lineage_fields_from_spawn_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("FETTLE_PARENT_SESSION", "parent-1")
+    monkeypatch.setenv("FETTLE_POLICY_CAPSULE", "/x/capsules/abcd1234abcd1234.json")
+    log_decision(hook="t", status="pass", session_id="child-1")
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["parent_session_id"] == "parent-1"
+    assert entry["capsule_digest"] == "abcd1234abcd1234"

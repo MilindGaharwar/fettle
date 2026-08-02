@@ -133,18 +133,22 @@ class TestClaims:
         assert "not claimed" in release_item(str(repo), "never-claimed")
 
 
-def _gate_ctx(cwd: Path, enabled: bool = True, mode: str = "advisory") -> HookContext:
+def _gate_ctx(cwd: Path, enabled: bool = True, mode: str = "advisory",
+              worktrees_cfg: dict | None = None, file_path: str = "") -> HookContext:
     hook_input = HookInput(
         hook_event_name="PostToolUse",
         tool_name="Edit",
-        tool_input={"file_path": str(cwd / "src.py")},
+        tool_input={"file_path": file_path or str(cwd / "src.py")},
         cwd=cwd,
         session_id="test-claims",
         raw={},
     )
+    config: dict = {"gates": {"claims": {"enabled": enabled, "mode": mode}}}
+    if worktrees_cfg is not None:
+        config["worktrees"] = worktrees_cfg
     return HookContext(
         input=hook_input,
-        config={"gates": {"claims": {"enabled": enabled, "mode": mode}}},
+        config=config,
         plugin_root=Path(__file__).parent.parent,
         hook_start_monotonic=0.0,
         global_deadline_monotonic=999999.0,
@@ -194,6 +198,48 @@ class TestClaimsGate:
         from fettle.dispatcher_registry import CHECKS
         spec = next(c for c in CHECKS if c.name == "claims_gate")
         assert spec.events == frozenset({"PostToolUse"})
+
+
+class TestWorktreeRequire:
+    """[worktrees].require (WP-162, A6) — main-worktree edits gated."""
+
+    REQUIRE = {"root": ".fettle/worktrees", "require": True,
+               "exempt_paths": ["docs/**", "**/*.md"]}
+
+    def test_require_off_main_worktree_exempt(self, repo):
+        from fettle.claims_gate import run_check
+        cfg = dict(self.REQUIRE, require=False)
+        assert run_check(_gate_ctx(repo, worktrees_cfg=cfg)).decision == Decision.ALLOW
+
+    def test_require_on_advises_on_code_edit(self, repo):
+        from fettle.claims_gate import run_check
+        result = run_check(_gate_ctx(repo, worktrees_cfg=self.REQUIRE))
+        assert result.decision == Decision.ADVISORY
+        assert "fettle worktree create" in result.message
+
+    def test_require_on_enforce_blocks(self, repo):
+        from fettle.claims_gate import run_check
+        result = run_check(_gate_ctx(repo, mode="enforce", worktrees_cfg=self.REQUIRE))
+        assert result.decision == Decision.BLOCK
+
+    def test_exempt_paths_allowed(self, repo):
+        from fettle.claims_gate import run_check
+        for path in ("docs/notes.txt", "README.md", "docs/a/b.rst"):
+            ctx = _gate_ctx(repo, worktrees_cfg=self.REQUIRE,
+                            file_path=str(repo / path))
+            assert run_check(ctx).decision == Decision.ALLOW, path
+
+    def test_linked_worktree_unaffected_by_require(self, repo):
+        from fettle.claims_gate import run_check
+        wt, _ = create_worktree(str(repo), "req-a", {})
+        assert claim_item(str(wt), "req-a", "sess-1", str(wt)) == ""
+        ctx = _gate_ctx(wt, worktrees_cfg=self.REQUIRE)
+        assert run_check(ctx).decision == Decision.ALLOW
+
+    def test_gate_disabled_wins(self, repo):
+        from fettle.claims_gate import run_check
+        ctx = _gate_ctx(repo, enabled=False, worktrees_cfg=self.REQUIRE)
+        assert run_check(ctx).decision == Decision.ALLOW
 
 
 class TestCLI:

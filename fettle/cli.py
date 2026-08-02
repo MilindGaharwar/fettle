@@ -380,6 +380,11 @@ def cmd_report(args: argparse.Namespace) -> None:
     """Effectiveness metrics from the audit trail; --org rolls up per repo (WP-145)."""
     from fettle.report import compute_effectiveness, compute_org_report
 
+    if getattr(args, "lineage", False):
+        from fettle.lineage_report import compute_lineage, render_lineage_tree
+        data = compute_lineage(args.days)
+        print(json.dumps(data, indent=2) if args.json else render_lineage_tree(data))
+        sys.exit(1 if "error" in data else 0)
     if getattr(args, "compliance", False):
         from fettle.compliance import compute_compliance_report, render_compliance_table
         data = compute_compliance_report(args.days)
@@ -980,6 +985,8 @@ def main() -> None:
     p_report.add_argument("--org", action="store_true", help="Aggregate per repo (cross-repo rollup)")
     p_report.add_argument("--compliance", action="store_true",
                           help="Evidence table: rules mapped to CWE / OWASP ASVS / SOC 2 (WP-146)")
+    p_report.add_argument("--lineage", action="store_true",
+                          help="Delegation-chain forest: who spawned whom, under which capsule (WP-158)")
     p_report.add_argument("--days", type=int, default=30, help="Reporting window (default 30)")
     p_report.add_argument("--json", action="store_true", help="JSON output")
 

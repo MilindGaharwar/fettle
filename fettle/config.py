@@ -295,7 +295,13 @@ DEFAULTS: dict[str, Any] = {
     # WP7 (Stage 4): worktree spine — one worktree per work item, branch
     # fettle/<item-id>. Root is inside the checkout (gitignored, scanners
     # skip .fettle).
-    "worktrees": {"root": ".fettle/worktrees"},
+    # require=true gates main-worktree edits (WP-162): non-exempt edits get
+    # "create a work-item worktree first", honoring gates.claims.mode.
+    "worktrees": {
+        "root": ".fettle/worktrees",
+        "require": False,
+        "exempt_paths": ["docs/**", "**/*.md"],
+    },
     # WP3 (Stage 5): agentic UAT — independent acceptance layer. Surfaces:
     # auto-detected (cli/api/web/library) unless listed explicitly. mode is
     # report-only in this stage.

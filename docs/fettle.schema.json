@@ -1158,6 +1158,20 @@
         "root": {
           "type": "string",
           "default": ".fettle/worktrees"
+        },
+        "require": {
+          "type": "boolean",
+          "default": false
+        },
+        "exempt_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "docs/**",
+            "**/*.md"
+          ]
         }
       },
       "additionalProperties": false

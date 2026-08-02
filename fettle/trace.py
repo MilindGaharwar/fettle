@@ -15,6 +15,9 @@ Schema v2 (WP-145 — stable, versioned; consumers must tolerate unknown keys):
     findings    list[dict]
     duration_ms float
     session_id  str
+    parent_session_id str — spawning session ('' when solo; WP-158)
+    capsule_digest    str — 16-hex digest of the governing policy capsule
+                            ('' when ungoverned; WP-158)
 
 v1 entries (no `schema`/`repo` keys) remain readable forever.
 """
@@ -53,6 +56,21 @@ def _repo_name(file: str) -> str:
     return ""
 
 
+def _lineage_fields() -> tuple[str, str]:
+    """(parent_session_id, capsule_digest) from the spawn env — never raises.
+
+    Set by `fettle spawn` (WP-157); empty for solo sessions. The digest is
+    the capsule filename stem — recorded even when unverified, so tampering
+    still leaves an audit trail pointing at the file.
+    """
+    parent = os.environ.get("FETTLE_PARENT_SESSION", "")
+    capsule = os.environ.get("FETTLE_POLICY_CAPSULE", "")
+    digest = ""
+    if capsule:
+        digest = os.path.splitext(os.path.basename(capsule))[0]
+    return parent, digest
+
+
 def log_decision(
     hook: str,
     status: str,
@@ -68,6 +86,7 @@ def log_decision(
     entry is lost, but the failure is surfaced once per process on stderr —
     loss of the audit log must never be silent.
     """
+    parent_session_id, capsule_digest = _lineage_fields()
     entry = {
         "schema": AUDIT_SCHEMA_VERSION,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -80,6 +99,8 @@ def log_decision(
         "findings": findings or [],
         "duration_ms": round(duration_ms, 2),
         "session_id": session_id,
+        "parent_session_id": parent_session_id,
+        "capsule_digest": capsule_digest,
     }
     try:
         trace_path = _get_trace_path()
