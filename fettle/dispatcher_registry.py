@@ -9,6 +9,7 @@ from __future__ import annotations
 from fettle.dispatcher_types import CheckSpec, HookContext
 
 # Phase 1 checks (pure logic, no subprocesses)
+from fettle.capsule_guard import run_check as capsule_guard_run
 from fettle.destructive_guard import run_check as destructive_guard_run
 from fettle.config_protect import run_check as config_protect_run
 from fettle.commit_message import run_check as commit_message_run
@@ -45,6 +46,15 @@ from fettle.tdd_gate import run_check as tdd_gate_run
 from fettle.verify_gate import run_check as verify_gate_run
 
 CHECKS: tuple[CheckSpec, ...] = (
+    # PreToolUse — first, every tool: delegated-policy tamper guard (Stage A)
+    CheckSpec(
+        name="capsule_guard",
+        run=capsule_guard_run,
+        events=frozenset({"PreToolUse"}),
+        tools=None,
+        order=1,
+        budget_ms=20,
+    ),
     # PreToolUse — Write|Edit
     CheckSpec(
         name="config_protect",

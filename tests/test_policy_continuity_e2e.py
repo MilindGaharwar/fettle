@@ -10,9 +10,8 @@ its parent. The capsule's policy must govern the child:
 2. a tampered capsule fails closed,
 3. FETTLE_GATE_MODE=off cannot override a verified capsule (E3).
 
-These tests are the evidence the Stage A slices exist to turn green. They
-carry xfail(strict=False) until slice A3 lands; the A3 commit removes the
-markers. The capsule documents are built BY HAND here (canonical JSON +
+These tests were born red (xfail until slice A3); A3 flipped them to hard
+assertions. The capsule documents are built BY HAND here (canonical JSON +
 sha256) so the wire format is pinned independently of policy_capsule.py.
 """
 
@@ -23,16 +22,9 @@ import os
 import subprocess
 import sys
 
-import pytest
-
 DISPATCHER = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "scripts", "dispatcher.py",
-)
-
-XFAIL_A3 = pytest.mark.xfail(
-    reason="red until Stage A slice A3 (capsule resolution in load_config)",
-    strict=False,
 )
 
 
@@ -89,27 +81,23 @@ def _run_child_dispatcher(cwd, env_extra: dict) -> tuple[int, dict | None]:
     return proc.returncode, out
 
 
-def _is_block(out: dict | None) -> bool:
-    if not isinstance(out, dict):
+def _is_block(rc: int, out: dict | None) -> bool:
+    """Dispatcher block wire contract: exit 2 + top-level decision:block."""
+    if rc != 2:
         return False
-    if out.get("decision") == "block":
-        return True
-    hso = out.get("hookSpecificOutput", {})
-    return isinstance(hso, dict) and hso.get("permissionDecision") == "deny"
+    return isinstance(out, dict) and out.get("decision") == "block"
 
 
 class TestDelegatedPolicyGoverns:
     """E1: child in a bare cwd must still run under the parent's policy."""
 
-    @XFAIL_A3
     def test_capsule_enforce_blocks_in_repoless_cwd(self, tmp_path) -> None:
         child_cwd = tmp_path / "child"
         child_cwd.mkdir()
         capsule = _make_capsule(tmp_path, _enforcing_policy())
         rc, out = _run_child_dispatcher(
             child_cwd, {"FETTLE_POLICY_CAPSULE": capsule})
-        assert rc == 0  # hooks always exit 0; the block is in the output
-        assert _is_block(out), f"capsule enforce mode not honored: {out}"
+        assert _is_block(rc, out), f"capsule enforce mode not honored: rc={rc} {out}"
 
     def test_without_capsule_child_is_ungoverned_baseline(self, tmp_path) -> None:
         """Documents the pre-Stage-A world: defaults are advisory → no block.
@@ -120,27 +108,25 @@ class TestDelegatedPolicyGoverns:
         child_cwd.mkdir()
         rc, out = _run_child_dispatcher(child_cwd, {})
         assert rc == 0
-        assert not _is_block(out)
+        assert not _is_block(rc, out)
 
 
 class TestCapsuleTamperFailsClosed:
     """§2.4 D-A4: digest mismatch → block, independent of repo config."""
 
-    @XFAIL_A3
     def test_tampered_capsule_blocks(self, tmp_path) -> None:
         child_cwd = tmp_path / "child"
         child_cwd.mkdir()
         capsule = _make_capsule(tmp_path, _enforcing_policy(), tamper=True)
         rc, out = _run_child_dispatcher(
             child_cwd, {"FETTLE_POLICY_CAPSULE": capsule})
-        assert rc == 0
-        assert _is_block(out), f"tampered capsule must fail closed: {out}"
+        assert _is_block(rc, out), f"tampered capsule must fail closed: rc={rc} {out}"
+        assert "capsule" in json.dumps(out).lower()
 
 
 class TestKillSwitchNeutered:
     """E3 / D-A3: env kill switches cannot weaken a verified capsule."""
 
-    @XFAIL_A3
     def test_gate_mode_off_cannot_override_capsule(self, tmp_path) -> None:
         child_cwd = tmp_path / "child"
         child_cwd.mkdir()
@@ -149,5 +135,5 @@ class TestKillSwitchNeutered:
             child_cwd,
             {"FETTLE_POLICY_CAPSULE": capsule, "FETTLE_GATE_MODE": "off"},
         )
-        assert rc == 0
-        assert _is_block(out), f"FETTLE_GATE_MODE=off must not defeat capsule: {out}"
+        assert _is_block(rc, out), \
+            f"FETTLE_GATE_MODE=off must not defeat capsule: rc={rc} {out}"

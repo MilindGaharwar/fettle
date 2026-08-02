@@ -357,6 +357,13 @@ def load_config(cwd: str | None = None) -> dict[str, Any]:
             if "enabled" in gate:
                 gate["enabled"] = False
 
+    # Stage A (A3): delegated policy capsule — a verified capsule handed
+    # down by a parent session merges OVER everything local, monotonically
+    # stricter (children may only tighten). Applied after env handling so
+    # kill-switch env vars cannot weaken delegated policy (design 12, D-A3).
+    from fettle.policy_capsule import apply_env_capsule
+    cfg = apply_env_capsule(cfg)
+
     return cfg
 
 

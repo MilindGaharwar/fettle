@@ -62,6 +62,7 @@ STRICTER_DIRECTION: dict[str, str] = {
 _MAX_FINDINGS = 20
 
 _last_error: str = ""
+_last_ignored: list[dict] = []
 
 
 def _capsules_dir() -> Path:
@@ -174,6 +175,28 @@ def resolve_env_capsule() -> tuple[dict | None, str]:
 def last_error() -> str:
     """Sticky verification error from the most recent resolution."""
     return _last_error
+
+
+def last_ignored() -> list[dict]:
+    """Suppressed weaker-local overrides from the most recent merge."""
+    return _last_ignored
+
+
+def apply_env_capsule(cfg: dict) -> dict:
+    """Merge a verified env capsule OVER `cfg`, monotonically stricter.
+
+    No env / version skew → cfg unchanged. Verification error → cfg
+    unchanged too — the error is sticky (last_error) and capsule_guard
+    blocks on it; load_config itself must never raise or block.
+    """
+    global _last_ignored
+    _last_ignored = []
+    doc, err = resolve_env_capsule()
+    if not doc or err:
+        return cfg
+    merged, ignored = merge_for_child(doc["policy"], cfg)
+    _last_ignored = ignored
+    return merged
 
 
 def _rank(mode: Any) -> int:
