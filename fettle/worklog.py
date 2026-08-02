@@ -101,8 +101,51 @@ def create_template(cwd: str) -> str:
     return str(filepath)
 
 
+def _session_start_ts(session_id: str | None) -> float | None:
+    """Earliest trace epoch ts for this session; None when unknown.
+
+    Unknown (no session id, no trace entries) fails OPEN to daily
+    behavior — the session scope only tightens when evidence exists.
+    """
+    if not session_id:
+        return None
+    from fettle.trace import get_recent_decisions
+
+    best: float | None = None
+    for entry in get_recent_decisions(10000):
+        if entry.get("session_id") != session_id:
+            continue
+        ts = entry.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        if best is None or ts < best:
+            best = float(ts)
+    return best
+
+
+def _plan_reconciliation(cwd: str) -> str:
+    """Planned-vs-done prose for the active session plan (D-A4: never
+    blocks on its own — appended to the worklog finding as advisory text)."""
+    from fettle.session_plan import active_plan
+
+    plan = active_plan(Path(cwd), max_age_hours=24.0)
+    if plan is None or plan["done"] >= plan["total"]:
+        return ""
+    unchecked = [i["text"] for i in plan["items"] if not i["done"]][:3]
+    return (
+        f"Session plan '{plan['title']}': {plan['done']}/{plan['total']} done — "
+        f"unchecked: {'; '.join(unchecked)}. "
+        "Confirm or update (fettle plan check / fettle plan status)."
+    )
+
+
 def run_check(ctx):
-    """Stop hook — advisory if no worklog entry for today."""
+    """Stop hook — advisory if no worklog entry for today.
+
+    scope="session" (v1.6 slice A) additionally requires today's entry to
+    have been modified during THIS session (mtime >= first trace entry of
+    the session), so a morning entry doesn't satisfy an evening session.
+    """
     from fettle.dispatcher_types import CheckResult
 
     cfg = ctx.config.get("gates", {}).get("worklog", {})
@@ -113,12 +156,32 @@ def run_check(ctx):
     worklog_path = _today_file(cwd)
     valid, reason = _has_valid_entry(worklog_path)
 
+    if valid and str(cfg.get("scope", "daily")) == "session":
+        start = _session_start_ts(ctx.session_id)
+        if start is not None:
+            try:
+                mtime = worklog_path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if mtime < start:
+                valid = False
+                reason = "worklog entry not updated during this session"
+
+    reconciliation = _plan_reconciliation(cwd)
+
     if valid:
+        if reconciliation:
+            return CheckResult.advisory("Worklog: " + reconciliation, hook_specific_output={
+                "hookEventName": ctx.input.hook_event_name,
+                "additionalContext": "Worklog: " + reconciliation,
+            })
         return CheckResult.allow()
 
     mode = cfg.get("mode", "advisory")
     expected_path = os.path.relpath(str(worklog_path), cwd)
     msg = "Worklog: " + reason + ". Create entry at " + expected_path + " (use /fettle:worklog)."
+    if reconciliation:
+        msg += " " + reconciliation
 
     if mode == "enforce":
         return CheckResult.block(msg, hook_specific_output={

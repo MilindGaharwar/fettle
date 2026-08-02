@@ -190,9 +190,17 @@ def scan_planning(file_path: str, cwd: str, plan_cfg: dict | None = None) -> lis
             if "plan" in f.name.lower() and f.suffix == ".md" and time.time() - f.stat().st_mtime < max_age_s:
                 return []
 
+    # v1.6 slice A: an active session plan (.fettle/plans/, checklist with
+    # >= 1 item, touched within the window) also satisfies the gate.
+    if bool(cfg.get("session_plans", True)):
+        from fettle.session_plan import active_plan
+        if active_plan(Path(cwd), max_age_hours=float(cfg.get("max_age_hours", 1))) is not None:
+            return []
+
     return [
         f"PLANNING: {trigger_reason} without a recent plan in {plan_dir_name}/ "
-        f"(disable via [gates.plan] enabled=false in .fettle.toml)"
+        f"or session plan in .fettle/plans/ (fettle plan start; "
+        f"disable via [gates.plan] enabled=false in .fettle.toml)"
     ]
 
 

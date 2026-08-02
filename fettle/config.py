@@ -25,6 +25,8 @@ DEFAULTS: dict[str, Any] = {
             "plan_dir": "docs",
             "plan_glob": "*plan*.md",
             "max_age_hours": 1,
+            # v1.6: accept active session plans (.fettle/plans/) too.
+            "session_plans": True,
             "risk_paths": [],
             "module_threshold": None,
             "module_roots": ["src", "packages"],
@@ -244,6 +246,9 @@ DEFAULTS: dict[str, Any] = {
         "worklog": {
             "enabled": False,
             "mode": "advisory",
+            # "daily": today's entry suffices. "session": the entry must
+            # have been updated during this session (v1.6 slice A).
+            "scope": "daily",
         },
         "bash_audit": {
             "enabled": False,

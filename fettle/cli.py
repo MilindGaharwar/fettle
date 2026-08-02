@@ -671,6 +671,49 @@ def cmd_topology(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def cmd_plan(args: argparse.Namespace) -> None:
+    """Session plans — checklist created before work starts (v1.6 slice A)."""
+    from fettle.paths import find_repo_root
+    from fettle.session_plan import (
+        active_plan, check_item, create_plan, find_plans, parse_plan,
+        render_status,
+    )
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)",
+              file=sys.stderr)
+        sys.exit(2)
+    root = Path(repo_root)
+    action = getattr(args, "plan_action", "status") or "status"
+    if action == "start":
+        try:
+            path = create_plan(root, args.title, args.item,
+                               session_id=os.environ.get("CLAUDE_SESSION_ID"))
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(f"✓ session plan: {path} ({len(args.item)} steps)")
+        sys.exit(0)
+    if action == "status":
+        plan = active_plan(root)
+        if plan is None:
+            plans = find_plans(root)
+            plan = parse_plan(plans[0]) if plans else None
+        if args.json:
+            print(json.dumps(plan, indent=2))
+        else:
+            print(render_status(plan))
+        sys.exit(0)
+    if action == "check":
+        ok, msg = check_item(root, args.text)
+        print(("✓ done: " if ok else "Refused: ") + msg,
+              file=sys.stdout if ok else sys.stderr)
+        sys.exit(0 if ok else 1)
+    print(f"unknown plan action: {action}", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_insights(args: argparse.Namespace) -> None:
     """Read-only evidence digest (WP-163, C4)."""
     from fettle.insights import compute_insights, render_insights
@@ -1195,6 +1238,20 @@ def main() -> None:
                             help="Evidence window in days (default 7)")
     p_insights.add_argument("--json", action="store_true", help="JSON output")
 
+    p_plan = subparsers.add_parser(
+        "plan", help="Session plans: checklist before work, ticked as you go (v1.6)")
+    plan_sub = p_plan.add_subparsers(dest="plan_action")
+    p_plan_start = plan_sub.add_parser(
+        "start", help="Create a session plan in .fettle/plans/")
+    p_plan_start.add_argument("--title", required=True, help="Plan title")
+    p_plan_start.add_argument("--item", action="append", default=[],
+                              help="A step (repeatable; at least one required)")
+    p_plan_status = plan_sub.add_parser("status", help="Show the active plan")
+    p_plan_status.add_argument("--json", action="store_true", help="JSON output")
+    p_plan_check = plan_sub.add_parser("check", help="Tick the first unchecked item matching TEXT")
+    p_plan_check.add_argument("text", help="Substring of the item to tick")
+    p_plan.set_defaults(plan_action="status", json=False)
+
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
     p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
@@ -1278,6 +1335,7 @@ def main() -> None:
         "topology": cmd_topology,
         "rules": cmd_rules,
         "insights": cmd_insights,
+        "plan": cmd_plan,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,

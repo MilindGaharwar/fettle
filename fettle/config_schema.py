@@ -68,6 +68,7 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.artifact_integrity.mode": frozenset({"advisory", "enforce"}),
     "gates.provenance.mode": frozenset({"none", "marker", "manifest", "commit"}),
     "gates.worklog.mode": frozenset({"advisory", "enforce"}),
+    "gates.worklog.scope": frozenset({"daily", "session"}),
 }
 
 #: WP4 — numeric bounds: (min, max), None = unbounded on that side.

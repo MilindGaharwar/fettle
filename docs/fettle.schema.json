@@ -63,6 +63,10 @@
               "default": 1,
               "minimum": 1
             },
+            "session_plans": {
+              "type": "boolean",
+              "default": true
+            },
             "risk_paths": {
               "type": "array"
             },
@@ -971,6 +975,14 @@
               "enum": [
                 "advisory",
                 "enforce"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "default": "daily",
+              "enum": [
+                "daily",
+                "session"
               ]
             }
           },

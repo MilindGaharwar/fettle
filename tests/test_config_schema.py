@@ -101,7 +101,13 @@ class TestDependencyModel:
 
     # ── per-gate mode enums ────────────────────────────────────
     def test_mode_enums_cover_exactly_the_mode_paths_in_defaults(self) -> None:
-        assert set(_mode_paths(DEFAULTS)) == set(MODE_ENUMS)
+        # Every `mode` key in DEFAULTS must have an enum; every enum path
+        # must exist in DEFAULTS (non-mode vocab paths like worklog.scope
+        # are allowed as long as they resolve).
+        mode_paths = set(_mode_paths(DEFAULTS))
+        assert mode_paths <= set(MODE_ENUMS)
+        for path in set(MODE_ENUMS) - mode_paths:
+            _get(DEFAULTS, path)  # raises KeyError on orphaned enum path
 
     def test_every_default_mode_is_in_its_enum(self) -> None:
         for path, allowed in MODE_ENUMS.items():

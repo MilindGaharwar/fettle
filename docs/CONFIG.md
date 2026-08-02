@@ -94,6 +94,16 @@ enabled = false
 threshold = 3         # block at N+ implementation files without a plan
 plan_dir = "docs"
 max_age_hours = 1
+session_plans = true  # accept active session plans (.fettle/plans/) too —
+                      # create one with `fettle plan start --title t --item step`,
+                      # tick items with `fettle plan check <text>`
+
+[gates.worklog]       # Stop requires a worklog entry — OFF by default
+enabled = false
+mode = "advisory"     # advisory | enforce
+scope = "daily"       # daily: today's entry suffices | session: entry must be
+                      # updated during THIS session; with an active session
+                      # plan, Stop also surfaces planned-vs-done (advisory)
 
 [gates.ux_spec]       # frontend edits require a UX spec — OFF by default
 enabled = false
