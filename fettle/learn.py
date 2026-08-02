@@ -30,6 +30,9 @@ from fettle.paths import find_repo_root
 
 LEARNED_RULES_DIR = "rules/learned"
 LEARNED_FIXTURES_DIR = "tests/fixtures/learned"
+# WP-163 (C2): machine-initiated drafts are quarantined here — never loaded
+# by any gate — until a human runs `fettle rules promote <id>` (D-C3).
+PROPOSED_RULES_DIR = "rules/proposed"
 
 LEARN_SYSTEM_PROMPT = """You are a security and code quality expert. Given an incident description, generate a semgrep rule that would have caught the issue.
 
@@ -150,6 +153,117 @@ def _save_rule(rule: dict, repo_root: Path) -> dict:
     }
 
 
+def _signature_brief(sig, days: int) -> str:
+    """Incident text for the LLM, built from a detected signature."""
+    lines = [
+        f"Repeated failure signature detected by fettle over the last {days} days:",
+        f"- kind: {sig.kind}",
+        f"- key: {sig.key}",
+        f"- occurrences: {sig.count}",
+        "Sample evidence:",
+    ]
+    lines += [f"  - {s}" for s in sig.sample_evidence]
+    lines.append("Write a semgrep rule that would catch this pattern early.")
+    return "\n".join(lines)
+
+
+def _proposal_id(sig) -> str:
+    if sig.kind == "ci-class":
+        return f"ci-{sig.key}-recurrence"
+    # trace-cluster key is "<hook>/<code>" — the code is the rule id
+    return sig.key.rsplit("/", 1)[-1]
+
+
+def _evidence_brief_yaml(sig, days: int) -> str:
+    """Deterministic no-LLM proposal: the evidence, an empty pattern (D-C2).
+
+    `fettle rules promote` refuses proposals with an empty pattern, so a
+    brief cannot reach the gates without a human completing it.
+    """
+    rule_id = _proposal_id(sig)
+    evidence = "".join(f"#   - {s}\n" for s in sig.sample_evidence)
+    return f"""# Fettle evolution proposal — quarantined; never loaded by gates.
+# Complete the pattern, then promote: fettle rules promote {rule_id}
+# evidence:
+{evidence}rules:
+  - id: {rule_id}
+    pattern: ''
+    message: "Repeated failure signature {sig.key} fired {sig.count}x in {days}d"
+    languages: [python]
+    severity: WARNING
+    metadata:
+      origin: fettle-evolution
+      status: proposed
+      signature: "{sig.key}"
+      occurrences: {sig.count}
+      generated: "{datetime.now().isoformat()}"
+"""
+
+
+def _proposal_yaml_from_rule(rule: dict, sig) -> str:
+    """LLM-generated rule, re-marked as an evolution proposal."""
+    yaml_content = _generate_semgrep_yaml(rule)
+    yaml_content = yaml_content.replace("origin: fettle-learn",
+                                        "origin: fettle-evolution")
+    return yaml_content + (
+        f"      status: proposed\n"
+        f"      signature: \"{sig.key}\"\n"
+        f"      occurrences: {sig.count}\n"
+    )
+
+
+def draft_proposals(repo_root: Path, days: int = 30, save: bool = True,
+                    generate=None) -> list[dict]:
+    """Draft rule proposals for every draftable signature (WP-163, C2).
+
+    Autonomous sensing + drafting; the output is quarantined in
+    rules/proposed/. `generate` is the LLM callable (injectable for tests);
+    when it returns None the deterministic evidence brief ships instead.
+    """
+    from fettle.evolution import detect_signatures
+
+    if generate is None:
+        generate = _generate_rule_from_incident
+    proposed_dir = repo_root / PROPOSED_RULES_DIR
+    results: list[dict] = []
+    for sig in detect_signatures(repo_root, days=days):
+        if not sig.draftable:
+            continue
+        rule_id = _proposal_id(sig)
+        rule_path = proposed_dir / f"{rule_id}.yml"
+        if rule_path.exists():
+            continue  # already proposed
+        rule = generate(_signature_brief(sig, days))
+        if rule:
+            rule["rule_id"] = rule_id  # signature-derived id wins (dedup key)
+            yaml_text = _proposal_yaml_from_rule(rule, sig)
+            mode = "llm"
+        else:
+            yaml_text = _evidence_brief_yaml(sig, days)
+            mode = "brief"
+        if save:
+            proposed_dir.mkdir(parents=True, exist_ok=True)
+            rule_path.write_text(yaml_text, encoding="utf-8")
+        results.append({
+            "rule_id": rule_id,
+            "kind": sig.kind,
+            "signature": sig.key,
+            "occurrences": sig.count,
+            "mode": mode,
+            "path": str(rule_path.relative_to(repo_root)) if save else "",
+        })
+    return results
+
+
+def list_proposed_rules(repo_root: Path) -> list[dict]:
+    """List quarantined proposals."""
+    proposed_dir = repo_root / PROPOSED_RULES_DIR
+    if not proposed_dir.exists():
+        return []
+    return [{"file": yml.name, "path": str(yml.relative_to(repo_root))}
+            for yml in sorted(proposed_dir.glob("*.yml"))]
+
+
 def list_learned_rules(repo_root: Path) -> list[dict]:
     """List all learned rules."""
     rules_dir = repo_root / LEARNED_RULES_DIR
@@ -167,12 +281,31 @@ def main() -> None:
     parser.add_argument("--file", help="Path to incident brief file")
     parser.add_argument("--list", action="store_true", help="List learned rules")
     parser.add_argument("--auto-save", action="store_true", help="Save without confirmation prompt")
+    parser.add_argument("--from-trace", action="store_true",
+                        help="Draft proposals from detected failure signatures (WP-163)")
+    parser.add_argument("--days", type=int, default=30,
+                        help="Signature window for --from-trace")
     args = parser.parse_args()
 
     repo_root = find_repo_root()
     if not repo_root:
         print("Error: not inside a repository.", file=sys.stderr)
         sys.exit(1)
+
+    if args.from_trace:
+        proposals = draft_proposals(repo_root, days=args.days, save=args.auto_save)
+        if not proposals:
+            print("No draftable failure signatures in the window. Nothing proposed.")
+            return
+        verb = "Proposed" if args.auto_save else "Would propose (dry run — add --auto-save)"
+        print(f"── Fettle Learn: {verb} {len(proposals)} rule(s) ──\n")
+        for p in proposals:
+            where = f" → {p['path']}" if p["path"] else ""
+            print(f"  • {p['rule_id']} [{p['mode']}] — {p['signature']} "
+                  f"×{p['occurrences']}{where}")
+        print("\n  Proposals never load into gates. Review and promote with:")
+        print("    fettle rules promote <rule-id>")
+        return
 
     if args.list:
         rules = list_learned_rules(repo_root)
