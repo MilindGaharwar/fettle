@@ -15,7 +15,9 @@ WP4 (Stage 2) — dependency model. Three declarative tables keyed by dotted
 path, consumed by BOTH validate_config and generate_json_schema:
 - MODE_ENUMS: the modes each gate's code actually honors -> error otherwise
   (a mode outside the set silently acts as some other mode — e.g.
-  tdd.mode="enforce" behaves as advisory — which is an invalid config state).
+  lean_review.mode="enforce" behaves as advisory — which is an invalid
+  config state). `strict` is an accepted legacy alias for `enforce` on the
+  tdd and ci_bootstrap gates.
 - RANGES: numeric bounds -> error outside them.
 - DEPENDENCIES: cross-field rules evaluated on the defaults-merged view ->
   error when the config would misbehave, warning when a feature is inert.
@@ -47,12 +49,12 @@ _MODE_VALUES = {"advisory", "soft", "enforce", "silent", "strict",
 MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.lint.mode": frozenset({"advisory", "soft", "enforce"}),
     "gates.docs.mode": frozenset({"advisory", "soft", "enforce"}),
-    "gates.ci_bootstrap.mode": frozenset({"advisory", "strict"}),
+    "gates.ci_bootstrap.mode": frozenset({"advisory", "strict", "enforce"}),
     "gates.destructive.mode": frozenset({"advisory", "enforce"}),
     "gates.config_protect.mode": frozenset({"advisory", "enforce"}),
     "gates.commit_message.mode": frozenset({"advisory", "enforce"}),
     "gates.lean_review.mode": frozenset({"silent", "advisory"}),
-    "gates.tdd.mode": frozenset({"advisory", "strict"}),
+    "gates.tdd.mode": frozenset({"advisory", "strict", "enforce"}),
     "gates.bdd.mode": frozenset({"advisory", "enforce"}),
     "gates.claims.mode": frozenset({"advisory", "enforce"}),
     "gates.verify.mode": frozenset({"advisory", "enforce"}),

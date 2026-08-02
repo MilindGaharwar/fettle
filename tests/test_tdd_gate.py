@@ -81,6 +81,25 @@ def test_impl_without_test_advisory(tmp_path):
     assert "test_parser" in result.message
 
 
+def test_impl_without_test_blocks_in_enforce_and_strict(tmp_path):
+    """mode=enforce (canonical) and mode=strict (legacy alias) both BLOCK."""
+    from fettle.tdd_gate import run_check
+
+    cwd = str(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "parser.py").write_text("def parse(): pass")
+
+    for i, mode in enumerate(("enforce", "strict")):
+        with patch("fettle.tdd_gate._get_state_path", return_value=tmp_path / f"tdd{i}.jsonl"):
+            ctx = _make_ctx(
+                "src/parser.py", event="PreToolUse", cwd=cwd, session_id=f"sb{i}",
+                config_overrides={"accept_preexisting_tests": False, "mode": mode},
+            )
+            result = run_check(ctx)
+        assert result.decision == Decision.BLOCK, mode
+        assert "TDD" in result.message
+
+
 def test_preexisting_test_satisfies(tmp_path):
     """With accept_preexisting_tests=true, existing test file satisfies."""
     from fettle.tdd_gate import run_check

@@ -497,11 +497,11 @@ def main():
         else:
             warning_findings.extend(plan_findings)
 
-        # CI bootstrap — strict BLOCKS on Pre; advisory warns once per session.
+        # CI bootstrap — enforce/strict BLOCKS on Pre; advisory warns once per session.
         boot_cfg = gates.get("ci_bootstrap", {})
         if boot_cfg.get("enabled"):
             boot_findings = scan_bootstrap(file_path, cwd)
-            if boot_findings and is_pre and boot_cfg.get("mode") == "strict":
+            if boot_findings and is_pre and boot_cfg.get("mode") in ("enforce", "strict"):
                 blocking_findings.extend(boot_findings)
             elif boot_findings and not _bootstrap_already_warned(cwd):
                 warning_findings.extend(boot_findings)

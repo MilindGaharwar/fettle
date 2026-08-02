@@ -76,6 +76,20 @@ def test_integration_strict_blocks_without_workflow():
     assert "fettle ci init" in out
 
 
+def test_integration_enforce_blocks_without_workflow():
+    """mode=enforce is the canonical blocking spelling (strict = legacy alias)."""
+    d = _repo(with_workflow=False)
+    _write_config(d, "enforce")
+    payload = {
+        "tool_name": "Write", "hook_event": "PreToolUse", "cwd": d,
+        "session_id": "t1e",
+        "tool_input": {"file_path": os.path.join(d, "app.py"), "content": "x = 1\n"},
+    }
+    rc, out = _run_gate(payload, d)
+    assert rc == 2
+    assert "fettle ci init" in out
+
+
 def test_integration_regression_advisory_never_blocks():
     """Regression — advisory mode informs, never blocks (exit != 2)."""
     d = _repo(with_workflow=False)

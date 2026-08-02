@@ -92,7 +92,7 @@ flowchart LR
 | Layer | Hook | What runs |
 |-------|------|-----------|
 | **Per-edit lint** | PostToolUse (Write/Edit) | ruff + semgrep on every Python edit |
-| **TDD ordering** | PreToolUse + PostToolUse | Test-before-implementation ordering — `advisory` warns, `strict` blocks |
+| **TDD ordering** | PreToolUse + PostToolUse | Test-before-implementation ordering — `advisory` warns, `enforce` blocks |
 | **Complexity** | PostToolUse (Write/Edit) | Cyclomatic + cognitive per modified function |
 | **Lean review** | PostToolUse (Write/Edit) | Over-engineering detection: abstractions, wrappers, large additions |
 | **Pre-write gate** | PreToolUse (Write/Edit) | Plan gate, config protection, UX spec gate |
@@ -333,8 +333,8 @@ minimum_branch_percent = 0      # Branch coverage (0 = disabled)
 
 [gates.tdd]
 enabled = false
-mode = "advisory"               # advisory | strict — strict BLOCKS implementation
-                                # edits with no prior test edit
+mode = "advisory"               # advisory | enforce — enforce BLOCKS implementation
+                                # edits with no prior test edit ("strict" = legacy alias)
 accept_preexisting_tests = true
 
 [gates.bdd]

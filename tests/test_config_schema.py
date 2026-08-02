@@ -108,15 +108,17 @@ class TestDependencyModel:
             assert _get(DEFAULTS, path) in allowed, path
 
     def test_mode_outside_gate_enum_errors(self) -> None:
-        # tdd honors advisory/strict; "enforce" would silently act as advisory
-        errors, _ = validate_config({"gates": {"tdd": {"mode": "enforce"}}})
+        # lean_review honors silent/advisory; "enforce" would silently act as advisory
+        errors, _ = validate_config({"gates": {"lean_review": {"mode": "enforce"}}})
         assert len(errors) == 1
-        assert "gates.tdd.mode" in errors[0]
-        assert "strict" in errors[0]
+        assert "gates.lean_review.mode" in errors[0]
+        assert "advisory" in errors[0]
 
     def test_mode_inside_gate_enum_ok(self) -> None:
-        errors, warnings = validate_config({"gates": {"tdd": {"mode": "strict"}}})
-        assert errors == [] and warnings == []
+        # tdd blocks on "enforce" (canonical) and "strict" (legacy alias)
+        for mode in ("enforce", "strict"):
+            errors, warnings = validate_config({"gates": {"tdd": {"mode": mode}}})
+            assert errors == [] and warnings == [], mode
 
     def test_provenance_modes(self) -> None:
         errors, _ = validate_config({"gates": {"provenance": {"mode": "manifest"}}})
@@ -225,7 +227,7 @@ class TestSchemaGeneration:
         schema = generate_json_schema()
         tdd_mode = (schema["properties"]["gates"]["properties"]["tdd"]
                     ["properties"]["mode"])
-        assert tdd_mode["enum"] == ["advisory", "strict"]
+        assert tdd_mode["enum"] == ["advisory", "enforce", "strict"]
 
     def test_range_bounds_in_schema(self) -> None:
         schema = generate_json_schema()

@@ -180,7 +180,7 @@ def run_check(ctx):
             f"Expected: edit {expected_test} before implementation."
         )
 
-        if mode == "strict":
+        if mode in ("enforce", "strict"):  # strict = legacy alias
             return CheckResult.block(msg, hook_specific_output={
                 "hookEventName": event,
                 "additionalContext": msg,

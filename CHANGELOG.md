@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Unified blocking-mode vocabulary**: `gates.tdd.mode` and
+  `gates.ci_bootstrap.mode` now accept `enforce` (the canonical blocking
+  spelling used by every other blocking gate) in addition to `strict`,
+  which remains a fully supported legacy alias. No behavior change for
+  existing configs.
+
 ## v1.3.1 — Parity & Provenance
 
 - **Stage 13 — full hook parity for Codex CLI, Gemini CLI, and OpenCode**:

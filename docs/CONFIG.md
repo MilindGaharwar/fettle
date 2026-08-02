@@ -24,8 +24,10 @@ Beyond types, validation enforces a dependency model so that a config which
 validates behaves as written:
 
 - **Per-gate modes** — each gate accepts only the modes its code honors
-  (e.g. `gates.tdd.mode` is `advisory | strict`; `enforce` there would
-  silently act as advisory). An out-of-vocabulary mode is an **error**.
+  (e.g. `gates.lean_review.mode` is `silent | advisory`; `enforce` there
+  would silently act as advisory). An out-of-vocabulary mode is an **error**.
+  Every blocking gate's blocking mode is spelled `enforce`; the tdd and
+  ci_bootstrap gates also accept `strict` as a legacy alias.
 - **Numeric ranges** — thresholds and windows are bounds-checked (e.g.
   `gates.coverage.threshold` must be 0–100). Out of range is an **error**.
 - **Cross-field dependencies** — e.g. `extends.url` without a valid
@@ -115,7 +117,8 @@ enabled = false
 
 [gates.tdd]           # test-before-implementation ordering — OFF by default
 enabled = false
-mode = "advisory"     # advisory | strict — strict BLOCKS impl edits with no prior test edit
+mode = "advisory"     # advisory | enforce — enforce BLOCKS impl edits with no prior test edit
+                      # ("strict" is accepted as a legacy alias for enforce)
 accept_preexisting_tests = true
 
 [gates.complexity]    # per-function complexity ceilings — advisory by default

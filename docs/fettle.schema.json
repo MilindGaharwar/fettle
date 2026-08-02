@@ -227,6 +227,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
+                "enforce",
                 "strict"
               ]
             }
@@ -585,6 +586,7 @@
               "default": "advisory",
               "enum": [
                 "advisory",
+                "enforce",
                 "strict"
               ]
             },
