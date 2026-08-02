@@ -51,6 +51,7 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.docs.mode": frozenset({"advisory", "soft", "enforce"}),
     "gates.ci_bootstrap.mode": frozenset({"advisory", "strict", "enforce"}),
     "gates.destructive.mode": frozenset({"advisory", "enforce"}),
+    "gates.agent_spawn.mode": frozenset({"advisory", "enforce"}),
     "gates.config_protect.mode": frozenset({"advisory", "enforce"}),
     "gates.commit_message.mode": frozenset({"advisory", "enforce"}),
     "gates.lean_review.mode": frozenset({"silent", "advisory"}),

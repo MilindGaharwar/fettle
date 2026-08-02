@@ -210,6 +210,49 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
     return checks
 
 
+def check_runner_governance() -> list[dict]:
+    """Per-runner hook-parity probe (WP-157, E2 visibility).
+
+    An installed agent CLI whose runtime carries no fettle hooks means any
+    child spawned there runs ungoverned. Claude wires hooks via
+    `fettle init`; the other runners have no hook surface yet, so their
+    presence alone is worth a warning when [gates.agent_spawn] is on.
+    """
+    import os
+    checks: list[dict] = []
+    probes = {
+        "claude": os.path.expanduser("~/.claude/settings.json"),
+        "codex": None,
+        "gemini": None,
+        "opencode": None,
+    }
+    for name in sorted(probes):
+        if not _which(name):
+            continue
+        settings = probes[name]
+        if settings:
+            wired = False
+            try:
+                with open(settings) as fh:
+                    wired = "fettle" in fh.read()
+            except OSError:
+                wired = False
+            detail = ("fettle hooks wired" if wired else
+                      "installed but no fettle hooks — children spawned here "
+                      "run ungoverned; run: fettle init")
+        else:
+            wired = False
+            detail = ("installed; runtime has no hook surface — govern "
+                      "children via `fettle spawn` (policy capsule)")
+        checks.append({
+            "name": f"runner:{name}",
+            "required": False,
+            "ok": wired,
+            "detail": detail,
+        })
+    return checks
+
+
 def check_config_valid() -> list[dict]:
     """Validate the project's .fettle.toml against the WP4 dependency model.
 
@@ -260,7 +303,8 @@ def main() -> int:
     args = parser.parse_args()
 
     checks = (check_environment() + check_commit_guards() + check_org_policy()
-              + check_config_valid() + check_dispatch_health())
+              + check_config_valid() + check_dispatch_health()
+              + check_runner_governance())
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes
         checks += verify_tool_hashes()

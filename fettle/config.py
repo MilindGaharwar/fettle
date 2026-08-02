@@ -70,6 +70,8 @@ DEFAULTS: dict[str, Any] = {
             "extra_patterns": [],
             "allow_commands": [],
         },
+        # Nested agent launches must go through `fettle spawn` (WP-157).
+        "agent_spawn": {"enabled": True, "mode": "advisory"},
         "config_protect": {
             "enabled": True,
             "mode": "advisory",

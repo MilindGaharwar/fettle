@@ -11,6 +11,7 @@ from fettle.dispatcher_types import CheckSpec, HookContext
 # Phase 1 checks (pure logic, no subprocesses)
 from fettle.capsule_guard import run_check as capsule_guard_run
 from fettle.destructive_guard import run_check as destructive_guard_run
+from fettle.agent_spawn_gate import run_check as agent_spawn_gate_run
 from fettle.config_protect import run_check as config_protect_run
 from fettle.commit_message import run_check as commit_message_run
 from fettle.loop_detect import run_check as loop_detect_run
@@ -88,6 +89,14 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Bash"}),
         order=10,
         budget_ms=50,
+    ),
+    CheckSpec(
+        name="agent_spawn_gate",
+        run=agent_spawn_gate_run,
+        events=frozenset({"PreToolUse"}),
+        tools=frozenset({"Bash"}),
+        order=12,
+        budget_ms=30,
     ),
     CheckSpec(
         name="commit_message",
