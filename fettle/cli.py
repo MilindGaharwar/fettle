@@ -720,6 +720,26 @@ def cmd_brief(args: argparse.Namespace) -> None:
     sys.exit(0)
 
 
+def cmd_learn(args: argparse.Namespace) -> None:
+    """Delegate to the learn module — docs promise `fettle learn` (WP-163)."""
+    from fettle import learn
+    argv = ["fettle learn"]
+    if args.incident:
+        argv += ["--incident", args.incident]
+    if args.file:
+        argv += ["--file", args.file]
+    if args.list:
+        argv.append("--list")
+    if args.auto_save:
+        argv.append("--auto-save")
+    if args.from_trace:
+        argv.append("--from-trace")
+    argv += ["--days", str(args.days)]
+    sys.argv = argv
+    learn.main()
+    sys.exit(0)
+
+
 def cmd_plan(args: argparse.Namespace) -> None:
     """Session plans — checklist created before work starts (v1.6 slice A)."""
     from fettle.paths import find_repo_root
@@ -1318,6 +1338,18 @@ def main() -> None:
                          help="Friction window in days (default 7)")
     p_brief.add_argument("--json", action="store_true", help="JSON output")
 
+    p_learn = subparsers.add_parser(
+        "learn", help="Draft rule proposals from incidents or trace failure signatures (WP-163)")
+    p_learn.add_argument("--incident", default="", help="Incident description text")
+    p_learn.add_argument("--file", default="", help="Path to incident brief file")
+    p_learn.add_argument("--list", action="store_true", help="List learned rules")
+    p_learn.add_argument("--auto-save", dest="auto_save", action="store_true",
+                         help="Save without confirmation prompt")
+    p_learn.add_argument("--from-trace", dest="from_trace", action="store_true",
+                         help="Draft proposals from detected failure signatures")
+    p_learn.add_argument("--days", type=int, default=30,
+                         help="Signature window for --from-trace (default 30)")
+
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
     p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
@@ -1412,6 +1444,7 @@ def main() -> None:
         "insights": cmd_insights,
         "plan": cmd_plan,
         "brief": cmd_brief,
+        "learn": cmd_learn,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,

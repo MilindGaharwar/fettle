@@ -42,6 +42,16 @@ def test_bare_fettle_outside_repo_prints_help(monkeypatch, capsys):
     assert "usage:" in out
 
 
+def test_learn_is_a_first_class_subcommand(tmp_path, monkeypatch, capsys):
+    """Docs promise `fettle learn --from-trace` — pin that the CLI has it."""
+    import fettle.learn
+    monkeypatch.setattr(fettle.learn, "find_repo_root", lambda: tmp_path)
+    code = _run_cli(monkeypatch, ["learn", "--list"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "No learned rules yet" in out
+
+
 # ─── doctor --fix ────────────────────────────────────────────────────────────
 
 

@@ -20,6 +20,7 @@
   <a href="#60-second-start">Quick start</a> ·
   <a href="#why-fettle">Why Fettle</a> ·
   <a href="#what-it-does">What it does</a> ·
+  <a href="#multi-agent-governance">Multi-agent</a> ·
   <a href="docs/CONFIG.md">Configuration</a> ·
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
@@ -51,27 +52,27 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.6.0 “Reliable Sessions”** — every session now has a governed
-shape: `fettle plan start` before work (accepted as planning evidence,
-reconciled at Stop), worklogs scoped to the session, and an optional
-structured completion report (`[gates.session_report]`) that
-`fettle topology report` joins into predicted-vs-actual footprints and
-`fettle brief` serves to orchestrators in one offline poll. Setup is now
-a conversation (`fettle init --interactive` or `--profile
-solo|team|enterprise`), bare `fettle` is a dashboard, `fettle doctor
---fix` wires missing commit guards, and every block points at
-`fettle explain`. On top of v1.5.0's governed self-evolution — failure
-signatures become quarantined rule proposals (`fettle learn
---from-trace`), promoted only by the human gate (`fettle rules
-promote`), digested weekly by `fettle insights` — and v1.4.0's governed
-delegation — policy capsules that children can only tighten,
-`fettle spawn`, delegation lineage, and topology advise/apply/status
-with import-graph footprint disjointness — and
-v1.3.1's four-agent hook parity, Sigstore-signed SLSA provenance + SBOM,
-compliance evidence reporting, and privacy-first opt-in telemetry — and
-v1.3.0's evidence loop (living specs, agent worktrees with claims,
-agentic UAT, semantic link graph, remote-CI verification gate).
-Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: v1.6.0 “Reliable Sessions”** — every agent session now has a
+governed shape: a plan before work, a worklog while working, a structured
+completion report after — and orchestrators read all of it in one poll.
+
+- `fettle plan start` — a session checklist the planning gate accepts as
+  evidence and the Stop hook reconciles (unchecked items surface, never block)
+- `fettle init --interactive` / `--profile solo|team|enterprise` — setup is
+  a five-question conversation that writes an annotated, schema-valid config
+- `[gates.session_report]` — sessions leave a machine-readable completion
+  report; `fettle topology report` joins predicted-vs-actual agent footprints;
+  `fettle brief` gives orchestrators everything in one offline call
+- Bare `fettle` is a dashboard, `fettle doctor --fix` repairs wiring, and
+  every block points at `fettle explain`
+
+Built on: **governed self-evolution** (v1.5 — failure signatures become
+quarantined rule proposals; promotion is a human command), **governed
+delegation** (v1.4 — policy capsules children can only tighten, spawn
+governance, delegation lineage, topology planning), **four-agent hook
+parity + supply-chain provenance** (v1.3.1), and the **evidence loop**
+(v1.3 — living specs, agent worktrees, agentic UAT, remote-CI gate).
+Full history: [CHANGELOG.md](CHANGELOG.md) · [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What It Does
 
@@ -143,7 +144,23 @@ this model — Fettle is the assurance layer for it.)
   OpenCode hook events all normalize to one event model through
   conformance-tested translators — switch agents (or run several) without
   changing a line of policy.
-- **Incident-derived rules.** `/fettle:learn` turns a real production incident
+- **Policy survives delegation — unique in the field.** When an agent spawns
+  another agent, the child inherits the parent's effective policy as a
+  tamper-evident, sha256-digest-pinned capsule that it can only *tighten*,
+  never weaken — even `FETTLE_GATE_MODE=off` cannot defeat it. Every trace
+  entry carries delegation lineage. No other quality tool even sees
+  agent-to-agent handoffs.
+- **It learns — but never changes policy on its own.** Repeated failure
+  signatures the rules don't cover become machine-drafted rule *proposals*
+  in a quarantine directory no gate ever loads. `fettle rules promote` is
+  an explicit human command; `fettle ratchet` moves rules advisory → enforce
+  only on accumulated fire/false-positive evidence. Autonomous sensing,
+  human-gated evolution.
+- **Sessions have a governed shape.** Plan before work (`fettle plan`),
+  worklog scoped to the session, structured completion report after —
+  planned-vs-done is reconciled at session end, and orchestrators consume
+  completion reports instead of doing transcript archaeology.
+- **Incident-derived rules.** `fettle learn` turns a real production incident
   into a semgrep rule with test fixtures and an incident citation. The rules
   catalog isn't a generic style guide — every LLM-antipattern rule traces to
   something that actually broke.
@@ -170,6 +187,31 @@ this model — Fettle is the assurance layer for it.)
   scan hit and a broad-except in new code). The harness that doesn't pass its
   own bar doesn't ship.
 
+## Multi-Agent Governance
+
+Agents increasingly spawn other agents. Fettle is the only quality harness
+that governs the *handoff*, not just the code:
+
+```text
+  orchestrator ── fettle spawn ──▶ child agent (isolated worktree)
+       │              │                  │
+       │        policy capsule      claims + plan + gates
+       │        (sha256-pinned,          │
+       │         tighten-only)     completion report
+       │                                 │
+       └────── fettle brief ◀────────────┘
+               (one offline poll)
+```
+
+| Capability | Command / config |
+|---|---|
+| **Topology planning** | `fettle topology advise` recommends solo / pipeline / writer-reviewer / parallel-workers from open work items + import-graph footprint disjointness; `apply` provisions worktrees, claims, and a manifest |
+| **Governed spawning** | `fettle spawn <runner> --task …` hands the child a tamper-evident policy capsule; `[gates.agent_spawn]` flags ungoverned launches and blocks bypass flags (`--yolo`, `--full-auto`, `--dangerously-skip-permissions`) |
+| **Policy continuity** | Capsules merge monotonically — a child can only tighten policy; `capsule_guard` fails closed on tamper |
+| **Live supervision** | `fettle topology status` — claims × trace × stop-loss per worker; `fettle brief` — plan, claims, workers, cached CI verdict, proposals, friction in one offline call |
+| **Outcome accounting** | `[gates.session_report]` writes a completion report per session; `fettle topology report` joins predicted vs actual footprints and flags overlap — facts, not verdicts |
+| **Audit lineage** | Every trace entry carries `parent_session_id` + capsule digest; `fettle report --lineage` reconstructs the delegation tree |
+
 ## Enterprise Operations (v1.3 arc)
 
 | Capability | How |
@@ -185,10 +227,13 @@ this model — Fettle is the assurance layer for it.)
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| **Learn** | `/fettle:learn` | Incident text → LLM-generated semgrep rule + fixtures + citation |
-| **Explain** | `/fettle:explain` | Why did the last hook block? Human-readable trace |
-| **Baseline** | `/fettle:baseline` | Snapshot violations for incremental adoption |
-| **Report** | `/fettle:report` | Effectiveness metrics (pass/violation rates, top violations) |
+| **Learn** | `fettle learn --from-trace` / `--incident` | Failure signatures or incident text → drafted semgrep rule proposals (quarantined until promoted) |
+| **Rules pipeline** | `fettle rules list\|promote\|demote` | The human gate: proposals → `rules/learned/`, with fire/FP evidence per rule |
+| **Insights** | `fettle insights [--days 7]` | Read-only digest: top friction, emerging failure signatures, promotion candidates, lineage anomalies |
+| **Ratchet** | `fettle ratchet promote\|demote\|sync` | Evidence-based advisory → enforce graduation |
+| **Explain** | `fettle explain` | Why did the last hook block? Human-readable trace (every block links here) |
+| **Baseline** | `fettle baseline create\|update` | Snapshot violations for incremental adoption |
+| **Report** | `fettle report [--org\|--lineage\|--compliance]` | Effectiveness metrics, org rollups, delegation trees, CWE/ASVS evidence |
 
 ## Rules Catalog (semgrep)
 
@@ -240,31 +285,42 @@ fettle doctor
 
 ## CLI
 
+26+ subcommands, one binary. The daily drivers:
+
 ```bash
-fettle init [--install-tools] [--dry-run]
-fettle check [--all] [--changed] [--json] [--fix] [--baseline] [--junit FILE]
-fettle config --print-effective
-fettle config --explain
-fettle config --validate
-fettle policy sync|status
-fettle report [--org] [--days N]
-fettle explain [--last N]
-fettle spec [lint|list|coverage] [--json]
-fettle worktree [create|list|remove] <item-id>
-fettle work [list|claim|release] [item-id]
-fettle uat doctor [--json]        # surface detection + capability probe
-fettle uat run --surface S --yes  # agentic UAT session → verdicts
-fettle uat report --worktree PATH # re-reconcile a past session
-fettle uat manual                 # human walkthrough from spec scenarios
-fettle uat attest <spec/Sn> --outcome ... --observed ...
-fettle links <id> [--json]        # semantic layer: everything attached to an id
-fettle links --orphans            # broken evidence chains (req→scenario→test/UAT)
-fettle verify [--full] [--json]   # run the test suite, record verification stamp
-fettle ci status [--json]         # remote CI verdict for HEAD (gh, REST fallback)
-fettle ci wait [--json]           # poll remote CI to completion, record stamp
-fettle baseline create|update
-fettle doctor
-fettle lsp
+fettle                            # dashboard: plan, claims, CI, proposals, friction
+fettle init [--interactive | --profile solo|team|enterprise] [--install-tools]
+fettle check [--changed] [--fix] [--json] [--baseline] [--junit FILE]
+fettle plan start --title T --item STEP   # session checklist (ticked as you go)
+fettle verify [--full]            # run the suite, record the green stamp
+fettle ci status|wait             # remote CI verdict for HEAD (gh, REST fallback)
+fettle doctor [--fix] [--verify-hashes]
+fettle explain [--last N]         # why did that gate fire?
+```
+
+Governance and multi-agent:
+
+```bash
+fettle spawn <runner> --task "..."        # governed child agent + policy capsule
+fettle topology advise|apply|status|report|revoke
+fettle brief [--json]                     # one offline poll for orchestrators
+fettle work list|claim|release            # work items + claims
+fettle worktree create|list|remove        # per-item git worktrees
+fettle policy sync|status                 # digest-pinned org policy
+fettle report [--org|--lineage|--compliance] [--days N]
+```
+
+Intelligence and evidence:
+
+```bash
+fettle learn --from-trace [--auto-save]   # failure signatures → rule proposals
+fettle rules list|promote|demote          # human gate for machine-drafted rules
+fettle insights [--days 7]                # weekly friction digest
+fettle ratchet promote|demote|sync        # evidence-based advisory → enforce
+fettle spec lint|list|coverage            # living specs (BDD scenarios)
+fettle links <id> | --orphans             # semantic evidence graph
+fettle uat doctor|run|report|manual|attest
+fettle bench | baseline | suppressions | config | telemetry | lsp
 ```
 
 `fettle check` flags:
@@ -365,9 +421,18 @@ mode = "advisory"               # advisory | enforce — pushed this session ⇒
 [gates.plan]
 enabled = false
 threshold = 3                   # Files changed before plan required
+session_plans = true            # accept `fettle plan start` checklists as evidence
 risk_paths = []                 # Globs that auto-require plan (e.g. "**/auth/**")
 module_threshold = null         # Distinct packages, null = disabled
 line_threshold = null           # Added lines, null = disabled
+
+[gates.worklog]
+enabled = false
+mode = "advisory"               # advisory | enforce
+scope = "daily"                 # daily | session (updated during THIS session)
+
+[gates.session_report]
+enabled = false                 # Stop writes .fettle/reports/<session>.json
 
 [gates.bash_audit]
 enabled = false                 # Privacy-first: opt-in only
@@ -412,13 +477,18 @@ PostToolUse ──→ dispatcher.py:
               → tdd_gate (records test/impl edits)
               → bdd_gate (spec scenario coverage)
               → claims_gate (claim-before-work in worktrees)
+              → ci_gate (records pushes for the Stop-time CI check)
               → loop_detect + scope_creep + discipline_link
     │
     ▼
 Stop ──→ dispatcher.py:
        → quality_gate (test freshness)
        → stop_quality_gate (imports + cargo check)
+       → verify_gate (fresh green `fettle verify` stamp)
+       → ci_gate (pushed this session ⇒ remote CI verified green)
        → coverage_gate (line + branch coverage)
+       → session_report (completion report for orchestrators)
+       → worklog (session worklog + plan reconciliation)
 ```
 
 All checks route through `dispatcher.py` (single process, per-check budget,
@@ -487,7 +557,7 @@ cd ~/projects/fettle
 .venv/bin/python -m pytest tests/ fettle/tests/ -q
 ```
 
-**1,500+ tests** across 110+ test files covering all checks, adapters, agent
+**1,727 tests** across 130 test files covering all checks, adapters, agent
 translators, and infrastructure. All adapter tests use mocked tool outputs —
 no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 

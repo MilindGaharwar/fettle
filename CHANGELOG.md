@@ -37,6 +37,9 @@ all of it in one poll.
   applies mechanical fixes only (wiring declared-but-uninstalled
   pre-commit hooks, then re-verifying); every dispatcher block appends
   "→ fettle explain — full context for this decision".
+- **`fettle learn` is now a first-class subcommand** — the documented
+  `fettle learn --from-trace [--auto-save]` / `--incident` interface
+  previously required invoking the module directly.
 
 ## v1.5.0 — Governed Self-Evolution
 

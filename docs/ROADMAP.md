@@ -45,18 +45,20 @@ verification gate (`[gates.ci]` + `fettle ci status|wait` — incident-driven:
 a pushed commit is not done until its remote verdict is green). Executed plan
 documents now live in [archive/](archive/).
 
-Priorities below are ordered; each names what it depends on.
+Priorities below are ordered; each names what it depends on. Items 1–3 of
+the original list shipped: the v1.3.0 release cut, the v1.3.x remainder
+(WP-146 compliance, WP-147 supply chain, WP-148 telemetry — v1.3.1), and
+the runner adapters (codex, gemini, opencode — Stage 13). The v1.4–v1.6
+arc (governed delegation, self-evolution, reliable sessions) shipped on
+top — see [CHANGELOG.md](../CHANGELOG.md).
 
 | # | Item | Depends on | Why now / trigger |
 |---|---|---|---|
-| 1 | **Release cut: v1.3.0** — version bump, CHANGELOG cut, tag; gets stages 0–8 into `finefettle` on PyPI | Stages 0–8 (shipped), green remote CI | Nine stages of shipped value sit unreleased; WP-146..148 move to v1.3.x (none block the release) |
-| 2 | **v1.3.x remainder**: WP-146 compliance evidence, WP-147 supply-chain posture, WP-148 health telemetry hardening | WP-144/145 (shipped) | Enterprise pull; decoupled from the release cut |
-| 3 | **Runner adapters** — codex, gemini, opencode behind the Stage-4 `fettle.runners` protocol | Stage 4 protocol (shipped, claude-only) | Multiplies UAT + agent-infra value across hosts |
-| 4 | **Advisory → gate graduation** — `[uat]` gating mode, `[gates.bdd]`/`[gates.verify]`/`[gates.ci]` enforce defaults | Field evidence from stages 3/5/7/8 telemetry | Evidence-driven; graduate only what has proven low-noise (this repo dogfoods `[gates.ci]` enforce) |
-| 5 | **Evaluator-optimizer UAT loop** — agent retries with reconciler feedback | Stage 5 reconciler + #3 | After UAT verdict corpus accrues |
-| 6 | **WP-155 semantic impact gate** — block on broken req→scenario→test chains | Stage 6 links + #4 | v1.4; builds directly on `fettle links --orphans` |
-| 7 | **Distribution** — Homebrew tap, Windows support, docs site | WP-149/151/152 | v1.2 exception + v1.4 product surface |
-| 8 | **Persistent semantic store** | #6, only if on-demand fusion gets slow | Deferred by design — the repository is the database |
+| 1 | **Advisory → gate graduation** — `[uat]` gating mode, `[gates.bdd]`/`[gates.verify]`/`[gates.ci]` enforce defaults | Field evidence from stages 3/5/7/8 telemetry | Evidence-driven; graduate only what has proven low-noise (this repo dogfoods `[gates.ci]` enforce) |
+| 2 | **Evaluator-optimizer UAT loop** — agent retries with reconciler feedback | Stage 5 reconciler + runner adapters | After UAT verdict corpus accrues |
+| 3 | **WP-155 semantic impact gate** — block on broken req→scenario→test chains | Stage 6 links + #1 | Builds directly on `fettle links --orphans` |
+| 4 | **Distribution** — Homebrew tap, Windows support, docs site | WP-149/151/152 | v1.2 exception + product surface |
+| 5 | **Persistent semantic store** | #3, only if on-demand fusion gets slow | Deferred by design — the repository is the database |
 
 **Trigger-based consideration — compiled hot-path shim (Go/Rust).** No port is
 planned: Fettle mostly orchestrates external tools (ruff, semgrep, pytest), so
