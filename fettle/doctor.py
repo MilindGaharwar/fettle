@@ -295,9 +295,44 @@ def check_config_valid() -> list[dict]:
     return checks
 
 
+def apply_mechanical_fixes(checks: list[dict], *, run=None, which=None) -> list[str]:
+    """Apply fixes that are purely mechanical — no judgement calls (v1.6 slice D).
+
+    Currently: install declared-but-unwired pre-commit hooks. Anything
+    needing a decision (config errors, missing tools, org policy) is
+    reported, never auto-fixed. Returns human-readable log lines.
+    """
+    import shutil
+    import subprocess
+    run = run or subprocess.run
+    which = which or shutil.which
+
+    log: list[str] = []
+    unwired = [c for c in checks
+               if c["name"] in ("commit-guards", "push-guards") and not c["ok"]]
+    if not unwired:
+        return log
+    if not which("pre-commit"):
+        log.append("cannot fix guard wiring: pre-commit binary not found "
+                   "(pip install pre-commit)")
+        return log
+    for c in unwired:
+        hook_type = "pre-commit" if c["name"] == "commit-guards" else "pre-push"
+        proc = run(["pre-commit", "install", "--hook-type", hook_type],
+                   capture_output=True, text=True)
+        if proc.returncode == 0:
+            log.append(f"fixed: installed {hook_type} hooks")
+        else:
+            err = (proc.stderr or proc.stdout or "").strip().splitlines()
+            log.append(f"fix failed for {hook_type}: {err[0] if err else 'unknown error'}")
+    return log
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--fix", action="store_true",
+                        help="Apply mechanical fixes only (currently: wire declared pre-commit hooks)")
     parser.add_argument("--verify-hashes", action="store_true",
                         help="Verify pinned tools' installed files against wheel RECORD hashes (WP-147)")
     args = parser.parse_args()
@@ -308,11 +343,23 @@ def main() -> int:
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes
         checks += verify_tool_hashes()
+
+    fix_log: list[str] = []
+    if args.fix:
+        fix_log = apply_mechanical_fixes(checks)
+        if any(line.startswith("fixed:") for line in fix_log):
+            # re-verify what we touched instead of claiming success
+            others = [c for c in checks
+                      if c["name"] not in ("commit-guards", "push-guards")]
+            checks = others + check_commit_guards()
     required_failures = [c for c in checks if c["required"] and not c["ok"]]
 
     if args.json:
-        print(json.dumps({"checks": checks, "healthy": not required_failures}, indent=2))
+        print(json.dumps({"checks": checks, "healthy": not required_failures,
+                          "fixes": fix_log}, indent=2))
     else:
+        for line in fix_log:
+            print(f"[fix ] {line}")
         for c in checks:
             mark = "ok " if c["ok"] else ("FAIL" if c["required"] else "warn")
             print(f"[{mark}] {c['name']:<10} {c['detail']}")

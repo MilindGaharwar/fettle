@@ -273,7 +273,9 @@ class TestBlockSchema:
         output, exit_code = agg.finish()
         assert exit_code == 2
         assert output["decision"] == "block"
-        assert output["reason"] == "Nope"
+        assert output["reason"].startswith("Nope")
+        # v1.6 slice D: every block points at the audit trail
+        assert "fettle explain" in output["reason"]
 
     def test_posttooluse_block_has_no_permission_decision(self):
         """permissionDecision is PreToolUse-only — Codex rejects it elsewhere."""

@@ -110,6 +110,9 @@ class Aggregator:
 
         if self.first_block is not None:
             reason = (self.first_block.message or "").strip() or "Blocked by Fettle"
+            # v1.6 slice D: every block carries a pointer to the audit trail.
+            if "fettle explain" not in reason:
+                reason += "\n\u2192 fettle explain — full context for this decision"
             if is_stop:
                 if advisory_context:
                     reason = reason + "\n\n" + advisory_context

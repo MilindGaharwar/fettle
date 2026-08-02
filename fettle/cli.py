@@ -356,6 +356,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     cmd = [sys.executable, os.path.join(script_dir, "doctor.py")]
     if getattr(args, "verify_hashes", False):
         cmd.append("--verify-hashes")
+    if getattr(args, "fix", False):
+        cmd.append("--fix")
     subprocess.run(cmd, check=False)
 
 
@@ -1132,6 +1134,8 @@ def main() -> None:
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")
 
     p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
+    p_doctor.add_argument("--fix", action="store_true",
+                          help="Apply mechanical fixes only (wire declared pre-commit hooks)")
     p_doctor.add_argument("--verify-hashes", dest="verify_hashes", action="store_true",
                           help="Verify pinned tools against wheel RECORD hashes (WP-147)")
 
@@ -1374,6 +1378,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
+        # v1.6 slice D: bare `fettle` inside a repo is a dashboard, not a
+        # manpage — offline, cached CI only (D-D1). Outside a repo, help.
+        from fettle.paths import find_repo_root
+        repo_root = find_repo_root()
+        if repo_root:
+            from fettle.brief import compute_brief, render_brief
+            print(render_brief(compute_brief(Path(repo_root))))
+            print("\n  fettle -h — commands · fettle doctor — environment health")
+            sys.exit(0)
         parser.print_help()
         sys.exit(0)
 
