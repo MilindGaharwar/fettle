@@ -360,7 +360,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """One-command setup: repo config, agent hooks, commit-time guards (WP-141)."""
+    """One-command setup: repo config, agent hooks, commit-time guards (WP-141).
+
+    --interactive / --profile (v1.6 slice B) generate an annotated
+    .fettle.toml from your answers before the wiring steps run.
+    """
     from fettle.paths import find_repo_root
     from fettle.init_cmd import print_steps, run_init
 
@@ -368,6 +372,29 @@ def cmd_init(args: argparse.Namespace) -> None:
     if not repo_root:
         print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
         sys.exit(2)
+
+    profile = getattr(args, "profile", None)
+    interactive = getattr(args, "interactive", False)
+    if interactive or profile:
+        from fettle.init_interview import (
+            PROFILES, detect_stack, render_config, run_interview, write_config,
+        )
+        root = Path(repo_root)
+        if interactive:
+            if not sys.stdin.isatty():
+                print("Error: --interactive needs a terminal; use --profile "
+                      f"{{{'|'.join(PROFILES)}}} instead", file=sys.stderr)
+                sys.exit(2)
+            answers = run_interview(root)
+        else:
+            answers = dict(PROFILES[profile])
+        content = render_config(answers, detect_stack(root))
+        ok, msg = write_config(root, content, force=getattr(args, "force", False))
+        if not ok:
+            print(f"Error: {msg}", file=sys.stderr)
+            sys.exit(2)
+        print(f"✓ wrote {msg}")
+
     steps, exit_code = run_init(repo_root, tools=args.install_tools, dry_run=args.dry_run)
     if args.json:
         print(json.dumps([s.to_dict() for s in steps], indent=2))
@@ -1093,6 +1120,12 @@ def main() -> None:
                         help="Install pinned ruff/semgrep/pre-commit via uv")
     p_init.add_argument("--dry-run", action="store_true", help="Show what would be done")
     p_init.add_argument("--json", action="store_true", help="JSON output")
+    p_init.add_argument("--interactive", action="store_true",
+                        help="Five questions to fit .fettle.toml to this project (TTY)")
+    p_init.add_argument("--profile", choices=["solo", "team", "enterprise"],
+                        help="Generate .fettle.toml from a preset (non-interactive)")
+    p_init.add_argument("--force", action="store_true",
+                        help="Overwrite an existing .fettle.toml (with --interactive/--profile)")
 
     p_policy = subparsers.add_parser("policy", help="Sync or inspect the digest-pinned org policy ([extends])")
     policy_sub = p_policy.add_subparsers(dest="policy_action")

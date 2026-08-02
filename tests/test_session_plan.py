@@ -11,7 +11,6 @@ from fettle.session_plan import (
     active_plan,
     check_item,
     create_plan,
-    find_plans,
     parse_plan,
     render_status,
 )
