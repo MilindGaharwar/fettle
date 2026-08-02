@@ -1,7 +1,6 @@
 """Tests for `fettle init --interactive` / `--profile` (v1.6 slice B)."""
 
 import tomllib
-from pathlib import Path
 
 import pytest
 

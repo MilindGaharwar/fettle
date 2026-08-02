@@ -14,8 +14,9 @@ Profiles are the same answers as data, for non-TTY use:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 #: Profile -> interview answers (D-B2: presets are data, schema-tested).
 PROFILES: dict[str, dict[str, bool]] = {
@@ -147,6 +148,9 @@ def render_config(answers: dict[str, Any], detected: dict[str, Any]) -> str:
             "[gates.claims]         # claim-before-work in agent worktrees",
             "enabled = true",
             'mode = "advisory"',
+            "",
+            "[gates.session_report] # Stop writes a completion report for the orchestrator",
+            "enabled = true",
             "",
             "[worktrees]            # agents work in isolated worktrees",
             f"require = {'true' if strict else 'false'}"

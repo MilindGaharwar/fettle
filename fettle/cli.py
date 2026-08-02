@@ -694,8 +694,28 @@ def cmd_topology(args: argparse.Namespace) -> None:
             sys.exit(1)
         print(f"✓ revoked {args.item_id}")
         sys.exit(0)
+    if action == "report":
+        from fettle.topology_apply import render_topology_report, topology_report
+        data = topology_report(root)
+        print(json.dumps(data, indent=2) if args.json else render_topology_report(data))
+        sys.exit(1 if "error" in data else 0)
     print(f"unknown topology action: {action}", file=sys.stderr)
     sys.exit(2)
+
+
+def cmd_brief(args: argparse.Namespace) -> None:
+    """One poll for orchestrators (v1.6 slice C). Read-only, offline."""
+    from fettle.brief import compute_brief, render_brief
+    from fettle.paths import find_repo_root
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)",
+              file=sys.stderr)
+        sys.exit(2)
+    data = compute_brief(Path(repo_root), days=args.days)
+    print(json.dumps(data, indent=2) if args.json else render_brief(data))
+    sys.exit(0)
 
 
 def cmd_plan(args: argparse.Namespace) -> None:
@@ -1233,6 +1253,9 @@ def main() -> None:
     p_topo_st.add_argument("--json", action="store_true", help="JSON output")
     p_topo_rev = topo_sub.add_parser("revoke", help="Release an item's claim and drop it")
     p_topo_rev.add_argument("item_id")
+    p_topo_rep = topo_sub.add_parser(
+        "report", help="Outcome join: predicted vs actual footprints, overlaps, stamps (v1.6)")
+    p_topo_rep.add_argument("--json", action="store_true", help="JSON output")
     p_topo.set_defaults(topology_action="advise", days=30, json=False)
 
     p_spawn = subparsers.add_parser(
@@ -1284,6 +1307,12 @@ def main() -> None:
     p_plan_check = plan_sub.add_parser("check", help="Tick the first unchecked item matching TEXT")
     p_plan_check.add_argument("text", help="Substring of the item to tick")
     p_plan.set_defaults(plan_action="status", json=False)
+
+    p_brief = subparsers.add_parser(
+        "brief", help="One poll for orchestrators: plan, claims, topology, CI, proposals (v1.6)")
+    p_brief.add_argument("--days", type=int, default=7,
+                         help="Friction window in days (default 7)")
+    p_brief.add_argument("--json", action="store_true", help="JSON output")
 
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
@@ -1369,6 +1398,7 @@ def main() -> None:
         "rules": cmd_rules,
         "insights": cmd_insights,
         "plan": cmd_plan,
+        "brief": cmd_brief,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,

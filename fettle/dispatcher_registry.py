@@ -45,6 +45,7 @@ from fettle.bdd_gate import run_check as bdd_gate_run
 from fettle.claims_gate import run_check as claims_gate_run
 from fettle.tdd_gate import run_check as tdd_gate_run
 from fettle.verify_gate import run_check as verify_gate_run
+from fettle.session_report import run_check as session_report_run
 
 CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — first, every tool: delegated-policy tamper guard (Stage A)
@@ -295,6 +296,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=55,
         budget_ms=100,
+    ),
+    # Stop — completion report for orchestrators (v1.6 slice C, never blocks)
+    CheckSpec(
+        name="session_report",
+        run=session_report_run,
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=58,
+        budget_ms=50,
     ),
     # Stop — worklog (advisory by default)
     CheckSpec(

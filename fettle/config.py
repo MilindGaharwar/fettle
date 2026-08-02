@@ -250,6 +250,12 @@ DEFAULTS: dict[str, Any] = {
             # have been updated during this session (v1.6 slice A).
             "scope": "daily",
         },
+        # v1.6 slice C: at Stop, write a structured completion report to
+        # .fettle/reports/<session>.json (files edited, claims, stamps,
+        # planned-vs-done) for orchestrators/integrators. Never blocks.
+        "session_report": {
+            "enabled": False,
+        },
         "bash_audit": {
             "enabled": False,
             "capture_command": False,

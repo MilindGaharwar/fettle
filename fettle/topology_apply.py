@@ -173,6 +173,129 @@ def revoke_item(root: str, item_id: str) -> str:
     return err or ""
 
 
+# ── v1.6 slice C: outcome report — did the advice hold? ─────────────────────
+
+
+def _rel_files(files: list[str], root: str) -> set[str]:
+    import os
+    rroot = os.path.abspath(root)
+    out: set[str] = set()
+    for f in files:
+        if os.path.isabs(f):
+            af = os.path.abspath(f)
+            if af.startswith(rroot + os.sep):
+                out.add(os.path.relpath(af, rroot))
+            else:
+                out.add(f)
+        else:
+            out.add(f)
+    return out
+
+
+def topology_report(root: str) -> dict:
+    """Predicted-vs-actual join over the live/last topology (read-only).
+
+    D-C2: facts, not verdicts — predicted footprints (recomputed), actual
+    edited files (from completion reports), pairwise actual overlaps,
+    per-worker friction, verify/CI stamp state. Interpretation stays
+    human (or `fettle insights`).
+    """
+    from fettle.session_report import load_reports
+    from fettle.topology import predict_footprint
+    from fettle.work_items import discover_work_items
+
+    manifest = load_manifest(root)
+    if not manifest:
+        return {"error": "no topology manifest — run `fettle topology apply` first"}
+    status = topology_status(root)
+
+    scopes: dict[str, list[str]] = {}
+    for item, _path in discover_work_items(root):
+        if item:
+            scopes[item.item_id] = item.scope
+    reports = {r.get("session_id", ""): r for r in load_reports(root)}
+
+    rows: list[dict] = []
+    actual_by_item: dict[str, set[str]] = {}
+    for w in status.get("workers", []):
+        iid = w["item"]
+        fp = predict_footprint(root, iid, scopes.get(iid, []))
+        rep = reports.get(w["session_id"])
+        actual = _rel_files(rep.get("files_edited", []), root) if rep else set()
+        actual_by_item[iid] = actual
+        predicted = sorted(fp.expanded) if not fp.unknown else []
+        outside = sorted(actual - set(predicted)) if predicted else []
+        verify = (rep or {}).get("verify") or {}
+        ci = (rep or {}).get("ci") or {}
+        rows.append({
+            "item": iid,
+            "session_id": w["session_id"],
+            "report_present": rep is not None,
+            "predicted_files": len(predicted),
+            "predicted_unknown": fp.unknown,
+            "actual_files": len(actual),
+            "outside_prediction": outside[:10],
+            "decisions": w["decisions"],
+            "blocks": w["blocks"],
+            "stop_loss_breached": w["stop_loss_breached"],
+            "verify_ok": bool(verify.get("ok")),
+            "ci_ok": bool(ci.get("ok")),
+            "plan": (rep or {}).get("plan"),
+        })
+
+    overlaps: list[dict] = []
+    items = sorted(actual_by_item)
+    for i, a in enumerate(items):
+        for b in items[i + 1:]:
+            shared = sorted(actual_by_item[a] & actual_by_item[b])
+            if shared:
+                overlaps.append({"a": a, "b": b, "files": shared[:10],
+                                 "count": len(shared)})
+
+    return {
+        "topology": manifest["topology"],
+        "created_at": manifest["created_at"],
+        "workers": rows,
+        "actual_overlaps": overlaps,
+        "prediction_held": not overlaps,
+    }
+
+
+def render_topology_report(data: dict) -> str:
+    if "error" in data:
+        return data["error"]
+    lines = [f"── Topology outcome: {data['topology']} "
+             f"(since {data['created_at']}) ──", ""]
+    for w in data["workers"]:
+        verdicts = []
+        if w["predicted_unknown"]:
+            verdicts.append("footprint unknown")
+        if w["outside_prediction"]:
+            verdicts.append(f"{len(w['outside_prediction'])}+ files outside prediction")
+        if w["stop_loss_breached"]:
+            verdicts.append("STOP-LOSS")
+        plan = w.get("plan")
+        plan_s = f" plan {plan['done']}/{plan['total']}" if plan else ""
+        lines.append(
+            f"  {w['item']:<24} edits {w['actual_files']:>3} "
+            f"(predicted {w['predicted_files']:>3})  "
+            f"blocks {w['blocks']:>2}/{w['decisions']:<4} "
+            f"verify {'✓' if w['verify_ok'] else '·'} "
+            f"ci {'✓' if w['ci_ok'] else '·'}"
+            f"{plan_s}"
+            + (f"  [{', '.join(verdicts)}]" if verdicts else "")
+            + ("" if w["report_present"] else "  (no completion report)"))
+    lines.append("")
+    if data["actual_overlaps"]:
+        lines.append("  ✗ prediction did NOT hold — actual overlaps:")
+        for o in data["actual_overlaps"]:
+            lines.append(f"    {o['a']} ∩ {o['b']}: {o['count']} file(s) — "
+                         f"{', '.join(o['files'][:5])}")
+    else:
+        lines.append("  ✓ disjointness prediction held (no actual overlaps)")
+    return "\n".join(lines)
+
+
 def render_status(data: dict) -> str:
     if "error" in data:
         return data["error"]

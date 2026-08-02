@@ -988,6 +988,16 @@
           },
           "additionalProperties": false
         },
+        "session_report": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
         "bash_audit": {
           "type": "object",
           "properties": {
