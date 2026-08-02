@@ -649,6 +649,24 @@ def cmd_topology(args: argparse.Namespace) -> None:
         data = advise(root, days=args.days)
         print(json.dumps(data, indent=2) if args.json else render_advice(data))
         sys.exit(0)
+    if action == "apply":
+        from fettle.topology_apply import apply_topology, render_apply
+        manifest = apply_topology(root, runner_name=args.runner, days=args.days)
+        print(json.dumps(manifest, indent=2) if args.json else render_apply(manifest))
+        sys.exit(1 if manifest["errors"] else 0)
+    if action == "status":
+        from fettle.topology_apply import render_status, topology_status
+        data = topology_status(root, max_blocks=args.max_blocks)
+        print(json.dumps(data, indent=2) if args.json else render_status(data))
+        sys.exit(1 if "error" in data else 0)
+    if action == "revoke":
+        from fettle.topology_apply import revoke_item
+        err = revoke_item(root, args.item_id)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✓ revoked {args.item_id}")
+        sys.exit(0)
     print(f"unknown topology action: {action}", file=sys.stderr)
     sys.exit(2)
 
@@ -1064,13 +1082,26 @@ def main() -> None:
     p_spec.set_defaults(spec_action="lint")
 
     p_topo = subparsers.add_parser(
-        "topology", help="Multi-agent topology: advise on parallelization (WP-159)")
+        "topology", help="Multi-agent topology: advise, apply, status, revoke (WP-159..161)")
     topo_sub = p_topo.add_subparsers(dest="topology_action")
     p_topo_adv = topo_sub.add_parser(
         "advise", help="Recommend a topology for open work items, with rationale")
     p_topo_adv.add_argument("--days", type=int, default=30,
                             help="Trace window for risk heuristics (default 30)")
     p_topo_adv.add_argument("--json", action="store_true", help="JSON output")
+    p_topo_app = topo_sub.add_parser(
+        "apply", help="Provision the advised topology: worktrees, claims, manifest")
+    p_topo_app.add_argument("--runner", default="claude",
+                            choices=["claude", "codex", "gemini", "opencode"])
+    p_topo_app.add_argument("--days", type=int, default=30)
+    p_topo_app.add_argument("--json", action="store_true", help="JSON output")
+    p_topo_st = topo_sub.add_parser(
+        "status", help="Live worker table: claims × trace × stop-loss")
+    p_topo_st.add_argument("--max-blocks", type=int, default=10,
+                           help="Stop-loss: blocks per session before flagging (default 10)")
+    p_topo_st.add_argument("--json", action="store_true", help="JSON output")
+    p_topo_rev = topo_sub.add_parser("revoke", help="Release an item's claim and drop it")
+    p_topo_rev.add_argument("item_id")
     p_topo.set_defaults(topology_action="advise", days=30, json=False)
 
     p_spawn = subparsers.add_parser(
