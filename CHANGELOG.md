@@ -34,6 +34,18 @@ child inherits the parent's effective policy as a tamper-evident capsule.
   edits to non-exempt paths (default exempt: `docs/**`, `**/*.md`) are
   gated behind `fettle worktree create <id> && fettle work claim <id>`,
   honoring `gates.claims.mode`.
+- **WP-159 — `fettle topology advise`**: deterministic, explainable
+  topology recommendation (solo / writer-reviewer / pipeline /
+  parallel-workers) from open work items, spec links, trace friction, and
+  *footprint disjointness* — each item's `scope` globs widened one hop
+  along the import graph; overlapping (or unknowable) footprints refuse
+  to parallelize, with the overlap named.
+- **WP-160/161 — `fettle topology apply` / `status` / `revoke`**: apply
+  provisions worktrees + claims for the advised topology, writes a
+  `topology.json` manifest to the shared git common dir, and emits the
+  `fettle spawn` commands; status joins manifest × claims × trace with
+  per-worker stop-loss flags (`--max-blocks`); revoke releases an item.
+  No supervisor daemon — coordination stays claims-file + trace.
 - **Unified blocking-mode vocabulary**: `gates.tdd.mode` and
   `gates.ci_bootstrap.mode` now accept `enforce` (the canonical blocking
   spelling used by every other blocking gate) in addition to `strict`,

@@ -1,7 +1,6 @@
 """Tests for fettle topology apply/status/revoke (WP-160/161, B3–B4)."""
 
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
