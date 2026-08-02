@@ -105,6 +105,11 @@ scope = "daily"       # daily: today's entry suffices | session: entry must be
                       # updated during THIS session; with an active session
                       # plan, Stop also surfaces planned-vs-done (advisory)
 
+[gates.session_report] # Stop writes .fettle/reports/<session>.json — OFF by default
+enabled = false       # files edited, claims held, plan progress, verify/CI
+                      # stamps. Never blocks; read it via `fettle brief` or
+                      # `fettle topology report`
+
 [gates.ux_spec]       # frontend edits require a UX spec — OFF by default
 enabled = false
 

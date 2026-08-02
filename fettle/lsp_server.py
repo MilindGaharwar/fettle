@@ -306,6 +306,7 @@ class FettleLSPServer:
         elif params.get("rootPath"):
             self._workspace_root = params["rootPath"]
 
+        from fettle import __version__
         return {
             "capabilities": {
                 "textDocumentSync": {
@@ -316,7 +317,7 @@ class FettleLSPServer:
             },
             "serverInfo": {
                 "name": "fettle",
-                "version": "1.3.0",
+                "version": __version__,
             },
         }
 

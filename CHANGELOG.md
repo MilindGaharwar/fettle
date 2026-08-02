@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.6.0 — Reliable Sessions
+
+Every session now has a governed shape: plan before work, worklog while
+working, structured completion report after — and orchestrators can read
+all of it in one poll.
+
+- **Session plans** (`fettle/session_plan.py`): `fettle plan start
+  --title … --item …` writes a frontmattered checklist to
+  `.fettle/plans/`; `fettle plan check <text>` ticks items;
+  `fettle plan status` shows progress. The planning gate accepts a fresh
+  session plan as planning evidence (`[gates.plan].session_plans`,
+  default on), and at Stop the worklog check reconciles the plan —
+  unchecked items become an advisory, never a block.
+- **Worklog scope** (`[gates.worklog].scope = "daily"|"session"`):
+  `session` requires the worklog to have been updated during *this*
+  session, not just today — closing the stale-worklog loophole.
+- **`fettle init --interactive` / `--profile solo|team|enterprise`**:
+  a five-question interview (or a preset) generates an annotated
+  `.fettle.toml` matched to team size, strictness, compliance, and
+  multi-agent use. Never overwrites without `--force`; every profile's
+  output is schema-validated by test.
+- **Completion contract** (`[gates.session_report]`, off by default):
+  at Stop, a session writes `.fettle/reports/<session>.json` — files
+  edited, claims held, plan progress, verify/CI stamp state. Never
+  blocks; write failures are silent. The enterprise profile enables it.
+- **`fettle topology report`**: predicted-vs-actual join over the last
+  topology — recomputed footprints against actually-edited files from
+  completion reports, pairwise overlaps, per-worker friction, stamp
+  state. Facts, not verdicts.
+- **`fettle brief [--json]`**: one offline poll for orchestrators —
+  active plan, claims, topology workers, cached CI verdict, open rule
+  proposals, top friction codes, recent completion reports.
+- **UX batch**: bare `fettle` inside a repo renders the brief dashboard
+  (offline, cached CI only) instead of a manpage; `fettle doctor --fix`
+  applies mechanical fixes only (wiring declared-but-uninstalled
+  pre-commit hooks, then re-verifying); every dispatcher block appends
+  "→ fettle explain — full context for this decision".
+
 ## v1.5.0 — Governed Self-Evolution
 
 Fettle now learns from its own evidence — without ever changing policy on

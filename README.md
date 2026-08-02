@@ -51,18 +51,22 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.5.0 “Governed Self-Evolution”** — fettle now learns from its
-own evidence without ever changing policy on its own: repeated failure
-signatures the rules don't cover become quarantined rule proposals
-(`fettle learn --from-trace` → `rules/proposed/`, never loaded by gates);
-`fettle rules promote` is the explicit human gate to `rules/learned/`;
-`fettle insights` digests friction, emerging failures, rule candidates,
-and lineage anomalies weekly. On top of v1.4.0's governed delegation —
-policy capsules that children can only tighten (`capsule_guard` fails
-closed; `FETTLE_GATE_MODE=off` cannot defeat it), `fettle spawn`, the
-agent_spawn gate, delegation lineage (`fettle report --lineage`),
-`[worktrees].require`, and `fettle topology advise/apply/status` with
-import-graph footprint disjointness — and
+**Status: v1.6.0 “Reliable Sessions”** — every session now has a governed
+shape: `fettle plan start` before work (accepted as planning evidence,
+reconciled at Stop), worklogs scoped to the session, and an optional
+structured completion report (`[gates.session_report]`) that
+`fettle topology report` joins into predicted-vs-actual footprints and
+`fettle brief` serves to orchestrators in one offline poll. Setup is now
+a conversation (`fettle init --interactive` or `--profile
+solo|team|enterprise`), bare `fettle` is a dashboard, `fettle doctor
+--fix` wires missing commit guards, and every block points at
+`fettle explain`. On top of v1.5.0's governed self-evolution — failure
+signatures become quarantined rule proposals (`fettle learn
+--from-trace`), promoted only by the human gate (`fettle rules
+promote`), digested weekly by `fettle insights` — and v1.4.0's governed
+delegation — policy capsules that children can only tighten,
+`fettle spawn`, delegation lineage, and topology advise/apply/status
+with import-graph footprint disjointness — and
 v1.3.1's four-agent hook parity, Sigstore-signed SLSA provenance + SBOM,
 compliance evidence reporting, and privacy-first opt-in telemetry — and
 v1.3.0's evidence loop (living specs, agent worktrees with claims,
@@ -418,7 +422,7 @@ Stop ──→ dispatcher.py:
 ```
 
 All checks route through `dispatcher.py` (single process, per-check budget,
-advisory cap). 30 checks registered, ordered by priority, fail-open on error.
+advisory cap). 31 checks registered, ordered by priority, fail-open on error.
 
 ## Result Taxonomy
 
@@ -507,6 +511,7 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.3.1 | Parity & Provenance: four-agent hook parity, SLSA provenance + SBOM, compliance evidence, opt-in telemetry | **Shipped** |
 | v1.4.0 | Governed Delegation: policy capsules, `fettle spawn`, agent_spawn gate, lineage reporting, worktree requirement, topology advise/apply/status | **Shipped** |
 | v1.5.0 | Governed Self-Evolution: failure-signature sensing, rule proposal quarantine, human-gated promotion, `fettle insights` digest | **Shipped** |
+| v1.6.0 | Reliable Sessions: session plans + worklog loop closure, `fettle init --interactive`, completion contract, `fettle topology report`, `fettle brief`, dashboard + `doctor --fix` | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.
