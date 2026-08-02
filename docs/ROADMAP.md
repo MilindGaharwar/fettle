@@ -28,7 +28,7 @@ This roadmap is committed before implementation begins and updated as releases s
 | v1.3.1 | **Parity & provenance** — four-agent hook parity (Claude Code, Codex, Gemini, OpenCode), SLSA provenance + CycloneDX SBOM, compliance evidence (CWE/ASVS/SOC 2), opt-in telemetry | WP-146..WP-148, engagement stages 10–13 | **Shipped** |
 | v1.4.0 | **Multi-agent integrity** — policy capsules (delegation-safe policy continuity), spawn gate, lineage audit | WP-156..WP-158 ([multi-agent plan](fettle-v14-multiagent-plan.md)) | Planned |
 | v1.4.x | **Topology intelligence + product surface** — topology advise/apply/monitor, worktree `require`, LSP hardening, rule marketplace, Windows, docs site, noise SLOs, semantic impact gate | WP-159..WP-162, WP-149..WP-153, WP-155 | Planned |
-| v1.5.0 | **Governed self-evolution** — trace-driven rule proposals, evidence-based rule ratchet, `fettle insights` | WP-163 ([multi-agent plan](fettle-v14-multiagent-plan.md)) | Planned |
+| v1.5.0 | **Governed self-evolution** — trace-driven rule proposals, evidence-based rule ratchet, `fettle insights` | WP-163 ([multi-agent plan](fettle-v14-multiagent-plan.md)) | **Shipped** |
 
 Every release ships with green tests on macOS + Linux CI and an updated CHANGELOG.
 

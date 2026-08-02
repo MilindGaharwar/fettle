@@ -51,16 +51,18 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.4.0 “Governed Delegation”** — policy survives delegation:
-`fettle spawn` hands children a tamper-evident policy capsule that can
-only be tightened, never weakened (`capsule_guard` fails closed on
-tampering; `FETTLE_GATE_MODE=off` cannot defeat it); `[gates.agent_spawn]`
-flags raw nested agent launches; every trace entry carries lineage
-(`fettle report --lineage` renders the delegation forest with UNGOVERNED
-flags); `[worktrees].require` gates main-worktree edits; and `fettle
-topology advise/apply/status` recommends, provisions, and supervises the
-multi-agent topology — refusing to parallelize work items whose predicted
-footprints overlap in the import graph. On top of
+**Status: v1.5.0 “Governed Self-Evolution”** — fettle now learns from its
+own evidence without ever changing policy on its own: repeated failure
+signatures the rules don't cover become quarantined rule proposals
+(`fettle learn --from-trace` → `rules/proposed/`, never loaded by gates);
+`fettle rules promote` is the explicit human gate to `rules/learned/`;
+`fettle insights` digests friction, emerging failures, rule candidates,
+and lineage anomalies weekly. On top of v1.4.0's governed delegation —
+policy capsules that children can only tighten (`capsule_guard` fails
+closed; `FETTLE_GATE_MODE=off` cannot defeat it), `fettle spawn`, the
+agent_spawn gate, delegation lineage (`fettle report --lineage`),
+`[worktrees].require`, and `fettle topology advise/apply/status` with
+import-graph footprint disjointness — and
 v1.3.1's four-agent hook parity, Sigstore-signed SLSA provenance + SBOM,
 compliance evidence reporting, and privacy-first opt-in telemetry — and
 v1.3.0's evidence loop (living specs, agent worktrees with claims,
@@ -504,6 +506,7 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.3.0 | Evidence Loop: central policy, org reporting, living specs + BDD gate, agent worktrees, agentic UAT, semantic links, verify + remote-CI gates | **Shipped** |
 | v1.3.1 | Parity & Provenance: four-agent hook parity, SLSA provenance + SBOM, compliance evidence, opt-in telemetry | **Shipped** |
 | v1.4.0 | Governed Delegation: policy capsules, `fettle spawn`, agent_spawn gate, lineage reporting, worktree requirement, topology advise/apply/status | **Shipped** |
+| v1.5.0 | Governed Self-Evolution: failure-signature sensing, rule proposal quarantine, human-gated promotion, `fettle insights` digest | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.

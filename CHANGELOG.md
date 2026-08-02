@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.5.0 — Governed Self-Evolution
+
+Fettle now learns from its own evidence — without ever changing policy on
+its own. Sensing and drafting are autonomous; promotion is a human command
+(WP-163, adapted from hermes-agent's closed learning loop).
+
+- **Failure-signature sensing** (`fettle/evolution.py`): read-only
+  detectors find repeated friction the rules don't cover — the same
+  `(hook, code)` blocking or firing ≥ 3× in the window with no covering
+  rule file, and recurring CI failure classes from the ingested history.
+  Evidence samples are secret-redacted.
+- **Proposal quarantine** (`fettle learn --from-trace [--auto-save]`):
+  draftable signatures become rule proposals in `rules/proposed/` — a
+  directory no gate ever loads (pinned by test). With a local LLM the
+  full learn pipeline drafts the rule; without one, a deterministic
+  *evidence brief* ships with an empty pattern that promotion refuses
+  until a human completes it.
+- **`fettle rules list|promote|demote`**: the human gate. `promote <id>`
+  moves a completed proposal to `rules/learned/` (loadable via
+  `[rules].extra_dirs`); `promote --candidates` computes promote/demote
+  candidates from ratchet evidence (fires vs FP stamps) — stats are
+  computed, decisions are not. `demote <id> --reason` returns a noisy
+  rule to quarantine. Mode (advisory→enforce) stays with `fettle ratchet`
+  and its evidence bar.
+- **`fettle insights [--days 7]`**: read-only weekly digest — top
+  friction gates, emerging failure signatures, rule-pipeline candidates,
+  ungoverned lineage sessions. Cron recipes (insights, drafting, nightly
+  hash verification) documented in docs/CONFIG.md — recipes, not a daemon.
+
 ## v1.4.0 — Governed Delegation
 
 Policy now survives delegation: when an agent spawns another agent, the
