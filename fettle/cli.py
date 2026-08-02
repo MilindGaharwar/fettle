@@ -607,6 +607,34 @@ def cmd_spec(args: argparse.Namespace) -> None:
     sys.exit(1 if errors else 0)
 
 
+def cmd_spawn(args: argparse.Namespace) -> None:
+    """Launch a child agent under the current effective policy (WP-157).
+
+    Exit codes: 0 = child ran and exited 0, 1 = child failed or spawn
+    refused, 2 = usage/environment error.
+    """
+    from fettle.spawn import spawn_agent
+
+    result = spawn_agent(
+        args.runner, args.task, os.getcwd(),
+        worktree_item=args.worktree, timeout_s=args.timeout,
+    )
+    if result.error:
+        print(f"Error: {result.error}", file=sys.stderr)
+        sys.exit(2 if "not inside a repository" in result.error else 1)
+    print(f"✓ capsule {result.capsule_digest} → {result.runner} in {result.child_cwd}")
+    if result.lineage:
+        print(f"  lineage: {' → '.join(result.lineage)} → {result.capsule_digest}")
+    run = result.run
+    if run.error:
+        print(f"Child agent failed: {run.error}", file=sys.stderr)
+        sys.exit(1)
+    if run.transcript.strip():
+        print(run.transcript.strip())
+    print(f"✓ child exited {run.exit_code} in {run.duration_s:.1f}s")
+    sys.exit(0 if run.exit_code == 0 else 1)
+
+
 def cmd_worktree(args: argparse.Namespace) -> None:
     """Per-work-item git worktrees (WP7, Stage 4).
 
@@ -1015,6 +1043,16 @@ def main() -> None:
     p_spec_cov.add_argument("--json", action="store_true", help="JSON evidence artifact")
     p_spec.set_defaults(spec_action="lint")
 
+    p_spawn = subparsers.add_parser(
+        "spawn", help="Launch a child agent governed by the current policy (WP-157)")
+    p_spawn.add_argument("runner", choices=["claude", "codex", "gemini", "opencode"],
+                         help="Registered agent runner")
+    p_spawn.add_argument("--task", required=True, help="Prompt for the child agent")
+    p_spawn.add_argument("--worktree", default="", metavar="ITEM_ID",
+                         help="Provision + claim a per-item worktree as the child's cwd")
+    p_spawn.add_argument("--timeout", type=int, default=600,
+                         help="Child run timeout in seconds (default 600)")
+
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
     p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
@@ -1094,6 +1132,7 @@ def main() -> None:
         "suppressions": cmd_suppressions,
         "lsp": cmd_lsp,
         "spec": cmd_spec,
+        "spawn": cmd_spawn,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
