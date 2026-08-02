@@ -671,6 +671,46 @@ def cmd_topology(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def cmd_rules(args: argparse.Namespace) -> None:
+    """Machine-drafted rule file lifecycle (WP-163, C3)."""
+    from fettle.paths import find_repo_root
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)",
+              file=sys.stderr)
+        sys.exit(2)
+    root = Path(repo_root)
+    action = getattr(args, "rules_action", "list") or "list"
+    if action == "list":
+        from fettle.rules_cmd import list_rules, render_rules_table
+        rows = list_rules(root)
+        print(json.dumps(rows, indent=2) if args.json else render_rules_table(rows))
+        sys.exit(0)
+    if action == "promote":
+        if getattr(args, "candidates", False):
+            from fettle.rules_cmd import promotion_candidates, render_candidates
+            data = promotion_candidates(root)
+            print(json.dumps(data, indent=2) if args.json else render_candidates(data))
+            sys.exit(0)
+        if not args.rule_id:
+            print("Error: provide a rule id or --candidates", file=sys.stderr)
+            sys.exit(2)
+        from fettle.rules_cmd import promote_rule_file
+        ok, msg = promote_rule_file(root, args.rule_id)
+        print(("✓ " if ok else "Refused: ") + msg,
+              file=sys.stdout if ok else sys.stderr)
+        sys.exit(0 if ok else 1)
+    if action == "demote":
+        from fettle.rules_cmd import demote_rule_file
+        ok, msg = demote_rule_file(root, args.rule_id, args.reason)
+        print(("✓ " if ok else "Refused: ") + msg,
+              file=sys.stdout if ok else sys.stderr)
+        sys.exit(0 if ok else 1)
+    print(f"unknown rules action: {action}", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_worktree(args: argparse.Namespace) -> None:
     """Per-work-item git worktrees (WP7, Stage 4).
 
@@ -1114,6 +1154,26 @@ def main() -> None:
     p_spawn.add_argument("--timeout", type=int, default=600,
                          help="Child run timeout in seconds (default 600)")
 
+    p_rules = subparsers.add_parser(
+        "rules", help="Machine-drafted rule lifecycle: proposed → learned (WP-163)")
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    p_rules_list = rules_sub.add_parser(
+        "list", help="Proposed + learned rules with fire/FP evidence")
+    p_rules_list.add_argument("--json", action="store_true", help="JSON output")
+    p_rules_prom = rules_sub.add_parser(
+        "promote", help="Approve a proposal into rules/learned/ (human gate)")
+    p_rules_prom.add_argument("rule_id", nargs="?", default="",
+                              help="Proposal id (filename stem)")
+    p_rules_prom.add_argument("--candidates", action="store_true",
+                              help="List computed promote/demote candidates only")
+    p_rules_prom.add_argument("--json", action="store_true", help="JSON output")
+    p_rules_dem = rules_sub.add_parser(
+        "demote", help="Return a learned rule to the proposal quarantine")
+    p_rules_dem.add_argument("rule_id")
+    p_rules_dem.add_argument("--reason", required=True,
+                             help="Why the rule is being demoted")
+    p_rules.set_defaults(rules_action="list", json=False)
+
     p_wt = subparsers.add_parser("worktree", help="Per-work-item git worktrees (WP7)")
     wt_sub = p_wt.add_subparsers(dest="wt_action")
     p_wt_create = wt_sub.add_parser("create", help="Create worktree + branch fettle/<item-id>")
@@ -1195,6 +1255,7 @@ def main() -> None:
         "spec": cmd_spec,
         "spawn": cmd_spawn,
         "topology": cmd_topology,
+        "rules": cmd_rules,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
