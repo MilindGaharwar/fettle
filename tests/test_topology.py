@@ -58,3 +58,71 @@ class TestConflicts:
         conflicts = find_conflicts(fps)
         assert len(conflicts) == 1
         assert "declares no scope" in conflicts[0].reason
+
+
+def _work_item(repo, item_id, scope=(), spec="", status="open"):
+    items = repo / "docs" / "work" / "items"
+    items.mkdir(parents=True, exist_ok=True)
+    scope_lines = "".join(f"  - {s}\n" for s in scope)
+    (items / f"{item_id}.md").write_text(
+        f"---\nfettle-work-item: true\nid: {item_id}\nstatus: {status}\n"
+        + (f"scope:\n{scope_lines}" if scope else "")
+        + (f"spec: {spec}\n" if spec else "")
+        + f"---\n\n# {item_id}\n"
+    )
+
+
+class TestAdvise:
+    def _advise(self, repo, monkeypatch, risky=False, note="test risk"):
+        from fettle import topology
+        monkeypatch.setattr(topology, "_trace_risk", lambda days=30: (risky, note))
+        return topology.advise(str(repo))
+
+    def test_no_items_solo(self, repo, monkeypatch):
+        data = self._advise(repo, monkeypatch)
+        assert data["topology"] == "solo"
+        assert "no open work items" in data["rationale"][0]
+
+    def test_single_low_risk_item_solo(self, repo, monkeypatch):
+        _work_item(repo, "one", scope=("pkg/island.py",))
+        assert self._advise(repo, monkeypatch)["topology"] == "solo"
+
+    def test_single_risky_item_writer_reviewer(self, repo, monkeypatch):
+        _work_item(repo, "one", scope=("pkg/island.py",))
+        data = self._advise(repo, monkeypatch, risky=True)
+        assert data["topology"] == "writer-reviewer"
+        assert any("review" in c for c in data["commands"])
+
+    def test_spec_linked_item_pipeline(self, repo, monkeypatch):
+        _work_item(repo, "one", scope=("pkg/island.py",), spec="my-spec")
+        data = self._advise(repo, monkeypatch)
+        assert data["topology"] == "pipeline"
+        assert any("uat" in c for c in data["commands"])
+
+    def test_disjoint_items_parallel_workers(self, repo, monkeypatch):
+        _work_item(repo, "a", scope=("pkg/island.py",))
+        _work_item(repo, "b", scope=("docs/**",))
+        data = self._advise(repo, monkeypatch)
+        assert data["topology"] == "parallel-workers"
+        assert len([c for c in data["commands"] if "fettle spawn" in c]) == 2
+
+    def test_overlapping_items_refused(self, repo, monkeypatch):
+        _work_item(repo, "a", scope=("pkg/util.py",))
+        _work_item(repo, "b", scope=("pkg/app.py",))
+        data = self._advise(repo, monkeypatch)
+        assert data["topology"] == "solo"
+        assert data["conflicts"]
+        assert any("REFUSING" in r for r in data["rationale"])
+
+    def test_done_items_ignored(self, repo, monkeypatch):
+        _work_item(repo, "a", scope=("pkg/island.py",), status="done")
+        data = self._advise(repo, monkeypatch)
+        assert data["items"] == []
+
+    def test_render(self, repo, monkeypatch):
+        _work_item(repo, "a", scope=("pkg/island.py",))
+        _work_item(repo, "b", scope=("docs/**",))
+        from fettle.topology import render_advice
+        out = render_advice(self._advise(repo, monkeypatch))
+        assert "parallel-workers" in out
+        assert "fettle spawn" in out

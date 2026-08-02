@@ -640,6 +640,19 @@ def cmd_spawn(args: argparse.Namespace) -> None:
     sys.exit(0 if run.exit_code == 0 else 1)
 
 
+def cmd_topology(args: argparse.Namespace) -> None:
+    """Multi-agent topology intelligence (WP-159..161)."""
+    action = getattr(args, "topology_action", "advise") or "advise"
+    root = os.getcwd()
+    if action == "advise":
+        from fettle.topology import advise, render_advice
+        data = advise(root, days=args.days)
+        print(json.dumps(data, indent=2) if args.json else render_advice(data))
+        sys.exit(0)
+    print(f"unknown topology action: {action}", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_worktree(args: argparse.Namespace) -> None:
     """Per-work-item git worktrees (WP7, Stage 4).
 
@@ -1050,6 +1063,16 @@ def main() -> None:
     p_spec_cov.add_argument("--json", action="store_true", help="JSON evidence artifact")
     p_spec.set_defaults(spec_action="lint")
 
+    p_topo = subparsers.add_parser(
+        "topology", help="Multi-agent topology: advise on parallelization (WP-159)")
+    topo_sub = p_topo.add_subparsers(dest="topology_action")
+    p_topo_adv = topo_sub.add_parser(
+        "advise", help="Recommend a topology for open work items, with rationale")
+    p_topo_adv.add_argument("--days", type=int, default=30,
+                            help="Trace window for risk heuristics (default 30)")
+    p_topo_adv.add_argument("--json", action="store_true", help="JSON output")
+    p_topo.set_defaults(topology_action="advise", days=30, json=False)
+
     p_spawn = subparsers.add_parser(
         "spawn", help="Launch a child agent governed by the current policy (WP-157)")
     p_spawn.add_argument("runner", choices=["claude", "codex", "gemini", "opencode"],
@@ -1140,6 +1163,7 @@ def main() -> None:
         "lsp": cmd_lsp,
         "spec": cmd_spec,
         "spawn": cmd_spawn,
+        "topology": cmd_topology,
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
