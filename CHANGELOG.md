@@ -1,7 +1,39 @@
 # Changelog
 
-## Unreleased
+## v1.4.0 — Governed Delegation
 
+Policy now survives delegation: when an agent spawns another agent, the
+child inherits the parent's effective policy as a tamper-evident capsule.
+
+- **WP-156 — Policy capsules** (`fettle/policy_capsule.py`): the effective
+  config is serialized to a sha256-digest-named capsule under
+  `$XDG_STATE_HOME/fettle/capsules/`; children resolve it via
+  `FETTLE_POLICY_CAPSULE` and merge it monotonically — a child can only
+  tighten policy, never weaken it (mode ladder, enabled=true wins,
+  direction-aware numeric thresholds; local weakenings are surfaced, not
+  silently applied). Tampered or missing capsules fail closed: the new
+  `capsule_guard` check (first PreToolUse check) blocks every tool call
+  until re-spawned. `FETTLE_GATE_MODE=off` cannot defeat a capsule.
+- **WP-157 — `fettle spawn <runner> --task ...`**: the blessed path for
+  launching child agents (claude/codex/gemini/opencode via the Stage 13
+  runner registry). Writes the capsule, chains lineage (depth cap 16),
+  exports `FETTLE_POLICY_CAPSULE` + `FETTLE_PARENT_SESSION`, optionally
+  provisions and claims a per-item worktree (`--worktree ITEM`), and logs
+  the spawn to the audit trail.
+- **WP-157 — `[gates.agent_spawn]`** (default on, advisory): detects raw
+  nested agent launches (`claude -p`, `codex exec`, `gemini -p/--yolo`,
+  `opencode run`) and points at `fettle spawn`; launches composed with
+  hook-bypass flags (`--dangerously-skip-permissions`, `--yolo`,
+  `--full-auto`) or `FETTLE_GATE_MODE=off` block in `enforce`.
+  `fettle doctor` gains a per-runner hook-parity probe.
+- **WP-158 — Lineage**: every trace entry carries `parent_session_id` +
+  `capsule_digest` (audit schema v2, additive). `fettle report --lineage`
+  renders the delegation forest — who spawned whom, under which capsule,
+  with per-session edit/block/advisory counts and `UNGOVERNED` flags.
+- **WP-162 — `[worktrees].require`** (default off): when on, main-worktree
+  edits to non-exempt paths (default exempt: `docs/**`, `**/*.md`) are
+  gated behind `fettle worktree create <id> && fettle work claim <id>`,
+  honoring `gates.claims.mode`.
 - **Unified blocking-mode vocabulary**: `gates.tdd.mode` and
   `gates.ci_bootstrap.mode` now accept `enforce` (the canonical blocking
   spelling used by every other blocking gate) in addition to `strict`,

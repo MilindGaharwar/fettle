@@ -141,6 +141,12 @@ mode = "advisory"     # advisory | enforce
 enabled = false
 mode = "advisory"     # advisory | enforce
 
+[gates.agent_spawn]   # nested agent launches must use `fettle spawn` — ON, advisory
+enabled = true
+mode = "advisory"     # advisory | enforce — enforce blocks launches composed
+                      # with hook-bypass flags (--dangerously-skip-permissions,
+                      # --yolo, --full-auto) or FETTLE_GATE_MODE=off
+
 [gates.verify]        # test suite verified green before Stop (fettle verify) — OFF by default
 enabled = false
 mode = "advisory"     # advisory | enforce
@@ -156,6 +162,9 @@ poll_s = 15           # 1–300; seconds between remote polls
 
 [worktrees]           # per-work-item worktree root (fettle worktree …)
 root = ".fettle/worktrees"
+require = false       # true → main-worktree edits to non-exempt paths are gated
+                      # (honors gates.claims.mode; WP-162)
+exempt_paths = ["docs/**", "**/*.md"]
 
 [uat]                 # agentic UAT (fettle uat …)
 surfaces = ["auto"]   # auto-detect, or explicit: ["cli", "api", "web", "library"]
@@ -178,7 +187,9 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 
 | Variable | Effect |
 |---|---|
-| `FETTLE_GATE_MODE` | Emergency override: `advisory`/`soft`/`enforce` set the mode of enabled gates; `off` disables every gate |
+| `FETTLE_GATE_MODE` | Emergency override: `advisory`/`soft`/`enforce` set the mode of enabled gates; `off` disables every gate — **cannot weaken a delegated policy capsule** |
+| `FETTLE_POLICY_CAPSULE` | Path to the tamper-evident policy capsule a parent handed this session (set by `fettle spawn`; merged monotonically — children can only tighten) |
+| `FETTLE_PARENT_SESSION` | Spawning session id (set by `fettle spawn`; recorded on every trace entry for `fettle report --lineage`) |
 | `FETTLE_PYTHON` | Interpreter used by the hook launcher (needs >= 3.11) |
 | `FETTLE_STATE_DIR` | Base dir for per-session state (default `$XDG_STATE_HOME/fettle`) |
 | `FETTLE_EDIT_TRACKING` | Override the per-session edit-tracking file path |

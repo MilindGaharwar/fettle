@@ -51,17 +51,17 @@ fettle doctor        # verify — hooks are live in your next agent session
 
 CLI-only (hooks need the checkout): `pipx install finefettle`
 
-**Status: v1.3.1 “Parity & Provenance”** — full hook parity across four
-agents (Claude Code, Codex CLI, Gemini CLI, OpenCode: one harness, one
-policy, conformance-tested translators), Sigstore-signed SLSA provenance
-and a CycloneDX SBOM on every release, compliance evidence reporting
-(CWE / OWASP ASVS / SOC 2 per rule, joined with the audit trail), and
-privacy-first opt-in telemetry that only an org's digest-pinned central
-policy can enable. On top of v1.3.0's evidence loop — living specs with
-scenario-coverage gating, agent worktrees with work-item claims, agentic
-UAT with reconciled verdicts, a semantic link graph
-(req → scenario → test → verdict), and a remote-CI verification gate: a
-pushed commit is not done until its remote verdict is green.
+**Status: v1.4.0 “Governed Delegation”** — policy survives delegation:
+`fettle spawn` hands children a tamper-evident policy capsule that can
+only be tightened, never weakened (`capsule_guard` fails closed on
+tampering; `FETTLE_GATE_MODE=off` cannot defeat it); `[gates.agent_spawn]`
+flags raw nested agent launches; every trace entry carries lineage
+(`fettle report --lineage` renders the delegation forest with UNGOVERNED
+flags); `[worktrees].require` gates main-worktree edits. On top of
+v1.3.1's four-agent hook parity, Sigstore-signed SLSA provenance + SBOM,
+compliance evidence reporting, and privacy-first opt-in telemetry — and
+v1.3.0's evidence loop (living specs, agent worktrees with claims,
+agentic UAT, semantic link graph, remote-CI verification gate).
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What It Does
@@ -385,9 +385,11 @@ Agent tool call (Claude Code · Codex CLI · Gemini CLI · OpenCode)
     ▼  fettle.agents — translate to one event model
     │
 PreToolUse ──→ dispatcher.py selects checks by event + tool + extension:
+             → capsule_guard (delegated-policy tamper check, fail-closed)
              → quality_gate (plan, UX spec)
              → tdd_gate (test-first ordering)
              → config_protect, destructive_guard
+             → agent_spawn_gate (nested agent launches → fettle spawn)
              → mcp_trust_gate (Bash only)
     │
     ▼ (tool executes)
@@ -411,7 +413,7 @@ Stop ──→ dispatcher.py:
 ```
 
 All checks route through `dispatcher.py` (single process, per-check budget,
-advisory cap). 28 checks registered, ordered by priority, fail-open on error.
+advisory cap). 30 checks registered, ordered by priority, fail-open on error.
 
 ## Result Taxonomy
 
@@ -498,6 +500,7 @@ no eslint, biome, tsc, cargo, or semgrep installation required to run the suite.
 | v1.2.0 | Independence: package restructure, agent abstraction, `fettle init`, config schema | **Shipped** |
 | v1.3.0 | Evidence Loop: central policy, org reporting, living specs + BDD gate, agent worktrees, agentic UAT, semantic links, verify + remote-CI gates | **Shipped** |
 | v1.3.1 | Parity & Provenance: four-agent hook parity, SLSA provenance + SBOM, compliance evidence, opt-in telemetry | **Shipped** |
+| v1.4.0 | Governed Delegation: policy capsules, `fettle spawn`, agent_spawn gate, lineage reporting, worktree requirement | **Shipped** |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for remaining governance and
 distribution work.
