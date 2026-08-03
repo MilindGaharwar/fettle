@@ -21,6 +21,7 @@ Pipeline:
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,29 @@ LEARNED_FIXTURES_DIR = "tests/fixtures/learned"
 # WP-163 (C2): machine-initiated drafts are quarantined here — never loaded
 # by any gate — until a human runs `fettle rules promote <id>` (D-C3).
 PROPOSED_RULES_DIR = "rules/proposed"
+
+# WP-8 (audit M-01): rule ids reach the filesystem as path components. The
+# LLM-supplied id is untrusted — anything outside this shape is discarded.
+_RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def _safe_rule_id(candidate: object) -> str:
+    """The candidate when it is a well-formed rule id; a timestamp id otherwise."""
+    if isinstance(candidate, str) and _RULE_ID_RE.fullmatch(candidate):
+        return candidate
+    return f"learned-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+
+def _normalize_rule_id(candidate: str) -> str:
+    """Deterministic slug for signature-derived proposal ids (dedup-stable)."""
+    slug = re.sub(r"[^a-z0-9-]+", "-", str(candidate).lower()).strip("-")[:64]
+    return slug or "proposal"
+
+
+def _assert_contained(path: Path, parent: Path) -> None:
+    """Defense in depth: no write may land outside its quarantine dir."""
+    if not path.resolve().is_relative_to(parent.resolve()):
+        raise ValueError(f"rule destination {path} escapes {parent}")
 
 LEARN_SYSTEM_PROMPT = """You are a security and code quality expert. Given an incident description, generate a semgrep rule that would have caught the issue.
 
@@ -122,7 +146,8 @@ def _generate_semgrep_yaml(rule: dict) -> str:
 
 def _save_rule(rule: dict, repo_root: Path) -> dict:
     """Save learned rule and fixtures to repo."""
-    rule_id = rule.get("rule_id", f"learned-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    rule_id = _safe_rule_id(rule.get("rule_id"))
+    rule["rule_id"] = rule_id  # the YAML must carry the id actually used
 
     # Create directories
     rules_dir = repo_root / LEARNED_RULES_DIR
@@ -132,17 +157,22 @@ def _save_rule(rule: dict, repo_root: Path) -> dict:
 
     # Save rule YAML
     rule_path = rules_dir / f"{rule_id}.yml"
+    _assert_contained(rule_path, rules_dir)
     rule_path.write_text(_generate_semgrep_yaml(rule), encoding="utf-8")
 
     # Save violating fixture
     violating = rule.get("violating_code", "")
     if violating:
-        (fixtures_dir / f"{rule_id}_violation.py").write_text(violating, encoding="utf-8")
+        dest = fixtures_dir / f"{rule_id}_violation.py"
+        _assert_contained(dest, fixtures_dir)
+        dest.write_text(violating, encoding="utf-8")
 
     # Save clean fixture
     clean = rule.get("clean_code", "")
     if clean:
-        (fixtures_dir / f"{rule_id}_clean.py").write_text(clean, encoding="utf-8")
+        dest = fixtures_dir / f"{rule_id}_clean.py"
+        _assert_contained(dest, fixtures_dir)
+        dest.write_text(clean, encoding="utf-8")
 
     return {
         "rule_id": rule_id,
@@ -229,8 +259,9 @@ def draft_proposals(repo_root: Path, days: int = 30, save: bool = True,
     for sig in detect_signatures(repo_root, days=days):
         if not sig.draftable:
             continue
-        rule_id = _proposal_id(sig)
+        rule_id = _normalize_rule_id(_proposal_id(sig))
         rule_path = proposed_dir / f"{rule_id}.yml"
+        _assert_contained(rule_path, proposed_dir)
         if rule_path.exists():
             continue  # already proposed
         rule = generate(_signature_brief(sig, days))

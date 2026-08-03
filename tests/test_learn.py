@@ -49,6 +49,49 @@ def test_list_learned_rules_empty(tmp_path):
     assert rules == []
 
 
+# --- WP-8 (audit M-01): rule_id is untrusted LLM output ---
+
+def _rule(rule_id):
+    return {
+        "rule_id": rule_id,
+        "severity": "ERROR",
+        "message": "m",
+        "pattern": "eval($X)",
+        "language": "python",
+        "violating_code": "eval(x)",
+        "clean_code": "json.loads(x)",
+    }
+
+
+def test_save_rule_traversal_id_rejected(tmp_path):
+    result = _save_rule(_rule("../../evil"), tmp_path)
+    assert result["rule_id"].startswith("learned-")  # fell back to timestamp id
+    assert not (tmp_path.parent / "evil.yml").exists()
+    saved = tmp_path / "rules" / "learned" / f"{result['rule_id']}.yml"
+    assert saved.exists()
+    assert result["rule_id"] in saved.read_text()  # YAML carries the real id
+
+
+def test_save_rule_absolute_id_rejected(tmp_path):
+    result = _save_rule(_rule("/tmp/evil"), tmp_path)
+    assert result["rule_id"].startswith("learned-")
+
+
+def test_save_rule_nested_id_rejected(tmp_path):
+    result = _save_rule(_rule("sub/dir-rule"), tmp_path)
+    assert result["rule_id"].startswith("learned-")
+
+
+def test_save_rule_non_string_id_rejected(tmp_path):
+    result = _save_rule(_rule(["not", "a", "string"]), tmp_path)
+    assert result["rule_id"].startswith("learned-")
+
+
+def test_save_rule_valid_kebab_id_kept(tmp_path):
+    result = _save_rule(_rule("api-timeout-2"), tmp_path)
+    assert result["rule_id"] == "api-timeout-2"
+
+
 def test_list_learned_rules(tmp_path):
     rules_dir = tmp_path / "rules" / "learned"
     rules_dir.mkdir(parents=True)
