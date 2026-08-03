@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.6.1 — Hardened Gates
+
+Remediation of a dual external audit (GPT + Opus, both at v1.6.0): every
+HIGH and MEDIUM finding closed, plus the integration adapters finally
+wired to the CLI.
+
+- **Hook contract fixed** (H-01/C1): gates read the normalized
+  `hook_event_name` field and block reasons survive the dispatcher —
+  Stop/UX/plan blocks no longer silently downgrade.
+- **Capsule version skew fails closed** (H-02): an env-asserted policy
+  capsule newer than the runtime is now a hard error, not a silent
+  fallback to defaults.
+- **MCP trust gate hardened** (H-03/H-04): package-install regex covers
+  newline/env/command/`python -m pip` bypasses (21-variant corpus);
+  file-path checks resolve `~` and relative paths identically in both
+  the subprocess and dispatcher paths; `doctor` surfaces env allowlist
+  redirects.
+- **Verify stamps bound to their session** (M-04): stamps carry
+  session id + HEAD sha + dirty digest; foreign or out-of-scope stamps
+  fail closed, unchanged trees are redeemed.
+- **Injection surfaces closed**: learned-rule ids validated/slugged with
+  path-containment asserts (M-01); VS Code extension shell-quotes every
+  interpolated value (M-02); telemetry/cross-review endpoints must be
+  https or real loopback, CI repo slugs regex-pinned (M-05).
+- **Truthful plumbing**: `fettle doctor` propagates its exit code in CI
+  (M-06); claims ledger writes are flocked + atomic (M-03/WP-5); trace
+  log rotates (WP-6); `evals` needs `pip install 'finefettle[evals]'`
+  and says so (M-07).
+- **Registry imports are lazy**: gate modules load at call time —
+  registry import ~46 ms vs ~79 ms eager, verified by a purity test.
+- **`fettle integrations`** (C14): SonarQube / Black Duck / Pact
+  adapters now reachable — `fettle integrations [name] [--json]`, new
+  `[integrations.*]` config sections, doctor readiness probes.
+  Exit contract: 0 pass, 1 findings, 2 misconfigured/unavailable.
+- **Honest config output** (H-05 stopgap): `fettle config
+  --print-effective` names the sources it does not include (central
+  policy, env overrides, capsules) until the resolvers are unified.
+- Test tree consolidated under `tests/` (canonical `pytest tests/ -q`);
+  suite: 1989 passed. `ruff check` clean across `fettle/` and `tests/`.
+
 ## v1.6.0 — Reliable Sessions
 
 Every session now has a governed shape: plan before work, worklog while
