@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from fettle.uat.doctor import format_report, probe
 from fettle.uat.surfaces import detect_surfaces, resolve_surfaces
 

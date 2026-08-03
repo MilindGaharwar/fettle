@@ -107,7 +107,7 @@ class TestQueries:
     def test_links_for_scenario_shows_full_chain(self, tmp_path):
         g = build_graph(str(_repo(tmp_path)), _cfg())
         info = links_for(g, "greeter/S1")
-        link_ids = {(l["label"], l["id"]) for l in info["links"]}
+        link_ids = {(link["label"], link["id"]) for link in info["links"]}
         assert ("traces", "greeter/R1") in link_ids
         assert ("covers", "test_greeting.py") in link_ids
         assert ("contains", "greeter") in link_ids
@@ -190,7 +190,7 @@ class TestCLI:
         assert r.returncode == 0, r.stderr
         data = json.loads(r.stdout)
         assert data["kind"] == "scenario"
-        assert any(l["id"] == "test_greeting.py" for l in data["links"])
+        assert any(link["id"] == "test_greeting.py" for link in data["links"])
 
     def test_links_unknown_id_exit_2_with_suggestion(self, tmp_path):
         repo = _repo(tmp_path)

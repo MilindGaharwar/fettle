@@ -238,6 +238,14 @@ def cmd_config(args: argparse.Namespace) -> None:
         print("── Effective Fettle Configuration ──\n")
         print(f"  Repo root: {repo_root or '(not found)'}")
         print(f"  Config file: {repo_root / '.fettle.toml' if repo_root and (repo_root / '.fettle.toml').exists() else '(defaults only)'}")
+        # H-05 stopgap (audit): this view uses the layered resolver
+        # (defaults→org→team→repo→dir), while gates resolve via load_config
+        # (defaults→remote→repo→env→capsule). Until WP-20 unifies them,
+        # name the sources this output does NOT include.
+        print()
+        print("  NOTE: this view does not include central policy ([extends]),")
+        print("  FETTLE_* env overrides, or an active policy capsule — gates")
+        print("  may resolve differently until the resolvers are unified.")
         print()
         print(json.dumps(config, indent=2, default=str))
     elif args.explain:

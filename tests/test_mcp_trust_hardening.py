@@ -5,7 +5,6 @@ These call the pure helpers directly: fast, no subprocess.
 """
 
 import json
-import os
 
 import pytest
 
