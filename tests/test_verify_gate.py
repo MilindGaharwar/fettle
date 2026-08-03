@@ -195,7 +195,8 @@ class TestStopGate:
         _write_edits(state, [str(src)])
         stamp = tmp_path / STAMP_RELPATH
         stamp.parent.mkdir(parents=True)
-        stamp.write_text(json.dumps({"ok": True}))
+        stamp.write_text(json.dumps({"ok": True, "session_id": "sess-g",
+                                     "scope": "full"}))
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
 
@@ -204,7 +205,8 @@ class TestStopGate:
         src.write_text("x = 1\n")
         stamp = tmp_path / STAMP_RELPATH
         stamp.parent.mkdir(parents=True)
-        stamp.write_text(json.dumps({"ok": True}))
+        stamp.write_text(json.dumps({"ok": True, "session_id": "sess-g",
+                                     "scope": "full"}))
         state = tmp_path / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])  # written AFTER the stamp
         past = time.time() - 60
@@ -223,7 +225,8 @@ class TestStopGate:
         _write_edits(state, [str(src)])
         stamp = tmp_path / STAMP_RELPATH
         stamp.parent.mkdir(parents=True)
-        stamp.write_text(json.dumps({"ok": False, "error": "2 failed"}))
+        stamp.write_text(json.dumps({"ok": False, "error": "2 failed",
+                                     "session_id": "sess-g", "scope": "full"}))
         with patch("fettle.config.state_dir", return_value=state):
             result = run_check(_gate_ctx(tmp_path, _cfg()))
         assert result.decision == Decision.ADVISORY
@@ -241,6 +244,107 @@ class TestStopGate:
             result = run_check(_gate_ctx(tmp_path, _cfg()))
         assert result.decision == Decision.ADVISORY
         assert "unreadable" in result.message
+
+    # --- WP-7 (audit M-04): stamp binding ---
+
+    def test_cross_session_stamp_rejected(self, tmp_path):
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({"ok": True, "session_id": "sess-OTHER",
+                                     "scope": "full"}))
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "another session" in result.message
+
+    def test_legacy_stamp_without_session_rejected(self, tmp_path):
+        """A hand-written or pre-WP-7 stamp proves nothing — fail closed."""
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({"ok": True}))
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "another session" in result.message
+
+    def test_impacted_stamp_not_covering_edits_rejected(self, tmp_path):
+        """Edited file maps to a test the impacted run never executed."""
+        src = tmp_path / "widget.py"
+        src.write_text("x = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({
+            "ok": True, "session_id": "sess-g", "scope": "impacted",
+            "impacted": ["tests/test_unrelated.py"],
+        }))
+        from fettle.test_discovery import TestConfig
+        tc = TestConfig(framework="pytest", command="pytest tests/",
+                        test_roots=["tests"])
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=tc)):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "did not cover" in result.message
+
+    def test_impacted_stamp_covering_edits_allows(self, tmp_path):
+        src = tmp_path / "widget.py"
+        src.write_text("x = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({
+            "ok": True, "session_id": "sess-g", "scope": "impacted",
+            "impacted": ["tests/test_widget.py"],
+        }))
+        from fettle.test_discovery import TestConfig
+        tc = TestConfig(framework="pytest", command="pytest tests/",
+                        test_roots=["tests"])
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=tc)):
+            assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+
+    def test_mtime_stale_stamp_redeemed_by_matching_tree(self, tmp_path):
+        """Stamp older than edits but git tree identical to verify time — fresh."""
+        import subprocess as sp
+        sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        sp.run(["git", "add", "."], cwd=tmp_path, check=True)
+        sp.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+        from fettle.verify_gate import _dirty_digest, _head_sha
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text("{}")  # placeholder so the untracked listing is final
+        state = tmp_path / "state" / "sess-g"
+        edits = _write_edits(state, [str(src)])
+        stamp.write_text(json.dumps({
+            "ok": True, "session_id": "sess-g", "scope": "full",
+            "head_sha": _head_sha(str(tmp_path)),
+            "dirty_digest": _dirty_digest(str(tmp_path)),
+        }))
+        import os
+        past = time.time() - 60
+        os.utime(stamp, (past, past))
+        os.utime(edits)  # edits mtime newer than stamp
+        with patch("fettle.config.state_dir", return_value=state):
+            assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
 
 
 class TestRegistryAndCLI:

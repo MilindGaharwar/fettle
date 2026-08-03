@@ -128,6 +128,10 @@ def run_verify(
     stamp: dict = {
         "ok": False, "command": "", "exit_code": -1, "duration_s": 0.0,
         "scope": "full", "impacted": [], "error": "", "ts": time.time(),
+        # binding fields (WP-7): which session verified WHAT, exactly
+        "session_id": session_id or "",
+        "head_sha": _head_sha(cwd),
+        "dirty_digest": _dirty_digest(cwd),
     }
     if not tc.command:
         stamp["error"] = (
@@ -209,6 +213,46 @@ def _edits_path(session_id: str | None) -> Path | None:
     return state_dir(session_id) / "edits.jsonl"
 
 
+# ── Stamp binding (WP-7, audit M-04) ──────────────────────────────────
+
+
+def _git_out(cwd: str, *args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout if proc.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def _head_sha(cwd: str) -> str:
+    return _git_out(cwd, "rev-parse", "HEAD").strip()
+
+
+def _dirty_digest(cwd: str) -> str:
+    """Fingerprint of the uncommitted state: status listing + tracked diffs.
+
+    Known limitation: content changes inside files that stay untracked do
+    not alter the digest — the mtime freshness check remains the primary
+    signal; this digest only *redeems* an mtime-stale stamp when the tree
+    provably matches the verified one.
+    """
+    import hashlib
+    material = (
+        _git_out(cwd, "status", "--porcelain")
+        + _git_out(cwd, "diff", "HEAD")
+    )
+    return hashlib.sha256(material.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _tree_matches_stamp(cwd: str, stamp: dict) -> bool:
+    head = str(stamp.get("head_sha") or "")
+    return (bool(head)
+            and head == _head_sha(cwd)
+            and str(stamp.get("dirty_digest") or "") == _dirty_digest(cwd))
+
+
 # ── Stop gate (milliseconds-world) ────────────────────────────────────────
 
 
@@ -236,13 +280,29 @@ def run_check(ctx: HookContext) -> CheckResult:
             stamp = None
         if not isinstance(stamp, dict):
             problem = "verification stamp is unreadable"
-        elif stamp_path.stat().st_mtime < edits_path.stat().st_mtime:
+        elif str(stamp.get("session_id") or "") != (ctx.session_id or ""):
+            # WP-7: a stamp from another session (or a hand-written one
+            # without a session) proves nothing about THIS session's edits.
+            problem = "verification stamp was written by another session"
+        elif (stamp_path.stat().st_mtime < edits_path.stat().st_mtime
+              and not _tree_matches_stamp(str(ctx.cwd), stamp)):
             problem = "code was edited after the last verification run (stale)"
         elif not stamp.get("ok", False):
             detail = str(stamp.get("error", "")).strip()
             problem = "last verification run failed" + (
                 f":\n{detail}" if detail else ""
             )
+        elif stamp.get("scope") == "impacted":
+            # WP-7: everything edited this session must fall inside the
+            # verified scope. Full-suite stamps are always a superset; an
+            # impacted stamp must cover the impacted set as of NOW — and a
+            # now-unmappable edit demands the full suite.
+            tc = discover_test_config(str(ctx.cwd))
+            needed = impacted_tests(str(ctx.cwd), edited, tc.test_roots or ["tests"])
+            verified = set(stamp.get("impacted") or [])
+            if not needed or not set(needed) <= verified:
+                problem = ("the last verification run did not cover every "
+                           "file edited this session")
 
     if not problem:
         return CheckResult.allow()
