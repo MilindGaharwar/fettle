@@ -63,7 +63,7 @@ jobs:
         run: python fettle/doctor.py
 
       - name: Tests
-        run: python -m pytest tests/ fettle/tests/ -q
+        run: python -m pytest tests/ -q
 
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null

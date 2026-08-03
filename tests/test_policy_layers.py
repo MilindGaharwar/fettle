@@ -12,7 +12,6 @@ from fettle.policy_layers import (
     load_config_layered,
     resolve_config,
     resolve_config_for_path,
-    verify_bundle,
 )
 
 
@@ -353,44 +352,6 @@ def test_hidden_dirs_skipped_for_directory_overrides(tmp_path):
     layers = discover_layers(project)
     dir_layers = [lyr for lyr in layers if lyr.priority == 40]
     assert len(dir_layers) == 0
-
-
-# ---------------------------------------------------------------------------
-# Signed bundles (stub)
-# ---------------------------------------------------------------------------
-
-
-def test_verify_bundle_valid(tmp_path):
-    """A valid TOML with _signed field passes verification."""
-    bundle = tmp_path / "bundle.toml"
-    bundle.write_text("""
-_signed = "placeholder-signature-v1"
-[gates.lint]
-mode = "enforce"
-""")
-    assert verify_bundle(bundle) is True
-
-
-def test_verify_bundle_missing_signed_field(tmp_path):
-    """A valid TOML without _signed field fails verification."""
-    bundle = tmp_path / "bundle.toml"
-    bundle.write_text("""
-[gates.lint]
-mode = "enforce"
-""")
-    assert verify_bundle(bundle) is False
-
-
-def test_verify_bundle_invalid_toml(tmp_path):
-    """Invalid TOML fails verification."""
-    bundle = tmp_path / "bundle.toml"
-    bundle.write_text("not valid [[[ toml")
-    assert verify_bundle(bundle) is False
-
-
-def test_verify_bundle_missing_file(tmp_path):
-    """Nonexistent file fails verification."""
-    assert verify_bundle(tmp_path / "nonexistent.toml") is False
 
 
 # ---------------------------------------------------------------------------

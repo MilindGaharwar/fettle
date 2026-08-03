@@ -268,3 +268,16 @@ def test_commit_warning_when_untested(proj, state):
     rc, _, stderr = run_gate(bash_payload(proj, "git commit -m x", "tc"), state)
     assert rc == 0  # warning, never a block
     assert "TESTS" in stderr
+
+
+def test_tracking_helpers_bind_state_lazily(monkeypatch, tmp_path):
+    """WP-14 (audit C10): helpers reached without main() must not touch Path("")."""
+    import fettle.quality_gate as qg
+
+    for name in ("TRACKING_FILE", "EDIT_TRACKING_FILE",
+                 "BROWSER_TEST_MARKER", "BOOTSTRAP_WARNED_MARKER"):
+        monkeypatch.setattr(qg, name, "")
+    monkeypatch.setattr(qg, "state_dir", lambda session_id: tmp_path)
+    qg.stamp_tests("npx playwright test")  # pre-fix: Path("").touch() crash
+    assert (tmp_path / "browser-tested.timestamp").is_file()
+    assert qg._load_edit_tracking() == []

@@ -221,32 +221,6 @@ def explain_config(layers: list[PolicyLayer], key_path: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Signed bundles (stub)
-# ---------------------------------------------------------------------------
-
-def verify_bundle(bundle_path: Path) -> bool:
-    """Verify a policy bundle file is valid TOML with expected structure.
-
-    Currently checks:
-    - File exists
-    - Valid TOML
-    - Contains a `_signed` field (cryptographic verification is future work)
-
-    Returns True if valid, False otherwise.
-    """
-    if not bundle_path.is_file():
-        return False
-    try:
-        with open(bundle_path, "rb") as fh:
-            data = tomllib.load(fh)
-    except (tomllib.TOMLDecodeError, OSError):
-        return False
-
-    # Must contain _signed field (actual crypto verification is future work)
-    return "_signed" in data
-
-
-# ---------------------------------------------------------------------------
 # CLI integration
 # ---------------------------------------------------------------------------
 

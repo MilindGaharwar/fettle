@@ -310,6 +310,7 @@ def scan_tests_before_commit(command: str) -> list[str]:
 
 def scan_stop_untested(data: dict) -> list[str]:
     """BLOCKING (Stop): Block response if implementation files edited but not tested."""
+    _ensure_state()
     cwd = data.get("cwd", "")
     entries = _load_edit_tracking()
     if not entries:
@@ -347,6 +348,7 @@ def stamp_tests(command: str):
     """Record test runs — marks ALL tracked files as tested (from post_bash_test_detect.py)."""
     if not _TEST_RE.search(command):
         return
+    _ensure_state()
 
     # Detect browser testing (Playwright with screenshots)
     if "playwright" in command or "screenshot" in command or "chromium.launch" in command:
@@ -372,6 +374,7 @@ def stamp_tests(command: str):
 
 def _load_tracking() -> list[str]:
     """Load session edit list (for planning gate)."""
+    _ensure_state()
     try:
         if os.path.isfile(TRACKING_FILE):
             if time.time() - os.path.getmtime(TRACKING_FILE) > 3600:
@@ -385,6 +388,7 @@ def _load_tracking() -> list[str]:
 
 def _save_tracking(files: list[str]):
     """Save session edit list (for planning gate)."""
+    _ensure_state()
     try:
         with open(TRACKING_FILE, "w") as f:
             json.dump(files, f)
@@ -394,6 +398,7 @@ def _save_tracking(files: list[str]):
 
 def _load_edit_tracking() -> list[dict]:
     """Load per-file edit tracking JSONL (for test gate)."""
+    _ensure_state()
     entries = []
     try:
         if os.path.isfile(EDIT_TRACKING_FILE):
@@ -409,6 +414,7 @@ def _load_edit_tracking() -> list[dict]:
 
 def _save_edit_tracking(entries: list[dict]):
     """Save per-file edit tracking JSONL (atomic write)."""
+    _ensure_state()
     try:
         tmp = EDIT_TRACKING_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -427,6 +433,14 @@ def _init_state(session_id: str) -> None:
     EDIT_TRACKING_FILE = str(sdir / "edits.jsonl")
     BROWSER_TEST_MARKER = str(sdir / "browser-tested.timestamp")
     BOOTSTRAP_WARNED_MARKER = str(sdir / "ci-bootstrap-warned.json")
+
+
+def _ensure_state() -> None:
+    """WP-14 (audit C10): state paths default to "" at module level — a caller
+    that reaches a tracking helper without going through main() would touch
+    Path("") or open(""). Bind to the fallback session lazily instead."""
+    if not TRACKING_FILE:
+        _init_state("unknown")
 
 
 def _bootstrap_already_warned(cwd: str) -> bool:

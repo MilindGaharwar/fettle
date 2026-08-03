@@ -10,7 +10,10 @@ import os
 import subprocess
 import sys
 
-SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import fettle
+
+# The standalone hook scripts live inside the fettle package directory.
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(fettle.__file__))
 
 
 def _run_hook(script: str, input_data: dict, env_overrides: dict | None = None) -> tuple[int, dict | None]:
