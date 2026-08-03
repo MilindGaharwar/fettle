@@ -151,3 +151,34 @@ def test_shipped_scenarios_validate():
     assert dirs, "no shipped eval scenarios found"
     for d in dirs:
         load_scenario(d)  # raises on schema violation
+
+
+# ── WP-11 (audit M-07): missing PyYAML must fail with guidance ───────
+
+
+def test_missing_pyyaml_exits_with_install_hint(monkeypatch, capsys):
+    import importlib
+
+    class _BlockYaml:
+        def find_spec(self, name, path=None, target=None):
+            if name == "yaml":
+                raise ImportError("blocked for test")
+            return None
+
+    monkeypatch.delitem(sys.modules, "yaml", raising=False)
+    monkeypatch.delitem(sys.modules, "fettle.evals_runner", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BlockYaml()] + sys.meta_path)
+    with pytest.raises(SystemExit) as exc:
+        importlib.import_module("fettle.evals_runner")
+    assert exc.value.code == 2
+    assert "finefettle[evals]" in capsys.readouterr().err
+
+
+def test_evals_extra_declared_in_pyproject():
+    pyproject = os.path.join(PLUGIN_DIR, "pyproject.toml")
+    with open(pyproject, "rb") as fh:
+        import tomllib
+
+        data = tomllib.load(fh)
+    extras = data["project"]["optional-dependencies"]
+    assert any(dep.startswith("pyyaml") for dep in extras.get("evals", []))

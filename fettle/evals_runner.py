@@ -28,7 +28,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:  # WP-11 (audit M-07): pyyaml ships in the `evals` extra
+    print(
+        "fettle evals requires PyYAML — install with: pip install 'finefettle[evals]'",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 logger = logging.getLogger("fettle.evals")
 

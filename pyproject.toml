@@ -27,8 +27,9 @@ classifiers = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0", "pyyaml>=6.0"]
 semgrep = ["semgrep>=1.50"]
+evals = ["pyyaml>=6.0"]
 uat = ["playwright>=1.40"]
-all = ["semgrep>=1.50", "ruff>=0.4.0"]
+all = ["semgrep>=1.50", "ruff>=0.4.0", "pyyaml>=6.0"]
 
 [project.scripts]
 fettle = "fettle.cli:main"
