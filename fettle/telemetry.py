@@ -55,6 +55,22 @@ _OVERRIDE_STATUSES = ("overridden", "override")
 _ERROR_STATUSES = ("tool_error", "check_error")
 
 
+def _endpoint_allowed(endpoint: str) -> bool:
+    """https anywhere, or plain http only to loopback (WP-12, audit M-05).
+
+    startswith() checks pass hosts like http://127.0.0.1.evil.example —
+    the hostname must be parsed, not prefix-matched.
+    """
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(endpoint)
+    except ValueError:
+        return False
+    if parts.scheme == "https":
+        return True
+    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "::1", "localhost")
+
+
 def telemetry_settings(cwd: str | None = None) -> dict:
     """Resolve telemetry state with provenance.
 
@@ -89,8 +105,7 @@ def telemetry_settings(cwd: str | None = None) -> dict:
     if not (isinstance(org_tel, dict) and org_tel.get("enabled")):
         return result
     endpoint = str(org_tel.get("endpoint", ""))
-    if not (endpoint.startswith("https://")
-            or endpoint.startswith(("http://127.0.0.1", "http://localhost"))):
+    if not _endpoint_allowed(endpoint):
         result["note"] = (
             f"org policy enables telemetry but endpoint {endpoint[:48]!r} is "
             "not https:// — telemetry stays off"

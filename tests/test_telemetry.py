@@ -68,6 +68,17 @@ class TestOptIn:
         assert settings["enabled"] is False
         assert "https" in settings["note"]
 
+    def test_loopback_prefix_spoof_stays_off(self, tmp_path, monkeypatch):
+        # WP-12 (audit M-05): startswith("http://127.0.0.1") passed this host.
+        policy = b'[telemetry]\nenabled = true\nendpoint = "http://127.0.0.1.evil.example/i"\n'
+        repo = _org_enabled_repo(tmp_path, monkeypatch, policy)
+        assert telemetry_settings(str(repo))["enabled"] is False
+
+    def test_real_loopback_http_allowed(self, tmp_path, monkeypatch):
+        policy = b'[telemetry]\nenabled = true\nendpoint = "http://127.0.0.1:9999/ingest"\n'
+        repo = _org_enabled_repo(tmp_path, monkeypatch, policy)
+        assert telemetry_settings(str(repo))["enabled"] is True
+
     def test_org_policy_without_telemetry_stays_off(self, tmp_path, monkeypatch):
         repo = _org_enabled_repo(tmp_path, monkeypatch, b'[gates.lint]\nmode = "enforce"\n')
         assert telemetry_settings(str(repo))["enabled"] is False

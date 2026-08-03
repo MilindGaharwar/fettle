@@ -96,6 +96,16 @@ class TestGithubRemote:
         repo = _git_repo(tmp_path, "https://gitlab.com/owner/name.git")
         assert ci_gate._github_repo(str(repo)) is None
 
+    # WP-12 (audit M-05): the slug is spliced into an api.github.com URL —
+    # anything beyond plain owner/repo must be rejected.
+    def test_slug_with_query_metacharacters_rejected(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path, "https://github.com/owner/name?x=1")
+        assert ci_gate._github_repo(str(repo)) is None
+
+    def test_slug_with_traversal_rejected(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path, "git@github.com:owner/..%2fother.git")
+        assert ci_gate._github_repo(str(repo)) is None
+
 
 # ── run_ci_status (minutes-world; _query_runs patched) ────────────────────
 

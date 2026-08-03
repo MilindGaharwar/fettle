@@ -49,6 +49,9 @@ _GIT_PUSH_RE = re.compile(r"\bgit(?:\s+-C\s+\S+|\s+-\S+)*\s+push\b")
 _GITHUB_REMOTE_RE = re.compile(
     r"(?:git@github\.com:|https://github\.com/)([^/\s]+/[^/\s]+?)(?:\.git)?/?$"
 )
+# WP-12 (audit M-05): the slug is interpolated into an api.github.com URL —
+# only plain owner/repo shapes may pass (no '?', '#', '..', '%').
+_REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 _GREEN_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
 
@@ -79,7 +82,8 @@ def _github_repo(cwd: str) -> str | None:
     if proc.returncode != 0:
         return None
     m = _GITHUB_REMOTE_RE.search(proc.stdout.strip())
-    return m.group(1) if m else None
+    slug = m.group(1) if m else None
+    return slug if slug and _REPO_SLUG_RE.fullmatch(slug) else None
 
 
 def _query_runs(cwd: str, sha: str) -> tuple[list[dict] | None, str]:

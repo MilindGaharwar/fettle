@@ -26,6 +26,18 @@ DEFAULT_PROMPT = (
 TIMEOUT = 120
 
 
+def _endpoint_allowed(endpoint: str) -> bool:
+    """https anywhere, or plain http only to loopback (WP-12, audit M-05)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(endpoint)
+    except ValueError:
+        return False
+    if parts.scheme == "https":
+        return True
+    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "::1", "localhost")
+
+
 def _read_files(paths: list[str]) -> str:
     parts: list[str] = []
     for path in paths:
@@ -78,6 +90,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if not _endpoint_allowed(REVIEW_ENDPOINT):
+        print(
+            "cross_review: FETTLE_REVIEW_ENDPOINT must be https:// "
+            "(plain http:// is allowed only for loopback) — code is never "
+            "sent over cleartext to a remote host.",
+            file=sys.stderr,
+        )
+        return 2
     parser = argparse.ArgumentParser(description="Fettle cross-review via an OpenAI-compatible endpoint")
     parser.add_argument("--files", nargs="+", required=True, help="Files to review")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"LLM model (default: {DEFAULT_MODEL})")
