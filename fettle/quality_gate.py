@@ -464,7 +464,9 @@ def main():
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
     cwd = data.get("cwd", ".")
-    hook_event = data.get("hook_event", "")
+    # Legacy field first; fall back to the normalized agent-contract field so
+    # a raw normalized payload still routes correctly (H-01 hardening).
+    hook_event = data.get("hook_event") or data.get("hook_event_name") or ""
 
     _init_state(data.get("session_id", "unknown"))
     cfg = load_config(cwd)
@@ -561,7 +563,20 @@ def run_check(ctx):
     from fettle.dispatcher_types import CheckResult
 
     script_path = os.path.abspath(__file__)
-    payload = ctx.input.raw
+    # Canonical payload: the raw agent payload may use any host's field
+    # vocabulary — overwrite the fields this gate consumes with the
+    # NORMALIZED values so enforcement never depends on the host's spelling
+    # (H-01: real events carried `hook_event_name`, and the legacy
+    # `hook_event` read silently downgraded Pre-edit blocks to warnings).
+    payload = dict(ctx.input.raw)
+    payload["hook_event"] = ctx.input.hook_event_name
+    payload["hook_event_name"] = ctx.input.hook_event_name
+    if ctx.input.tool_name is not None:
+        payload["tool_name"] = ctx.input.tool_name
+    payload["tool_input"] = ctx.input.tool_input
+    payload["cwd"] = str(ctx.input.cwd)
+    if ctx.input.session_id:
+        payload["session_id"] = ctx.input.session_id
 
     try:
         proc = subprocess.run(
@@ -586,7 +601,15 @@ def run_check(ctx):
     context = hso.get("additionalContext", "")
 
     if proc.returncode == 2:
-        return CheckResult.block(context, hook_specific_output=hso)
+        # Blocks carry their findings in top-level `reason` and
+        # `permissionDecisionReason` — never `additionalContext`. Losing
+        # them turned every block into a bare "Blocked by Fettle".
+        reason = (
+            context
+            or output.get("reason", "")
+            or hso.get("permissionDecisionReason", "")
+        )
+        return CheckResult.block(reason, hook_specific_output=hso)
     if context:
         return CheckResult.advisory(context, hook_specific_output=hso)
     return CheckResult.allow()
