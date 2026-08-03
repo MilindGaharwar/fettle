@@ -6,19 +6,16 @@
 
 <p align="center"><b>The quality harness for AI-generated code — live in your editor.</b></p>
 
-Surfaces ruff, semgrep, complexity, and incident-derived LLM-antipattern
-findings as native VS Code diagnostics — the *same* checks that run inside
-Claude Code, Codex CLI, Gemini CLI, and OpenCode agent sessions, driven by
-the *same* `.fettle.toml`. What your agent gets blocked on is exactly what
-your editor underlines: one policy, zero drift.
+Surfaces Fettle's current Python LSP findings as native VS Code diagnostics,
+using the workspace's `.fettle.toml`. Agent hooks and editor diagnostics share
+configuration but do not yet run an identical set of gates.
 
 → Main project: [github.com/MilindGaharwar/fettle](https://github.com/MilindGaharwar/fettle)
 
 ## Features
 
-- **Live diagnostics** on Python, TypeScript, JavaScript, Go, and Rust files
-- **Function complexity** annotations (cyclomatic + cognitive)
-- **Semgrep patterns** including LLM-antipattern rules — each traced to a real incident
+- **Live diagnostics** on Python files
+- **Ruff and Fettle's bundled Semgrep findings** through the LSP path
 - **Auto-reload** when `.fettle.toml` changes
 - **Commands:** restart server, run full scan, view report
 
@@ -59,7 +56,7 @@ code --install-extension fettle-0.9.0.vsix
 | `fettle.pythonPath` | auto-detected | Python >= 3.11 interpreter |
 | `fettle.lintOnSave` | `true` | Lint on save |
 | `fettle.lintOnOpen` | `true` | Lint on open |
-| `fettle.showComplexity` | `true` | Show complexity annotations |
+| `fettle.showComplexity` | `true` | Reserved setting; current LSP diagnostics do not expose complexity annotations |
 
 ## Commands
 
@@ -69,6 +66,8 @@ code --install-extension fettle-0.9.0.vsix
 
 ## How it works
 
-The extension launches Fettle's built-in LSP server (`scripts/lsp_server.py`) which runs the same ruff + semgrep checks that fire in Claude Code hooks. Diagnostics appear inline as you edit — identical to what the AI agent sees.
+The extension launches Fettle's built-in LSP server for Python diagnostics.
+Hook-only process gates, shell guards, and Stop-time checks are not editor
+diagnostics.
 
 Project config is read from `.fettle.toml` at the workspace root.

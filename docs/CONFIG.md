@@ -1,8 +1,8 @@
 # Fettle configuration
 
-> One file drives everything. The same `.fettle.toml` powers agent hooks
-> (Claude Code, Codex CLI, Gemini CLI, OpenCode), the CLI, pre-commit, CI,
-> and the LSP server — set policy once, enforce it at every chokepoint.
+> `.fettle.toml` is the shared policy source for agent hooks, the CLI,
+> pre-commit, CI, and the LSP server. Each surface supports a different subset
+> of checks, so validate the specific surfaces you intend to enforce.
 
 Fettle reads a single optional `.fettle.toml` at your project root. Layering
 (later wins): built-in defaults → `.fettle.toml` → environment variables.
@@ -57,8 +57,9 @@ sha256 = "9f2c…"   # content digest — the pin is mandatory
   `fettle policy sync` fetches (HTTPS only, 1 MiB cap); `fettle policy
   status` shows pin + cache state; `fettle doctor` warns when a configured
   policy isn't synced.
-- **Offline-safe**: an unsynced or unreachable policy degrades to local
-  config with a warning — enforcement never breaks because a server is down.
+- **Offline operation**: hooks never fetch policy. If no valid cached policy is
+  available, local behavior and warnings depend on the calling surface; verify
+  required central policy with `fettle policy status` in CI.
 - One hop only: an org policy cannot itself contain `[extends]`.
 
 ## Telemetry (`[telemetry]`, WP-148)
@@ -202,7 +203,7 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 
 | Variable | Effect |
 |---|---|
-| `FETTLE_GATE_MODE` | Emergency override: `advisory`/`soft`/`enforce` set the mode of enabled gates; `off` disables every gate — **cannot weaken a delegated policy capsule** |
+| `FETTLE_GATE_MODE` | Override enabled gate mode with `advisory`/`soft`/`enforce`, or request `off`. Delegated sessions also evaluate their capsule; validate strict capsule behavior with your runner before treating it as a security boundary. |
 | `FETTLE_POLICY_CAPSULE` | Path to the tamper-evident policy capsule a parent handed this session (set by `fettle spawn`; merged monotonically — children can only tighten) |
 | `FETTLE_PARENT_SESSION` | Spawning session id (set by `fettle spawn`; recorded on every trace entry for `fettle report --lineage`) |
 | `FETTLE_PYTHON` | Interpreter used by the hook launcher (needs >= 3.11) |

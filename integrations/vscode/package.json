@@ -1,7 +1,7 @@
 {
   "name": "fettle",
   "displayName": "Fettle",
-  "description": "Real-time quality enforcement for AI-assisted development — ruff, semgrep, complexity, coverage, and discipline gates",
+  "description": "Python diagnostics from Fettle's AI-assisted development quality policy",
   "version": "0.9.0",
   "publisher": "MilindGaharwar",
   "icon": "icon.png",
@@ -22,11 +22,8 @@
     "lint",
     "quality",
     "python",
-    "typescript",
     "ruff",
     "semgrep",
-    "complexity",
-    "coverage",
     "ai",
     "claude"
   ],

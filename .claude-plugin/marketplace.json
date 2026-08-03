@@ -8,12 +8,12 @@
     {
       "name": "fettle",
       "source": "./",
-      "description": "Quality enforcement for AI-assisted development — ruff + semgrep + incident-derived LLM-antipattern rules wired into the Claude Code tool lifecycle.",
-      "version": "0.4.2",
+      "description": "In-session quality governance with advisory-first code and process gates, evidence, and multi-agent controls.",
+      "version": "1.6.0",
       "author": {"name": "Milind Gaharwar"},
       "license": "MIT",
       "homepage": "https://github.com/MilindGaharwar/fettle",
-      "keywords": ["quality", "lint", "semgrep", "ruff", "hooks", "guardrails"]
+      "keywords": ["quality", "ai-agents", "lint", "semgrep", "ruff", "hooks", "governance"]
     }
   ]
 }

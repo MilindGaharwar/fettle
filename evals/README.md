@@ -1,6 +1,6 @@
-# Fettle Behavioral Evals — WP-133
+# Fettle Behavioral Evaluations
 
-> Shape stolen with attribution from
+> Structure adapted with attribution from
 > [superpowers-evals](https://github.com/prime-radiant-inc/superpowers-evals)
 > (quorum), radically slimmed. Rule *matching* is proven by
 > `tests/test_rule_integrity.py` fixtures; this lab proves the step after:

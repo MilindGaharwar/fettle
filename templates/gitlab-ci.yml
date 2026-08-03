@@ -1,11 +1,9 @@
-# Fettle GitLab CI template (WP-143) — same policy as the GitHub Action
-# and pre-commit hooks: one .fettle.toml, identical findings at every
-# chokepoint.
+# Fettle GitLab CI template — use the repository's .fettle.toml in CI.
 #
 # Consumer usage (.gitlab-ci.yml):
 #
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/MilindGaharwar/fettle/v1.3.0/templates/gitlab-ci.yml'
+#     - remote: 'https://raw.githubusercontent.com/MilindGaharwar/fettle/v1.6.0/templates/gitlab-ci.yml'
 #
 #   fettle:
 #     variables:

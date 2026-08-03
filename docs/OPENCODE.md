@@ -6,8 +6,9 @@ OpenCode's **native** event shapes (`tool.execute.before/after`,
 `session.idle`) directly via `fettle.agents.opencode` — translation is
 conformance-tested in Python, and the TypeScript shim is a thin transport.
 
-**Setup: run `fettle init`** — it detects `~/.config/opencode` and registers
-the plugin automatically, preserving your existing config. Manual
+**Setup: run `fettle init` from a Fettle Git checkout.** It detects
+`~/.config/opencode` and registers the plugin while preserving existing config.
+The PyPI wheel does not include this TypeScript transport. Manual
 registration, if you prefer:
 
 ```json
@@ -31,5 +32,6 @@ The adapter maps:
 Claude Code continues to use `hooks/hooks.json` directly; installing this
 adapter does not alter or replace that integration.
 
-The TypeScript adapter is distributed with the Git repository. It is not
-included in Python wheels because OpenCode loads it directly from the checkout.
+The adapter forwards local event payloads to Fettle's Python dispatcher. Run
+`fettle doctor` after setup, restart OpenCode, and test an advisory rule before
+enabling blocking modes.
