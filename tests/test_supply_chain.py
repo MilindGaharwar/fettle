@@ -6,6 +6,9 @@ import argparse
 import base64
 import hashlib
 import importlib.metadata
+import types
+
+import pytest
 
 from fettle.supply_chain import PINNED_TOOLS, verify_record, verify_tool_hashes
 
@@ -125,13 +128,18 @@ class TestVerifyToolHashes:
 
 
 class TestDoctorWiring:
+    @staticmethod
+    def _run_stub(captured, returncode=0):
+        def fake_run(cmd, **kw):
+            captured.update(cmd=cmd)
+            return types.SimpleNamespace(returncode=returncode)
+        return fake_run
+
     def test_cmd_doctor_forwards_flag(self, monkeypatch):
         from fettle import cli
 
         captured: dict = {}
-        monkeypatch.setattr(
-            "subprocess.run", lambda cmd, **kw: captured.update(cmd=cmd)
-        )
+        monkeypatch.setattr("subprocess.run", self._run_stub(captured))
         cli.cmd_doctor(argparse.Namespace(verify_hashes=True))
         assert captured["cmd"][-1] == "--verify-hashes"
 
@@ -139,11 +147,26 @@ class TestDoctorWiring:
         from fettle import cli
 
         captured: dict = {}
-        monkeypatch.setattr(
-            "subprocess.run", lambda cmd, **kw: captured.update(cmd=cmd)
-        )
+        monkeypatch.setattr("subprocess.run", self._run_stub(captured))
         cli.cmd_doctor(argparse.Namespace())
         assert "--verify-hashes" not in captured["cmd"]
+
+    def test_cmd_doctor_propagates_failure_exit_code(self, monkeypatch):
+        # WP-10 (audit M-06): a red doctor run must fail the CLI, not exit 0.
+        from fettle import cli
+
+        captured: dict = {}
+        monkeypatch.setattr("subprocess.run", self._run_stub(captured, returncode=1))
+        with pytest.raises(SystemExit) as exc:
+            cli.cmd_doctor(argparse.Namespace())
+        assert exc.value.code == 1
+
+    def test_cmd_doctor_green_run_returns_normally(self, monkeypatch):
+        from fettle import cli
+
+        captured: dict = {}
+        monkeypatch.setattr("subprocess.run", self._run_stub(captured))
+        assert cli.cmd_doctor(argparse.Namespace()) is None
 
     def test_doctor_main_includes_supply_checks(self, monkeypatch, capsys):
         from fettle import doctor

@@ -358,7 +358,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         cmd.append("--verify-hashes")
     if getattr(args, "fix", False):
         cmd.append("--fix")
-    subprocess.run(cmd, check=False)
+    proc = subprocess.run(cmd, check=False)
+    if proc.returncode != 0:  # WP-10 (audit M-06): propagate failure to CI
+        sys.exit(proc.returncode)
 
 
 def cmd_init(args: argparse.Namespace) -> None:
