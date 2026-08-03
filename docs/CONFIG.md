@@ -131,6 +131,16 @@ spec_patterns = ["docs/*spec*.md", "docs/**/*spec*.md", "docs/*strategy*.md", "d
 [gates.tests]         # untested-code Stop gate + pre-commit warning — OFF by default
 enabled = false
 
+[gates.mcp_trust]     # zero-trust package-install allowlist — OFF by default
+enabled = false
+allowlist_path = ""   # pin the allowlist file via policy; when set, the
+                      # MCP_ALLOWLIST_PATH env override is IGNORED (an
+                      # agent-writable env var must not redirect the trust
+                      # root). Empty → env override or the default path.
+                      # NOTE: command mediation is regex-based defense in
+                      # depth, not a sandbox — pair it with [gates.destructive]
+                      # enforce mode and OS-level controls for hard guarantees.
+
 [gates.tdd]           # test-before-implementation ordering — OFF by default
 enabled = false
 mode = "advisory"     # advisory | enforce — enforce BLOCKS impl edits with no prior test edit
@@ -212,7 +222,7 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 | `FETTLE_TRACE_DIR` | Override the trace directory |
 | `FETTLE_LEAN_MAX_RUNTIME_MS` | Override the lean-sniffer wall-clock budget (default 200 ms; test harnesses pin a high value for determinism) |
 | `FETTLE_LEAN_STATE_DIR` | Override the lean-review session state directory |
-| `MCP_ALLOWLIST_PATH` | Override the MCP trust-gate allowlist path (default `~/.config/fettle/mcp-allowlist.json`) |
+| `MCP_ALLOWLIST_PATH` | Override the MCP trust-gate allowlist path (default `~/.config/fettle/mcp-allowlist.json`). Inert when policy sets `[gates.mcp_trust].allowlist_path`. |
 
 ## Automation recipes (WP-163)
 

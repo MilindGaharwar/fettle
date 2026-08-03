@@ -62,7 +62,9 @@ DEFAULTS: dict[str, Any] = {
             ],
         },
         "tests": {"enabled": False, "browser_test_window_s": 1800},
-        "mcp_trust": {"enabled": False},
+        # allowlist_path, when set via policy, pins the trust root and makes
+        # the MCP_ALLOWLIST_PATH env override inert (WP-4c).
+        "mcp_trust": {"enabled": False, "allowlist_path": ""},
         # CI must be set up before development. Default on + advisory (a
         # one-time nudge to run `fettle ci init`); mode="strict" blocks.
         "ci_bootstrap": {"enabled": True, "mode": "advisory"},

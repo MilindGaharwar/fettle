@@ -215,6 +215,10 @@
             "enabled": {
               "type": "boolean",
               "default": false
+            },
+            "allowlist_path": {
+              "type": "string",
+              "default": ""
             }
           },
           "additionalProperties": false

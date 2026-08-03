@@ -295,6 +295,40 @@ def check_config_valid() -> list[dict]:
     return checks
 
 
+def check_mcp_trust() -> list[dict]:
+    """Surface an active MCP_ALLOWLIST_PATH env override (WP-4c).
+
+    An env-writable redirect of the trust root is invisible otherwise. When
+    policy pins [gates.mcp_trust].allowlist_path the env var is inert; when
+    it does not and the gate is enabled, an env override is a warning.
+    """
+    import os
+    checks: list[dict] = []
+    env_path = os.environ.get("MCP_ALLOWLIST_PATH")
+    if not env_path:
+        return checks
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from fettle.config import load_config
+        mcp = load_config(".")["gates"]["mcp_trust"]
+    except Exception:  # noqa: BLE001 — doctor must never crash
+        return checks
+    pinned = mcp.get("allowlist_path") or ""
+    if pinned:
+        ok, detail = True, (
+            f"env MCP_ALLOWLIST_PATH={env_path} is inert — policy pins "
+            f"allowlist_path={pinned}"
+        )
+    else:
+        ok = not mcp.get("enabled", False)
+        detail = (
+            f"env MCP_ALLOWLIST_PATH={env_path} redirects the trust allowlist — "
+            "pin [gates.mcp_trust].allowlist_path in policy to make it inert"
+        )
+    checks.append({"name": "mcp-allowlist", "required": False, "ok": ok, "detail": detail})
+    return checks
+
+
 def apply_mechanical_fixes(checks: list[dict], *, run=None, which=None) -> list[str]:
     """Apply fixes that are purely mechanical — no judgement calls (v1.6 slice D).
 
@@ -339,7 +373,7 @@ def main() -> int:
 
     checks = (check_environment() + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health()
-              + check_runner_governance())
+              + check_runner_governance() + check_mcp_trust())
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes
         checks += verify_tool_hashes()
