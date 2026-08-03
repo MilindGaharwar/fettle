@@ -23,7 +23,6 @@ import copy
 import hashlib
 import json
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -139,10 +138,11 @@ def resolve_env_capsule() -> tuple[dict | None, str]:
     """Resolve and verify $FETTLE_POLICY_CAPSULE.
 
     Returns (capsule_doc, error):
-      (None, "")      — env not set: normal solo mode, or benign version skew
+      (None, "")      — env not set: normal solo mode
       (doc,  "")      — verified capsule
-      (None, reason)  — the env ASSERTS a capsule that is missing or
-                        tampered: fail closed (capsule_guard blocks on this)
+      (None, reason)  — the env ASSERTS a capsule that is missing, tampered,
+                        or of an unsupported schema version: fail closed
+                        (capsule_guard blocks on this)
     """
     global _last_error
     _last_error = ""
@@ -157,14 +157,18 @@ def resolve_env_capsule() -> tuple[dict | None, str]:
         return None, _last_error
     version = doc.get("fettle_capsule") if isinstance(doc, dict) else None
     if isinstance(version, int) and version > CAPSULE_VERSION:
-        # D-A1: newer schema = skew, not tampering. Ignore loudly.
-        print(
-            f"fettle: policy capsule at {path} has schema version {version} "
-            f"(this fettle reads {CAPSULE_VERSION}) — capsule IGNORED. "
-            "Update fettle in the child environment.",
-            file=sys.stderr,
+        # D-A1 (revised 2026-08-03, audit H-02): when the env ASSERTS a
+        # capsule, an unsupported schema version must fail CLOSED. The
+        # capsule file is child-writable — treating newer versions as benign
+        # skew let a child bump the version field (which is outside the
+        # policy digest) and silently escape inherited policy.
+        _last_error = (
+            f"policy capsule at {path} declares schema version {version} "
+            f"(this fettle reads {CAPSULE_VERSION}). Refusing to run with "
+            "unverifiable delegated policy — update fettle in the child "
+            "environment or re-spawn with a compatible parent."
         )
-        return None, ""
+        return None, _last_error
     reason = verify(doc, path)
     if reason:
         _last_error = f"policy capsule at {path}: {reason}"

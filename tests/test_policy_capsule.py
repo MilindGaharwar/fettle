@@ -96,18 +96,34 @@ class TestResolveEnvCapsule:
         assert resolved is None
         assert "digest mismatch" in err
 
-    def test_newer_version_skew_ignored_not_blocked(
-        self, state_home, monkeypatch, capsys
+    def test_newer_version_skew_fails_closed(
+        self, state_home, monkeypatch
     ) -> None:
-        # D-A1: version skew is fail-open (ignore + loud warning), not tamper.
+        # D-A1 revised (audit H-02): an asserted capsule with an unsupported
+        # schema version blocks — the version field sits outside the policy
+        # digest, so a child could otherwise bump it to escape delegation.
         path = write_capsule(POLICY, ORIGIN)
         doc = json.loads(path.read_text())
         doc["fettle_capsule"] = 99
         path.write_text(json.dumps(doc))
         monkeypatch.setenv(ENV_VAR, str(path))
         resolved, err = resolve_env_capsule()
-        assert resolved is None and err == ""
-        assert "IGNORED" in capsys.readouterr().err
+        assert resolved is None
+        assert "schema version 99" in err
+        assert last_error() == err
+
+    def test_huge_version_with_bad_digest_fails_closed(
+        self, state_home, monkeypatch
+    ) -> None:
+        # The audit's exact reproduction: version=999 + garbage digest must
+        # never be treated as benign skew.
+        path = state_home / "evil.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"fettle_capsule": 999, "digest": "invalid"}))
+        monkeypatch.setenv(ENV_VAR, str(path))
+        resolved, err = resolve_env_capsule()
+        assert resolved is None
+        assert err != ""
 
 
 class TestMonotonicMerge:
