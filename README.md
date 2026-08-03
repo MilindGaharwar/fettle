@@ -35,7 +35,7 @@ runs configured checks before, after, and at the end of a session.
 agent edits ──▶ Fettle checks ──▶ finding returns in-session ──▶ agent repairs
 ```
 
-**Status: v1.6.1 "Hardened Gates"**
+**Status: v1.6.2 "CI Truth"**
 
 ## Quick Start
 

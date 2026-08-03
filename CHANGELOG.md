@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.6.2 — CI Truth
+
+CI now proves what the docs claim (audit M-08/M-09/M-10/M-11/L-07):
+
+- **Blocking lint job**: `ruff check fettle tests` gates every push.
+- **Coverage job**: branch coverage with a no-regression floor of 65
+  (measured baseline 67%; subprocess-driven hook tests are invisible
+  to coverage) — the floor ratchets toward the config gate's 80.
+  `coverage.xml` published as a build artifact.
+- **Python matrix**: 3.11 / 3.12 / 3.13 block on ubuntu, 3.12 on
+  macOS; Python 3.14 and newest-semgrep legs run as non-blocking
+  canaries.
+- **Supply-chain pins**: every workflow tool pip-pinned exactly and
+  every third-party action pinned by commit SHA; the reusable workflow
+  drops its unused `pull-requests: write` permission.
+- **Type-check honesty**: a non-blocking mypy job backs the
+  `Typing :: Typed` classifier until the baseline reaches zero.
+
 ## v1.6.1 — Hardened Gates
 
 Remediation of a dual external audit (GPT + Opus, both at v1.6.0): every
