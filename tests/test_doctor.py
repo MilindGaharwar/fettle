@@ -60,3 +60,111 @@ def test_python_check_reports_interpreter():
     assert py["name"] == "python"
     assert py["ok"] is (sys.version_info >= (3, 11))
     assert sys.version.split()[0] in py["detail"]
+
+
+# ─── WP-16: SYSTEM_TOOLS tier (shellcheck via brew/apt) ─────────────────────
+
+
+def test_system_install_argv_prefers_brew():
+    from fettle.supply_chain import system_install_argv
+    argv = system_install_argv("shellcheck", which=lambda n: "/opt/homebrew/bin/brew" if n == "brew" else None)
+    assert argv == ["brew", "install", "shellcheck"]
+
+
+def test_system_install_argv_apt_uses_noninteractive_sudo():
+    from fettle.supply_chain import system_install_argv
+    argv = system_install_argv("shellcheck", which=lambda n: "/usr/bin/apt-get" if n == "apt-get" else None)
+    assert argv == ["sudo", "-n", "apt-get", "install", "-y", "shellcheck"]
+
+
+def test_system_install_argv_none_without_package_manager():
+    from fettle.supply_chain import system_install_argv, system_install_hint
+    assert system_install_argv("shellcheck", which=lambda n: None) is None
+    hint = system_install_hint("shellcheck", which=lambda n: None)
+    assert "shellcheck" in hint and "package manager" in hint
+
+
+def test_system_install_hint_strips_sudo_n_flag():
+    from fettle.supply_chain import system_install_hint
+    hint = system_install_hint("shellcheck", which=lambda n: "/usr/bin/apt-get" if n == "apt-get" else None)
+    assert hint == "sudo apt-get install -y shellcheck"
+
+
+def test_missing_shellcheck_warn_carries_install_command(monkeypatch):
+    real_which = doctor._which
+    monkeypatch.setattr(
+        doctor, "_which",
+        lambda name: None if name == "shellcheck" else real_which(name),
+    )
+    checks = doctor.check_environment()
+    sc = next(c for c in checks if c["name"] == "shellcheck")
+    assert sc["ok"] is False and sc["required"] is False
+    assert "install:" in sc["detail"]  # exact per-OS command on the warn line
+
+
+def test_fix_installs_missing_system_tool():
+    installed = {"done": False}
+
+    def fake_run(cmd, **kw):
+        installed["done"] = True
+        assert cmd == ["brew", "install", "shellcheck"]
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def fake_which(name):
+        if name == "brew":
+            return "/opt/homebrew/bin/brew"
+        if name == "shellcheck" and installed["done"]:
+            return "/opt/homebrew/bin/shellcheck"
+        return None
+
+    checks = [{"name": "shellcheck", "required": False, "ok": False, "detail": "not on PATH"}]
+    log = doctor.apply_mechanical_fixes(checks, run=fake_run, which=fake_which)
+    assert log == ["fixed: installed shellcheck"]
+    assert checks[0]["ok"] is True
+    assert "/opt/homebrew/bin/shellcheck" in checks[0]["detail"]
+
+
+def test_fix_system_tool_without_package_manager_reports_not_errors():
+    checks = [{"name": "shellcheck", "required": False, "ok": False, "detail": "not on PATH"}]
+    log = doctor.apply_mechanical_fixes(checks, run=None, which=lambda n: None)
+    assert len(log) == 1 and log[0].startswith("cannot fix shellcheck:")
+    assert checks[0]["ok"] is False  # never claim success
+
+
+def test_fix_system_tool_surfaces_installer_failure():
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 1, "", "Error: no bottle available")
+
+    checks = [{"name": "shellcheck", "required": False, "ok": False, "detail": "not on PATH"}]
+    log = doctor.apply_mechanical_fixes(
+        checks, run=fake_run,
+        which=lambda n: "/opt/homebrew/bin/brew" if n == "brew" else None,
+    )
+    assert log == ["fix failed for shellcheck: Error: no bottle available"]
+    assert checks[0]["ok"] is False
+
+
+def test_install_system_tools_reports_present_tool_ok(monkeypatch):
+    from fettle import init_cmd
+    monkeypatch.setattr(init_cmd.shutil, "which", lambda n: f"/usr/bin/{n}")
+    steps = init_cmd.install_system_tools(dry_run=False)
+    assert [(s.name, s.status) for s in steps] == [("tool:shellcheck", "ok")]
+
+
+def test_install_system_tools_dry_run_names_the_command(monkeypatch):
+    from fettle import init_cmd
+    monkeypatch.setattr(
+        init_cmd.shutil, "which",
+        lambda n: "/opt/homebrew/bin/brew" if n == "brew" else None,
+    )
+    steps = init_cmd.install_system_tools(dry_run=True)
+    assert steps[0].status == "created"
+    assert "brew install shellcheck" in steps[0].detail
+
+
+def test_install_system_tools_no_manager_is_actionable(monkeypatch):
+    from fettle import init_cmd
+    monkeypatch.setattr(init_cmd.shutil, "which", lambda n: None)
+    steps = init_cmd.install_system_tools(dry_run=False)
+    assert steps[0].status == "action"
+    assert "shellcheck" in steps[0].detail

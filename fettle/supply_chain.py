@@ -32,6 +32,35 @@ PINNED_TOOLS = {
     "pre-commit": "4.4.0",
 }
 
+# System tools (WP-16) — gate dependencies that are not pip-installable, so
+# they come from the OS package manager. Presence, not version, is the
+# contract: brew and apt pin per-distro and drift is harmless here.
+SYSTEM_TOOLS = ("shellcheck",)
+
+
+def system_install_argv(tool: str, which=None) -> list[str] | None:
+    """Best-effort argv to install a system tool via the local package manager.
+
+    brew needs no privileges; apt-get gets ``sudo -n`` so an environment
+    without passwordless sudo fails fast instead of hanging on a password
+    prompt. Returns None when neither manager is on PATH.
+    """
+    import shutil
+    which = which or shutil.which
+    if which("brew"):
+        return ["brew", "install", tool]
+    if which("apt-get"):
+        return ["sudo", "-n", "apt-get", "install", "-y", tool]
+    return None
+
+
+def system_install_hint(tool: str, which=None) -> str:
+    """Exact install command for the doctor warn line (per-OS, human-facing)."""
+    argv = system_install_argv(tool, which=which)
+    if argv is None:
+        return f"no brew/apt found — install {tool} with your OS package manager"
+    return " ".join(a for a in argv if a != "-n")
+
 
 def verify_record(dist: importlib.metadata.Distribution) -> dict | None:
     """Verify installed files against the distribution's RECORD hashes.

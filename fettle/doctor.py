@@ -54,6 +54,10 @@ def check_environment() -> list[dict]:
                   + ("" if py_ok else " — need >= 3.11 (set FETTLE_PYTHON)"),
     })
 
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fettle.supply_chain import SYSTEM_TOOLS, system_install_hint
+
     tools = [
         ("ruff", True, "lint layer disabled without it"),
         ("semgrep", False, "LLM-antipattern layer skipped without it"),
@@ -64,11 +68,15 @@ def check_environment() -> list[dict]:
     for name, required, consequence in tools:
         path = _which(name)
         version = _version_of(path) if path else None
+        detail = f"{version} at {path}" if path else f"not on PATH — {consequence}"
+        if not path and name in SYSTEM_TOOLS:
+            # WP-16: the warn line carries the exact per-OS install command
+            detail += f" — install: {system_install_hint(name)}"
         checks.append({
             "name": name,
             "required": required,
             "ok": bool(path),
-            "detail": f"{version} at {path}" if path else f"not on PATH — {consequence}",
+            "detail": detail,
         })
 
     return checks
@@ -383,24 +391,26 @@ def check_integrations() -> list[dict]:
 def apply_mechanical_fixes(checks: list[dict], *, run=None, which=None) -> list[str]:
     """Apply fixes that are purely mechanical — no judgement calls (v1.6 slice D).
 
-    Currently: install declared-but-unwired pre-commit hooks. Anything
-    needing a decision (config errors, missing tools, org policy) is
-    reported, never auto-fixed. Returns human-readable log lines.
+    Currently: install declared-but-unwired pre-commit hooks, and install
+    missing SYSTEM_TOOLS via brew/apt when one is available (WP-16).
+    Anything needing a decision (config errors, org policy) is reported,
+    never auto-fixed. Returns human-readable log lines.
     """
+    import os
     import shutil
     import subprocess
     run = run or subprocess.run
     which = which or shutil.which
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fettle.supply_chain import SYSTEM_TOOLS, system_install_argv, system_install_hint
 
     log: list[str] = []
     unwired = [c for c in checks
                if c["name"] in ("commit-guards", "push-guards") and not c["ok"]]
-    if not unwired:
-        return log
-    if not which("pre-commit"):
+    if unwired and not which("pre-commit"):
         log.append("cannot fix guard wiring: pre-commit binary not found "
                    "(pip install pre-commit)")
-        return log
+        unwired = []
     for c in unwired:
         hook_type = "pre-commit" if c["name"] == "commit-guards" else "pre-push"
         proc = run(["pre-commit", "install", "--hook-type", hook_type],
@@ -410,6 +420,24 @@ def apply_mechanical_fixes(checks: list[dict], *, run=None, which=None) -> list[
         else:
             err = (proc.stderr or proc.stdout or "").strip().splitlines()
             log.append(f"fix failed for {hook_type}: {err[0] if err else 'unknown error'}")
+
+    # SYSTEM_TOOLS tier (WP-16): best-effort brew/apt install, re-probed
+    # after — the check dict is only flipped when the tool actually appears.
+    for c in (c for c in checks if c["name"] in SYSTEM_TOOLS and not c["ok"]):
+        tool = c["name"]
+        argv = system_install_argv(tool, which=which)
+        if argv is None:
+            log.append(f"cannot fix {tool}: {system_install_hint(tool, which=which)}")
+            continue
+        proc = run(argv, capture_output=True, text=True, timeout=600)
+        path = which(tool)
+        if proc.returncode == 0 and path:
+            c["ok"] = True
+            c["detail"] = f"installed at {path} via {' '.join(a for a in argv if a != '-n')}"
+            log.append(f"fixed: installed {tool}")
+        else:
+            err = (proc.stderr or proc.stdout or "").strip().splitlines()
+            log.append(f"fix failed for {tool}: {err[0] if err else 'unknown error'}")
     return log
 
 
@@ -417,7 +445,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle environment self-check")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fix", action="store_true",
-                        help="Apply mechanical fixes only (currently: wire declared pre-commit hooks)")
+                        help="Apply mechanical fixes only (wire declared pre-commit hooks; "
+                             "install missing system tools via brew/apt)")
     parser.add_argument("--verify-hashes", action="store_true",
                         help="Verify pinned tools' installed files against wheel RECORD hashes (WP-147)")
     args = parser.parse_args()
