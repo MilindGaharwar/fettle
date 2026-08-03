@@ -129,6 +129,56 @@ class TestClaims:
         assert load_claims(str(wt))["item-v"]["session_id"] == "sess-1"
         assert claim_for_worktree(str(wt), str(wt)) == "item-v"
 
+    # --- WP-5 (audit Opus C3): concurrent read-modify-write integrity ---
+
+    def _spawn_claimers(self, repo, tmp_path, jobs):
+        """Launch one process per (item, sess, worktree), gated on a barrier file."""
+        plugin_root = str(Path(__file__).resolve().parent.parent)
+        barrier = tmp_path / "go"
+        procs = []
+        for item, sess, wt in jobs:
+            code = (
+                "import os, sys, time\n"
+                f"sys.path.insert(0, {plugin_root!r})\n"
+                "from fettle.work_items import claim_item\n"
+                f"while not os.path.exists({str(barrier)!r}): time.sleep(0.001)\n"
+                f"err = claim_item({str(repo)!r}, {item!r}, {sess!r}, {wt!r})\n"
+                "print('ERR:' + err)\n"
+            )
+            procs.append(subprocess.Popen(
+                [sys.executable, "-c", code],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ))
+        barrier.write_text("")
+        outs = []
+        for p in procs:
+            out, err = p.communicate(timeout=30)
+            assert p.returncode == 0, err
+            outs.append(out.strip().removeprefix("ERR:"))
+        return outs
+
+    def test_concurrent_same_item_exactly_one_winner(self, repo, tmp_path):
+        wts = []
+        for i in range(4):
+            wt, _ = create_worktree(str(repo), f"wt-race-{i}", {})
+            wts.append(str(wt))
+        results = self._spawn_claimers(
+            repo, tmp_path,
+            [("item-race", f"sess-{i}", wts[i]) for i in range(4)],
+        )
+        winners = [r for r in results if r == ""]
+        assert len(winners) == 1, results
+        assert all("claimed by session" in r for r in results if r != "")
+
+    def test_concurrent_distinct_items_no_lost_update(self, repo, tmp_path):
+        results = self._spawn_claimers(
+            repo, tmp_path,
+            [(f"item-{i}", f"sess-{i}", str(repo)) for i in range(4)],
+        )
+        assert results == ["", "", "", ""]
+        claims = load_claims(str(repo))
+        assert sorted(claims) == [f"item-{i}" for i in range(4)]
+
     def test_release_unclaimed_errors(self, repo):
         assert "not claimed" in release_item(str(repo), "never-claimed")
 

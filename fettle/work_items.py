@@ -15,9 +15,12 @@ Two kinds of state, two homes:
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -152,10 +155,38 @@ def _save_claims(root: str, claims: dict) -> str:
         return "not a git repository — claims need a shared .git dir"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(claims, indent=2) + "\n", encoding="utf-8")
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(claims, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
     except OSError as e:
         return f"cannot write claims file: {e}"
     return ""
+
+
+@contextmanager
+def _claims_lock(root: str):
+    """Exclusive advisory lock serializing claim read-modify-write cycles.
+
+    Without it, two sessions claiming concurrently both read the same
+    snapshot and the second write silently drops the first claim — the
+    exact split-brain the claims file exists to prevent (audit Opus C3).
+    Yields an error string ('' on success) so callers surface lock
+    failures the same way as write failures.
+    """
+    path = _claims_path(root)
+    if path is None:
+        yield "not a git repository — claims need a shared .git dir"
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path.with_name("claims.lock"), "w", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield ""
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+    except OSError as e:
+        yield f"cannot lock claims file: {e}"
 
 
 def claim_item(root: str, item_id: str, session_id: str, worktree: str) -> str:
@@ -164,29 +195,35 @@ def claim_item(root: str, item_id: str, session_id: str, worktree: str) -> str:
     Live = the claiming worktree still exists. Stale claims are silently
     reclaimed (unclaimed = takeable — Wayfinder semantics).
     """
-    claims = load_claims(root)
-    existing = claims.get(item_id)
-    if existing:
-        same_worktree = str(Path(existing.get("worktree", ""))) == str(Path(worktree))
-        still_live = Path(existing.get("worktree", "/nonexistent")).exists()
-        if still_live and not same_worktree:
-            return (f"item '{item_id}' is claimed by session "
-                    f"{existing.get('session_id', '?')} in {existing.get('worktree', '?')} — "
-                    f"release it there or pick another item")
-    claims[item_id] = {
-        "session_id": session_id,
-        "worktree": str(worktree),
-        "claimed_at": int(time.time()),
-    }
-    return _save_claims(root, claims)
+    with _claims_lock(root) as lock_err:
+        if lock_err:
+            return lock_err
+        claims = load_claims(root)
+        existing = claims.get(item_id)
+        if existing:
+            same_worktree = str(Path(existing.get("worktree", ""))) == str(Path(worktree))
+            still_live = Path(existing.get("worktree", "/nonexistent")).exists()
+            if still_live and not same_worktree:
+                return (f"item '{item_id}' is claimed by session "
+                        f"{existing.get('session_id', '?')} in {existing.get('worktree', '?')} — "
+                        f"release it there or pick another item")
+        claims[item_id] = {
+            "session_id": session_id,
+            "worktree": str(worktree),
+            "claimed_at": int(time.time()),
+        }
+        return _save_claims(root, claims)
 
 
 def release_item(root: str, item_id: str) -> str:
-    claims = load_claims(root)
-    if item_id not in claims:
-        return f"item '{item_id}' is not claimed"
-    del claims[item_id]
-    return _save_claims(root, claims)
+    with _claims_lock(root) as lock_err:
+        if lock_err:
+            return lock_err
+        claims = load_claims(root)
+        if item_id not in claims:
+            return f"item '{item_id}' is not claimed"
+        del claims[item_id]
+        return _save_claims(root, claims)
 
 
 def claim_for_worktree(root: str, worktree: str) -> str:
