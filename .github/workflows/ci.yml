@@ -5,41 +5,89 @@ on:
     branches: [main]
   pull_request:
 
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        semgrep: ["1.168.0"]
-        canary: [false]
-        # WP-117 — canary leg: run against the newest semgrep to catch
-        # upstream behavior changes (e.g. 1.136 re-anchored paths.include
-        # to the git root) the week they ship, not months later. Informative,
-        # never blocking — the pinned legs stay authoritative.
-        include:
-          - os: ubuntu-latest
-            semgrep: "latest"
-            canary: true
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.canary }}
-    name: test (${{ matrix.os }}, semgrep ${{ matrix.semgrep }}${{ matrix.canary && ', canary' || '' }})
-    steps:
-      - uses: actions/checkout@v4
+# WP-B4: third-party actions pinned by commit SHA (tag in trailing comment);
+# all pip tools pinned exactly. Bump deliberately, not by tag drift.
 
-      - uses: actions/setup-python@v5
+jobs:
+  # WP-B1: ruff is a blocking gate — the same check the pre-commit hook runs.
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
+      - name: Install ruff (pinned)
+        run: python -m pip install --quiet ruff==0.15.20
+
+      - name: Ruff check
+        run: ruff check fettle tests
+
+  # WP-B5: honesty for the `Typing :: Typed` classifier — mypy runs on every
+  # push but does not block yet. Promote to blocking once the baseline is 0.
+  typecheck:
+    name: typecheck (mypy, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy (pinned)
+        run: python -m pip install --quiet mypy==2.3.0 pyyaml==6.0.3
+
+      - name: Mypy (informative)
+        run: mypy fettle --ignore-missing-imports || true
+
+  test:
+    strategy:
+      fail-fast: false
+      # WP-B2: every supported Python (3.11/3.12/3.13) blocks on ubuntu;
+      # macOS covers one Python (runner minutes cost 10x). Canary legs —
+      # newest semgrep (WP-117) and Python 3.14 — inform, never block.
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13"]
+        semgrep: ["1.168.0"]
+        canary: [false]
+        include:
+          - os: macos-latest
+            python: "3.12"
+            semgrep: "1.168.0"
+            canary: false
+          - os: ubuntu-latest
+            python: "3.12"
+            semgrep: "latest"
+            canary: true
+          - os: ubuntu-latest
+            python: "3.14"
+            semgrep: "1.168.0"
+            canary: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.canary }}
+    name: test (${{ matrix.os }}, py${{ matrix.python }}, semgrep ${{ matrix.semgrep }}${{ matrix.canary && ', canary' || '' }})
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+
       - name: Install tools (pinned)
-        if: ${{ !matrix.canary }}
+        if: ${{ matrix.semgrep \!= 'latest' }}
         run: |
-          python -m pip install --quiet pytest ruff==0.15.20 semgrep==${{ matrix.semgrep }} pyyaml
+          python -m pip install --quiet pytest==9.1.1 ruff==0.15.20 semgrep==${{ matrix.semgrep }} pyyaml==6.0.3
 
       - name: Install tools (canary — newest semgrep)
-        if: ${{ matrix.canary }}
+        if: ${{ matrix.semgrep == 'latest' }}
         run: |
-          python -m pip install --quiet pytest ruff==0.15.20 semgrep pyyaml
+          python -m pip install --quiet pytest==9.1.1 ruff==0.15.20 semgrep pyyaml==6.0.3
           semgrep --version
 
       # Editable install so `python -m fettle.cli` resolves from any cwd —
@@ -67,3 +115,36 @@ jobs:
 
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null
+
+  # WP-B1: branch coverage with a no-regression floor. Baseline measured at
+  # 67% (2026-08; much of the suite exercises hooks via subprocess, which
+  # coverage does not see). Floor 65 ratchets upward — raise it as the
+  # in-process baseline climbs toward the [gates.coverage] threshold of 80.
+  coverage:
+    name: coverage (branch, floor 65)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools (pinned)
+        run: |
+          python -m pip install --quiet pytest==9.1.1 pytest-cov==7.1.0 ruff==0.15.20 semgrep==1.168.0 pyyaml==6.0.3
+          python -m pip install --quiet -e .
+
+      - name: Install cargo + shellcheck (parity with the test job)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends shellcheck cargo
+
+      - name: Tests with coverage
+        run: python -m pytest tests/ -q --cov=fettle --cov-branch --cov-report=term --cov-report=xml --cov-fail-under=65
+
+      - name: Publish coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
