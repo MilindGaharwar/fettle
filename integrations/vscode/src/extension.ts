@@ -18,6 +18,11 @@ import {
 let client: LanguageClient | undefined;
 let outputChannel: OutputChannel;
 
+/** POSIX single-quote escaping for values sent to a shell terminal. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function findPython(): string | undefined {
   const configured = workspace
     .getConfiguration("fettle")
@@ -34,10 +39,14 @@ function findPython(): string | undefined {
   for (const candidate of candidates) {
     try {
       if (fs.existsSync(candidate)) return candidate;
-      const { execSync } = require("child_process");
-      const resolved = execSync(`command -v ${candidate} 2>/dev/null`, {
-        encoding: "utf-8",
-      }).trim();
+      const { execFileSync } = require("child_process");
+      // argv-array + positional parameter: candidate is never interpolated
+      // into shell syntax (audit M-02).
+      const resolved = execFileSync(
+        "/bin/sh",
+        ["-c", 'command -v "$1" 2>/dev/null', "sh", candidate],
+        { encoding: "utf-8" }
+      ).trim();
       if (resolved) return resolved;
     } catch {
       continue;
@@ -159,8 +168,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
       const terminal = window.createTerminal("Fettle Scan");
       const workspaceRoot =
         workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
+      const script = path.join(pluginRoot, "scripts", "quality_scan.py");
       terminal.sendText(
-        `python3 ${path.join(pluginRoot, "scripts", "quality_scan.py")} --root "${workspaceRoot}"`
+        `${shellQuote(pythonPath)} ${shellQuote(script)} --root ${shellQuote(workspaceRoot)}`
       );
       terminal.show();
     })
@@ -171,8 +181,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
       const terminal = window.createTerminal("Fettle Report");
       const workspaceRoot =
         workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
+      const runner = path.join(pluginRoot, "scripts", "run.sh");
       terminal.sendText(
-        `bash ${path.join(pluginRoot, "scripts", "run.sh")} report.py --root "${workspaceRoot}"`
+        `bash ${shellQuote(runner)} report.py --root ${shellQuote(workspaceRoot)}`
       );
       terminal.show();
     })
