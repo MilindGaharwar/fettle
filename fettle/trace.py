@@ -29,6 +29,11 @@ import time
 
 AUDIT_SCHEMA_VERSION = 2
 
+# Opportunistic rotation threshold (WP-6, audit Opus C4): rotate_trace()
+# existed but nothing in the production path ever called it, so the trace
+# grew without bound. ~5 MB ≈ tens of thousands of entries.
+_ROTATE_BYTES = 5 * 1024 * 1024
+
 # One-time stderr warning flag: audit-log loss must be visible (WP: Stage-0
 # failure-visibility), but must never spam or break the hook path.
 _write_failure_warned = False
@@ -107,6 +112,11 @@ def log_decision(
         with open(trace_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
             f.flush()
+        # Size-stat is cheap; actual rotation fires rarely. Concurrent
+        # rotators are safe (atomic os.replace) — worst case a few entries
+        # from the overlap window are dropped, which beats unbounded growth.
+        if os.path.getsize(trace_path) > _ROTATE_BYTES:
+            rotate_trace()
         return True
     except OSError as exc:
         global _write_failure_warned
@@ -169,19 +179,8 @@ def read_tail(max_bytes: int = 65536) -> list[dict]:
 
 
 def get_recent_decisions(limit: int = 20) -> list[dict]:
-    """Read recent trace entries."""
-    trace_path = _get_trace_path()
-    if not os.path.isfile(trace_path):
-        return []
-    entries = []
-    with open(trace_path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    """Read recent trace entries — bounded tail-read, not a full-file scan."""
+    entries = read_tail(max_bytes=max(65536, limit * 2048))
     return entries[-limit:]
 
 

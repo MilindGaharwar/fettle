@@ -166,7 +166,7 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
     from collections import Counter
     checks: list[dict] = []
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from fettle.trace import probe_writable, read_tail
+    from fettle.trace import _ROTATE_BYTES, _get_trace_path, probe_writable, read_tail
 
     ok, detail = probe_writable()
     checks.append({
@@ -176,6 +176,23 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
         "detail": f"writable at {detail}" if ok
                   else f"NOT writable ({detail}) — hook decisions are not being recorded",
     })
+
+    # Trace size (WP-6): rotation is opportunistic from log_decision; a file
+    # far past the threshold means rotation is failing.
+    try:
+        size = os.path.getsize(_get_trace_path())
+    except OSError:
+        size = 0
+    if size:
+        size_ok = size <= 4 * _ROTATE_BYTES
+        checks.append({
+            "name": "trace-size",
+            "required": False,
+            "ok": size_ok,
+            "detail": f"{size / (1024 * 1024):.1f} MB"
+                      + ("" if size_ok else " — rotation appears broken; "
+                         "run: python -c 'from fettle.trace import rotate_trace; rotate_trace()'"),
+        })
 
     cutoff = time.time() - days * 86400
     by_status: Counter = Counter()

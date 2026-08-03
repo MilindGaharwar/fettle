@@ -37,6 +37,34 @@ def test_rotate_trace(tmp_path, monkeypatch):
     assert len(entries) == 20
 
 
+def test_log_decision_rotates_when_over_threshold(tmp_path, monkeypatch):
+    """WP-6: production writes trigger rotation — no unbounded growth."""
+    import fettle.trace as trace_mod
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(trace_mod, "_ROTATE_BYTES", 2048)
+    trace_path = tmp_path / "fettle" / "trace.jsonl"
+    trace_path.parent.mkdir(parents=True)
+    with open(trace_path, "w") as f:
+        for i in range(6000):
+            f.write(json.dumps({"schema": 2, "status": f"s{i}"}) + "\n")
+    log_decision(hook="test", status="newest")
+    lines = trace_path.read_text().strip().splitlines()
+    assert len(lines) == 5000  # rotated down from 6001
+    assert json.loads(lines[-1])["status"] == "newest"
+
+
+def test_get_recent_decisions_is_bounded_tail_read(tmp_path, monkeypatch):
+    """WP-6: reading recents must not scan the whole file."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    trace_path = tmp_path / "fettle" / "trace.jsonl"
+    trace_path.parent.mkdir(parents=True)
+    with open(trace_path, "w") as f:
+        for i in range(5000):
+            f.write(json.dumps({"schema": 2, "status": f"s{i}"}) + "\n")
+    entries = get_recent_decisions(limit=3)
+    assert [e["status"] for e in entries] == ["s4997", "s4998", "s4999"]
+
+
 def test_lineage_fields_empty_when_solo(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.delenv("FETTLE_PARENT_SESSION", raising=False)
