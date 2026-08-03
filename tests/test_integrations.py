@@ -142,3 +142,113 @@ class TestPact:
         assert report.status == IntegrationStatus.FAIL
         assert len(report.findings) == 1
         assert "mobile" in report.findings[0].message
+
+
+class TestCliIntegrations:
+    """WP-14b — `fettle integrations` CLI wiring (audit C14)."""
+
+    @staticmethod
+    def _args(name=None, as_json=False):
+        import argparse
+        return argparse.Namespace(name=name, json=as_json)
+
+    @staticmethod
+    def _report(status, summary="", findings=None):
+        return IntegrationReport(status=status, summary=summary,
+                                 findings=findings or [])
+
+    def _run(self, monkeypatch, reports, name=None, as_json=False):
+        """Invoke cmd_integrations with each adapter's run_command stubbed."""
+        import pytest
+        import fettle.blackduck_adapter
+        import fettle.pact_adapter
+        import fettle.sonar_adapter
+        from fettle import cli
+        modules = {"sonarqube": fettle.sonar_adapter,
+                   "blackduck": fettle.blackduck_adapter,
+                   "pact": fettle.pact_adapter}
+        for key, module in modules.items():
+            report = reports.get(key, self._report(IntegrationStatus.NOT_ENABLED))
+            monkeypatch.setattr(module, "run_command",
+                                lambda cfg, cwd, _r=report: _r)
+        with pytest.raises(SystemExit) as exc:
+            cli.cmd_integrations(self._args(name=name, as_json=as_json))
+        return exc.value.code
+
+    def test_all_pass_exits_zero(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {
+            "sonarqube": self._report(IntegrationStatus.PASS, "clean"),
+            "pact": self._report(IntegrationStatus.PASS, "verified"),
+        })
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "SonarQube" in out and "Pact" in out
+        assert "Black Duck" not in out  # NOT_ENABLED skipped in run-all mode
+
+    def test_failure_exits_one(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {
+            "sonarqube": self._report(IntegrationStatus.PASS),
+            "pact": self._report(IntegrationStatus.FAIL, "1 contract failed"),
+        })
+        assert code == 1
+
+    def test_misconfigured_exits_two(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {
+            "sonarqube": self._report(IntegrationStatus.MISCONFIGURED, "no token"),
+            "pact": self._report(IntegrationStatus.FAIL),
+        })
+        assert code == 2  # environment error trumps findings
+
+    def test_unavailable_exits_two(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {
+            "blackduck": self._report(IntegrationStatus.UNAVAILABLE, "cli missing"),
+        })
+        assert code == 2
+
+    def test_none_enabled_exits_zero_with_note(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {})
+        assert code == 0
+        assert "No integrations enabled" in capsys.readouterr().out
+
+    def test_named_adapter_runs_only_that_one(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {
+            "sonarqube": self._report(IntegrationStatus.PASS),
+            "pact": self._report(IntegrationStatus.FAIL),
+        }, name="sonarqube")
+        assert code == 0
+        assert "Pact" not in capsys.readouterr().out
+
+    def test_named_disabled_adapter_exits_two(self, monkeypatch, capsys):
+        code = self._run(monkeypatch, {}, name="blackduck")
+        assert code == 2  # explicitly asked for a disabled integration
+
+    def test_json_output_shape(self, monkeypatch, capsys):
+        from fettle.integration_base import IntegrationFinding
+        code = self._run(monkeypatch, {
+            "sonarqube": self._report(
+                IntegrationStatus.FAIL, "1 issue",
+                findings=[IntegrationFinding(severity="HIGH", message="vuln",
+                                             file="app.py", line=5, code="S1")]),
+        }, as_json=True)
+        assert code == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["integrations"][0]["name"] == "sonarqube"
+        assert payload["integrations"][0]["status"] == "fail"
+        assert payload["integrations"][0]["findings"][0] == {
+            "severity": "HIGH", "message": "vuln", "file": "app.py",
+            "line": 5, "code": "S1"}
+
+    def test_parser_accepts_integrations_subcommand(self, monkeypatch):
+        from fettle import cli
+        called = {}
+        monkeypatch.setattr(cli, "cmd_integrations",
+                            lambda args: called.update(vars(args)))
+        monkeypatch.setattr("sys.argv", ["fettle", "integrations", "pact", "--json"])
+        cli.main()
+        assert called["name"] == "pact" and called["json"] is True
+
+    def test_defaults_declare_integrations_section(self):
+        from fettle.config import DEFAULTS
+        for name in ("sonarqube", "blackduck", "pact"):
+            assert DEFAULTS["integrations"][name]["enabled"] is False
+            assert DEFAULTS["integrations"][name]["token_env"]

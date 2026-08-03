@@ -305,6 +305,30 @@ DEFAULTS: dict[str, Any] = {
     # `enabled` is honored ONLY from the digest-pinned org policy ([extends]);
     # setting it in a repo's .fettle.toml is ignored and surfaced.
     "telemetry": {"enabled": False, "endpoint": ""},
+    # WP-14b: external tool adapters, run via `fettle integrations`. All
+    # default OFF; tokens come from env vars (never from config). The keys
+    # mirror exactly what each adapter reads.
+    "integrations": {
+        "sonarqube": {
+            "enabled": False,
+            "endpoint": "",           # https:// required unless allow_insecure
+            "project_key": "",
+            "token_env": "SONAR_TOKEN",
+            "allow_insecure": False,
+        },
+        "blackduck": {
+            "enabled": False,
+            "cli_path": "polaris",
+            "token_env": "POLARIS_TOKEN",
+            "scan_timeout_s": 300,
+        },
+        "pact": {
+            "enabled": False,
+            "broker_url": "",         # https:// required unless allow_insecure
+            "token_env": "PACT_BROKER_TOKEN",
+            "allow_insecure": False,
+        },
+    },
     # WP7 (Stage 4): worktree spine — one worktree per work item, branch
     # fettle/<item-id>. Root is inside the checkout (gitignored, scanners
     # skip .fettle).

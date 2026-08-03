@@ -346,6 +346,40 @@ def check_mcp_trust() -> list[dict]:
     return checks
 
 
+def check_integrations() -> list[dict]:
+    """Readiness probe for enabled integration adapters (WP-14b).
+
+    Only enabled adapters are checked; an enabled-but-misconfigured adapter
+    would otherwise fail silently at `fettle integrations` time.
+    """
+    import os
+    checks: list[dict] = []
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from fettle.config import load_config
+        from fettle.integration_base import IntegrationStatus
+        from fettle.blackduck_adapter import BlackDuckAdapter
+        from fettle.pact_adapter import PactAdapter
+        from fettle.sonar_adapter import SonarQubeAdapter
+        cfg = load_config(".")
+    except Exception:  # noqa: BLE001 — doctor must never crash
+        return checks
+    adapters = {"sonarqube": SonarQubeAdapter(), "blackduck": BlackDuckAdapter(),
+                "pact": PactAdapter()}
+    for name, adapter in adapters.items():
+        if not cfg.get("integrations", {}).get(name, {}).get("enabled"):
+            continue
+        status = adapter.is_available(cfg)
+        checks.append({
+            "name": f"integration-{name}",
+            "required": False,
+            "ok": status not in (IntegrationStatus.MISCONFIGURED,
+                                 IntegrationStatus.UNAVAILABLE),
+            "detail": f"{name} enabled — readiness: {status.value}",
+        })
+    return checks
+
+
 def apply_mechanical_fixes(checks: list[dict], *, run=None, which=None) -> list[str]:
     """Apply fixes that are purely mechanical — no judgement calls (v1.6 slice D).
 
@@ -390,7 +424,8 @@ def main() -> int:
 
     checks = (check_environment() + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health()
-              + check_runner_governance() + check_mcp_trust())
+              + check_runner_governance() + check_mcp_trust()
+              + check_integrations())
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes
         checks += verify_tool_hashes()

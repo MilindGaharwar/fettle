@@ -1178,6 +1178,82 @@
       },
       "additionalProperties": false
     },
+    "integrations": {
+      "type": "object",
+      "properties": {
+        "sonarqube": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "endpoint": {
+              "type": "string",
+              "default": ""
+            },
+            "project_key": {
+              "type": "string",
+              "default": ""
+            },
+            "token_env": {
+              "type": "string",
+              "default": "SONAR_TOKEN"
+            },
+            "allow_insecure": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "blackduck": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "cli_path": {
+              "type": "string",
+              "default": "polaris"
+            },
+            "token_env": {
+              "type": "string",
+              "default": "POLARIS_TOKEN"
+            },
+            "scan_timeout_s": {
+              "type": "integer",
+              "default": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "pact": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "broker_url": {
+              "type": "string",
+              "default": ""
+            },
+            "token_env": {
+              "type": "string",
+              "default": "PACT_BROKER_TOKEN"
+            },
+            "allow_insecure": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "worktrees": {
       "type": "object",
       "properties": {

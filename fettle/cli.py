@@ -363,6 +363,73 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         sys.exit(proc.returncode)
 
 
+# WP-14b: integration adapters wired to the CLI (audit C14).
+_INTEGRATIONS = {
+    "sonarqube": ("fettle.sonar_adapter", "SonarQube"),
+    "blackduck": ("fettle.blackduck_adapter", "Black Duck"),
+    "pact": ("fettle.pact_adapter", "Pact"),
+}
+
+
+def cmd_integrations(args: argparse.Namespace) -> None:
+    """Run external tool adapters: named one, or all enabled ones.
+
+    Exit contract (matches `fettle check`): 0 pass, 1 findings/failure,
+    2 misconfigured or unavailable environment.
+    """
+    from importlib import import_module
+
+    from fettle.config import load_config
+    from fettle.integration_base import IntegrationStatus, format_integration_report
+
+    cwd = os.getcwd()
+    cfg = load_config(cwd)
+    names = [args.name] if args.name else list(_INTEGRATIONS)
+
+    results = []  # (name, label, IntegrationReport)
+    for name in names:
+        module_name, label = _INTEGRATIONS[name]
+        report = import_module(module_name).run_command(cfg, cwd)
+        if args.name is None and report.status == IntegrationStatus.NOT_ENABLED:
+            continue  # "run all" means all *enabled*
+        results.append((name, label, report))
+
+    exit_code = 0
+    for _, _, report in results:
+        if report.status in (IntegrationStatus.MISCONFIGURED,
+                             IntegrationStatus.UNAVAILABLE,
+                             IntegrationStatus.NOT_ENABLED):
+            exit_code = 2
+        elif report.status == IntegrationStatus.FAIL:
+            exit_code = max(exit_code, 1)
+
+    if args.json:
+        payload = {
+            "integrations": [
+                {
+                    "name": name,
+                    "status": report.status.value,
+                    "summary": report.summary,
+                    "findings": [
+                        {"severity": f.severity, "message": f.message,
+                         "file": f.file, "line": f.line, "code": f.code}
+                        for f in report.findings
+                    ],
+                }
+                for name, _, report in results
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+    elif not results:
+        print("No integrations enabled — set [integrations.<name>].enabled "
+              "in .fettle.toml (sonarqube, blackduck, pact).")
+    else:
+        for _, label, report in results:
+            print(format_integration_report(report, label))
+
+    sys.exit(exit_code)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """One-command setup: repo config, agent hooks, commit-time guards (WP-141).
 
@@ -1161,6 +1228,14 @@ def main() -> None:
     p_doctor.add_argument("--verify-hashes", dest="verify_hashes", action="store_true",
                           help="Verify pinned tools against wheel RECORD hashes (WP-147)")
 
+    p_integrations = subparsers.add_parser(
+        "integrations",
+        help="Run external tool adapters (SonarQube, Black Duck, Pact)")
+    p_integrations.add_argument("name", nargs="?", default=None,
+                                choices=sorted(_INTEGRATIONS),
+                                help="One adapter; omit to run all enabled ones")
+    p_integrations.add_argument("--json", action="store_true", help="JSON output")
+
     p_init = subparsers.add_parser("init", help="One-command setup: repo config, agent hooks, commit-time guards")
     p_init.add_argument("--install-tools", action="store_true",
                         help="Install pinned ruff/semgrep/pre-commit via uv")
@@ -1430,6 +1505,7 @@ def main() -> None:
         "explain": cmd_explain,
         "baseline": cmd_baseline,
         "doctor": cmd_doctor,
+        "integrations": cmd_integrations,
         "init": cmd_init,
         "policy": cmd_policy,
         "telemetry": cmd_telemetry,

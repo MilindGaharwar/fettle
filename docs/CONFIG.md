@@ -83,6 +83,36 @@ endpoint = "https://telemetry.example.com/ingest"   # https:// required
 - `fettle telemetry send [--days N]` — refused unless org-enabled;
   fire-and-forget with a 5 s timeout, failure never blocks anything.
 
+## Integrations (`[integrations.*]`, WP-14b)
+
+External tool adapters, run via `fettle integrations [sonarqube|blackduck|pact]
+[--json]` — no name runs every *enabled* adapter. All default **off**; tokens
+always come from env vars, never from config. Exit codes: `0` pass, `1`
+findings/failure, `2` misconfigured or unavailable (also returned when a
+disabled adapter is named explicitly). `fettle doctor` reports readiness for
+each enabled adapter.
+
+```toml
+[integrations.sonarqube]
+enabled = true
+endpoint = "https://sonar.example.com"   # https:// required unless allow_insecure
+project_key = "my-project"
+token_env = "SONAR_TOKEN"                # env var holding the token
+allow_insecure = false
+
+[integrations.blackduck]
+enabled = true
+cli_path = "polaris"                     # Polaris CLI binary
+token_env = "POLARIS_TOKEN"
+scan_timeout_s = 300
+
+[integrations.pact]
+enabled = true
+broker_url = "https://pact.example.com"  # https:// required unless allow_insecure
+token_env = "PACT_BROKER_TOKEN"
+allow_insecure = false
+```
+
 ## Example
 
 ```toml
