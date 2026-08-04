@@ -6,22 +6,24 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-v1.6.0 provides four-agent event normalization, advisory-first session gates,
-central policy and reporting, living-spec and verification evidence, governed
-delegation primitives, quarantined rule proposals, and reliable-session
-artifacts. See the [README](../README.md) for capabilities and operational
-boundaries.
+v1.7.0 provides four-agent event normalization, advisory-first session gates,
+unified layered policy resolution with provenance (org/team packs, digest-
+pinned central policy, per-directory overrides), guided workflows installable
+into every supported agent environment, central reporting, living-spec and
+verification evidence, governed delegation primitives, quarantined rule
+proposals, and reliable-session artifacts. The 2026-08 dual external audits
+are fully remediated. See the [README](../README.md) for capabilities and
+operational boundaries.
 
 ## Priorities
 
 | Priority | Outcome | Graduation trigger |
 |---|---|---|
-| 1 | Remediate audit findings in normalized hook enforcement, delegated-policy handling, MCP trust, and policy-resolution consistency | Regression coverage demonstrates identical intended decisions on every affected surface |
-| 2 | Graduate selected advisory gates, including UAT/BDD/verify/CI | Field evidence shows acceptable false-positive and environment-error rates |
-| 3 | Add evaluator-optimizer UAT retries with reconciler feedback | A representative UAT verdict corpus exists |
-| 4 | Add a semantic impact gate for broken requirement-to-scenario-to-test chains | Link coverage is stable enough to block without routine false positives |
-| 5 | Improve distribution: Homebrew, Windows, hosted documentation | Installation and integration tests cover each target |
-| 6 | Harden editor support and expand beyond Python | LSP behavior matches documented CLI findings for each added language |
+| 1 | Graduate selected advisory gates, including UAT/BDD/verify/CI | Field evidence shows acceptable false-positive and environment-error rates |
+| 2 | Add evaluator-optimizer UAT retries with reconciler feedback | A representative UAT verdict corpus exists |
+| 3 | Add a semantic impact gate for broken requirement-to-scenario-to-test chains | Link coverage is stable enough to block without routine false positives |
+| 4 | Improve distribution: Homebrew, Windows, hosted documentation | Installation and integration tests cover each target |
+| 5 | Harden editor support and expand beyond Python | LSP behavior matches documented CLI findings for each added language |
 
 ## Deliberate Non-Goals
 

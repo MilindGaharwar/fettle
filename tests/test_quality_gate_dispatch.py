@@ -1,6 +1,6 @@
 """E2E dispatcher-contract tests for quality_gate.run_check (WP-1 + WP-2).
 
-Regression class from the 2026-08 audits (H-01 + Opus 2.1): the subprocess
+Regression class from the 2026-08 audits (H-01 + audit 2.1): the subprocess
 consumed the legacy `hook_event` field while real agent payloads carry
 `hook_event_name`, so PreToolUse blocks silently downgraded to warnings; and
 `run_check` read only `additionalContext`, destroying every block reason.
@@ -107,7 +107,7 @@ def test_post_edit_ux_never_blocks(repo):
     assert result.decision is not Decision.BLOCK
 
 
-# ─── Block reasons must survive the subprocess boundary (Opus 2.1) ───────────
+# ─── Block reasons must survive the subprocess boundary (audit 2.1) ───────────
 
 
 def test_block_reason_carries_real_finding(repo):

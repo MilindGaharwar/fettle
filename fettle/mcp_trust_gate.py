@@ -20,7 +20,7 @@ def _allowlist_path(configured: str | None = None) -> str:
     Precedence: policy-pinned [gates.mcp_trust].allowlist_path > env
     override > default. When policy pins the path, MCP_ALLOWLIST_PATH is
     deliberately IGNORED — an env var writable by the agent must not
-    redirect the trust root (audit Opus 1.2).
+    redirect the trust root (audit B-1.2).
     """
     raw = configured or os.environ.get("MCP_ALLOWLIST_PATH", DEFAULT_ALLOWLIST_PATH)
     return os.path.abspath(os.path.expanduser(raw))

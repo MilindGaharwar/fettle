@@ -27,16 +27,15 @@ Status: awaiting decisions. Nothing below is implemented.
    runner. Options: `claude -p` headless (already used by evals), OpenCode, or
    an abstraction over both. Headless `claude -p` runs on your subscription —
    acceptable for background UAT workloads (cost/rate limits)?
-5. **"Opus 5" (WP1).** I will research prompting best practice for the current
-   top Anthropic models. Confirm you mean the strongest available Claude
-   generation, and that the deliverable should live in docs/ (it will name
-   vendor models — fine, vs. the no-model-attribution rule which I read as
-   "don't credit a model as the *author* of Fettle"?).
-6. **Naming rule confirmation.** "Don't put the name of Claude or Fable
-   anywhere" — I read this as: no authorship/attribution in docs, commits, or
-   code comments. Legitimate *product integration* references (Claude Code
-   hooks, `claude -p` runner, `~/.claude/plugins` paths) must stay or the docs
-   would be wrong. Confirm.
+5. **Frontier readiness (WP1).** I will research prompting best practice for
+   the current top frontier agent models. Confirm the deliverable should live
+   in docs/ (it will name vendor models — product-integration naming, which
+   is fine).
+6. **Naming rule confirmation.** The attribution rule — I read this as: no
+   tool-vendor authorship/attribution in docs, commits, or code comments.
+   Legitimate *product integration* references (Claude Code hooks, `claude
+   -p` runner, `~/.claude/plugins` paths) must stay or the docs would be
+   wrong. Confirm.
 7. **GitHub collaborator invite.** The API invites by *username*, not email.
    Please confirm Prerit's GitHub username (or I can send the invite if the
    email search resolves unambiguously — see admin note in the report).

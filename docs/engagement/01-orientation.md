@@ -120,4 +120,4 @@ regression tests despite hard latency budgets, TS/VS Code surfaces untested.
 (WP-133..155), [continuity-traceability-plan.md](../continuity-traceability-plan.md) (proposed).
 **Dead/executed** (stale statuses): PLAN-v050-adaptive, WORKPACKAGES-v050,
 SPEC-dispatcher-v2 (superseded layout), v08/v09/v10 plans, swebok-gaps,
-expansion-plan, AUDIT-GPT55*, ci-enforcement-plan ("ACTIVE" but shipped).
+expansion-plan, audit-2026-07*, ci-enforcement-plan ("ACTIVE" but shipped).

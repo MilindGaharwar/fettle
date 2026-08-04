@@ -4,7 +4,7 @@
 
 **Status:** Proposed
 **Owners:** Disciplines (continuity behavior), Fettle (audit correlation)
-**Reviewed by:** Claude Opus 4.6 (approve with changes; corrections incorporated)
+**Reviewed by:** independent design review (approve with changes; corrections incorporated)
 **Estimated effort:** 13-18 hours plus a 2-week advisory pilot
 
 ## 1. User Story
@@ -446,13 +446,13 @@ No Fettle implementation begins until the pilot decision gate passes. This
 prevents building audit infrastructure for a continuity practice that users do
 not maintain or that fails to improve resumability.
 
-## 13. Opus Review Disposition
+## 13. Review Disposition
 
-Claude Opus 4.6 reviewed this plan on 2026-07-22 and returned **approve with
+An independent review of this plan on 2026-07-22 and returned **approve with
 changes**. Incorporated findings: executable active-plan marker behavior,
 explicit `log_decision()` call-site audit, partial-WP-128 scope, global-trace
 coverage limitation, and exact cross-cutting skill placement. One finding was
-not incorporated: Opus reported that
+not incorporated: the review reported that
 `skills/discipline-shipping/SKILL.md` did not exist, but direct file inspection
 and `git status` confirmed that it exists and has a pre-existing modification.
 

@@ -58,8 +58,8 @@ S7.3 hygiene · S7.4 docs + roadmap (this commit).
 ## Archive list (S7.3)
 
 PLAN-v050-adaptive, WORKPACKAGES-v050, SPEC-dispatcher-v2,
-fettle-v08-plan-sol(-v2), fettle-v09-plan, fettle-v10-enterprise-plan,
-fettle-v10-plan-compliant, AUDIT-GPT55(-v2), ci-enforcement-plan,
+fettle-v08-plan(-v2), fettle-v09-plan, fettle-v10-enterprise-plan,
+fettle-v10-plan-compliant, audit-2026-07-07/-14, ci-enforcement-plan,
 fettle-expansion-plan, fettle-swebok-gaps-plan,
 continuity-traceability-plan. Kept live: CONFIG, OPENCODE, ROADMAP,
 fettle-enterprise-product-plan (WP-133..153 reference), fettle.schema.json.

@@ -2,7 +2,7 @@
 
 # Fettle v0.9 Implementation Plan
 
-**Authored by:** GPT-5.6 Sol (design) + Claude Opus (review + formatting)
+**Status:** archived design draft (superseded)
 **Status:** Pending Sol sign-off
 **Total effort:** ~8-11 days across 4 work packages
 **Prerequisite:** Fettle v0.8 shipped and activated

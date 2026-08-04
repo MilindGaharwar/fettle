@@ -2,7 +2,7 @@
 
 # Fettle SWEBOK v4 Gap Coverage Plan
 
-**Authored by:** Claude Opus
+**Status:** archived design draft (superseded)
 **Status:** Pending Sol review
 **Total effort:** 20-27 hours across 5 work packages
 **SWEBOK KAs addressed:** KA 7 (Maintenance), KA 6 (Operations), KA 8 (SCM), KA 5 (Testing), KA 1 (Requirements)

@@ -82,6 +82,31 @@ point: the session where code is being generated.
 Fettle is not a replacement for tests, review, or CI. It connects those forms
 of evidence into the agent workflow and records what happened.
 
+## What Makes Fettle Different
+
+- **One policy, five surfaces.** A single `.fettle.toml` governs Claude Code,
+  Codex CLI, Gemini CLI, OpenCode, and VS Code diagnostics through one event
+  model and one dispatcher — write the rule once, enforce it everywhere your
+  agents work.
+- **Zero-dependency runtime.** The entire engine is Python standard library.
+  Nothing to vendor-audit, no transitive supply chain, hooks start fast.
+- **Findings arrive while the agent can still act.** Feedback lands in the
+  same session that produced the code, when repair costs one tool call
+  instead of a review round-trip.
+- **Policy with provenance.** Eight configuration layers (defaults, org,
+  team, digest-pinned central, repository, directory, environment, capsule)
+  resolve deterministically, and `fettle config --explain` shows exactly
+  which layer set every value.
+- **Rules that learn — under human control.** `fettle learn` drafts detection
+  rules from real incidents; proposals stay quarantined until a human
+  promotes them, and every promoted rule carries its evidence.
+- **Delegation without policy loss.** Policy capsules travel with spawned
+  sub-agents and are digest-checked on arrival; children can tighten policy
+  but never loosen it.
+- **Claims you can check.** 2,000+ tests, SLSA build provenance, a CycloneDX
+  SBOM, and PyPI Trusted Publishing on every release — the same evidence
+  discipline Fettle asks of your sessions.
+
 ## Capabilities
 
 ### In-session checks
@@ -236,8 +261,12 @@ mode = "advisory"
 enabled = false
 ```
 
-See the [configuration reference](docs/CONFIG.md) for defaults, supported modes,
-central policy, environment variables, and state locations.
+Policy resolves through layered sources — built-in defaults, org and team
+packs, digest-pinned central policy, the repository file, per-directory
+overrides, environment variables, and delegation capsules — with full
+provenance via `fettle config --explain`. See the
+[configuration reference](docs/CONFIG.md) for defaults, supported modes,
+precedence, environment variables, and state locations.
 
 ## Operational Boundaries
 

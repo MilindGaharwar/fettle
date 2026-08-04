@@ -2,7 +2,7 @@
 
 # Fettle v0.5.0 Work Packages — Adaptive Quality Enforcement
 
-> Restructured based on GPT 5.5 review (2026-07-12). Addresses: foundational gaps moved early, oversized WPs split, adapter protocol ahead of checkers, result schema before output.
+> Restructured based on external review (2026-07-12). Addresses: foundational gaps moved early, oversized WPs split, adapter protocol ahead of checkers, result schema before output.
 
 ## Summary
 
@@ -1127,7 +1127,7 @@ Non-lazy carve-outs (never simplify these away):
 ### WP-106 — Tiered Lean Review: Deterministic Sniffers (Phase 1)
 
 > Replaces original WP-106/107/108 (slash commands). Decision: automated silent
-> detection is higher-value than manual on-demand commands. Validated via GPT 5.5
+> detection is higher-value than manual on-demand commands. Validated via external review
 > architectural review (2026-07-14). Full plan: `~/.claude/plans/tiered-lean-review.md`
 
 **Problem:** Fettle reviews for bugs/security/lint but cannot detect when code passes all rules yet is 5× more verbose than necessary. The Ladder (WP-104/105) prevents over-engineering at generation time; this system detects it post-generation for later review.

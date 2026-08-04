@@ -2,7 +2,7 @@
 
 # Fettle v1.0 — Enterprise Integration Plan
 
-**Authored by:** Claude Opus, reviewed by GPT-5.6 Sol
+**Status:** archived design draft (superseded)
 **Status:** Revised after Sol's NEEDS WORK verdict (9 conditions addressed)
 **Scope:** Integrate 12 enterprise Copilot skills into Fettle (2 skipped: epic-creation, okf-builder)
 **Total effort:** 50-80 hours (revised from 16-24 after Sol's feedback)

@@ -1,11 +1,11 @@
 # v1.6.1 → v1.7 — Consolidated Audit Remediation Plan
 
-Status: PLANNED (2026-08-03). Supersedes the earlier GPT-only draft of this
+Status: PLANNED (2026-08-03). Supersedes the earlier single-source draft of this
 document.
 
 Sources:
-1. **GPT full audit** (2026-08-03, @ 24d26a3) — 24 findings (5 High, 12 Medium, 7 Low).
-2. **Opus audit** (2026-08-03, @ 24d26a3) — graded review; C1–C15 triaged in the
+1. **External audit A** (2026-08-03, @ 24d26a3) — 24 findings (5 High, 12 Medium, 7 Low).
+2. **External audit B** (2026-08-03, @ 24d26a3) — graded review; C1–C15 triaged in the
    earlier draft, carried forward here.
 3. **Owner directives** (2026-08-03): (i) resolve the shellcheck PATH warning,
    (ii) refresh legacy slash-command instructions to the quarantined-rule
@@ -19,7 +19,7 @@ HEAD is one docs-only commit past the audited revision.
 
 ## Part 1 — Triage
 
-### 1a. Confirmed High (GPT H-findings — all verified live at HEAD)
+### 1a. Confirmed High (audit-A H-findings — all verified live at HEAD)
 
 | # | Finding | Verification against current code |
 |---|---|---|
@@ -29,7 +29,7 @@ HEAD is one docs-only commit past the audited revision.
 | H-04 | Dispatcher allowlist-path protection weaker than standalone | Confirmed. `_check_file_result()` compares the literal string `"~/.config/fettle/mcp-allowlist.json"`; no `expanduser`/`abspath`, no `_allowlist_path()` (so the `MCP_ALLOWLIST_PATH` override is unprotected on the dispatcher path), no resolved protected-path comparison. `check_file_tool()` does all of this — two divergent implementations. |
 | H-05 | Displayed policy ≠ enforced policy | Confirmed. `fettle config --print-effective` uses [fettle/policy_layers.py](../../fettle/policy_layers.py) (defaults → org.toml → team.toml → repo → dir overrides). Runtime uses `load_config()` (defaults → digest-pinned remote `[extends]` → repo → env → capsule). **Neither includes the other's sources.** 41 production call sites use `load_config()`; the layered path is inspection-only. |
 
-### 1b. Confirmed Medium/Low (GPT M/L-findings, new relative to earlier draft)
+### 1b. Confirmed Medium/Low (audit-A M/L-findings, new relative to earlier draft)
 
 | # | Finding | Verification |
 |---|---|---|
@@ -64,8 +64,8 @@ Carried from the earlier draft, all re-confirmed:
 |---|---|
 | claims_gate / complexity_check / dispatcher_aggregate / dispatcher_registry untested | All tested (test_work_items, test_complexity, test_output_schema+, registry pins across ≥5 files) |
 | Replace setup.py with `package-data` | Infeasible — `rules/` is outside the package tree |
-| GPT M-11 "unpinned Ruff in CI" | ci.yml pins ruff==0.15.20 (reusable workflow is the real gap) |
-| Opus "1901/1716 test counts" | 1,723 pass / 4 skip at the tracked 24d26a3 baseline |
+| audit-A M-11 "unpinned Ruff in CI" | ci.yml pins ruff==0.15.20 (reusable workflow is the real gap) |
+| audit-B "1901/1716 test counts" | 1,723 pass / 4 skip at the tracked 24d26a3 baseline |
 
 ### 1e. Accepted as designed (document, don't change)
 
@@ -123,7 +123,7 @@ This is new product surface → lands in **v1.7.0**, not the hardening patch.
 
 Execution order within the release; WP-1..WP-8 are release blockers.
 
-**WP-1 — Block-reason propagation (Opus C1) · CRITICAL, ~1 line + tests**
+**WP-1 — Block-reason propagation (audit-B C1) · CRITICAL, ~1 line + tests**
 `run_check`: `context = hso.get("additionalContext") or hso.get("permissionDecisionReason") or output.get("reason", "")`.
 Tests assert the real finding text reaches `CheckResult.block(...)`.
 
@@ -163,16 +163,16 @@ mode** with an "ambiguous command" reason. Adversarial corpus test (audit's
 bypass list + variants). Docs honesty note: regex mediation is
 defense-in-depth, not a sandbox — recommend enforce mode + bash_audit
 together.
-(c) *Env redirect (Opus 1.2)*: new `[gates.mcp_trust].allowlist_path` config
+(c) *Env redirect (audit-B 1.2)*: new `[gates.mcp_trust].allowlist_path` config
 key (schema + DEFAULTS). When set via policy, `MCP_ALLOWLIST_PATH` env is
 ignored; doctor surfaces an active env override.
 
-**WP-5 — Claims integrity (Opus C3, GPT M-03) · HIGH**
+**WP-5 — Claims integrity (audit-B C3, audit-A M-03) · HIGH**
 `_save_claims`: tmp + `os.replace`. `claim_item`/`release_item`: `fcntl.flock`
 on a sibling `claims.lock` around the read-modify-write. Multiprocess
 contention test: exactly one winner.
 
-**WP-6 — Trace growth (Opus C4/C8) · HIGH**
+**WP-6 — Trace growth (audit-B C4/C8) · HIGH**
 Opportunistic `rotate_trace()` from `log_decision` (size-stat threshold
 ~5 MB); bounded reverse tail-read for `get_recent_decisions`; doctor
 trace-size probe.
@@ -203,19 +203,19 @@ Declare a `finefettle[evals]` extra containing pyyaml; `fettle evals` gives a
 clear "pip install 'finefettle[evals]'" error when missing. Clean-wheel smoke
 test in release.yml imports the module.
 
-**WP-12 — Endpoint validation batch (Opus 1.4/1.6/1.7) · MEDIUM**
+**WP-12 — Endpoint validation batch (audit-B 1.4/1.6/1.7) · MEDIUM**
 telemetry + cross_review: `urlsplit`-based https-or-loopback validation
 (kills `http://localhost@attacker.com`); ci_gate slug regex
 (`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`) before URL interpolation.
 
-**WP-13 — Lazy dispatcher registry (Opus 3.1) · MEDIUM (perf)**
+**WP-13 — Lazy dispatcher registry (audit-B 3.1) · MEDIUM (perf)**
 Importlib-on-first-call shim; CheckSpec shape unchanged; measure with
 `fettle bench` before/after; addresses the M-05 overrun cause.
 
 **WP-14 — Carried from earlier draft · MEDIUM/LOW**
 Remove `verify_bundle` stub (C6); quality_gate lazy `_init_state` guard (C10);
 dedicated capsule_guard tests (C15); test-layout move `fettle/tests/` →
-`tests/` + update every suite invocation (C9 — also closes GPT M-10).
+`tests/` + update every suite invocation (C9 — also closes audit-A M-10).
 
 **WP-14b — Wire integration adapters to the CLI (C14) · MEDIUM**
 **DECIDED (2026-08-03): wire, don't remove** — the adapters are used by
@@ -388,7 +388,7 @@ approval, remote CI green after every push (`gh run watch --exit-status`).
 
 ## Part 5 — Re-audit acceptance criteria
 
-Adopted from the GPT audit §16 (all 15 criteria), plus:
+Adopted from the audit-A §16 (all 15 criteria), plus:
 
 16. All 17 workflows invocable in Claude Code, VS Code, Codex, Gemini, and
     OpenCode, from both a git checkout and a clean PyPI install.

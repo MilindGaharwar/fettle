@@ -53,7 +53,7 @@ CI now proves what the docs claim (audit M-08/M-09/M-10/M-11/L-07):
 
 ## v1.6.1 — Hardened Gates
 
-Remediation of a dual external audit (GPT + Opus, both at v1.6.0): every
+Remediation of a two independent external audits (both at v1.6.0): every
 HIGH and MEDIUM finding closed, plus the integration adapters finally
 wired to the CLI.
 
@@ -702,8 +702,8 @@ for the full enterprise arc (WP-133..WP-153).
 - `rules/learned/` directory for incident-derived rules.
 - 33 new tests (test_result, test_paths, test_trace, test_baseline, test_learn, test_cli).
 
-### GPT 5.5 audit
-- `docs/AUDIT-GPT55.md`: independent code audit with prioritized TODO.
+### External audit
+- `docs/archive/audit-2026-07-07.md`: independent code audit with prioritized TODO.
 
 ## Unreleased
 

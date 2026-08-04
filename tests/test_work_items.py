@@ -129,7 +129,7 @@ class TestClaims:
         assert load_claims(str(wt))["item-v"]["session_id"] == "sess-1"
         assert claim_for_worktree(str(wt), str(wt)) == "item-v"
 
-    # --- WP-5 (audit Opus C3): concurrent read-modify-write integrity ---
+    # --- WP-5 (audit C3): concurrent read-modify-write integrity ---
 
     def _spawn_claimers(self, repo, tmp_path, jobs):
         """Launch one process per (item, sess, worktree), gated on a barrier file."""

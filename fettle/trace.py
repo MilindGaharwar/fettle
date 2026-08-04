@@ -29,7 +29,7 @@ import time
 
 AUDIT_SCHEMA_VERSION = 2
 
-# Opportunistic rotation threshold (WP-6, audit Opus C4): rotate_trace()
+# Opportunistic rotation threshold (WP-6, audit C4): rotate_trace()
 # existed but nothing in the production path ever called it, so the trace
 # grew without bound. ~5 MB ≈ tens of thousands of entries.
 _ROTATE_BYTES = 5 * 1024 * 1024

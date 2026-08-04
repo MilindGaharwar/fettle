@@ -2,8 +2,7 @@
 
 # Fettle v1.0 — Enterprise Integration (Fettle-Compliant Plan)
 
-**Authored by:** Claude Opus
-**Reviewed by:** GPT-5.6 Sol (pending)
+**Status:** archived design draft (superseded)
 **Total effort:** 60-77 hours across 12 work packages
 
 ---

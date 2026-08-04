@@ -287,6 +287,6 @@ replicate = ["pip install -e .[dev]", "pytest", "ruff check ."]
 
 ## References
 
-- GPT 5.5 review (2026-07-12): validated proposals, identified CI failure ingestion as biggest gap
+- External review (2026-07-12): validated proposals, identified CI failure ingestion as biggest gap
 - Existing Fettle architecture: Checker protocol, policy engine, event model, cache
 - Off-the-shelf tools to integrate: deptry, pytest-testmon, pyright, gitleaks, actionlint

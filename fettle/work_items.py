@@ -169,7 +169,7 @@ def _claims_lock(root: str):
 
     Without it, two sessions claiming concurrently both read the same
     snapshot and the second write silently drops the first claim — the
-    exact split-brain the claims file exists to prevent (audit Opus C3).
+    exact split-brain the claims file exists to prevent (audit C3).
     Yields an error string ('' on success) so callers surface lock
     failures the same way as write failures.
     """
