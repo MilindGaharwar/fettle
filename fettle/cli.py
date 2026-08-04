@@ -438,6 +438,46 @@ def cmd_integrations(args: argparse.Namespace) -> None:
     sys.exit(exit_code)
 
 
+def cmd_workflows(args: argparse.Namespace) -> None:
+    """Install/list the guided workflows in each agent's native command
+    format (WP-18). Exit 0 unless a write failed; action/skipped steps are
+    informational, matching `fettle init`.
+    """
+    from fettle.paths import find_repo_root
+    from fettle.workflows import AGENTS, install, list_rows
+
+    action = getattr(args, "workflows_action", "list") or "list"
+    if action == "list":
+        rows = list_rows()
+        if getattr(args, "json", False):
+            print(json.dumps({"workflows": rows}, indent=2))
+        else:
+            print("── fettle workflows ──\n")
+            for row in rows:
+                print(f"  {row['name']:<16} {row['description']}")
+            print("\nInvocation: Claude/Gemini /fettle:<name> · VS Code/OpenCode "
+                  "/fettle-<name> · Codex /prompts:fettle-<name>")
+            print("Install:    fettle workflows install [--agent …] [--project|--user]")
+        sys.exit(0)
+
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
+        sys.exit(2)
+    scope = "user" if getattr(args, "user", False) else "project"
+    agent = getattr(args, "agent", "all")
+    agents = list(AGENTS) if agent == "all" else [agent]
+    steps = install(agents, scope, Path(repo_root),
+                    dry_run=getattr(args, "dry_run", False),
+                    detect=(agent == "all"))
+    if getattr(args, "json", False):
+        print(json.dumps({"steps": [s.to_dict() for s in steps]}, indent=2))
+    else:
+        from fettle.init_cmd import print_steps
+        print_steps(steps)
+    sys.exit(1 if any(s.status == "error" for s in steps) else 0)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """One-command setup: repo config, agent hooks, commit-time guards (WP-141).
 
@@ -1256,6 +1296,26 @@ def main() -> None:
     p_init.add_argument("--force", action="store_true",
                         help="Overwrite an existing .fettle.toml (with --interactive/--profile)")
 
+    p_workflows = subparsers.add_parser(
+        "workflows", help="Guided workflows in every agent's slash-command format (WP-18)")
+    workflows_sub = p_workflows.add_subparsers(dest="workflows_action")
+    p_wf_list = workflows_sub.add_parser("list", help="Canonical workflows + per-host invocation")
+    p_wf_list.add_argument("--json", action="store_true", help="JSON output")
+    p_wf_install = workflows_sub.add_parser(
+        "install", help="Render commands/*.md into each host's native format")
+    p_wf_install.add_argument("--agent", default="all",
+                              choices=["all", "claude", "vscode", "codex", "gemini", "opencode"],
+                              help="One host, or all detected ones (default)")
+    scope_group = p_wf_install.add_mutually_exclusive_group()
+    scope_group.add_argument("--project", action="store_true",
+                             help="Install into this repository (default)")
+    scope_group.add_argument("--user", action="store_true",
+                             help="Install into your home-directory agent config")
+    p_wf_install.add_argument("--dry-run", dest="dry_run", action="store_true",
+                              help="Show what would be written")
+    p_wf_install.add_argument("--json", action="store_true", help="JSON output")
+    p_workflows.set_defaults(workflows_action="list", json=False)
+
     p_policy = subparsers.add_parser("policy", help="Sync or inspect the digest-pinned org policy ([extends])")
     policy_sub = p_policy.add_subparsers(dest="policy_action")
     policy_sub.add_parser("sync", help="Fetch, digest-verify, and cache the org policy")
@@ -1515,6 +1575,7 @@ def main() -> None:
         "doctor": cmd_doctor,
         "integrations": cmd_integrations,
         "init": cmd_init,
+        "workflows": cmd_workflows,
         "policy": cmd_policy,
         "telemetry": cmd_telemetry,
         "report": cmd_report,

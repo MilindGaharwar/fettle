@@ -189,20 +189,29 @@ Discover all commands with `fettle --help` and command-specific options with
 
 ## Guided Agent Workflows
 
-The Claude Code plugin also bundles 17 user-invocable slash commands. These are
-agent workflows rather than CLI subcommands: they combine Fettle checks with
-structured review, explanation, and artifact creation.
+Fettle bundles 17 user-invocable guided workflows. These are agent workflows
+rather than CLI subcommands: they combine Fettle checks with structured
+review, explanation, and artifact creation. They work in every supported
+agent environment — install them with:
 
-| Workflow | Slash commands |
+```bash
+fettle workflows install        # all detected agents (also runs during fettle init)
+fettle workflows list           # names + per-host invocation
+```
+
+| Workflow | Commands (Claude Code / Gemini naming) |
 |---|---|
 | Quality and review | `/fettle:quality`, `/fettle:pr-review`, `/fettle:review`, `/fettle:explain`, `/fettle:report` |
 | Security and operations | `/fettle:security-review`, `/fettle:threat-model`, `/fettle:preflight`, `/fettle:ops-review` |
 | Planning and evidence | `/fettle:plan-activate`, `/fettle:plan-complete`, `/fettle:worklog`, `/fettle:baseline` |
 | Policy and learning | `/fettle:learn`, `/fettle:mcp-approve`, `/fettle:mcp-revoke`, `/fettle:lean-debt` |
 
+Per-host invocation: Claude Code and Gemini CLI use `/fettle:<name>`; VS Code
+and OpenCode use `/fettle-<name>`; Codex CLI uses `/prompts:fettle-<name>`.
 Use these when you want the agent to interpret results or guide a review. Use
-the `fettle` CLI for deterministic automation and CI. The slash commands ship
-with the Git checkout/plugin, not the standalone PyPI wheel.
+the `fettle` CLI for deterministic automation and CI. The canonical sources in
+`commands/` are bundled into the PyPI wheel, so `fettle workflows install`
+works from any install mode.
 
 ## Configuration
 

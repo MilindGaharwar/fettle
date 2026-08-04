@@ -66,3 +66,26 @@ def templates_dir() -> Path:
         return pkg_templates
 
     return clone_templates
+
+
+def commands_dir() -> Path:
+    """Return the path to the canonical workflow commands directory (WP-18).
+
+    Same resolution order as rules_dir(): CLAUDE_PLUGIN_ROOT override,
+    clone-mode repo_root/commands/, then wheel-bundled fettle/_commands/.
+    """
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env_root:
+        candidate = Path(env_root) / "commands"
+        if candidate.is_dir():
+            return candidate
+
+    clone_commands = _REPO_ROOT / "commands"
+    if clone_commands.is_dir():
+        return clone_commands
+
+    pkg_commands = _PACKAGE_DIR / "_commands"
+    if pkg_commands.is_dir():
+        return pkg_commands
+
+    return clone_commands

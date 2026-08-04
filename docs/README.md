@@ -26,9 +26,11 @@ Start with the path that matches what you are trying to accomplish.
 
 ## Agent Workflows
 
-The Claude Code plugin includes guided slash-command workflows under
-`commands/`. They complement deterministic CLI commands by asking the agent to
-interpret findings, conduct reviews, or create evidence artifacts.
+Fettle ships guided slash-command workflows, canonically defined under
+`commands/` and installable into every supported agent environment with
+`fettle workflows install` (run automatically by `fettle init`). They
+complement deterministic CLI commands by asking the agent to interpret
+findings, conduct reviews, or create evidence artifacts.
 
 - Quality: `/fettle:quality`, `/fettle:pr-review`, `/fettle:review`,
   `/fettle:explain`, `/fettle:report`.
@@ -39,9 +41,10 @@ interpret findings, conduct reviews, or create evidence artifacts.
 - Governance: `/fettle:learn`, `/fettle:mcp-approve`, `/fettle:mcp-revoke`,
   `/fettle:lean-debt`.
 
-These workflows require the plugin checkout. Treat `fettle --help` and the
-active CLI documentation as authoritative for automation; some workflows add
-agent interpretation around those commands.
+Naming per host: Claude Code and Gemini CLI use `/fettle:<name>`; VS Code and
+OpenCode use `/fettle-<name>`; Codex CLI uses `/prompts:fettle-<name>`. Treat
+`fettle --help` and the active CLI documentation as authoritative for
+automation; the workflows add agent interpretation around those commands.
 
 ## Operating Model
 

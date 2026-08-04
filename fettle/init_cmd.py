@@ -377,6 +377,9 @@ def run_init(repo_root: Path, *, tools: bool = False, dry_run: bool = False) -> 
     steps += init_codex(dry_run)
     steps += init_gemini(dry_run)
     steps += init_pre_commit(repo_root, dry_run)
+    # WP-18: guided workflows in each detected host's slash-command format.
+    from fettle.workflows import install_for_init
+    steps += install_for_init(repo_root, dry_run)
     if tools:
         steps += install_tools(dry_run)
     exit_code = 1 if any(s.status == "error" for s in steps) else 0

@@ -41,6 +41,14 @@ class _BuildPyWithRules(build_py):
             dest.mkdir(parents=True, exist_ok=True)
             for resource in src_templates.glob("*.md"):
                 shutil.copy2(resource, dest / resource.name)
+        # Copy commands/*.md — canonical workflow source for `fettle workflows
+        # install` (WP-18; resolved at runtime via _resources.commands_dir)
+        src_commands = Path(__file__).parent / "commands"
+        if src_commands.is_dir():
+            dest = Path(self.build_lib) / "fettle" / "_commands"
+            dest.mkdir(parents=True, exist_ok=True)
+            for resource in src_commands.glob("*.md"):
+                shutil.copy2(resource, dest / resource.name)
 
 
 setup(cmdclass={"build_py": _BuildPyWithRules})
