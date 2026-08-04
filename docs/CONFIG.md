@@ -283,5 +283,11 @@ moves it from advisory to enforce.
 - **Per-session state** (edit tracking, plan-gate counters, browser-test marker)
   lives under `$XDG_STATE_HOME/fettle/<session_id>/` — concurrent agent
   sessions never see each other's state.
-- **Per-project trace** (`.fettle/trace.jsonl`) records findings, metrics, and
-  gate errors — the raw material for `fettle report`.
+- **Per-project trace** (`.fettle/trace.jsonl`, override with
+  `FETTLE_TRACE_DIR`) records detailed findings, hook metrics, and gate
+  errors for the current repository.
+- **Global decision trace** (`$XDG_STATE_HOME/fettle/trace.jsonl`, default
+  `~/.local/state/fettle/trace.jsonl`) is the cross-repository audit log: one
+  entry per hook decision with status, findings summary (file/line/code),
+  session lineage, and capsule digest. Rotated automatically at ~5 MB. This
+  store feeds `fettle explain`, `fettle report`, and `fettle insights`.

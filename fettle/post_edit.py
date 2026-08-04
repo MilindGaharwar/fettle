@@ -330,7 +330,9 @@ def main() -> None:
             status=status,
             tool="ruff+semgrep",
             file=file_path,
-            findings=[{"code": str(f.get("rule","")), "message": str(f.get("message","")), "severity": str(f.get("severity",""))} for f in findings[:5]],
+            findings=[{"code": str(f.get("rule", "")), "message": str(f.get("message", "")),
+                       "severity": str(f.get("severity", "")), "file": str(f.get("file", "")),
+                       "line": f.get("line", 0)} for f in findings[:5]],
             duration_ms=hook_duration_ms,
             session_id=session_id,
         )

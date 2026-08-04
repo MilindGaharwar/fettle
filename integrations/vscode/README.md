@@ -54,9 +54,6 @@ code --install-extension fettle-0.9.0.vsix
 | `fettle.enable` | `true` | Enable/disable Fettle |
 | `fettle.pluginPath` | auto-detected | Path to Fettle plugin root |
 | `fettle.pythonPath` | auto-detected | Python >= 3.11 interpreter |
-| `fettle.lintOnSave` | `true` | Lint on save |
-| `fettle.lintOnOpen` | `true` | Lint on open |
-| `fettle.showComplexity` | `true` | Reserved setting; current LSP diagnostics do not expose complexity annotations |
 
 ## Commands
 

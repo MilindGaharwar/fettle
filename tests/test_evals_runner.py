@@ -143,6 +143,45 @@ def test_setup_files_seeded_into_workdir(tmp_path):
     assert "def add" in seen["calc"]
 
 
+# ── scenario path containment (L-06) ─────────────────────────────────
+
+
+def test_setup_file_escaping_workdir_is_indeterminate(tmp_path):
+    evil = VALID.replace("setup_files:", "setup_files:\n      ../escape.py: \"pwned\"", 1)
+    scenario = load_scenario(_write_scenario(tmp_path, evil))
+    called = {}
+
+    def runner(prompt, cwd):
+        called["ran"] = True
+        return "x"
+
+    result = run_scenario(scenario, runner=runner, workdir=tmp_path / "sub" / "run")
+    assert result.verdict == Verdict.INDETERMINATE
+    assert "containment" in result.transcript
+    assert not called  # the agent never launched
+    assert not (tmp_path / "sub" / "escape.py").exists()
+
+
+def test_absolute_setup_path_is_indeterminate(tmp_path):
+    evil = VALID.replace("setup_files:", f"setup_files:\n      {tmp_path}/abs.py: \"pwned\"", 1)
+    scenario = load_scenario(_write_scenario(tmp_path, evil))
+    result = run_scenario(scenario, runner=lambda p, c: "x", workdir=tmp_path / "run")
+    assert result.verdict == Verdict.INDETERMINATE
+    assert not (tmp_path / "abs.py").exists()
+
+
+def test_file_check_escaping_workdir_fails_check(tmp_path):
+    (tmp_path / "secret.txt").write_text("hunter2")
+    evil = VALID.replace("path: calc.py", "path: ../secret.txt")
+    scenario = load_scenario(_write_scenario(tmp_path, evil))
+    result = run_scenario(scenario, runner=lambda p, c: "I added divide",
+                          workdir=tmp_path / "run")
+    assert result.verdict == Verdict.FAIL
+    escaped = [c for c in result.checks if "escapes" in c.detail]
+    assert escaped and not escaped[0].passed
+
+
+
 # ── shipped scenarios stay statically valid (CI gate) ────────────────
 
 

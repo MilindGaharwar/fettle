@@ -93,14 +93,10 @@ function createClient(
   };
 
   const clientOptions: LanguageClientOptions = {
+    // The LSP server lints Python only (lsp_server.py skips non-.py files) —
+    // advertising other languages was audit finding M-12.
     documentSelector: [
       { scheme: "file", language: "python" },
-      { scheme: "file", language: "typescript" },
-      { scheme: "file", language: "typescriptreact" },
-      { scheme: "file", language: "javascript" },
-      { scheme: "file", language: "javascriptreact" },
-      { scheme: "file", language: "go" },
-      { scheme: "file", language: "rust" },
     ],
     outputChannel,
     synchronize: {

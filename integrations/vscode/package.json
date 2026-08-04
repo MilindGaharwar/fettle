@@ -2,7 +2,7 @@
   "name": "fettle",
   "displayName": "Fettle",
   "description": "Python diagnostics from Fettle's AI-assisted development quality policy",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "MilindGaharwar",
   "icon": "icon.png",
   "license": "MIT",
@@ -28,13 +28,7 @@
     "claude"
   ],
   "activationEvents": [
-    "onLanguage:python",
-    "onLanguage:typescript",
-    "onLanguage:typescriptreact",
-    "onLanguage:javascript",
-    "onLanguage:javascriptreact",
-    "onLanguage:go",
-    "onLanguage:rust"
+    "onLanguage:python"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -55,21 +49,6 @@
           "type": "string",
           "default": "",
           "description": "Path to Python >= 3.11 interpreter (auto-detected)"
-        },
-        "fettle.lintOnSave": {
-          "type": "boolean",
-          "default": true,
-          "description": "Run diagnostics on file save"
-        },
-        "fettle.lintOnOpen": {
-          "type": "boolean",
-          "default": true,
-          "description": "Run diagnostics when a file is opened"
-        },
-        "fettle.showComplexity": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show function complexity annotations"
         }
       }
     },

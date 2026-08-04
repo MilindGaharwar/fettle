@@ -380,3 +380,26 @@ def test_edit_tracking_multiple_appends():
             assert entry['file'] == fixture
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ─── global trace findings carry file/line (L-01) ────────────────────────────
+def test_global_trace_findings_include_file_and_line(tmp_path):
+    """log_decision findings must carry file/line so `fettle explain` can render them."""
+    fixture = os.path.join(FIXTURES, "violations", "bare_except.py")
+    tmpdir = str(tmp_path / "proj")
+    os.makedirs(tmpdir)
+    state_home = str(tmp_path / "state")
+    run_hook(
+        {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
+        extra_env={"FETTLE_GATE_MODE": "soft", "XDG_STATE_HOME": state_home},
+        cwd=tmpdir,
+    )
+    global_trace = os.path.join(state_home, "fettle", "trace.jsonl")
+    assert os.path.isfile(global_trace)
+    with open(global_trace) as fh:
+        entries = [json.loads(line) for line in fh]
+    with_findings = [e for e in entries if e.get("findings")]
+    assert with_findings, f"No decision entry with findings in {entries}"
+    for finding in with_findings[-1]["findings"]:
+        assert finding.get("file"), finding
+        assert isinstance(finding.get("line"), int), finding

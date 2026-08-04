@@ -122,9 +122,27 @@ def load_scenario(scenario_dir: str | Path) -> Scenario:
     )
 
 
+def _contained(workdir: Path, rel: str) -> Path:
+    """Resolve rel against workdir, refusing escapes (L-06).
+
+    Scenario files are data, not trusted code — a scenario must not be able
+    to read or write outside its working directory via `../` or absolute
+    check/setup paths.
+    """
+    if Path(rel).is_absolute():
+        raise ValueError(f"scenario path must be relative: {rel}")
+    target = (workdir / rel).resolve()
+    if not target.is_relative_to(workdir.resolve()):
+        raise ValueError(f"scenario path escapes the working directory: {rel}")
+    return target
+
+
 def _evaluate(check: Check, transcript: str, workdir: Path) -> CheckRecord:
     if check.type.startswith("file_"):
-        target = workdir / (check.path or "")
+        try:
+            target = _contained(workdir, check.path or "")
+        except ValueError as e:
+            return CheckRecord(check=check, passed=False, detail=str(e))
         content = target.read_text() if target.is_file() else ""
         found = re.search(check.regex, content) is not None
         wanted = check.type == "file_matches"
@@ -157,8 +175,13 @@ def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = N
         runner = get_runner(os.environ.get("FETTLE_EVAL_RUNNER", "claude"))
     workdir = Path(workdir) if workdir else Path.cwd() / "evals-run"
     workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        setup_targets = {rel: _contained(workdir, rel)
+                         for rel in scenario.setup_files}
+    except ValueError as e:
+        return RunResult(Verdict.INDETERMINATE, (), f"containment error: {e}")
     for rel, content in scenario.setup_files.items():
-        target = workdir / rel
+        target = setup_targets[rel]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
     try:
