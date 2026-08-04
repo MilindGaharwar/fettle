@@ -9,7 +9,7 @@ When the user invokes `/fettle:review`:
 1. Identify the file to review (ask if not obvious from context).
 2. Run:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh review.py --file PATH
+   python3 -m fettle.review --file PATH
    ```
 3. Present the review findings.
 

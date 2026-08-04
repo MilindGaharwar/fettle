@@ -15,11 +15,8 @@ Manage the daily worklog at `.fettle/worklog/YYYY-MM-DD.md`.
    - `create` — create today's template if missing
    - `today` — open today's entry (create if needed)
 
-2. **For "view":** Run:
-   ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/worklog.py view
-   ```
-   Present the recent entries.
+2. **For "view":** Read the last 7 files in `.fettle/worklog/` (named `YYYY-MM-DD.md`,
+   so lexical order is date order) and present their "Completed" sections.
 
 3. **For "create" or "today":**
    - Check if `.fettle/worklog/YYYY-MM-DD.md` exists

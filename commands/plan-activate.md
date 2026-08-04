@@ -15,7 +15,7 @@ Activate a development plan to unlock implementation file edits.
 
 3. Run the structural validator:
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/plan_validator.py <PLAN_PATH>
+   python3 -m fettle.plan_validator <PLAN_PATH>
    ```
    If it fails, report every error verbatim and do NOT activate. The errors name the exact WP and missing method type. Fix the plan first.
 
@@ -23,11 +23,9 @@ Activate a development plan to unlock implementation file edits.
    - Look for a `## Council Review` or `## Adversarial Review` section in the plan, OR
    - Check if a council report file is referenced in the plan header (e.g., `council_report: /path/to/report.md`)
    - If neither exists: **WARN** the user that no adversarial review is on record. For plans
-     with implementation tasks, recommend running:
-     ```bash
-     python3 /tmp/fettle/tools/council.py --role adversarial < <BRIEF_FILE>
-     ```
-     before activation. Strongly recommended but does not hard-block (council rate limits are real).
+     with implementation tasks, recommend an adversarial review pass (a second model or a
+     colleague red-teaming the plan) before activation. Strongly recommended but does not
+     hard-block.
 
 5. If validation passes, write the marker file:
    ```bash
@@ -60,4 +58,4 @@ WPs containing only INSPECT, VERIFY, REVIEW, or PROPERTY tasks are exempt.
 - Only one plan can be active at a time -- activating a new one replaces the old
 - The marker is persistent at .fettle/state/active-plan.json (survives reboots)
 - To deactivate, run /fettle:plan-complete
-- Validator callable standalone: python3 ${CLAUDE_PLUGIN_ROOT}/scripts/plan_validator.py plan.md
+- Validator callable standalone: python3 -m fettle.plan_validator plan.md

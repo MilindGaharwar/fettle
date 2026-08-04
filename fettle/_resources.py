@@ -43,3 +43,26 @@ def rules_dir() -> Path:
 
     # Fallback to clone path (will fail gracefully downstream)
     return clone_rules
+
+
+def templates_dir() -> Path:
+    """Return the path to the workflow templates directory (WP-17).
+
+    Same resolution order as rules_dir(): CLAUDE_PLUGIN_ROOT override,
+    clone-mode repo_root/templates/, then wheel-bundled fettle/_templates/.
+    """
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env_root:
+        candidate = Path(env_root) / "templates"
+        if candidate.is_dir():
+            return candidate
+
+    clone_templates = _REPO_ROOT / "templates"
+    if clone_templates.is_dir():
+        return clone_templates
+
+    pkg_templates = _PACKAGE_DIR / "_templates"
+    if pkg_templates.is_dir():
+        return pkg_templates
+
+    return clone_templates

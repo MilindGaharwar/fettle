@@ -12,7 +12,7 @@ Remove a package from the root-owned allowlist ledger.
 
 1. **Parse arguments.** Extract package name from $ARGUMENTS (e.g., `@playwright/mcp`).
 
-2. **Check current ledger.** Read the allowlist ledger and verify the package exists. If not found, report and stop.
+2. **Locate and check the ledger.** The allowlist lives at `~/.config/fettle/mcp-allowlist.json` by default (a policy-pinned `[gates.mcp_trust].allowlist_path` wins; otherwise the `MCP_ALLOWLIST_PATH` env var). Read it and verify the package exists under `packages`. If not found, report and stop.
 
 3. **Show current entry.** Display the package's version, audit date, auditor, and report path.
 

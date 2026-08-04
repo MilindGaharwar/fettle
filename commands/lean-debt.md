@@ -5,7 +5,7 @@ Report all `fettle:lean:` markers in the project — deliberate simplifications 
 ## Usage
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh lean_debt.py
+python3 -m fettle.lean_debt
 ```
 
 ## Convention

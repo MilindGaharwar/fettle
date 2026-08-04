@@ -14,7 +14,7 @@ Run a security review on the target path.
 
 2. **Run the scanner:**
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/security_review.py --path TARGET
+   python3 -m fettle.security_review --path TARGET
    ```
 
 3. **Present findings** grouped by severity (CRITICAL/HIGH first).

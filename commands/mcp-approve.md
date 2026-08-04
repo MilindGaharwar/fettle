@@ -12,7 +12,9 @@ Run the full 5-phase MCP Zero-Trust Validation Protocol to audit a package, then
 
 1. **Parse arguments.** Extract package name and exact version from $ARGUMENTS (e.g., `@playwright/mcp@0.0.70`). If no version is pinned, STOP and ask for an exact version — unpinned packages are never approved.
 
-2. **Check if already approved.** Read the allowlist ledger and check if this exact package@version is already present. If so, report it and stop.
+2. **Locate the ledger.** The allowlist lives at `~/.config/fettle/mcp-allowlist.json` by default. Precedence: a policy-pinned `[gates.mcp_trust].allowlist_path` in the effective config wins; otherwise the `MCP_ALLOWLIST_PATH` env var; otherwise the default. Check `fettle config --print-effective` for a pinned path.
+
+3. **Check if already approved.** Read the allowlist ledger and check if this exact package@version is already present under `packages`. If so, report it and stop.
 
 3. **Phase 1 — Package Provenance & Supply Chain**
    - Run `npm view <package>@<version> --json` to get publisher, download stats, repo link, publish date
@@ -64,7 +66,7 @@ Run the full 5-phase MCP Zero-Trust Validation Protocol to audit a package, then
 
 11. **If approved**, update the ledger via sudo. Use a Python script that:
     - Reads the current allowlist ledger
-    - Adds the new package entry with version, sha256, audit date, auditor, report path, and approved_by_human=true
+    - Adds the new package entry under `packages` with `version`, `sha256_tarball` (npm) or `sha256_wheel` (Python), audit date, auditor, report path, and `approved_by_human: true`; set `allow_source: true` only when a source build was explicitly audited
     - Writes to a temp file then sudo copies it to the ledger path
     - Sets ownership to root:root and permissions to 0644
 

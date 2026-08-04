@@ -6,18 +6,18 @@ Manage violation baselines for gradual adoption.
 
 ### Create baseline (snapshot current state)
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh baseline.py create
+fettle baseline create
 ```
 Saves all current findings to `.fettle-baseline.json`. These findings are grandfathered.
 
 ### Check against baseline (only new violations)
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh baseline.py check
+fettle check --baseline
 ```
 
 ### Update baseline (after fixing some findings)
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh baseline.py update
+fettle baseline update
 ```
 
 ## Purpose

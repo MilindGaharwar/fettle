@@ -39,7 +39,11 @@ def test_save_rule(tmp_path):
     }
     result = _save_rule(rule, tmp_path)
     assert result["rule_id"] == "unsafe-eval"
-    assert (tmp_path / "rules" / "learned" / "unsafe-eval.yml").exists()
+    # WP-17: incident rules are quarantined in rules/proposed/, not learned/
+    saved = tmp_path / "rules" / "proposed" / "unsafe-eval.yml"
+    assert saved.exists()
+    assert not (tmp_path / "rules" / "learned" / "unsafe-eval.yml").exists()
+    assert "status: proposed" in saved.read_text()
     assert (tmp_path / "tests" / "fixtures" / "learned" / "unsafe-eval_violation.py").exists()
     assert (tmp_path / "tests" / "fixtures" / "learned" / "unsafe-eval_clean.py").exists()
 
@@ -67,7 +71,7 @@ def test_save_rule_traversal_id_rejected(tmp_path):
     result = _save_rule(_rule("../../evil"), tmp_path)
     assert result["rule_id"].startswith("learned-")  # fell back to timestamp id
     assert not (tmp_path.parent / "evil.yml").exists()
-    saved = tmp_path / "rules" / "learned" / f"{result['rule_id']}.yml"
+    saved = tmp_path / "rules" / "proposed" / f"{result['rule_id']}.yml"
     assert saved.exists()
     assert result["rule_id"] in saved.read_text()  # YAML carries the real id
 

@@ -17,7 +17,11 @@ Run a Production Readiness Review (PRR) checklist for the target service.
    mkdir -p .fettle
    ```
 
-3. **Copy the ops-review template.** Read the template from `${CLAUDE_PLUGIN_ROOT}/templates/ops-review.md` and write it to `.fettle/ops-review-{name}.md`, replacing `{SERVICE_NAME}` with the service name and `{DATE}` with today's date.
+3. **Copy the ops-review template.** Locate the bundled template and write it to `.fettle/ops-review-{name}.md`, replacing `{SERVICE_NAME}` with the service name and `{DATE}` with today's date:
+   ```bash
+   python3 -c "from fettle._resources import templates_dir; print(templates_dir() / 'ops-review.md')"
+   ```
+   Read the file at the printed path.
 
 4. **Run automated checks on the codebase.** Use Grep and Glob to scan for operational readiness indicators and pre-fill the template sections:
 

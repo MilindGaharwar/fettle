@@ -17,7 +17,11 @@ Run a pre-deployment FMEA (Failure Mode and Effects Analysis) quality checklist 
    mkdir -p .fettle
    ```
 
-3. **Copy the preflight template.** Read the template from `${CLAUDE_PLUGIN_ROOT}/templates/preflight.md` and write it to `.fettle/preflight-{name}.md`, replacing `{SERVICE_NAME}` with the service name and `{DATE}` with today's date.
+3. **Copy the preflight template.** Locate the bundled template and write it to `.fettle/preflight-{name}.md`, replacing `{SERVICE_NAME}` with the service name and `{DATE}` with today's date:
+   ```bash
+   python3 -c "from fettle._resources import templates_dir; print(templates_dir() / 'preflight.md')"
+   ```
+   Read the file at the printed path.
 
 4. **Run automated checks on the codebase.** Use Grep and Glob to scan for known anti-patterns and pre-fill the template sections:
 
@@ -73,5 +77,5 @@ Run a pre-deployment FMEA (Failure Mode and Effects Analysis) quality checklist 
 
 9. **Suggest** running the full automated scan:
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/quality_scan.py --root .
+   fettle check --all
    ```

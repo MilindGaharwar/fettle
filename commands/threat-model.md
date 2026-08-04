@@ -14,7 +14,7 @@ Generate a threat model for the target service.
 
 2. **Run the generator:**
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/threat_model.py --name SERVICE --root . --output docs/threat-model-SERVICE.md
+   python3 -m fettle.threat_model --name SERVICE --root . --output docs/threat-model-SERVICE.md
    ```
 
 3. **Present the auto-detected data** (entry points, data stores, auth mechanisms) and ask the user to confirm or add missing items.

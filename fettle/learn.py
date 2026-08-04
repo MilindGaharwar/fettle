@@ -2,7 +2,8 @@
 """Fettle learn — generate semgrep rules from incidents.
 
 The flagship feature: incident text → LLM-generated semgrep rule + fixtures + citation.
-Requires human approval before landing in rules/learned/.
+Drafts land in the rules/proposed/ quarantine (never gate-loaded); a human
+approves them into rules/learned/ via `fettle rules promote` (WP-17).
 
 Usage:
     python3 learn.py --incident "Description of what went wrong..."
@@ -14,8 +15,8 @@ Pipeline:
 2. LLM generates: semgrep rule YAML + violating fixture + clean fixture + citation
 3. Verify: run semgrep on violating fixture (must match) and clean fixture (must not match)
 4. If verification fails: one automated repair round
-5. Present to user for approval
-6. On approval: save to rules/learned/<rule-id>.yml + tests/fixtures/learned/
+5. On --auto-save: land in rules/proposed/<rule-id>.yml + tests/fixtures/learned/
+6. Human approval: fettle rules promote <rule-id> → rules/learned/
 """
 
 import argparse
@@ -145,20 +146,27 @@ def _generate_semgrep_yaml(rule: dict) -> str:
 
 
 def _save_rule(rule: dict, repo_root: Path) -> dict:
-    """Save learned rule and fixtures to repo."""
+    """Save a drafted rule into the rules/proposed/ quarantine + fixtures.
+
+    WP-17: incident rules land in rules/proposed/ (status: proposed), never
+    directly in rules/learned/ — promotion is an explicit human step via
+    `fettle rules promote`. Fixtures still go to tests/fixtures/learned/
+    (they are keyed by rule id and follow the rule through promotion).
+    """
     rule_id = _safe_rule_id(rule.get("rule_id"))
     rule["rule_id"] = rule_id  # the YAML must carry the id actually used
 
     # Create directories
-    rules_dir = repo_root / LEARNED_RULES_DIR
+    rules_dir = repo_root / PROPOSED_RULES_DIR
     fixtures_dir = repo_root / LEARNED_FIXTURES_DIR
     rules_dir.mkdir(parents=True, exist_ok=True)
     fixtures_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save rule YAML
+    # Save rule YAML, marked as a quarantined proposal
     rule_path = rules_dir / f"{rule_id}.yml"
     _assert_contained(rule_path, rules_dir)
-    rule_path.write_text(_generate_semgrep_yaml(rule), encoding="utf-8")
+    rule_path.write_text(_generate_semgrep_yaml(rule) + "      status: proposed\n",
+                         encoding="utf-8")
 
     # Save violating fixture
     violating = rule.get("violating_code", "")
@@ -375,7 +383,10 @@ def main() -> None:
 
     if args.auto_save:
         result = _save_rule(rule, repo_root)
-        print(f"\n  ✓ Saved: {result['rule_path']}")
+        print(f"\n  ✓ Proposed: {result['rule_path']} (quarantined — never gate-loaded)")
+        print("  NOTE: --auto-save previously wrote to rules/learned/ directly; that")
+        print("  behavior is deprecated. Approve with: fettle rules promote "
+              + result["rule_id"])
     else:
         print("\n  [Requires human approval — run with --auto-save to persist]")
 

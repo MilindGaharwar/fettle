@@ -14,7 +14,7 @@ from setuptools.command.build_py import build_py
 
 
 class _BuildPyWithRules(build_py):
-    """Copy rules/ into the built package so they ship inside the wheel."""
+    """Copy rules/ and templates/ into the built package (wheel resources)."""
 
     def run(self):
         super().run()
@@ -33,6 +33,14 @@ class _BuildPyWithRules(build_py):
                 dest_learned.mkdir(parents=True, exist_ok=True)
                 for yml in learned.glob("*.yml"):
                     shutil.copy2(yml, dest_learned / yml.name)
+        # Copy templates/*.md so workflow commands can locate them when
+        # pip-installed (WP-17; resolved at runtime via _resources.templates_dir)
+        src_templates = Path(__file__).parent / "templates"
+        if src_templates.is_dir():
+            dest = Path(self.build_lib) / "fettle" / "_templates"
+            dest.mkdir(parents=True, exist_ok=True)
+            for resource in src_templates.glob("*.md"):
+                shutil.copy2(resource, dest / resource.name)
 
 
 setup(cmdclass={"build_py": _BuildPyWithRules})

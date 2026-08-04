@@ -5,7 +5,7 @@ Show effectiveness metrics from Fettle's trace data.
 ## Usage
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh report.py [--days 30]
+fettle report [--days 30]
 ```
 
 Reports:

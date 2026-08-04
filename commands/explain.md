@@ -7,7 +7,7 @@ Explain why Fettle blocked or warned about the last edit.
 When the user invokes `/fettle:explain`:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh explain.py --last 3
+fettle explain
 ```
 
 Shows for each decision:

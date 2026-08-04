@@ -12,20 +12,36 @@ When the user invokes `/fettle:learn`, ask for the incident details:
 
 Then run:
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh learn.py --incident "INCIDENT_TEXT" --auto-save
+fettle learn --incident "INCIDENT_TEXT" --auto-save
 ```
 
-The generated rule lands in `rules/learned/<rule-id>.yml` with:
+The drafted rule lands in the `rules/proposed/` quarantine (status: proposed)
+with:
 - Semgrep pattern
 - Citation (incident reference)
 - Violating fixture (tests/fixtures/learned/)
 - Clean fixture (tests/fixtures/learned/)
 
+Proposals are NEVER loaded by gates. Promotion to `rules/learned/` is an
+explicit human step.
+
 ## Verification
 
-After generating, verify the rule works:
+After generating, verify the rule works against its fixtures:
 ```bash
-semgrep --config rules/learned/<rule-id>.yml tests/fixtures/learned/<rule-id>_violation.py
+semgrep --config rules/proposed/<rule-id>.yml tests/fixtures/learned/<rule-id>_violation.py
 ```
 
 Should match the violation fixture and NOT match the clean fixture.
+
+## Approval
+
+Review the quarantined proposals and promote the good ones:
+```bash
+fettle rules list
+fettle rules promote <rule-id>
+```
+
+Promotion moves the rule to `rules/learned/` (status: learned), where it can
+be loaded via `.fettle.toml`. `fettle rules promote` refuses proposals with
+an empty pattern.

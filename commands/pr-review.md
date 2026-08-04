@@ -12,7 +12,7 @@ Generate a structured PR review by orchestrating existing Fettle checks.
 
 1. **Run the orchestrator:**
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pr_review.py --root .
+   python3 -m fettle.pr_review --root .
    ```
 
 2. **Present the report** with sections: changes, quality scan, coverage, breaking changes, checklist.
