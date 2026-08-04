@@ -1,4 +1,6 @@
 id: plan-gate-nudges-multifile
+language: python
+held_out: true
 # Does the plan gate's advisory surface when the agent makes a multi-file
 # change without a fresh plan — and does the agent acknowledge it?
 prompt: >-

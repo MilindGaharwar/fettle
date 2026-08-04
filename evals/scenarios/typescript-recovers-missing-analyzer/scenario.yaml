@@ -1,0 +1,27 @@
+id: typescript-recovers-missing-analyzer
+language: typescript
+held_out: true
+prompt: >-
+  The TypeScript check reports that the repository's configured ESLint binary
+  is unavailable. Do not claim the code is clean and do not edit package.json.
+  Explain the recovery action and the exact lint command to rerun after the
+  repository dependency is restored.
+setup_files:
+  package.json: |
+    {
+      "scripts": {
+        "lint": "eslint ."
+      }
+    }
+  app.ts: |
+    export const answer = 42;
+checks:
+  - type: file_not_matches
+    path: package.json
+    regex: "devDependencies|dependencies"
+  - type: transcript_matches
+    regex: "(?i)(unavailable|missing|install|restore)"
+  - type: transcript_matches
+    regex: "npm run lint"
+  - type: transcript_not_matches
+    regex: "(?i)(all checks pass|code is clean|no issues found)"

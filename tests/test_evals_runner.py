@@ -17,6 +17,7 @@ EVALS_DIR = os.path.join(PLUGIN_DIR, "evals", "scenarios")
 
 sys.path.insert(0, os.path.join(PLUGIN_DIR))
 from fettle.evals_runner import (  # noqa: E402
+    EvalMetrics,
     Scenario,
     Verdict,
     discover_scenarios,
@@ -34,6 +35,8 @@ def _write_scenario(tmp_path, body):
 
 VALID = """
     id: my-scenario
+    language: python
+    held_out: true
     prompt: "Add a divide function to calc.py"
     setup_files:
       calc.py: |
@@ -55,7 +58,21 @@ def test_valid_scenario_loads(tmp_path):
     s = load_scenario(_write_scenario(tmp_path, VALID))
     assert isinstance(s, Scenario)
     assert s.id == "my-scenario"
+    assert s.language == "python"
+    assert s.held_out is True
     assert len(s.checks) == 2
+
+
+def test_unknown_language_rejected(tmp_path):
+    d = _write_scenario(tmp_path, VALID.replace("language: python", "language: brainfuck"))
+    with pytest.raises(ValueError, match="language"):
+        load_scenario(d)
+
+
+def test_held_out_must_be_boolean(tmp_path):
+    d = _write_scenario(tmp_path, VALID.replace("held_out: true", "held_out: eventually"))
+    with pytest.raises(ValueError, match="held_out"):
+        load_scenario(d)
 
 
 def test_missing_prompt_rejected(tmp_path):
@@ -93,6 +110,10 @@ def test_pass_when_all_checks_pass(tmp_path):
 
     result = run_scenario(_load(tmp_path), runner=runner, workdir=tmp_path / "run")
     assert result.verdict == Verdict.PASS
+    assert result.metrics.repair_success is True
+    assert result.metrics.repeated_violation is False
+    assert result.metrics.diagnostic_bytes == len(result.transcript.encode("utf-8"))
+    assert result.metrics.indeterminate_reason is None
 
 
 def test_fail_when_file_check_fails(tmp_path):
@@ -102,6 +123,8 @@ def test_fail_when_file_check_fails(tmp_path):
 
     result = run_scenario(_load(tmp_path), runner=runner, workdir=tmp_path / "run")
     assert result.verdict == Verdict.FAIL
+    assert result.metrics.repair_success is False
+    assert result.metrics.repeated_violation is True
     assert any(not c.passed for c in result.checks)
 
 
@@ -120,6 +143,30 @@ def test_indeterminate_when_runner_raises(tmp_path):
 
     result = run_scenario(_load(tmp_path), runner=runner, workdir=tmp_path / "run")
     assert result.verdict == Verdict.INDETERMINATE
+    assert "agent CLI missing" in result.metrics.indeterminate_reason
+
+
+def test_turns_to_repair_recorded_when_runner_supplies_them(tmp_path):
+    class Result:
+        transcript = "I added divide to calc.py"
+        error = ""
+        turns = 2
+
+    class Runner:
+        def run(self, prompt, cwd, timeout_s):
+            (cwd / "calc.py").write_text("def divide(a, b):\n    return a / b\n")
+            return Result()
+
+    result = run_scenario(_load(tmp_path), runner=Runner(), workdir=tmp_path / "run")
+    assert isinstance(result.metrics, EvalMetrics)
+    assert result.metrics.turns_to_repair == 2
+    assert result.metrics.to_dict() == {
+        "repair_success": True,
+        "turns_to_repair": 2,
+        "repeated_violation": False,
+        "diagnostic_bytes": len(result.transcript.encode("utf-8")),
+        "indeterminate_reason": None,
+    }
 
 
 def test_indeterminate_on_empty_transcript_with_transcript_checks(tmp_path):
@@ -190,6 +237,13 @@ def test_shipped_scenarios_validate():
     assert dirs, "no shipped eval scenarios found"
     for d in dirs:
         load_scenario(d)  # raises on schema violation
+
+
+def test_shipped_scenarios_cover_python_and_typescript_with_held_out_cases():
+    scenarios = [load_scenario(d) for d in discover_scenarios(EVALS_DIR)]
+    for language in ("python", "typescript"):
+        assert any(s.language == language for s in scenarios)
+        assert any(s.language == language and s.held_out for s in scenarios)
 
 
 # ── WP-11 (audit M-07): missing PyYAML must fail with guidance ───────

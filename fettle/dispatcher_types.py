@@ -11,6 +11,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from fettle.finding import CheckFinding, EvidenceReference, ResultState
+
 
 class Decision(StrEnum):
     ALLOW = "allow"
@@ -77,18 +79,94 @@ class CheckResult:
     decision: Decision = Decision.ALLOW
     message: str | None = None
     hook_specific_output: dict[str, Any] = field(default_factory=dict)
+    result_state: ResultState = ResultState.PASS
+    findings: list[CheckFinding] = field(default_factory=list)
+    evidence: list[EvidenceReference] = field(default_factory=list)
+    action: str | None = None
+
+    def __post_init__(self):
+        if self.decision != Decision.ALLOW and self.result_state == ResultState.PASS:
+            self.result_state = ResultState.VIOLATION
 
     @classmethod
     def allow(cls) -> CheckResult:
         return cls(decision=Decision.ALLOW)
 
     @classmethod
-    def advisory(cls, message: str, *, hook_specific_output: dict[str, Any] | None = None) -> CheckResult:
-        return cls(decision=Decision.ADVISORY, message=message, hook_specific_output=hook_specific_output or {})
+    def advisory(
+        cls,
+        message: str,
+        *,
+        hook_specific_output: dict[str, Any] | None = None,
+        findings: list[CheckFinding] | None = None,
+        evidence: list[EvidenceReference] | None = None,
+        action: str | None = None,
+    ) -> CheckResult:
+        return cls(
+            decision=Decision.ADVISORY,
+            message=message,
+            hook_specific_output=hook_specific_output or {},
+            result_state=ResultState.VIOLATION,
+            findings=findings or [],
+            evidence=evidence or [],
+            action=action,
+        )
 
     @classmethod
-    def block(cls, message: str, *, hook_specific_output: dict[str, Any] | None = None) -> CheckResult:
-        return cls(decision=Decision.BLOCK, message=message, hook_specific_output=hook_specific_output or {})
+    def block(
+        cls,
+        message: str,
+        *,
+        hook_specific_output: dict[str, Any] | None = None,
+        findings: list[CheckFinding] | None = None,
+        evidence: list[EvidenceReference] | None = None,
+        action: str | None = None,
+    ) -> CheckResult:
+        return cls(
+            decision=Decision.BLOCK,
+            message=message,
+            hook_specific_output=hook_specific_output or {},
+            result_state=ResultState.VIOLATION,
+            findings=findings or [],
+            evidence=evidence or [],
+            action=action,
+        )
+
+    @classmethod
+    def tool_error(
+        cls,
+        message: str,
+        *,
+        action: str,
+        hook_specific_output: dict[str, Any] | None = None,
+        evidence: list[EvidenceReference] | None = None,
+    ) -> CheckResult:
+        return cls(
+            decision=Decision.ADVISORY,
+            message=message,
+            hook_specific_output=hook_specific_output or {},
+            result_state=ResultState.TOOL_ERROR,
+            evidence=evidence or [],
+            action=action,
+        )
+
+    @classmethod
+    def unknown(
+        cls,
+        message: str,
+        *,
+        action: str,
+        hook_specific_output: dict[str, Any] | None = None,
+        evidence: list[EvidenceReference] | None = None,
+    ) -> CheckResult:
+        return cls(
+            decision=Decision.ADVISORY,
+            message=message,
+            hook_specific_output=hook_specific_output or {},
+            result_state=ResultState.UNKNOWN,
+            evidence=evidence or [],
+            action=action,
+        )
 
 
 CheckRunner = Callable[[HookContext], CheckResult]

@@ -19,11 +19,15 @@ operational boundaries.
 
 | Priority | Outcome | Graduation trigger |
 |---|---|---|
-| 1 | Graduate selected advisory gates, including UAT/BDD/verify/CI | Field evidence shows acceptable false-positive and environment-error rates |
-| 2 | Add evaluator-optimizer UAT retries with reconciler feedback | A representative UAT verdict corpus exists |
-| 3 | Add a semantic impact gate for broken requirement-to-scenario-to-test chains | Link coverage is stable enough to block without routine false positives |
-| 4 | Improve distribution: Homebrew, Windows, hosted documentation | Installation and integration tests cover each target |
-| 5 | Harden editor support and expand beyond Python | LSP behavior matches documented CLI findings for each added language |
+| 1 | v1.8: canonical result, finding, and evidence contracts | Tool failures cannot appear clean; every non-pass result has a recovery action |
+| 2 | v1.8: Python and TypeScript agent-ergonomics baseline | Repair, turns, recurrence, bytes, and indeterminate runs are recorded |
+| 3 | v1.9: canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
+| 4 | v1.10–v1.12: native web, enterprise adapters, and advisory framework packs | Each stack passes clean, violation, error, routing, and behavioral-eval gates |
+| 5 | v1.13+: semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
+
+The authoritative activity sequence, dependencies, estimates, and demand gates
+are maintained in the
+[Fettle evolution implementation plan](fettle-evolution-implementation-plan.md).
 
 ## Deliberate Non-Goals
 

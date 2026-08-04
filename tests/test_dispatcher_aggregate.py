@@ -2,6 +2,7 @@
 
 from fettle.dispatcher_aggregate import Aggregator
 from fettle.dispatcher_types import CheckResult
+from fettle.finding import CheckFinding, EvidenceReference, FindingSeverity
 
 
 class TestAggregatorAllow:
@@ -115,6 +116,28 @@ class TestAggregatorAdvisory:
         assert code == 0
         assert "reminder" in output.get("systemMessage", "")
         assert "hookSpecificOutput" not in output
+
+    def test_structured_transport_does_not_change_host_wire(self):
+        finding = CheckFinding(
+            checker="ruff",
+            severity=FindingSeverity.ERROR,
+            file="app.py",
+            line=1,
+            message="unused import",
+        )
+        plain = Aggregator(total_budget_ms=400, hook_event_name="PostToolUse")
+        plain.add_result("ruff", CheckResult.advisory("fix import"), 5)
+        enriched = Aggregator(total_budget_ms=400, hook_event_name="PostToolUse")
+        enriched.add_result(
+            "ruff",
+            CheckResult.advisory(
+                "fix import",
+                findings=[finding],
+                evidence=[EvidenceReference(evidence_id="ev-1", kind="command")],
+            ),
+            5,
+        )
+        assert enriched.finish() == plain.finish()
 
 
 class TestAggregatorErrors:

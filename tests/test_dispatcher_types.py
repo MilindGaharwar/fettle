@@ -1,28 +1,66 @@
 """Tests for fettle.dispatcher_types — core types for the dispatcher."""
 
 from fettle.dispatcher_types import CheckResult, CheckSpec, Decision, HookContext, HookInput
+from fettle.finding import CheckFinding, EvidenceReference, FindingSeverity, ResultState
 
 
 class TestCheckResult:
     def test_allow(self):
         r = CheckResult.allow()
         assert r.decision == Decision.ALLOW
+        assert r.result_state == ResultState.PASS
         assert r.message is None
 
     def test_advisory(self):
         r = CheckResult.advisory("warning msg")
         assert r.decision == Decision.ADVISORY
+        assert r.result_state == ResultState.VIOLATION
         assert r.message == "warning msg"
 
     def test_block(self):
         r = CheckResult.block("denied", hook_specific_output={"key": "val"})
         assert r.decision == Decision.BLOCK
+        assert r.result_state == ResultState.VIOLATION
         assert r.message == "denied"
         assert r.hook_specific_output == {"key": "val"}
 
     def test_block_no_hso(self):
         r = CheckResult.block("x")
         assert r.hook_specific_output == {}
+
+    def test_tool_error_is_explicit_and_actionable(self):
+        r = CheckResult.tool_error(
+            "ruff could not execute",
+            action="Install ruff and rerun `ruff check .`.",
+        )
+        assert r.decision == Decision.ADVISORY
+        assert r.result_state == ResultState.TOOL_ERROR
+        assert r.action == "Install ruff and rerun `ruff check .`."
+
+    def test_unknown_is_never_pass(self):
+        r = CheckResult.unknown(
+            "analysis timed out",
+            action="Run `fettle verify`.",
+        )
+        assert r.result_state == ResultState.UNKNOWN
+        assert r.decision != Decision.ALLOW
+
+    def test_structured_findings_and_evidence_are_carried(self):
+        finding = CheckFinding(
+            checker="ruff",
+            severity=FindingSeverity.ERROR,
+            file="app.py",
+            line=1,
+            message="unused import",
+        )
+        evidence = EvidenceReference(evidence_id="ev-1", kind="command")
+        r = CheckResult.advisory("fix import", findings=[finding], evidence=[evidence])
+        assert r.findings == [finding]
+        assert r.evidence == [evidence]
+
+    def test_direct_block_construction_cannot_report_pass(self):
+        r = CheckResult(decision=Decision.BLOCK, message="denied")
+        assert r.result_state == ResultState.VIOLATION
 
 
 class TestHookContext:

@@ -1,0 +1,21 @@
+id: typescript-repairs-debug-artifact
+language: typescript
+held_out: false
+prompt: >-
+  Add an exported divide(a, b) function to calc.ts. Keep the final TypeScript
+  free of console.log and debugger statements, then state the command that
+  should be rerun to check the file.
+setup_files:
+  calc.ts: |
+    export function add(a: number, b: number): number {
+      return a + b;
+    }
+checks:
+  - type: file_matches
+    path: calc.ts
+    regex: "export function divide"
+  - type: file_not_matches
+    path: calc.ts
+    regex: "console\\.log|debugger"
+  - type: transcript_matches
+    regex: "(?i)(eslint|biome|npm|pnpm|yarn|bun).*(run|exec|check|lint)|(?i)(run|rerun).*(lint|check)"

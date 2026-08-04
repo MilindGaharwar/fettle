@@ -20,6 +20,7 @@ Verdicts are three-valued (exit codes): pass=0, fail=1, indeterminate=2.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -31,9 +32,9 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:  # WP-11 (audit M-07): pyyaml ships in the `evals` extra
-    print(
-        "fettle evals requires PyYAML — install with: pip install 'finefettle[evals]'",
-        file=sys.stderr,
+    sys.stderr.write(
+        "fettle evals requires PyYAML — install with: "
+        "pip install 'finefettle[evals]'\n"
     )
     sys.exit(2)
 
@@ -45,6 +46,7 @@ CHECK_TYPES = frozenset({
     "transcript_matches",
     "transcript_not_matches",
 })
+LANGUAGES = frozenset({"python", "typescript"})
 
 
 class Verdict(Enum):
@@ -69,6 +71,8 @@ class Scenario:
     prompt: str
     checks: tuple[Check, ...]
     setup_files: dict[str, str] = field(default_factory=dict)
+    language: str | None = None
+    held_out: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,10 +83,29 @@ class CheckRecord:
 
 
 @dataclass(frozen=True)
+class EvalMetrics:
+    repair_success: bool | None
+    turns_to_repair: int | None
+    repeated_violation: bool
+    diagnostic_bytes: int
+    indeterminate_reason: str | None = None
+
+    def to_dict(self) -> dict[str, bool | int | str | None]:
+        return {
+            "repair_success": self.repair_success,
+            "turns_to_repair": self.turns_to_repair,
+            "repeated_violation": self.repeated_violation,
+            "diagnostic_bytes": self.diagnostic_bytes,
+            "indeterminate_reason": self.indeterminate_reason,
+        }
+
+
+@dataclass(frozen=True)
 class RunResult:
     verdict: Verdict
     checks: tuple[CheckRecord, ...]
     transcript: str
+    metrics: EvalMetrics
 
 
 def discover_scenarios(root: str | Path) -> list[Path]:
@@ -114,11 +137,19 @@ def load_scenario(scenario_dir: str | Path) -> Scenario:
             raise ValueError(f"{path}: check '{ctype}' needs a 'path'")
         checks.append(Check(type=ctype, regex=c["regex"], path=c.get("path")))
     setup_files = data.get("setup_files") or {}
+    language = data.get("language")
+    if language is not None and language not in LANGUAGES:
+        raise ValueError(f"{path}: 'language' must be one of {sorted(LANGUAGES)}")
+    held_out = data.get("held_out", False)
+    if not isinstance(held_out, bool):
+        raise ValueError(f"{path}: 'held_out' must be a boolean")
     return Scenario(
         id=str(data.get("id", Path(scenario_dir).name)),
         prompt=prompt,
         checks=tuple(checks),
         setup_files={str(k): str(v) for k, v in setup_files.items()},
+        language=language,
+        held_out=held_out,
     )
 
 
@@ -154,7 +185,7 @@ def _evaluate(check: Check, transcript: str, workdir: Path) -> CheckRecord:
     return CheckRecord(check=check, passed=found == wanted, detail=detail)
 
 
-def _invoke_runner(runner, prompt: str, cwd: Path) -> str:
+def _invoke_runner(runner, prompt: str, cwd: Path) -> tuple[str, int | None]:
     """Bridge: AgentRunner (fettle.runners) or plain callable (test seam).
 
     An AgentRunner reporting an error raises — run_scenario maps that to
@@ -165,8 +196,25 @@ def _invoke_runner(runner, prompt: str, cwd: Path) -> str:
         result = runner.run(prompt, cwd, timeout_s=timeout_s)
         if result.error:
             raise RuntimeError(result.error)
-        return result.transcript
-    return runner(prompt, cwd)
+        return result.transcript, getattr(result, "turns", None)
+    return runner(prompt, cwd), None
+
+
+def _metrics(
+    verdict: Verdict,
+    transcript: str,
+    records: tuple[CheckRecord, ...] = (),
+    *,
+    turns: int | None = None,
+    reason: str | None = None,
+) -> EvalMetrics:
+    return EvalMetrics(
+        repair_success=None if verdict == Verdict.INDETERMINATE else verdict == Verdict.PASS,
+        turns_to_repair=turns if verdict == Verdict.PASS else None,
+        repeated_violation=verdict == Verdict.FAIL and any(not record.passed for record in records),
+        diagnostic_bytes=len(transcript.encode("utf-8")),
+        indeterminate_reason=reason,
+    )
 
 
 def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = None) -> RunResult:
@@ -179,22 +227,33 @@ def run_scenario(scenario: Scenario, runner=None, workdir: str | Path | None = N
         setup_targets = {rel: _contained(workdir, rel)
                          for rel in scenario.setup_files}
     except ValueError as e:
-        return RunResult(Verdict.INDETERMINATE, (), f"containment error: {e}")
+        transcript = f"containment error: {e}"
+        return RunResult(Verdict.INDETERMINATE, (), transcript, _metrics(
+            Verdict.INDETERMINATE, transcript, reason=transcript,
+        ))
     for rel, content in scenario.setup_files.items():
         target = setup_targets[rel]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
     try:
-        transcript = _invoke_runner(runner, scenario.prompt, workdir)
+        transcript, turns = _invoke_runner(runner, scenario.prompt, workdir)
     except Exception as e:  # noqa: BLE001 — runner failure is indeterminate (broken experiment), not fail
         logger.warning("eval runner failed for %s: %s", scenario.id, e)
-        return RunResult(Verdict.INDETERMINATE, (), f"runner error: {e}")
+        transcript = f"runner error: {e}"
+        return RunResult(Verdict.INDETERMINATE, (), transcript, _metrics(
+            Verdict.INDETERMINATE, transcript, reason=transcript,
+        ))
     has_transcript_checks = any(c.type.startswith("transcript_") for c in scenario.checks)
     if not transcript.strip() and has_transcript_checks:
-        return RunResult(Verdict.INDETERMINATE, (), transcript)
+        reason = "runner returned an empty transcript"
+        return RunResult(Verdict.INDETERMINATE, (), transcript, _metrics(
+            Verdict.INDETERMINATE, transcript, reason=reason,
+        ))
     records = tuple(_evaluate(c, transcript, workdir) for c in scenario.checks)
     verdict = Verdict.PASS if all(r.passed for r in records) else Verdict.FAIL
-    return RunResult(verdict, records, transcript)
+    return RunResult(verdict, records, transcript, _metrics(
+        verdict, transcript, records, turns=turns,
+    ))
 
 
 def main() -> None:
@@ -210,18 +269,19 @@ def main() -> None:
     if args.cmd == "validate":
         dirs = discover_scenarios(args.root)
         if not dirs:
-            print(f"no scenarios under {args.root}", file=sys.stderr)
+            sys.stderr.write(f"no scenarios under {args.root}\n")
             sys.exit(2)
         for d in dirs:
             load_scenario(d)
-            print(f"✓ {d.name}")
+            sys.stdout.write(f"✓ {d.name}\n")
         sys.exit(0)
 
     scenario = load_scenario(args.scenario_dir)
     result = run_scenario(scenario, workdir=args.workdir)
     for r in result.checks:
-        print(f"  [{'PASS' if r.passed else 'FAIL'}] {r.detail}")
-    print(f"verdict: {result.verdict.value}")
+        sys.stdout.write(f"  [{'PASS' if r.passed else 'FAIL'}] {r.detail}\n")
+    sys.stdout.write(f"metrics: {json.dumps(result.metrics.to_dict(), sort_keys=True)}\n")
+    sys.stdout.write(f"verdict: {result.verdict.value}\n")
     sys.exit(EXIT_CODES[result.verdict])
 
 

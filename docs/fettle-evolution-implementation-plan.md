@@ -1,6 +1,6 @@
 # Fettle Evolution Implementation Plan
 
-Status: PROPOSED
+Status: APPROVED — P0–P5 active
 
 Scope: post-v1.7 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -49,8 +49,7 @@ analyzer, IDE suite, hosted control plane, or operating-system sandbox.
 
 ## 2. Assumptions
 
-1. v1.7 policy-resolution parity and workflow distribution land before the
-   adapter migration begins.
+1. v1.7 policy-resolution parity and workflow distribution are complete.
 2. Python 3.11+ and the default zero-runtime-dependency posture remain.
 3. Repository-native wrappers and commands take precedence over global tools.
 4. Hooks remain the deterministic enforcement boundary; MCP is optional
@@ -60,8 +59,8 @@ analyzer, IDE suite, hosted control plane, or operating-system sandbox.
    measured evidence.
 7. Existing Python, Go, Rust, and JS/TS behavior remains supported throughout
    migration; no flag-day dispatcher rewrite is acceptable.
-8. The current dirty worktree contains unrelated v1.7 work and must not be
-   overwritten or reverted during implementation.
+8. Implementation remains additive until parity tests permit removal of an old
+   path; unrelated worktree changes must not be overwritten or reverted.
 
 ## 3. Decisions And Tradeoffs
 
@@ -96,7 +95,55 @@ classification and integrate with external sandboxes, but will not claim that
 hooks provide process or network containment. eBPF/ptrace belongs in a separate
 privileged, platform-specific security product.
 
-## 4. Dependency Spine
+## 4. Current Baseline And Authoritative Scope
+
+v1.7.0 is the shipped trust baseline. The activity IDs below are the execution
+source of truth; release work packages later in this document provide design
+detail. Estimates include tests and documentation for one experienced engineer
+and are planning ranges, not commitments.
+
+| ID | Activity | Release | Depends on | Estimate | State |
+|---|---|---|---|---|---|
+| P0 | Align roadmap, release numbering, and v1.7 baseline | v1.8 | v1.7.0 | 0.5 day | Active |
+| P1 | Define canonical four-state result contract | v1.8 | P0 | 0.5–1 day | Active |
+| P2 | Add actionable fields to the canonical finding | v1.8 | P1 | 0.5–1 day | Active |
+| P3 | Carry findings and evidence through dispatcher transport without changing host wires | v1.8 | P1, P2 | 1–2 days | Active |
+| P4 | Record repair, turn, recurrence, byte, and indeterminate eval metrics | v1.8 | P1 | 1–2 days | Active |
+| P5 | Add Python and TypeScript repair/error behavioral scenarios | v1.8 | P2, P4 | 1–2 days | Active |
+| P6 | Persist bounded, redacted structured evidence in trace | v1.8 | P2, P3 | 1–2 days | Planned |
+| P7 | Render concise, detailed, and JSON findings in report/explain | v1.8 | P2, P6 | 1–2 days | Planned |
+| P8 | Attach evidence IDs to verify, coverage, UAT, CI, and integrations | v1.8 | P6 | 2–4 days | Planned |
+| P9 | Consolidate workspace models and nested routing | v1.9 | P3 | 4–7 days | Planned |
+| P10 | Strengthen adapter protocol with explicit `CheckRun` state | v1.9 | P1, P9 | 3–5 days | Planned |
+| P11 | Add adapter-backed dispatcher check and migrate TypeScript | v1.9 | P3, P10 | 3–5 days | Planned |
+| P12 | Migrate Go, Python, and Rust after parity | v1.9 | P11 | 4–7 days | Planned |
+| P13 | Centralize file and test classification | v1.9 | P9, P10 | 3–5 days | Planned |
+| P14 | Verify all affected workspaces and bind evidence | v1.9 | P8, P9, P10 | 3–5 days | Planned |
+| P15 | Complete repository-native JS/TS tooling | v1.10 | P10, P11 | 3–5 days | Planned |
+| P16 | Discover Node workspaces and framework metadata | v1.10 | P9, P15 | 2–4 days | Planned |
+| P17 | Establish web CLI/hook/LSP parity and eval corpus | v1.10 | P5, P15, P16 | 3–5 days | Planned |
+| P18 | Add argv-only generic command integration | v1.10 | P1, P6, P10 | 2–4 days | Planned |
+| P19 | Ingest bounded SARIF and JUnit evidence | v1.10 | P2, P18 | 3–5 days | Planned |
+| P20 | Expand adversarial shell corpus and conservative classification | v1.10 | P1 | 3–5 days | Planned |
+| P21 | Define optional external sandbox provider contract | v1.10 | P18, P20 | 2–4 days | Demand-gated |
+| P22 | Add .NET workspace, adapter, and behavioral evals | v1.11 | P10, P14, P19 | 5–8 days | Planned |
+| P23 | Add Java workspace, adapter, and behavioral evals | v1.11 | P10, P14, P19 | 5–8 days | Planned |
+| P24 | Add advisory framework-pack infrastructure | v1.12 | P13, P17, P22, P23 | 3–5 days | Planned |
+| P25 | Add React/Next.js pack | v1.12 | P17, P24 | 3–5 days | Evidence-gated |
+| P26 | Add ASP.NET Core and Spring Boot packs | v1.12 | P22, P23, P24 | 5–8 days | Evidence-gated |
+| P27 | Add HTML/HTMX pack; add Angular only on demonstrated demand | v1.12 | P17, P24 | 3–6 days | Demand-gated |
+| P28 | Capture bounded pre-edit structural evidence | v1.13 | P6, P13 | 3–5 days | Evidence-gated |
+| P29 | Add initial semantic-delta rules and native infra ingestion | v1.13 | P19, P28 | 5–10 days | Evidence-gated |
+| P30 | Extract shared side-effect-controlled analysis service | v1.14 | P12, P17, P19 | 4–7 days | Planned |
+| P31 | Add thin stdio MCP query surface | v1.14 | P30 | 3–5 days | Demand-gated |
+| P32 | Graduate additional LSP languages after parity | v1.14 | P22, P23, P30 | 3–6 days | Evidence-gated |
+
+The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
+→ P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
+run alongside the web proving ground after their dependencies close. Work
+marked demand- or evidence-gated is not scheduled until its trigger is met.
+
+## 5. Dependency Spine
 
 ```text
 v1.7 correctness and policy parity
@@ -128,11 +175,11 @@ R3 JS/TS proving ground   R4 generic ingestion   R5 shell hardening
 No downstream release starts until its predecessor's graduation trigger is
 met. Parallel work is allowed only where the graph explicitly branches.
 
-## 5. Release Plan
+## 6. Release Plan
 
 ### R0: v1.7 Trust Foundation
 
-Owner: existing audit plan, not this plan.
+Owner: existing audit plan, not this plan. Status: COMPLETE in v1.7.0.
 
 Required completion evidence:
 
@@ -704,7 +751,7 @@ tool errors as explicit diagnostics or status, not an empty diagnostic set.
 Graduation trigger: the same fixture produces the same canonical findings over
 CLI, hook, LSP, and MCP, modulo transport fields.
 
-## 6. Cross-Cutting Test Strategy
+## 7. Cross-Cutting Test Strategy
 
 ### Unit Contract
 
@@ -766,7 +813,7 @@ For each release, use a fresh sample repository rather than only fixtures:
 
 File the report under `docs/uat/` for each language or framework graduation.
 
-## 7. Security Requirements
+## 8. Security Requirements
 
 - Execute configured tools as argv arrays with `shell=False`.
 - Resolve target paths inside their declared workspace before invocation.
@@ -779,7 +826,7 @@ File the report under `docs/uat/` for each language or framework graduation.
 - MCP cannot mutate policy, approve packages, or suppress enforcing rules.
 - Missing tools and parser failures remain visible and policy-controlled.
 
-## 8. Performance Budgets
+## 9. Performance Budgets
 
 - PreToolUse total default: 250 ms.
 - PostToolUse total default: 400 ms.
@@ -791,7 +838,7 @@ File the report under `docs/uat/` for each language or framework graduation.
 - Profile/workspace discovery is cached by marker content/mtime and invalidated
   when any relevant marker changes.
 
-## 9. Observability And Graduation
+## 10. Observability And Graduation
 
 Measure locally and through existing privacy-preserving aggregate telemetry:
 
@@ -806,7 +853,7 @@ Do not add repository names, paths, source snippets, session identifiers, or
 raw commands to aggregate telemetry. OpenTelemetry export and a hosted control
 plane remain deferred until a concrete enterprise consumer requires them.
 
-## 10. Blast Radius
+## 11. Blast Radius
 
 High-risk modules:
 
@@ -829,11 +876,11 @@ Required controls:
 - Run packaging smoke tests whenever rules, fixtures, commands, or optional
   surfaces are added.
 
-The current kgraph impact result was stale and reported only queried files;
-re-index with `kgraph index` before implementation and rerun impact for each
-work package.
+The graph was re-indexed before P0–P5 implementation. Rerun `kgraph index` and
+`kgraph impact <file>` whenever the worktree changes before a later work
+package begins.
 
-## 11. Historical Release-Level Estimate
+## 12. Historical Release-Level Estimate
 
 The activity-level estimates in **Current Baseline And Authoritative Scope**
 supersede this original coarse sizing. This table remains only to preserve the
@@ -859,7 +906,7 @@ Recommended staffing: one architectural owner for R1/R2, then separate adapter
 owners can implement .NET and Java in parallel against the frozen contract.
 Framework packs should follow, not overlap, initial adapter development.
 
-## 12. Implementation Task Contract
+## 13. Implementation Task Contract
 
 Every work package is decomposed during its planning session into small tasks
 that name exact files and leave tests green. The minimum sequence for each is:
@@ -878,7 +925,7 @@ that name exact files and leave tests green. The minimum sequence for each is:
 
 No work package is complete based only on parser unit tests.
 
-## 13. Release Success Criteria
+## 14. Release Success Criteria
 
 The program is successful when:
 
@@ -897,7 +944,7 @@ The program is successful when:
 10. The full test suite, Fettle scan, package smoke, and remote CI are green at
     every release boundary.
 
-## 14. Explicit Non-Goals
+## 15. Explicit Non-Goals
 
 - Kernel-level eBPF or ptrace enforcement.
 - Default-deny network namespaces managed by Fettle.
@@ -910,7 +957,7 @@ The program is successful when:
 - Bespoke permanent adapters for every commercial scanner.
 - Enforce-by-default framework heuristics.
 
-## 15. Planning Gate Status
+## 16. Planning Gate Status
 
 - Phase 0 UX: complete in `docs/polyglot-governance.ux-spec.md`.
 - Phase 0.5 UI: not applicable; this plan changes CLI, hook, LSP, and protocol
@@ -919,4 +966,4 @@ The program is successful when:
 - Phase 3.5 UAT scenarios: defined in the UX spec; per-release executable
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
-- Implementation authorization: pending owner review of this proposed plan.
+- Implementation authorization: approved for P0–P5.

@@ -1,4 +1,4 @@
-"""Fettle v0.5.0 — WP-69: Structured finding/result schema.
+"""Fettle schema 0.6.0 — structured finding and result contracts.
 
 The canonical format all checkers emit. Every downstream consumer
 (runner, hooks, CI comparison, dashboard) reads this schema.
@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Any
 
 
-SCHEMA_VERSION = "0.5.0"
+SCHEMA_VERSION = "0.6.0"
 MAX_RAW_OUTPUT_LEN = 2048
 
 _SECRET_PATTERNS = [
@@ -33,6 +33,13 @@ class FindingSeverity(StrEnum):
     INFO = "info"
 
 
+class ResultState(StrEnum):
+    PASS = "pass"
+    VIOLATION = "violation"
+    TOOL_ERROR = "tool_error"
+    UNKNOWN = "unknown"
+
+
 class Confidence(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
@@ -41,6 +48,17 @@ class Confidence(StrEnum):
     @property
     def weight(self) -> int:
         return {"high": 3, "medium": 2, "low": 1}[self.value]
+
+
+@dataclass(frozen=True)
+class EvidenceReference:
+    """Pointer to bounded evidence persisted outside a host response."""
+
+    evidence_id: str
+    kind: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"evidence_id": self.evidence_id, "kind": self.kind}
 
 
 @dataclass
@@ -58,7 +76,11 @@ class CheckFinding:
     blocking: bool | None = None
     confidence: Confidence = Confidence.HIGH
     suggested_fix: str | None = None
+    impact: str | None = None
+    action: str | None = None
     rerun_command: str | None = None
+    evidence_id: str | None = None
+    result_state: ResultState = ResultState.VIOLATION
     raw_tool_output: str | None = None
     redacted: bool = False
 
@@ -87,8 +109,15 @@ class CheckFinding:
             data["workspace"] = self.workspace
         if self.suggested_fix:
             data["suggested_fix"] = self.suggested_fix
+        if self.impact:
+            data["impact"] = self.impact
+        if self.action:
+            data["action"] = self.action
         if self.rerun_command:
             data["rerun_command"] = self.rerun_command
+        if self.evidence_id:
+            data["evidence_id"] = self.evidence_id
+        data["result_state"] = self.result_state.value
         if self.raw_tool_output:
             data["raw_tool_output"] = self.raw_tool_output
         if self.redacted:
@@ -112,6 +141,11 @@ class CheckResult:
     duration_ms: float = 0.0
     checker: str | None = None
     workspace: str | None = None
+    result_state: ResultState | None = None
+
+    def __post_init__(self):
+        if self.result_state is None:
+            self.result_state = ResultState.VIOLATION if self.findings else ResultState.PASS
 
     @property
     def has_blocking(self) -> bool:
@@ -127,6 +161,10 @@ class CheckResult:
 
     @property
     def exit_code(self) -> int:
+        if self.result_state in (ResultState.TOOL_ERROR, ResultState.UNKNOWN):
+            return 2
+        if self.result_state == ResultState.VIOLATION and not self.findings:
+            return 1
         if self.has_blocking:
             return 2
         if self.findings:
@@ -159,7 +197,11 @@ def redact_finding(f: CheckFinding) -> CheckFinding:
         blocking=f.blocking,
         confidence=f.confidence,
         suggested_fix=f.suggested_fix,
+        impact=f.impact,
+        action=f.action,
         rerun_command=f.rerun_command,
+        evidence_id=f.evidence_id,
+        result_state=f.result_state,
         raw_tool_output=raw if raw else None,
         redacted=True,
     )

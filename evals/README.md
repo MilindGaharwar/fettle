@@ -22,6 +22,8 @@
 ```
 evals/scenarios/<name>/scenario.yaml
   id            defaults to the directory name
+  language      python | typescript (required for release baselines)
+  held_out      true when reserved from message tuning
   prompt        what the agent is asked to do
   setup_files   files seeded into the scratch workdir
   checks        file_matches | file_not_matches |
@@ -32,6 +34,11 @@ Verdicts are three-valued: `pass` (0) — every check passed; `fail` (1) — a
 check failed; `indeterminate` (2) — runner error or empty transcript when
 transcript checks exist. Never conflate fail with indeterminate: one is
 evidence, the other is a broken experiment.
+
+Each run also records `repair_success`, `turns_to_repair`,
+`repeated_violation`, UTF-8 `diagnostic_bytes`, and `indeterminate_reason`.
+`turns_to_repair` remains null for runners that expose only final output; the
+harness does not infer turns from prose.
 
 ## Commands
 

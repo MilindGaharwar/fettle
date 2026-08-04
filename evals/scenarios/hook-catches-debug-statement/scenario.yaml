@@ -1,4 +1,6 @@
 id: hook-catches-debug-statement
+language: python
+held_out: false
 # Does the post-edit hook's advisory actually make the agent remove the
 # debug print, rather than shipping it?
 prompt: >-

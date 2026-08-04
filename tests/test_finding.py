@@ -13,7 +13,9 @@ from fettle.finding import (
     CheckFinding,
     CheckResult,
     Confidence,
+    EvidenceReference,
     FindingSeverity,
+    ResultState,
     sort_findings,
     to_json,
     to_human,
@@ -36,7 +38,10 @@ def test_finding_serializes_to_json():
         message="unused import os",
         code="F401",
         suggested_fix="Remove `import os`",
+        impact="Dead imports obscure dependency intent.",
+        action="Remove `import os`.",
         rerun_command="ruff check src/app.py",
+        evidence_id="ev-ruff-1",
     )
     data = f.to_dict()
     assert data["checker"] == "ruff"
@@ -46,7 +51,11 @@ def test_finding_serializes_to_json():
     assert data["column"] == 5
     assert data["message"] == "unused import os"
     assert data["suggested_fix"] == "Remove `import os`"
+    assert data["impact"] == "Dead imports obscure dependency intent."
+    assert data["action"] == "Remove `import os`."
     assert data["rerun_command"] == "ruff check src/app.py"
+    assert data["evidence_id"] == "ev-ruff-1"
+    assert data["result_state"] == "violation"
     # roundtrip via JSON
     text = json.dumps(data)
     parsed = json.loads(text)
@@ -192,7 +201,34 @@ def test_check_result_no_blocking():
 
 def test_check_result_pass():
     result = CheckResult(findings=[], duration_ms=10.0)
+    assert result.result_state == ResultState.PASS
     assert result.exit_code == 0
+
+
+def test_check_result_tool_error_is_not_clean():
+    result = CheckResult(result_state=ResultState.TOOL_ERROR)
+    assert result.exit_code == 2
+
+
+def test_check_result_unknown_is_not_clean():
+    result = CheckResult(result_state=ResultState.UNKNOWN)
+    assert result.exit_code == 2
+
+
+def test_explicit_violation_without_findings_is_not_clean():
+    result = CheckResult(result_state=ResultState.VIOLATION)
+    assert result.exit_code == 1
+
+
+def test_evidence_reference_serializes_without_raw_source():
+    evidence = EvidenceReference(
+        evidence_id="ev-1",
+        kind="command",
+    )
+    assert evidence.to_dict() == {
+        "evidence_id": "ev-1",
+        "kind": "command",
+    }
 
 
 # --- Confidence ---

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — v1.8 target
+
+- Added the canonical `pass`, `violation`, `tool_error`, and `unknown` result
+  states, actionable finding fields, and evidence references without changing
+  strict agent-host hook output.
+- Behavioral evals now report repair success, available turn counts, repeated
+  violations, diagnostic bytes, and indeterminate reasons, with Python and
+  TypeScript held-out baselines.
+
 ## v1.7.0 — Workflows Everywhere
 
 The 17 fettle workflows now install into every supported agent CLI, and
