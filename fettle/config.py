@@ -1,17 +1,25 @@
 """Fettle configuration — single source for gates, severity, and paths.
 
-Layering (later wins): built-in defaults → `.fettle.toml` at the project root
-→ environment variables. Uses stdlib tomllib (Python >= 3.11); no dependencies.
+Canonical layering (later wins, WP-20 unified resolver):
+    defaults → org.toml → team.toml → remote [extends] → repo .fettle.toml
+            → directory overrides (path-scoped) → env → capsule (tighten-only)
 
-Design principles (docs/ROADMAP.md):
+Directory `.fettle.toml` overrides apply only when a caller resolves for a
+specific file (`load_config(cwd, for_path=...)`); pathless callers resolve
+at root scope. Uses stdlib tomllib (Python >= 3.11); no dependencies.
+
+Design principles (docs/ROADMAP.md, docs/engagement/17):
 - Opinionated process gates (plan/UX/UI/tests/MCP) default OFF.
 - Core lint gate defaults ON in advisory mode.
 - FETTLE_GATE_MODE env var is an emergency global override only.
+- Inspection (`fettle config`) and runtime share this one resolver.
 """
 
 import copy
 import os
+import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -365,51 +373,165 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-def load_config(cwd: str | None = None) -> dict[str, Any]:
-    """Merged config for the project at `cwd` (default: process cwd)."""
-    root = Path(cwd or os.getcwd())
-    cfg = copy.deepcopy(DEFAULTS)
+@dataclass
+class PolicyLayer:
+    """One layer of policy configuration with provenance metadata.
 
+    List order IS the precedence order (later layers win). Env and capsule
+    appear as pseudo-layers whose `config` is the *applied* diff.
+    """
+
+    name: str    # "defaults", "org:acme", "team:platform", "remote", "repo", "dir:src/api", "env:FETTLE_GATE_MODE", "capsule"
+    source: str  # file path, env var name, or "built-in"
+    config: dict
+
+
+_DIR_NOISE = ("node_modules", "__pycache__", ".venv")
+
+
+def _xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
+
+
+def _load_toml_layer(path: Path) -> dict | None:
+    """Load one layer file. Missing → None; corrupt → fail-visible skip."""
+    if not path.is_file():
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        print(f"fettle: could not parse {path}: {e} — skipping layer", file=sys.stderr)
+        return None
+
+
+def _ancestor_dir_layers(root: Path, for_path: str) -> list[PolicyLayer]:
+    """Directory-override layers applicable to `for_path`.
+
+    Walks ancestors of the file from the repo root down (deeper wins) —
+    O(depth) stat calls, never a tree scan, so hooks stay fast. Hidden and
+    noise directories end the walk (their configs never apply).
+    """
+    p = Path(for_path)
+    if not p.is_absolute():
+        p = root / p
+    try:
+        rel = p.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return []
+    layers: list[PolicyLayer] = []
+    current = root
+    for part in rel.parts[:-1]:  # directory components only
+        if part.startswith(".") or part in _DIR_NOISE:
+            break
+        current = current / part
+        data = _load_toml_layer(current / CONFIG_FILENAME)
+        if data is not None:
+            layers.append(PolicyLayer(
+                name=f"dir:{current.relative_to(root)}",
+                source=str(current / CONFIG_FILENAME),
+                config=data,
+            ))
+    return layers
+
+
+def _dict_diff(before: dict, after: dict) -> dict:
+    """Nested fragment of keys whose values differ between two dicts."""
+    out: dict = {}
+    for key, val in after.items():
+        if isinstance(val, dict) and isinstance(before.get(key), dict):
+            sub = _dict_diff(before[key], val)
+            if sub:
+                out[key] = sub
+        elif key not in before or before[key] != val:
+            out[key] = copy.deepcopy(val)
+    return out
+
+
+def resolve_with_provenance(
+    cwd: str | None = None, for_path: str | None = None
+) -> tuple[dict[str, Any], list[PolicyLayer]]:
+    """Canonical resolution with per-layer provenance (WP-20).
+
+    Returns (effective_config, layers). `load_config()` is this minus the
+    provenance — inspection and runtime cannot diverge.
+    """
+    root = Path(cwd or os.getcwd())
+    layers = [PolicyLayer("defaults", "built-in", copy.deepcopy(DEFAULTS))]
+
+    # Org / team packs ($XDG_CONFIG_HOME/fettle/{org,team}.toml).
+    packs_dir = _xdg_config_home() / "fettle"
+    for kind in ("org", "team"):
+        pack_path = packs_dir / f"{kind}.toml"
+        data = _load_toml_layer(pack_path)
+        if data is not None:
+            name = data.pop("_name", kind)
+            layers.append(PolicyLayer(f"{kind}:{name}", str(pack_path), data))
+
+    # Repo config (.fettle.toml at root, or $FETTLE_CONFIG).
     configured_path = os.environ.get("FETTLE_CONFIG", "").strip()
     config_path = Path(configured_path).expanduser() if configured_path else root / CONFIG_FILENAME
     if not config_path.is_absolute():
         config_path = Path.cwd() / config_path
-    if config_path.is_file():
-        try:
-            with open(config_path, "rb") as fh:
-                file_cfg = tomllib.load(fh)
-            # WP-144: org policy (cache-only — never network in the hook path)
-            # merges under the repo's own config: defaults → org → repo.
-            if file_cfg.get("extends"):
-                from fettle.policy_remote import resolve_cached_policy
-                org_cfg = resolve_cached_policy(file_cfg)
-                if org_cfg:
-                    cfg = _deep_merge(cfg, org_cfg)
-            cfg = _deep_merge(cfg, file_cfg)
-        except (tomllib.TOMLDecodeError, OSError) as e:
-            # Fail-visible: a broken config must not silently revert to defaults.
-            import sys
-            print(f"fettle: could not parse {config_path}: {e} — using defaults", file=sys.stderr)
+    repo_data = _load_toml_layer(config_path)
+
+    # WP-144: central policy (cache-only — never network in the hook path)
+    # is keyed off the repo's [extends] and merges UNDER it, over team.
+    if repo_data and repo_data.get("extends"):
+        from fettle.policy_remote import resolve_cached_policy
+        remote_cfg = resolve_cached_policy(repo_data)
+        if remote_cfg:
+            ext = repo_data.get("extends")
+            url = ext.get("url", "") if isinstance(ext, dict) else ""
+            layers.append(PolicyLayer("remote", url or "[extends] cache", remote_cfg))
+    if repo_data is not None:
+        layers.append(PolicyLayer("repo", str(config_path), repo_data))
+
+    # Directory overrides — path-scoped resolution only.
+    if for_path:
+        layers.extend(_ancestor_dir_layers(root, for_path))
+
+    cfg: dict = {}
+    for layer in layers:
+        cfg = _deep_merge(cfg, layer.config)
 
     # Emergency env overrides. Mode values change how enabled gates behave;
     # "off" is the kill switch for every gate with an enabled flag.
     mode = os.environ.get("FETTLE_GATE_MODE", "").strip().lower()
-    if mode in ("advisory", "soft", "enforce"):
-        cfg["gates"]["lint"]["mode"] = mode
-        cfg["gates"]["docs"]["mode"] = mode
-    elif mode == "off":
-        for gate in cfg["gates"].values():
-            if "enabled" in gate:
-                gate["enabled"] = False
+    if mode in ("advisory", "soft", "enforce", "off"):
+        before = copy.deepcopy(cfg)
+        if mode == "off":
+            for gate in cfg["gates"].values():
+                if isinstance(gate, dict) and "enabled" in gate:
+                    gate["enabled"] = False
+        else:
+            cfg["gates"]["lint"]["mode"] = mode
+            cfg["gates"]["docs"]["mode"] = mode
+        diff = _dict_diff(before, cfg)
+        if diff:
+            layers.append(PolicyLayer("env:FETTLE_GATE_MODE", f"FETTLE_GATE_MODE={mode}", diff))
 
     # Stage A (A3): delegated policy capsule — a verified capsule handed
     # down by a parent session merges OVER everything local, monotonically
     # stricter (children may only tighten). Applied after env handling so
     # kill-switch env vars cannot weaken delegated policy (design 12, D-A3).
-    from fettle.policy_capsule import apply_env_capsule
+    from fettle.policy_capsule import ENV_VAR as CAPSULE_ENV, apply_env_capsule
+    before = cfg
     cfg = apply_env_capsule(cfg)
+    diff = _dict_diff(before, cfg)
+    if diff:
+        layers.append(PolicyLayer("capsule", CAPSULE_ENV, diff))
 
-    return cfg
+    return cfg, layers
+
+
+def load_config(cwd: str | None = None, for_path: str | None = None) -> dict[str, Any]:
+    """Merged config for the project at `cwd` (default: process cwd).
+
+    Pass `for_path` (a file the caller is gating) to include directory
+    `.fettle.toml` overrides on the file's ancestor chain.
+    """
+    return resolve_with_provenance(cwd, for_path)[0]
 
 
 def state_dir(session_id: str) -> Path:

@@ -4,8 +4,30 @@
 > pre-commit, CI, and the LSP server. Each surface supports a different subset
 > of checks, so validate the specific surfaces you intend to enforce.
 
-Fettle reads a single optional `.fettle.toml` at your project root. Layering
-(later wins): built-in defaults → `.fettle.toml` → environment variables.
+Fettle reads a single optional `.fettle.toml` at your project root, plus
+optional org/team packs and scoped overrides — all resolved by **one
+resolver** shared by every gate and by `fettle config` (v1.7.0, WP-20).
+
+## Policy source precedence
+
+Later sources win (the capsule may only tighten):
+
+| # | Source | Location |
+|---|--------|----------|
+| 1 | Built-in defaults | shipped with fettle |
+| 2 | Org pack | `$XDG_CONFIG_HOME/fettle/org.toml` |
+| 3 | Team pack | `$XDG_CONFIG_HOME/fettle/team.toml` |
+| 4 | Central policy | `[extends]` in the repo config (digest-pinned, cache-only) |
+| 5 | Repo config | `.fettle.toml` at the project root (or `$FETTLE_CONFIG`) |
+| 6 | Directory overrides | `.fettle.toml` in ancestor dirs of the gated file |
+| 7 | Env override | `FETTLE_GATE_MODE` (emergency only) |
+| 8 | Policy capsule | `FETTLE_POLICY_CAPSULE` — tighten-only, beats even env |
+
+Directory overrides apply only to per-file gates (the resolver walks the
+edited file's ancestors); commands that resolve without a file get root
+scope. Org/team packs may set `_name = "acme"` for provenance display.
+Inspect the result with `fettle config --print-effective` (exactly what
+gates load) and `fettle config --explain` (which layer set each key).
 
 A machine-readable schema is published at
 [fettle.schema.json](fettle.schema.json) (generated from the built-in
@@ -41,8 +63,8 @@ validates behaves as written:
 
 ## Central policy (`[extends]`, WP-144)
 
-An org-wide policy file can be layered UNDER a repo's config
-(defaults → org policy → repo `.fettle.toml` → env):
+An org-wide policy file can be layered UNDER a repo's config (see the
+precedence table above — it sits between the team pack and the repo file):
 
 ```toml
 [extends]

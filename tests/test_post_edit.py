@@ -382,6 +382,31 @@ def test_edit_tracking_multiple_appends():
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+# ─── directory overrides reach gate behavior (WP-20) ─────────────────────────
+def test_directory_override_disables_lint_for_scoped_path(tmp_path):
+    """A subdir .fettle.toml disabling lint silences the hook for files there."""
+    proj = tmp_path / "proj"
+    sub = proj / "generated"
+    sub.mkdir(parents=True)
+    violation = "try:\n    x = 1 / 0\nexcept Exception:\n    pass\n"
+
+    control = proj / "bad.py"
+    control.write_text(violation)
+    out_root, _, _ = run_hook(
+        {"tool_input": {"file_path": str(control)}, "cwd": str(proj)}, cwd=str(proj)
+    )
+    assert out_root.strip()  # gate active at root scope
+
+    (sub / ".fettle.toml").write_text("[gates.lint]\nenabled = false\n")
+    scoped = sub / "bad.py"
+    scoped.write_text(violation)
+    out_sub, _, rc = run_hook(
+        {"tool_input": {"file_path": str(scoped)}, "cwd": str(proj)}, cwd=str(proj)
+    )
+    assert rc == 0
+    assert out_sub == ""  # directory override disabled the gate
+
+
 # ─── global trace findings carry file/line (L-01) ────────────────────────────
 def test_global_trace_findings_include_file_and_line(tmp_path):
     """log_decision findings must carry file/line so `fettle explain` can render them."""

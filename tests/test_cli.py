@@ -37,6 +37,34 @@ def test_cli_config_effective_honors_mode_override(capsys, tmp_path, monkeypatch
     assert '"mode": "enforce"' in output
 
 
+def test_cli_config_effective_is_canonical(capsys, tmp_path, monkeypatch):
+    """WP-20: inspection shows exactly what gates load — no divergence banner."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    import json as json_mod
+    from fettle.cli import main
+    from fettle.config import load_config
+    with patch("sys.argv", ["fettle", "config", "--print-effective"]):
+        main()
+    output = capsys.readouterr().out
+    assert "may resolve differently" not in output  # H-05 banner removed
+    assert "Sources: repo (" in output
+    printed = json_mod.loads(output[output.index("{"):])
+    assert printed == load_config(str(tmp_path))
+
+
+def test_cli_config_explain_shows_provenance(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    from fettle.cli import main
+    with patch("sys.argv", ["fettle", "config", "--explain"]):
+        main()
+    output = capsys.readouterr().out
+    assert 'gates.lint.mode = "enforce" (repo, overrides defaults: "advisory")' in output
+
+
 def test_cli_doctor(tmp_path, monkeypatch):
     """Doctor command runs without crashing."""
     monkeypatch.chdir(tmp_path)

@@ -200,8 +200,8 @@ def cmd_ci(args: argparse.Namespace) -> None:
 
 def cmd_config(args: argparse.Namespace) -> None:
     """Show or validate configuration."""
+    from fettle.config import resolve_with_provenance
     from fettle.paths import find_repo_root
-    from fettle.policy_layers import discover_layers, load_config_layered
 
     repo_root = find_repo_root()
     project_root = repo_root or __import__("pathlib").Path.cwd()
@@ -231,26 +231,26 @@ def cmd_config(args: argparse.Namespace) -> None:
               + (f" ({len(warnings)} warning(s))" if warnings else ""))
         sys.exit(0)
 
-    layers = discover_layers(project_root)
-    config = load_config_layered(str(project_root))
+    # WP-20: one resolver for inspection and runtime — this output is
+    # exactly what gates load (org/team/remote/repo/env/capsule included;
+    # directory overrides apply per-file only).
+    config, layers = resolve_with_provenance(str(project_root))
 
     if args.print_effective:
         print("── Effective Fettle Configuration ──\n")
         print(f"  Repo root: {repo_root or '(not found)'}")
-        print(f"  Config file: {repo_root / '.fettle.toml' if repo_root and (repo_root / '.fettle.toml').exists() else '(defaults only)'}")
-        # H-05 stopgap (audit): this view uses the layered resolver
-        # (defaults→org→team→repo→dir), while gates resolve via load_config
-        # (defaults→remote→repo→env→capsule). Until WP-20 unifies them,
-        # name the sources this output does NOT include.
-        print()
-        print("  NOTE: this view does not include central policy ([extends]),")
-        print("  FETTLE_* env overrides, or an active policy capsule — gates")
-        print("  may resolve differently until the resolvers are unified.")
+        sources = [f"{lyr.name} ({lyr.source})" for lyr in layers if lyr.name != "defaults"]
+        print(f"  Sources: {'; '.join(sources) if sources else '(defaults only)'}")
         print()
         print(json.dumps(config, indent=2, default=str))
     elif args.explain:
-        from fettle.policy_layers import _print_explain
+        from fettle.policy_layers import _print_explain, discover_directory_layers
         _print_explain(layers)
+        dir_layers = discover_directory_layers(project_root)
+        if dir_layers:
+            print("\npath-scoped layers (apply to files under their directory only):")
+            for lyr in dir_layers:
+                print(f"  {lyr.name}: {lyr.source}")
     else:
         print("Use --print-effective, --explain, or --validate to inspect config.")
 

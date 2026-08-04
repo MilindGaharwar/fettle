@@ -1,18 +1,46 @@
-"""Tests for WP-126: Policy layering — discover, merge, explain."""
+"""Tests for the unified config resolver (WP-20) and provenance engine.
 
-import os
-import sys
+One resolver: defaults → org → team → remote [extends] → repo → directory
+overrides (path-scoped) → env → capsule. Inspection == runtime by parity.
+"""
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+import copy
 
-from fettle.policy_layers import (
+import pytest
+
+from fettle.config import (
+    DEFAULTS,
     PolicyLayer,
+    load_config,
+    resolve_with_provenance,
+)
+from fettle.policy_layers import (
+    discover_directory_layers,
     discover_layers,
     explain_config,
     load_config_layered,
     resolve_config,
-    resolve_config_for_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_env(monkeypatch, tmp_path):
+    """Every test gets an empty XDG config home and clean fettle env."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg_config"))
+    for var in ("FETTLE_GATE_MODE", "FETTLE_POLICY_CAPSULE", "FETTLE_CONFIG"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def _packs_dir(tmp_path):
+    d = tmp_path / "xdg_config" / "fettle"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _project(tmp_path):
+    p = tmp_path / "project"
+    p.mkdir(exist_ok=True)
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -21,374 +49,353 @@ from fettle.policy_layers import (
 
 
 def test_defaults_only_when_no_files(tmp_path):
-    """With no config files anywhere, only the defaults layer is discovered."""
-    layers = discover_layers(tmp_path)
-    assert len(layers) == 1
-    assert layers[0].name == "defaults"
-    assert layers[0].priority == 0
+    """With no config files anywhere, only the defaults layer exists."""
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert [lyr.name for lyr in layers] == ["defaults"]
     assert layers[0].source == "built-in"
+    assert cfg == DEFAULTS
+    assert cfg is not DEFAULTS  # deep-copied, never aliased
 
 
-def test_defaults_resolution_matches_builtin():
-    """resolve_config with only defaults returns a copy of DEFAULTS."""
-    from fettle.config import DEFAULTS
+# ---------------------------------------------------------------------------
+# Org / team / repo layers
+# ---------------------------------------------------------------------------
 
-    layer = PolicyLayer(name="defaults", source="built-in", config=DEFAULTS.copy(), priority=0)
-    cfg = resolve_config([layer])
-    assert cfg["gates"]["lint"]["enabled"] is True
+
+def test_org_layer_discovered_and_enforced(tmp_path):
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text('_name = "acme"\n[gates.lint]\nmode = "enforce"\n')
+    project = _project(tmp_path)
+
+    cfg, layers = resolve_with_provenance(str(project))
+    org = next(lyr for lyr in layers if lyr.name == "org:acme")
+    assert org.source == str(packs / "org.toml")
+    assert "_name" not in cfg  # popped for naming, never merged
+    # H-05 closed: the pack is enforced at runtime, not just displayed.
+    assert load_config(str(project))["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_team_layer_discovered(tmp_path):
+    packs = _packs_dir(tmp_path)
+    (packs / "team.toml").write_text('_name = "platform"\n[gates.docs]\nenabled = true\n')
+
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert "team:platform" in [lyr.name for lyr in layers]
+    assert cfg["gates"]["docs"]["enabled"] is True
+
+
+def test_precedence_org_team_repo(tmp_path):
+    """Same key set at every level: repo > team > org > defaults."""
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    (packs / "team.toml").write_text('[gates.lint]\nmode = "soft"\n')
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text('[gates.lint]\nmode = "advisory"\n')
+
+    cfg, layers = resolve_with_provenance(str(project))
     assert cfg["gates"]["lint"]["mode"] == "advisory"
+    chain = explain_config(layers, "gates.lint.mode")
+    assert [c["layer"] for c in chain] == ["defaults", "org:org", "team:team", "repo"]
+    assert chain[-1]["value"] == "advisory"
 
 
-# ---------------------------------------------------------------------------
-# Org + repo merge
-# ---------------------------------------------------------------------------
+def test_org_plus_repo_merge_disjoint_keys(tmp_path):
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text("[gates.plan]\nenabled = true\n")
 
-
-def test_org_layer_discovered(tmp_path, monkeypatch):
-    """Org pack at $XDG_CONFIG_HOME/fettle/org.toml is picked up."""
-    config_home = tmp_path / "xdg_config"
-    config_home.mkdir()
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-
-    fettle_dir = config_home / "fettle"
-    fettle_dir.mkdir()
-    (fettle_dir / "org.toml").write_text("""
-_name = "acme"
-[gates.lint]
-mode = "enforce"
-""")
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    layers = discover_layers(project)
-    names = [lyr.name for lyr in layers]
-    assert "org:acme" in names
-    org_layer = next(lyr for lyr in layers if lyr.name == "org:acme")
-    assert org_layer.priority == 10
-    assert org_layer.config["gates"]["lint"]["mode"] == "enforce"
-
-
-def test_org_plus_repo_merge(tmp_path, monkeypatch):
-    """Org sets lint mode to enforce, repo overrides a different key; both apply."""
-    config_home = tmp_path / "xdg_config"
-    (config_home / "fettle").mkdir(parents=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-
-    (config_home / "fettle" / "org.toml").write_text("""
-_name = "acme"
-[gates.lint]
-mode = "enforce"
-""")
-
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".fettle.toml").write_text("""
-[gates.plan]
-enabled = true
-""")
-
-    layers = discover_layers(project)
-    cfg = resolve_config(layers)
-
-    # Org's enforce setting wins over defaults
+    cfg = load_config(str(project))
     assert cfg["gates"]["lint"]["mode"] == "enforce"
-    # Repo's plan enabled wins
     assert cfg["gates"]["plan"]["enabled"] is True
-    # Default lint enabled still there
-    assert cfg["gates"]["lint"]["enabled"] is True
+    assert cfg["gates"]["lint"]["enabled"] is True  # default survives
 
 
-def test_repo_overrides_org(tmp_path, monkeypatch):
-    """Repo layer (priority 30) overrides org layer (priority 10)."""
-    config_home = tmp_path / "xdg_config"
-    (config_home / "fettle").mkdir(parents=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+# ---------------------------------------------------------------------------
+# Remote [extends] layer — under repo, over team
+# ---------------------------------------------------------------------------
 
-    (config_home / "fettle" / "org.toml").write_text("""
-[gates.lint]
-mode = "enforce"
-""")
 
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".fettle.toml").write_text("""
-[gates.lint]
-mode = "advisory"
-""")
+def test_remote_layer_between_team_and_repo(tmp_path, monkeypatch):
+    packs = _packs_dir(tmp_path)
+    (packs / "team.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text(
+        '[extends]\nurl = "https://example.com/policy.toml"\nsha256 = "abc"\n'
+        '[gates.docs]\nenabled = true\n'
+    )
+    import fettle.policy_remote as pr
+    monkeypatch.setattr(
+        pr, "resolve_cached_policy",
+        lambda raw: {"gates": {"lint": {"mode": "soft"}, "plan": {"enabled": True}}},
+    )
 
-    layers = discover_layers(project)
-    cfg = resolve_config(layers)
+    cfg, layers = resolve_with_provenance(str(project))
+    names = [lyr.name for lyr in layers]
+    assert names == ["defaults", "team:team", "remote", "repo"]
+    remote = layers[names.index("remote")]
+    assert remote.source == "https://example.com/policy.toml"
+    # remote overrides team; repo's disjoint key still applies
+    assert cfg["gates"]["lint"]["mode"] == "soft"
+    assert cfg["gates"]["plan"]["enabled"] is True
+    assert cfg["gates"]["docs"]["enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# Directory overrides — path-scoped only, ancestor walk
+# ---------------------------------------------------------------------------
+
+
+def test_directory_override_applies_for_path_only(tmp_path):
+    project = _project(tmp_path)
+    (project / "src" / "api").mkdir(parents=True)
+    (project / "src" / "api" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    inside = load_config(str(project), for_path=str(project / "src" / "api" / "handler.py"))
+    assert inside["gates"]["lint"]["mode"] == "enforce"
+
+    outside = load_config(str(project), for_path=str(project / "src" / "handler.py"))
+    assert outside["gates"]["lint"]["mode"] == "advisory"
+
+    pathless = load_config(str(project))
+    assert pathless["gates"]["lint"]["mode"] == "advisory"
+
+
+def test_nested_directory_overrides_deeper_wins(tmp_path):
+    project = _project(tmp_path)
+    (project / "src" / "api").mkdir(parents=True)
+    (project / "src" / ".fettle.toml").write_text(
+        '[gates.lint]\nmode = "soft"\n[gates.docs]\nenabled = true\n'
+    )
+    (project / "src" / "api" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    cfg, layers = resolve_with_provenance(
+        str(project), for_path=str(project / "src" / "api" / "handler.py")
+    )
+    assert [lyr.name for lyr in layers if lyr.name.startswith("dir:")] == [
+        "dir:src", "dir:src/api",
+    ]
+    assert cfg["gates"]["lint"]["mode"] == "enforce"  # deeper wins
+    assert cfg["gates"]["docs"]["enabled"] is True    # shallower still merges
+
+
+def test_directory_override_beats_repo(tmp_path):
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text('[gates.lint]\nmode = "soft"\n')
+    (project / "src").mkdir()
+    (project / "src" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    cfg = load_config(str(project), for_path=str(project / "src" / "x.py"))
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_relative_for_path_resolved_against_root(tmp_path):
+    project = _project(tmp_path)
+    (project / "src").mkdir()
+    (project / "src" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    cfg = load_config(str(project), for_path="src/x.py")
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_for_path_outside_root_gets_root_scope(tmp_path):
+    project = _project(tmp_path)
+    (project / "src").mkdir()
+    (project / "src" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    cfg = load_config(str(project), for_path=str(tmp_path / "elsewhere" / "x.py"))
     assert cfg["gates"]["lint"]["mode"] == "advisory"
 
 
-# ---------------------------------------------------------------------------
-# Team layer
-# ---------------------------------------------------------------------------
+def test_hidden_and_noise_ancestors_ignored(tmp_path):
+    project = _project(tmp_path)
+    for noise in (".git", "node_modules"):
+        (project / noise / "pkg").mkdir(parents=True)
+        (project / noise / "pkg" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+
+    for noise in (".git", "node_modules"):
+        cfg = load_config(str(project), for_path=str(project / noise / "pkg" / "x.py"))
+        assert cfg["gates"]["lint"]["mode"] == "advisory"
 
 
-def test_team_layer_discovered(tmp_path, monkeypatch):
-    """Team pack at $XDG_CONFIG_HOME/fettle/team.toml is picked up."""
-    config_home = tmp_path / "xdg_config"
-    (config_home / "fettle").mkdir(parents=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-
-    (config_home / "fettle" / "team.toml").write_text("""
-_name = "platform"
-[gates.docs]
-enabled = true
-mode = "enforce"
-""")
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    layers = discover_layers(project)
-    names = [lyr.name for lyr in layers]
-    assert "team:platform" in names
-    team_layer = next(lyr for lyr in layers if lyr.name == "team:platform")
-    assert team_layer.priority == 20
-
-
-# ---------------------------------------------------------------------------
-# Directory override scoping
-# ---------------------------------------------------------------------------
-
-
-def test_directory_override_discovered(tmp_path):
-    """A .fettle.toml in a subdirectory creates a dir: layer."""
-    project = tmp_path / "project"
+def test_discover_directory_layers_listing(tmp_path):
+    project = _project(tmp_path)
     (project / "src" / "api").mkdir(parents=True)
-    (project / "src" / "api" / ".fettle.toml").write_text("""
-[gates.lint]
-mode = "enforce"
-""")
+    (project / "src" / "api" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    (project / "node_modules" / "pkg").mkdir(parents=True)
+    (project / "node_modules" / "pkg" / ".fettle.toml").write_text("[gates.lint]\n")
+    (project / ".fettle.toml").write_text("[gates.plan]\n")  # repo layer, not a dir layer
 
-    layers = discover_layers(project)
-    dir_layers = [lyr for lyr in layers if lyr.priority == 40]
-    assert len(dir_layers) == 1
-    assert dir_layers[0].name == "dir:src/api"
+    listed = discover_directory_layers(project)
+    assert [lyr.name for lyr in listed] == ["dir:src/api"]
 
 
-def test_directory_override_scoped_to_path(tmp_path):
-    """Directory overrides apply only to files within that directory."""
-    project = tmp_path / "project"
-    (project / "src" / "api").mkdir(parents=True)
-    (project / "src" / "api" / ".fettle.toml").write_text("""
-[gates.lint]
-mode = "enforce"
-""")
+def test_discover_layers_excludes_dir_layers(tmp_path):
+    project = _project(tmp_path)
+    (project / "src").mkdir()
+    (project / "src" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
 
-    layers = discover_layers(project)
-
-    # File inside src/api/ gets the override
-    cfg_inside = resolve_config_for_path(layers, "src/api/handler.py", project)
-    assert cfg_inside["gates"]["lint"]["mode"] == "enforce"
-
-    # File outside src/api/ does NOT get the override
-    cfg_outside = resolve_config_for_path(layers, "src/utils/helper.py", project)
-    assert cfg_outside["gates"]["lint"]["mode"] == "advisory"
-
-
-def test_multiple_directory_overrides(tmp_path):
-    """Multiple directories can have independent overrides."""
-    project = tmp_path / "project"
-    (project / "src" / "api").mkdir(parents=True)
-    (project / "src" / "web").mkdir(parents=True)
-
-    (project / "src" / "api" / ".fettle.toml").write_text("""
-[gates.lint]
-mode = "enforce"
-""")
-    (project / "src" / "web" / ".fettle.toml").write_text("""
-[gates.docs]
-enabled = true
-""")
-
-    layers = discover_layers(project)
-
-    cfg_api = resolve_config_for_path(layers, "src/api/handler.py", project)
-    assert cfg_api["gates"]["lint"]["mode"] == "enforce"
-    assert cfg_api["gates"]["docs"]["enabled"] is False  # web override doesn't apply
-
-    cfg_web = resolve_config_for_path(layers, "src/web/page.py", project)
-    assert cfg_web["gates"]["lint"]["mode"] == "advisory"  # api override doesn't apply
-    assert cfg_web["gates"]["docs"]["enabled"] is True
+    assert [lyr.name for lyr in discover_layers(project)] == ["defaults"]
 
 
 # ---------------------------------------------------------------------------
-# Provenance explanation
+# Env and capsule pseudo-layers (applied diffs)
+# ---------------------------------------------------------------------------
+
+
+def test_env_mode_pseudo_layer(tmp_path, monkeypatch):
+    monkeypatch.setenv("FETTLE_GATE_MODE", "enforce")
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    env = layers[-1]
+    assert env.name == "env:FETTLE_GATE_MODE"
+    assert env.source == "FETTLE_GATE_MODE=enforce"
+    # Applied diff only: docs.mode already defaults to "enforce", so only
+    # the lint change is attributed to the env layer.
+    assert env.config == {"gates": {"lint": {"mode": "enforce"}}}
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_env_off_pseudo_layer_disables_gates(tmp_path, monkeypatch):
+    monkeypatch.setenv("FETTLE_GATE_MODE", "off")
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    env = next(lyr for lyr in layers if lyr.name == "env:FETTLE_GATE_MODE")
+    assert env.config["gates"]["lint"] == {"enabled": False}
+    assert not cfg["gates"]["lint"]["enabled"]
+
+
+def test_no_env_layer_when_mode_is_noop(tmp_path):
+    """No FETTLE_GATE_MODE → no env pseudo-layer at all."""
+    _, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert not any(lyr.name.startswith("env:") for lyr in layers)
+
+
+def test_capsule_pseudo_layer_carries_applied_diff(tmp_path, monkeypatch):
+    import fettle.policy_capsule as pc
+
+    def fake_capsule(cfg):
+        out = copy.deepcopy(cfg)
+        out["gates"]["lint"]["mode"] = "enforce"
+        return out
+
+    monkeypatch.setattr(pc, "apply_env_capsule", fake_capsule)
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert layers[-1].name == "capsule"
+    assert layers[-1].config == {"gates": {"lint": {"mode": "enforce"}}}
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_capsule_applies_over_env(tmp_path, monkeypatch):
+    """Kill-switch env vars cannot weaken delegated policy (D-A3)."""
+    import fettle.policy_capsule as pc
+
+    def fake_capsule(cfg):
+        out = copy.deepcopy(cfg)
+        out["gates"]["lint"]["enabled"] = True
+        return out
+
+    monkeypatch.setattr(pc, "apply_env_capsule", fake_capsule)
+    monkeypatch.setenv("FETTLE_GATE_MODE", "off")
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert cfg["gates"]["lint"]["enabled"] is True
+    assert layers[-1].name == "capsule"
+
+
+# ---------------------------------------------------------------------------
+# FETTLE_CONFIG + corrupt layers
+# ---------------------------------------------------------------------------
+
+
+def test_fettle_config_env_honored(tmp_path, monkeypatch):
+    alt = tmp_path / "alt.toml"
+    alt.write_text('[gates.lint]\nmode = "enforce"\n')
+    monkeypatch.setenv("FETTLE_CONFIG", str(alt))
+
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    repo = next(lyr for lyr in layers if lyr.name == "repo")
+    assert repo.source == str(alt)
+    assert cfg["gates"]["lint"]["mode"] == "enforce"
+
+
+def test_corrupt_org_toml_skipped_fail_visible(tmp_path, capsys):
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text("this is not valid [[[ toml")
+    (packs / "team.toml").write_text("[gates.docs]\nenabled = true\n")
+
+    cfg, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert not any(lyr.name.startswith("org:") for lyr in layers)
+    assert cfg["gates"]["docs"]["enabled"] is True  # other layers unaffected
+    assert "could not parse" in capsys.readouterr().err
+
+
+def test_corrupt_repo_toml_skipped_fail_visible(tmp_path, capsys):
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text("invalid {{{ toml content")
+
+    _, layers = resolve_with_provenance(str(project))
+    assert [lyr.name for lyr in layers] == ["defaults"]
+    assert "could not parse" in capsys.readouterr().err
+
+
+def test_missing_config_home_no_crash(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
+    _, layers = resolve_with_provenance(str(_project(tmp_path)))
+    assert [lyr.name for lyr in layers] == ["defaults"]
+
+
+# ---------------------------------------------------------------------------
+# Parity: inspection == runtime (H-05)
+# ---------------------------------------------------------------------------
+
+
+def test_inspection_equals_runtime(tmp_path, monkeypatch):
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    (packs / "team.toml").write_text("[gates.docs]\nenabled = true\n")
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text("[gates.plan]\nenabled = true\n")
+    monkeypatch.setenv("FETTLE_GATE_MODE", "soft")
+
+    assert resolve_with_provenance(str(project))[0] == load_config(str(project))
+
+
+def test_load_config_layered_is_deprecated_alias(tmp_path):
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
+    assert load_config_layered(str(project)) == load_config(str(project))
+
+
+# ---------------------------------------------------------------------------
+# Provenance explanation (unit)
 # ---------------------------------------------------------------------------
 
 
 def test_explain_single_layer():
-    """Explain shows a single source when only defaults define a key."""
-    layers = [PolicyLayer(
-        name="defaults", source="built-in",
-        config={"gates": {"lint": {"mode": "advisory"}}},
-        priority=0,
-    )]
-    result = explain_config(layers, "gates.lint.mode")
-    assert len(result) == 1
-    assert result[0] == {"layer": "defaults", "value": "advisory"}
+    layers = [PolicyLayer("defaults", "built-in", {"gates": {"lint": {"mode": "advisory"}}})]
+    assert explain_config(layers, "gates.lint.mode") == [
+        {"layer": "defaults", "value": "advisory"}
+    ]
 
 
 def test_explain_override_chain():
-    """Explain shows the full chain: defaults -> repo override."""
     layers = [
-        PolicyLayer(
-            name="defaults", source="built-in",
-            config={"gates": {"lint": {"mode": "advisory"}}},
-            priority=0,
-        ),
-        PolicyLayer(
-            name="repo", source="/project/.fettle.toml",
-            config={"gates": {"lint": {"mode": "enforce"}}},
-            priority=30,
-        ),
+        PolicyLayer("defaults", "built-in", {"gates": {"lint": {"mode": "advisory"}}}),
+        PolicyLayer("repo", "/project/.fettle.toml", {"gates": {"lint": {"mode": "enforce"}}}),
     ]
     result = explain_config(layers, "gates.lint.mode")
-    assert len(result) == 2
-    assert result[0] == {"layer": "defaults", "value": "advisory"}
-    assert result[1] == {"layer": "repo", "value": "enforce"}
+    assert result == [
+        {"layer": "defaults", "value": "advisory"},
+        {"layer": "repo", "value": "enforce"},
+    ]
 
 
 def test_explain_missing_key():
-    """Explain returns empty list for a key that no layer sets."""
-    layers = [PolicyLayer(
-        name="defaults", source="built-in",
-        config={"gates": {"lint": {"mode": "advisory"}}},
-        priority=0,
-    )]
-    result = explain_config(layers, "nonexistent.key.path")
-    assert result == []
+    layers = [PolicyLayer("defaults", "built-in", {"gates": {}})]
+    assert explain_config(layers, "nonexistent.key.path") == []
 
 
-# ---------------------------------------------------------------------------
-# Priority ordering
-# ---------------------------------------------------------------------------
-
-
-def test_priority_order_is_correct(tmp_path, monkeypatch):
-    """Layers come back sorted: defaults < org < team < repo < dir."""
-    config_home = tmp_path / "xdg_config"
-    (config_home / "fettle").mkdir(parents=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-
-    (config_home / "fettle" / "org.toml").write_text('[gates.lint]\nmode = "enforce"\n')
-    (config_home / "fettle" / "team.toml").write_text('[gates.docs]\nenabled = true\n')
-
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".fettle.toml").write_text('[gates.plan]\nenabled = true\n')
-    (project / "src").mkdir()
-    (project / "src" / ".fettle.toml").write_text('[gates.lint]\nmode = "advisory"\n')
-
-    layers = discover_layers(project)
-    priorities = [lyr.priority for lyr in layers]
-    assert priorities == sorted(priorities)
-    assert priorities == [0, 10, 20, 30, 40]
-
-
-# ---------------------------------------------------------------------------
-# Missing / corrupt layer files handled gracefully
-# ---------------------------------------------------------------------------
-
-
-def test_corrupt_org_toml_skipped(tmp_path, monkeypatch, capsys):
-    """A corrupt org.toml is skipped with a warning, not a crash."""
-    config_home = tmp_path / "xdg_config"
-    (config_home / "fettle").mkdir(parents=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-
-    (config_home / "fettle" / "org.toml").write_text("this is not valid [[[ toml")
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    layers = discover_layers(project)
-    # Only defaults should be present (org was skipped)
-    assert len(layers) == 1
-    assert layers[0].name == "defaults"
-
-    captured = capsys.readouterr()
-    assert "could not parse" in captured.err
-
-
-def test_corrupt_repo_toml_skipped(tmp_path, capsys):
-    """A corrupt .fettle.toml in the repo is skipped gracefully."""
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".fettle.toml").write_text("invalid {{{ toml content")
-
-    layers = discover_layers(project)
-    assert len(layers) == 1
-    assert layers[0].name == "defaults"
-
-    captured = capsys.readouterr()
-    assert "could not parse" in captured.err
-
-
-def test_missing_config_home_no_crash(tmp_path, monkeypatch):
-    """If XDG_CONFIG_HOME points to nonexistent dir, no crash."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    layers = discover_layers(project)
-    assert len(layers) == 1
-    assert layers[0].name == "defaults"
-
-
-def test_hidden_dirs_skipped_for_directory_overrides(tmp_path):
-    """Hidden directories and node_modules are not scanned for overrides."""
-    project = tmp_path / "project"
-    (project / ".git" / "hooks").mkdir(parents=True)
-    (project / ".git" / "hooks" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
-    (project / "node_modules" / "pkg").mkdir(parents=True)
-    (project / "node_modules" / "pkg" / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
-
-    layers = discover_layers(project)
-    dir_layers = [lyr for lyr in layers if lyr.priority == 40]
-    assert len(dir_layers) == 0
-
-
-# ---------------------------------------------------------------------------
-# load_config_layered backwards compatibility
-# ---------------------------------------------------------------------------
-
-
-def test_load_config_layered_no_files(tmp_path, monkeypatch):
-    """load_config_layered with no config files returns same as defaults."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
-    # Clear any FETTLE_GATE_MODE
-    monkeypatch.delenv("FETTLE_GATE_MODE", raising=False)
-
-    from fettle.config import DEFAULTS
-
-    cfg = load_config_layered(str(tmp_path))
-    assert cfg["gates"]["lint"]["mode"] == DEFAULTS["gates"]["lint"]["mode"]
-    assert cfg["gates"]["lint"]["enabled"] == DEFAULTS["gates"]["lint"]["enabled"]
-
-
-def test_load_config_layered_with_repo_file(tmp_path, monkeypatch):
-    """load_config_layered picks up repo .fettle.toml like load_config does."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
-    monkeypatch.delenv("FETTLE_GATE_MODE", raising=False)
-
-    (tmp_path / ".fettle.toml").write_text("""
-[gates.lint]
-mode = "enforce"
-""")
-    cfg = load_config_layered(str(tmp_path))
-    assert cfg["gates"]["lint"]["mode"] == "enforce"
-
-
-def test_load_config_layered_env_override(tmp_path, monkeypatch):
-    """FETTLE_GATE_MODE env var still works with layered loader."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
-    monkeypatch.setenv("FETTLE_GATE_MODE", "enforce")
-
-    cfg = load_config_layered(str(tmp_path))
-    assert cfg["gates"]["lint"]["mode"] == "enforce"
+def test_resolve_config_merges_in_list_order():
+    layers = [
+        PolicyLayer("a", "x", {"k": 1, "sub": {"a": 1}}),
+        PolicyLayer("b", "y", {"k": 2, "sub": {"b": 2}}),
+    ]
+    assert resolve_config(layers) == {"k": 2, "sub": {"a": 1, "b": 2}}

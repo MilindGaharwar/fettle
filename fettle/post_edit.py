@@ -42,7 +42,7 @@ def main() -> None:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
 
-    cfg = load_config(cwd)
+    cfg = load_config(cwd, for_path=file_path)
     if not cfg["gates"]["lint"]["enabled"]:
         sys.exit(0)
 
