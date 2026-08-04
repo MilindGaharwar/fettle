@@ -57,7 +57,8 @@ jobs:
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir; d = rules_dir(); assert d.is_dir() and any(d.glob('*.yml')), d"
           # WP-11: bare wheel has no pyyaml — evals must fail with guidance, not a traceback
           /tmp/smoke/bin/python -c "import fettle.evals_runner" 2>&1 | grep -q "finefettle\[evals\]"
-          /tmp/smoke/bin/pip install --quiet 'dist/'*.whl'[evals]'
+          WHEEL=$(ls dist/*.whl)
+          /tmp/smoke/bin/pip install --quiet "${WHEEL}[evals]"
           /tmp/smoke/bin/python -c "import fettle.evals_runner"
 
       # WP-147: SLSA provenance + Sigstore signatures for every artifact,
