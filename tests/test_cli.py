@@ -74,6 +74,24 @@ def test_cli_doctor(tmp_path, monkeypatch):
     cmd_doctor(args)
 
 
+def test_cli_explain_supports_detailed_json(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    from fettle.trace import log_decision
+    log_decision(
+        hook="ruff", status="violation",
+        findings=[{"code": "F401", "message": "unused import", "action": "remove it"}],
+        evidence=[{"evidence_id": "ev-ruff123", "kind": "command"}],
+    )
+    from fettle.cli import main
+    with patch("sys.argv", ["fettle", "explain", "--last", "1", "--detailed", "--json"]):
+        main()
+
+    output = capsys.readouterr().out
+    entry = __import__("json").loads(output)
+    assert entry["findings"][0]["action"] == "remove it"
+    assert entry["evidence"][0]["evidence_id"] == "ev-ruff123"
+
+
 # --- `fettle check` exit-code contract (WP-133 / audit D1+D2) ---
 # 0 = clean, 1 = error-severity findings, 2 = usage/environment error.
 # Codes must be identical for text and --json modes.
@@ -208,5 +226,4 @@ def test_cli_version_matches_pyproject():
     from fettle.cli import _version
     with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
         assert _version() == tomllib.load(fh)["project"]["version"]
-
 

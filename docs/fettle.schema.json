@@ -1088,6 +1088,35 @@
       },
       "additionalProperties": false
     },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "test_command": {
+          "type": "string",
+          "default": ""
+        },
+        "lint_command": {
+          "type": "string",
+          "default": ""
+        },
+        "format_command": {
+          "type": "string",
+          "default": ""
+        },
+        "typecheck_command": {
+          "type": "string",
+          "default": ""
+        },
+        "build_command": {
+          "type": "string",
+          "default": ""
+        },
+        "workspaces": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": false
+    },
     "paths": {
       "type": "object",
       "properties": {

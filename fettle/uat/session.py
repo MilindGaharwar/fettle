@@ -56,6 +56,7 @@ class SessionResult:
     scenario_ids: list[str] = field(default_factory=list)
     status: str = "error"  # completed | error | timeout
     error: str = ""
+    evidence_id: str = ""
 
 
 def collect_scenarios(root: str) -> list[dict]:
@@ -236,6 +237,13 @@ def run_session(root: str, config: dict, surface: str,
     elif not result.error:
         result.status = "completed"
     checkpoint.update(status=result.status, transcript=result.transcript_path,
-                      error=result.error)
+                       error=result.error)
+    from fettle.trace import build_evidence
+    artifact = build_evidence(
+        "uat", exit_code=0 if result.status == "completed" else 1,
+        duration_ms=getattr(run, "duration_s", 0) * 1000, scope=surface,
+    )
+    result.evidence_id = artifact["evidence_id"]
+    checkpoint["evidence_id"] = result.evidence_id
     _write_checkpoint(str(wt_path), checkpoint)
     return result

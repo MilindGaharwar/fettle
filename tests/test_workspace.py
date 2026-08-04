@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from fettle.workspace import (
+    Workspace,
     discover_workspaces,
     route_file_to_workspace,
 )
@@ -128,3 +129,29 @@ def test_file_outside_all_workspaces_handled(tmp_path):
     ws = route_file_to_workspace("docs/README.md", workspaces)
     # File outside any workspace -> None
     assert ws is None
+
+
+def test_deeply_nested_workspace_discovery_and_longest_prefix(tmp_path):
+    root = tmp_path / "services"
+    root.mkdir()
+    (root / "package.json").write_text('{"name": "services"}')
+    nested = root / "admin" / "api"
+    nested.mkdir(parents=True)
+    (nested / "pyproject.toml").write_text('[project]\nname = "admin-api"\n')
+
+    workspaces = discover_workspaces(str(tmp_path))
+    ws = route_file_to_workspace("services/admin/api/app.py", workspaces)
+    assert ws is not None
+    assert ws.path == "services/admin/api"
+
+
+def test_generated_and_vendor_directories_are_excluded(tmp_path):
+    for path in (tmp_path / "node_modules" / "dep", tmp_path / "dist" / "generated"):
+        path.mkdir(parents=True)
+        (path / "package.json").write_text('{"name": "ignored"}')
+    assert discover_workspaces(str(tmp_path)) == []
+
+
+def test_workspace_is_canonical_profile_model():
+    from fettle.profile import Workspace as ProfileWorkspace
+    assert ProfileWorkspace is Workspace

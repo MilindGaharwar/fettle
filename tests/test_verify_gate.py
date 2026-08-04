@@ -77,6 +77,7 @@ class TestRunVerify:
         repo = _project(tmp_path, f"{sys.executable} -c pass")
         stamp = run_verify(str(repo), _cfg())
         assert stamp["ok"] and stamp["exit_code"] == 0
+        assert stamp["evidence_id"].startswith("ev-")
         on_disk = json.loads((repo / STAMP_RELPATH).read_text())
         assert on_disk["ok"] is True
 

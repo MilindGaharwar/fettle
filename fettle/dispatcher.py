@@ -199,6 +199,18 @@ def main() -> int:
 
         elapsed_ms = int((time.monotonic() - check_start) * 1000)
         aggregator.add_result(spec.name, result, elapsed_ms)
+        if result.findings or result.evidence:
+            with contextlib.suppress(Exception):
+                log_decision(
+                    hook=spec.name,
+                    status=result.result_state.value,
+                    tool=hook_input.tool_name or "",
+                    file=str(ctx.target_path or ""),
+                    findings=[finding.to_dict() for finding in result.findings],
+                    evidence=[item.to_dict() for item in result.evidence],
+                    duration_ms=elapsed_ms,
+                    session_id=session_id,
+                )
 
         # WP-D: Log overruns for observability
         if time.monotonic() > check_deadline:

@@ -85,6 +85,11 @@ def record_attestation(root: str, scenario_id: str, outcome: str,
         "operator": operator or "unknown",
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    from fettle.trace import build_evidence
+    entry["evidence_id"] = build_evidence(
+        "uat_attestation", exit_code=0 if outcome == "matches" else 1,
+        scope=scenario_id,
+    )["evidence_id"]
     entries = load_attestations(root)
     entries.append(entry)
     path = _attest_path(root)

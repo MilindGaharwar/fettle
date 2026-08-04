@@ -287,6 +287,14 @@ DEFAULTS: dict[str, Any] = {
         "error_rules": ["BLE001", "S110", "S608", "S701"],
         "warning_prefixes": ["SIM", "UP"],
     },
+    "profile": {
+        "test_command": "",
+        "lint_command": "",
+        "format_command": "",
+        "typecheck_command": "",
+        "build_command": "",
+        "workspaces": [],
+    },
     "paths": {
         "ruff_config": "",   # empty → plugin's rules/.ruff.toml
         "trace_dir": ".fettle",  # relative to project root, gitignore it

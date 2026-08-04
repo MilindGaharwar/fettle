@@ -9,26 +9,10 @@ import contextlib
 import hashlib
 import json
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-
-@dataclass
-class Workspace:
-    """A single workspace within a project."""
-
-    path: str = "."
-    language: str = ""
-    manager: str = ""
-    test_command: str = ""
-    lint_command: str = ""
-    format_command: str = ""
-    typecheck_command: str = ""
-    build_command: str = ""
-    dependency_file: str = ""
-    lockfile: str | None = None
-    source_roots: list[str] = field(default_factory=list)
-    test_roots: list[str] = field(default_factory=list)
+from fettle.workspace import Workspace, discover_workspaces
 
 
 @dataclass
@@ -41,7 +25,7 @@ class Profile:
     def to_dict(self) -> dict:
         return {
             "languages": self.languages,
-            "workspaces": [vars(w) for w in self.workspaces],
+            "workspaces": [asdict(w) for w in self.workspaces],
         }
 
 
@@ -55,8 +39,8 @@ _MARKERS = {
 }
 
 
-def _detect_python_workspace(root: Path) -> Workspace:
-    ws = Workspace(language="python")
+def _detect_python_workspace(root: Path, *, path: str = ".", name: str = "", marker: str = "pyproject.toml") -> Workspace:
+    ws = Workspace(name=name or root.name, path=path, language="python", marker=marker)
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         ws.dependency_file = "pyproject.toml"
@@ -101,8 +85,8 @@ def _detect_python_test_command(root: Path) -> str:
     return ""
 
 
-def _detect_node_workspace(root: Path) -> Workspace:
-    ws = Workspace(language="javascript")
+def _detect_node_workspace(root: Path, *, path: str = ".", name: str = "", marker: str = "package.json") -> Workspace:
+    ws = Workspace(name=name or root.name, path=path, language="javascript", marker=marker)
     ws.dependency_file = "package.json"
     pkg = root / "package.json"
     if pkg.is_file():
@@ -130,9 +114,12 @@ def _detect_node_manager(root: Path) -> str:
     return "npm"
 
 
-def _detect_rust_workspace(root: Path) -> Workspace:
+def _detect_rust_workspace(root: Path, *, path: str = ".", name: str = "", marker: str = "Cargo.toml") -> Workspace:
     return Workspace(
+        name=name or root.name,
+        path=path,
         language="rust",
+        marker=marker,
         dependency_file="Cargo.toml",
         lockfile="Cargo.lock" if (root / "Cargo.lock").is_file() else None,
         manager="cargo",
@@ -143,9 +130,12 @@ def _detect_rust_workspace(root: Path) -> Workspace:
     )
 
 
-def _detect_go_workspace(root: Path) -> Workspace:
+def _detect_go_workspace(root: Path, *, path: str = ".", name: str = "", marker: str = "go.mod") -> Workspace:
     return Workspace(
+        name=name or root.name,
+        path=path,
         language="go",
+        marker=marker,
         dependency_file="go.mod",
         lockfile="go.sum" if (root / "go.sum").is_file() else None,
         manager="go",
@@ -175,10 +165,19 @@ def _find_lockfile(root: Path, candidates: list[str]) -> str | None:
 
 def _marker_hash(root: Path) -> str:
     h = hashlib.md5(usedforsecurity=False)
-    for marker in sorted(_MARKERS.keys()):
-        p = root / marker
-        if p.is_file():
-            h.update(f"{marker}:{p.stat().st_mtime_ns}".encode())
+    excluded = {".git", ".fettle", ".venv", "venv", "node_modules", "vendor", "target",
+                "dist", "build", "out", "coverage", "__pycache__"}
+    marker_names = {*_MARKERS, "global.json", "pom.xml", "build.gradle", "build.gradle.kts"}
+    paths = [root / ".fettle.toml"]
+    paths.extend(
+        path for path in root.rglob("*")
+        if path.name in marker_names
+        and not any(part in excluded for part in path.relative_to(root).parts)
+    )
+    for path in sorted(paths):
+        if path.is_file():
+            relative = path.relative_to(root).as_posix()
+            h.update(f"{relative}:{path.stat().st_mtime_ns}:{path.stat().st_size}".encode())
     return h.hexdigest()
 
 
@@ -218,10 +217,20 @@ def _apply_fettle_toml_overrides(root: Path, profile: Profile) -> None:
     overrides = data.get("profile", {})
     if not overrides or not profile.workspaces:
         return
-    ws = profile.workspaces[0]
-    for key in ("test_command", "lint_command", "format_command", "typecheck_command", "build_command"):
-        if key in overrides:
-            setattr(ws, key, overrides[key])
+    command_keys = ("test_command", "lint_command", "format_command", "typecheck_command", "build_command")
+    for ws in profile.workspaces:
+        for key in command_keys:
+            if key in overrides:
+                setattr(ws, key, overrides[key])
+    for workspace_override in overrides.get("workspaces", []):
+        if not isinstance(workspace_override, dict):
+            continue
+        ws = next((item for item in profile.workspaces if item.path == workspace_override.get("path")), None)
+        if ws is None:
+            continue
+        for key in command_keys:
+            if key in workspace_override:
+                setattr(ws, key, workspace_override[key])
 
 
 def detect_profile(cwd: str, use_cache: bool = True) -> Profile:
@@ -236,23 +245,25 @@ def detect_profile(cwd: str, use_cache: bool = True) -> Profile:
 
     languages: list[str] = []
     workspaces: list[Workspace] = []
-
-    for marker, lang in _MARKERS.items():
-        if (root / marker).is_file() and lang not in languages:
-            languages.append(lang)
-
-    if "python" in languages:
-        workspaces.append(_detect_python_workspace(root))
-    if "javascript" in languages or "typescript" in languages:
-        ws = _detect_node_workspace(root)
-        if ws.language == "typescript" and "javascript" in languages:
-            languages.remove("javascript")
-            languages.append("typescript")
+    for discovered in discover_workspaces(str(root)):
+        ws_root = root if discovered.path == "." else root / discovered.path
+        if discovered.language == "python":
+            ws = _detect_python_workspace(ws_root, path=discovered.path, name=discovered.name,
+                                          marker=discovered.marker)
+        elif discovered.language == "javascript":
+            ws = _detect_node_workspace(ws_root, path=discovered.path, name=discovered.name,
+                                        marker=discovered.marker)
+        elif discovered.language == "rust":
+            ws = _detect_rust_workspace(ws_root, path=discovered.path, name=discovered.name,
+                                        marker=discovered.marker)
+        elif discovered.language == "go":
+            ws = _detect_go_workspace(ws_root, path=discovered.path, name=discovered.name,
+                                      marker=discovered.marker)
+        else:
+            ws = discovered
         workspaces.append(ws)
-    if "rust" in languages:
-        workspaces.append(_detect_rust_workspace(root))
-    if "go" in languages:
-        workspaces.append(_detect_go_workspace(root))
+        if ws.language not in languages:
+            languages.append(ws.language)
 
     profile = Profile(languages=languages, workspaces=workspaces)
     _apply_fettle_toml_overrides(root, profile)

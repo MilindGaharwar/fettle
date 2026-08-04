@@ -131,6 +131,8 @@ class TestRunSession:
         assert cp["status"] == "completed"
         assert cp["session_id"] == result.session_id
         assert cp["transcript"] == result.transcript_path
+        assert cp["evidence_id"].startswith("ev-")
+        assert result.evidence_id == cp["evidence_id"]
 
     def test_worktree_is_claimed(self, tmp_path):
         from fettle.work_items import claim_for_worktree

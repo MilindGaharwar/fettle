@@ -1,5 +1,7 @@
 """Tests for fettle.explain — human-readable trace explanation."""
 
+import json
+
 from fettle.explain import explain_entry
 
 
@@ -47,3 +49,24 @@ class TestExplainEntry:
                  "findings": findings}
         output = explain_entry(entry)
         assert "and 5 more" in output
+
+    def test_detailed_entry_shows_action_rerun_and_evidence(self):
+        entry = {
+            "hook": "PostToolUse", "status": "violation", "timestamp": "now",
+            "findings": [{"code": "E001", "message": "bad", "file": "x.py",
+                          "line": 4, "impact": "request can fail",
+                          "action": "handle the error", "rerun_command": "ruff check x.py",
+                          "evidence_id": "ev-123"}],
+            "evidence": [{"evidence_id": "ev-123", "kind": "command",
+                          "exit_code": 1, "duration_ms": 12}],
+        }
+        output = explain_entry(entry, detailed=True)
+        assert "request can fail" in output
+        assert "handle the error" in output
+        assert "ruff check x.py" in output
+        assert "ev-123" in output
+
+    def test_json_entry_is_stable_machine_output(self):
+        entry = {"hook": "verify", "status": "unknown", "findings": [],
+                 "evidence": [{"evidence_id": "ev-1", "kind": "command"}]}
+        assert json.loads(explain_entry(entry, json_output=True)) == entry

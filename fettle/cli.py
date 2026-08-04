@@ -257,58 +257,17 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 def cmd_explain(args: argparse.Namespace) -> None:
     """Explain the last hook decision."""
+    from fettle.explain import explain_entry
+    from fettle.trace import get_recent_decisions
 
-    state_dir = os.environ.get(
-        "XDG_STATE_HOME", os.path.expanduser("~/.local/state")
-    )
-    trace_dir = os.path.join(state_dir, "fettle")
-
-    if not os.path.isdir(trace_dir):
-        print("No Fettle state found. Run a hook first.")
+    entries = get_recent_decisions(limit=args.last)
+    if not entries:
+        print("No Fettle decisions recorded yet.")
         return
-
-    trace_file = os.path.join(trace_dir, "trace.jsonl")
-    if not os.path.isfile(trace_file):
-        print("No trace file found.")
-        return
-
-    with open(trace_file) as f:
-        lines = f.readlines()
-
-    if not lines:
-        print("Trace is empty.")
-        return
-
-    last_entries = []
-    for line in reversed(lines[-20:]):
-        try:
-            entry = json.loads(line.strip())
-            last_entries.append(entry)
-        except json.JSONDecodeError:
-            continue
-
-    if not last_entries:
-        print("No parseable trace entries.")
-        return
-
-    print("── Last Fettle Decision(s) ──\n")
-    for entry in last_entries[:5]:
-        hook = entry.get("hook", "?")
-        status = entry.get("status", "?")
-        tool = entry.get("tool", "?")
-        file_path = entry.get("file", "")
-        findings = entry.get("findings", [])
-        ts = entry.get("timestamp", "")
-
-        print(f"  [{ts}] {hook} → {status}")
-        if file_path:
-            print(f"    File: {file_path}")
-        if tool:
-            print(f"    Tool: {tool}")
-        if findings:
-            for f in findings[:3]:
-                print(f"    • {f.get('code', '')} {f.get('message', '')}")
-        print()
+    if not args.json:
+        print(f"── Last {len(entries)} Fettle Decision(s) ──\n")
+    for entry in reversed(entries):
+        print(explain_entry(entry, detailed=args.detailed, json_output=args.json))
 
 
 def cmd_baseline(args: argparse.Namespace) -> None:
@@ -1265,7 +1224,9 @@ def main() -> None:
     p_config.add_argument("--validate", action="store_true", help="Validate .fettle.toml against the config schema")
 
     p_explain = subparsers.add_parser("explain", help="Explain last hook decision")
-    p_explain.add_argument("--last", action="store_true", default=True)
+    p_explain.add_argument("--last", type=int, default=1, help="Show last N decisions")
+    p_explain.add_argument("--detailed", action="store_true", help="Show actions and evidence")
+    p_explain.add_argument("--json", action="store_true", help="JSON Lines output")
 
     p_baseline = subparsers.add_parser("baseline", help="Manage violation baselines")
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")

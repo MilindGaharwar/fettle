@@ -155,6 +155,8 @@ def _check_branch_coverage(
 def run_check(ctx):
     """Stop hook — check diff coverage of edited files."""
     from fettle.dispatcher_types import CheckResult
+    from fettle.finding import EvidenceReference
+    from fettle.trace import build_evidence
 
     cfg = ctx.config.get("gates", {}).get("coverage", {})
     if not cfg.get("enabled", False):
@@ -216,13 +218,17 @@ def run_check(ctx):
         return CheckResult.allow()
 
     msg = "Diff coverage below threshold:\n" + "\n".join(failures[:5])
+    evidence_data = build_evidence(
+        "coverage", scope="changed_lines", workspace=str(cwd),
+    )
+    evidence = [EvidenceReference(evidence_data["evidence_id"], "coverage")]
     mode = cfg.get("mode", "advisory")
     if mode == "enforce":
         return CheckResult.block(msg, hook_specific_output={
             "hookEventName": ctx.input.hook_event_name,
             "additionalContext": msg,
-        })
+        }, evidence=evidence)
     return CheckResult.advisory(msg, hook_specific_output={
         "hookEventName": ctx.input.hook_event_name,
         "additionalContext": msg,
-    })
+    }, evidence=evidence)

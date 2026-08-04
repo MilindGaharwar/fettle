@@ -110,11 +110,11 @@ and are planning ranges, not commitments.
 | P3 | Carry findings and evidence through dispatcher transport without changing host wires | v1.8 | P1, P2 | 1–2 days | Active |
 | P4 | Record repair, turn, recurrence, byte, and indeterminate eval metrics | v1.8 | P1 | 1–2 days | Active |
 | P5 | Add Python and TypeScript repair/error behavioral scenarios | v1.8 | P2, P4 | 1–2 days | Active |
-| P6 | Persist bounded, redacted structured evidence in trace | v1.8 | P2, P3 | 1–2 days | Planned |
-| P7 | Render concise, detailed, and JSON findings in report/explain | v1.8 | P2, P6 | 1–2 days | Planned |
-| P8 | Attach evidence IDs to verify, coverage, UAT, CI, and integrations | v1.8 | P6 | 2–4 days | Planned |
-| P9 | Consolidate workspace models and nested routing | v1.9 | P3 | 4–7 days | Planned |
-| P10 | Strengthen adapter protocol with explicit `CheckRun` state | v1.9 | P1, P9 | 3–5 days | Planned |
+| P6 | Persist bounded, redacted structured evidence in trace | v1.8 | P2, P3 | 1–2 days | Complete |
+| P7 | Render concise, detailed, and JSON findings in report/explain | v1.8 | P2, P6 | 1–2 days | Complete |
+| P8 | Attach evidence IDs to verify, coverage, UAT, CI, and integrations | v1.8 | P6 | 2–4 days | Complete |
+| P9 | Consolidate workspace models and nested routing | v1.9 | P3 | 4–7 days | Complete |
+| P10 | Strengthen adapter protocol with explicit `CheckRun` state | v1.9 | P1, P9 | 3–5 days | Complete |
 | P11 | Add adapter-backed dispatcher check and migrate TypeScript | v1.9 | P3, P10 | 3–5 days | Planned |
 | P12 | Migrate Go, Python, and Rust after parity | v1.9 | P11 | 4–7 days | Planned |
 | P13 | Centralize file and test classification | v1.9 | P9, P10 | 3–5 days | Planned |

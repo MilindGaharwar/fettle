@@ -44,3 +44,8 @@ class TestFormatReport:
         report = IntegrationReport(status=IntegrationStatus.PASS)
         out = format_integration_report(report, "Pact")
         assert "PASS" in out
+
+    def test_report_has_stable_evidence_id(self):
+        report = IntegrationReport(status=IntegrationStatus.FAIL, summary="failed")
+        assert report.evidence_id.startswith("ev-")
+        assert report.evidence[0].evidence_id == report.evidence_id

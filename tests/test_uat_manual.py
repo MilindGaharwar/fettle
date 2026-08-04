@@ -72,6 +72,7 @@ class TestAttest:
                                             operator="milind")
         assert err == ""
         assert entry["source"] == "operator"  # labeled peer, never mixed
+        assert entry["evidence_id"].startswith("ev-")
         stored = load_attestations(str(tmp_path))
         assert stored[0]["scenario_id"] == "greeter/S1"
         assert stored[0]["operator"] == "milind"

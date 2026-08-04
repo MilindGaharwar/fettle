@@ -13,6 +13,7 @@ import pytest
 
 from fettle import dispatcher as dispatcher_mod
 from fettle import trace as trace_mod
+from fettle.finding import CheckFinding, EvidenceReference, FindingSeverity
 from fettle.dispatcher_types import CheckResult, CheckSpec
 
 
@@ -84,6 +85,29 @@ class TestCheckCrashVisibility:
         monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [_crashing_spec()])
         _, out = _run_main(monkeypatch, capsys, _payload())
         assert "fail-open" not in out.get("hookSpecificOutput", {}).get("additionalContext", "")
+
+
+class TestStructuredResultVisibility:
+    def test_result_findings_and_evidence_are_traced(self, monkeypatch, capsys, isolated_trace):
+        finding = CheckFinding(
+            checker="ruff", severity=FindingSeverity.ERROR, file="x.py", line=1,
+            message="unused import",
+        )
+        result = CheckResult.advisory(
+            "fix import", findings=[finding],
+            evidence=[EvidenceReference("ev-ruff123", "command")],
+        )
+        spec = CheckSpec(
+            name="ruff", run=lambda _ctx: result, events=frozenset({"PostToolUse"}),
+        )
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
+
+        rc, _ = _run_main(monkeypatch, capsys, _payload())
+
+        assert rc == 0
+        entries = [e for e in isolated_trace() if e.get("hook") == "ruff"]
+        assert entries[0]["findings"][0]["checker"] == "ruff"
+        assert entries[0]["evidence"][0]["evidence_id"] == "ev-ruff123"
 
     def test_stale_failures_outside_window_do_not_escalate(self, monkeypatch, capsys, isolated_trace):
         monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [_crashing_spec()])

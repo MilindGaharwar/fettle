@@ -9,16 +9,27 @@ from __future__ import annotations
 import glob
 import json
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 _WORKSPACE_MARKERS = {
     "pyproject.toml": "python",
+    "setup.py": "python",
+    "setup.cfg": "python",
     "package.json": "javascript",
     "Cargo.toml": "rust",
     "go.mod": "go",
+    "global.json": "dotnet",
+    "pom.xml": "java",
+    "build.gradle": "java",
+    "build.gradle.kts": "java",
 }
+
+_EXCLUDED_DIRS = frozenset({
+    ".git", ".fettle", ".venv", "venv", "node_modules", "vendor", "target",
+    "dist", "build", "out", "coverage", "__pycache__",
+})
 
 _SHARED_FILES = {
     "pnpm-lock.yaml", "yarn.lock", "package-lock.json",
@@ -29,19 +40,36 @@ _SHARED_FILES = {
 
 
 @dataclass
-class WorkspaceInfo:
-    """A detected workspace within a monorepo."""
+class Workspace:
+    """Canonical detected workspace and its native execution metadata."""
 
-    name: str
-    path: str
-    language: str
-    marker: str
+    name: str = ""
+    path: str = "."
+    language: str = ""
+    marker: str = ""
+    frameworks: list[str] = field(default_factory=list)
+    manager: str = ""
+    wrapper: str | None = None
+    test_command: str = ""
+    lint_command: str = ""
+    format_command: str = ""
+    typecheck_command: str = ""
+    build_command: str = ""
+    dependency_file: str = ""
+    dependency_files: list[str] = field(default_factory=list)
+    lockfile: str | None = None
+    lockfiles: list[str] = field(default_factory=list)
+    source_roots: list[str] = field(default_factory=list)
+    test_roots: list[str] = field(default_factory=list)
 
 
-def discover_workspaces(root_dir: str) -> list[WorkspaceInfo]:
+WorkspaceInfo = Workspace
+
+
+def discover_workspaces(root_dir: str) -> list[Workspace]:
     """Discover all workspaces in a repo."""
     root = Path(root_dir)
-    workspaces: list[WorkspaceInfo] = []
+    workspaces: list[Workspace] = []
 
     # Check for explicit workspace definitions first
     pnpm_ws = _detect_pnpm_workspaces(root)
@@ -52,41 +80,42 @@ def discover_workspaces(root_dir: str) -> list[WorkspaceInfo]:
     if cargo_ws:
         workspaces.extend(cargo_ws)
 
-    # If explicit workspaces found, don't scan further
-    if workspaces:
-        return workspaces
-
-    # Scan for nested marker files (one level deep max)
-    found_nested = False
-    for subdir in sorted(root.iterdir()):
-        if not subdir.is_dir() or subdir.name.startswith("."):
-            continue
+    seen = {(ws.path, ws.language) for ws in workspaces}
+    candidates = [root]
+    candidates.extend(
+        path for path in root.rglob("*")
+        if path.is_dir() and not any(part in _EXCLUDED_DIRS for part in path.relative_to(root).parts)
+    )
+    for directory in sorted(candidates):
+        marker_found = False
         for marker, lang in _WORKSPACE_MARKERS.items():
-            if (subdir / marker).is_file():
-                name = _extract_name(subdir, marker) or subdir.name
-                rel_path = str(subdir.relative_to(root))
-                workspaces.append(WorkspaceInfo(
-                    name=name, path=rel_path, language=lang, marker=marker,
+            if not (directory / marker).is_file():
+                continue
+            marker_found = True
+            rel_path = "." if directory == root else directory.relative_to(root).as_posix()
+            if (rel_path, lang) not in seen:
+                workspaces.append(Workspace(
+                    name=_extract_name(directory, marker) or directory.name,
+                    path=rel_path, language=lang, marker=marker,
                 ))
-                found_nested = True
-                break
-
-    # If no nested workspaces, treat root as single workspace
-    if not found_nested:
-        for marker, lang in _WORKSPACE_MARKERS.items():
-            if (root / marker).is_file():
-                name = _extract_name(root, marker) or root.name
-                workspaces.append(WorkspaceInfo(
-                    name=name, path=".", language=lang, marker=marker,
-                ))
-                break
-
-    return workspaces
+                seen.add((rel_path, lang))
+        if not marker_found:
+            project_files = sorted(directory.glob("*.csproj"))
+            solution_files = sorted(directory.glob("*.sln")) + sorted(directory.glob("*.slnx"))
+            if project_files or solution_files:
+                rel_path = "." if directory == root else directory.relative_to(root).as_posix()
+                if (rel_path, "dotnet") not in seen:
+                    marker = (project_files or solution_files)[0].name
+                    workspaces.append(Workspace(
+                        name=directory.name, path=rel_path, language="dotnet", marker=marker,
+                    ))
+                    seen.add((rel_path, "dotnet"))
+    return sorted(workspaces, key=lambda ws: (ws.path, ws.language))
 
 
 def route_file_to_workspace(
-    file_path: str, workspaces: list[WorkspaceInfo]
-) -> WorkspaceInfo | None:
+    file_path: str, workspaces: list[Workspace]
+) -> Workspace | None:
     """Route a file to its workspace. Returns None for shared/root files."""
     # Check if file is a known shared file
     base = file_path.split("/")[0] if "/" in file_path else file_path
@@ -94,7 +123,7 @@ def route_file_to_workspace(
         return None
 
     # Match by path prefix (longest match wins)
-    best: WorkspaceInfo | None = None
+    best: Workspace | None = None
     best_len = 0
     for ws in workspaces:
         if ws.path == ".":
@@ -165,7 +194,7 @@ def _name_from_go_mod(path: Path) -> str:
     return ""
 
 
-def _detect_pnpm_workspaces(root: Path) -> list[WorkspaceInfo]:
+def _detect_pnpm_workspaces(root: Path) -> list[Workspace]:
     """Detect pnpm workspace packages from pnpm-workspace.yaml."""
     ws_file = root / "pnpm-workspace.yaml"
     if not ws_file.is_file():
@@ -190,7 +219,7 @@ def _detect_pnpm_workspaces(root: Path) -> list[WorkspaceInfo]:
             elif stripped and not stripped.startswith("#"):
                 break
 
-    workspaces: list[WorkspaceInfo] = []
+    workspaces: list[Workspace] = []
     for pattern in packages:
         # Resolve glob patterns
         for match in sorted(glob.glob(str(root / pattern))):
@@ -204,7 +233,7 @@ def _detect_pnpm_workspaces(root: Path) -> list[WorkspaceInfo]:
     return workspaces
 
 
-def _detect_cargo_workspaces(root: Path) -> list[WorkspaceInfo]:
+def _detect_cargo_workspaces(root: Path) -> list[Workspace]:
     """Detect Cargo workspace members."""
     cargo_toml = root / "Cargo.toml"
     if not cargo_toml.is_file():
@@ -220,7 +249,7 @@ def _detect_cargo_workspaces(root: Path) -> list[WorkspaceInfo]:
     if not members:
         return []
 
-    workspaces: list[WorkspaceInfo] = []
+    workspaces: list[Workspace] = []
     for pattern in members:
         for match in sorted(glob.glob(str(root / pattern))):
             match_path = Path(match)

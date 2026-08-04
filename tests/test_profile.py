@@ -63,6 +63,32 @@ def test_cache_invalidation_on_marker_change(tmp_path):
     assert len(p2.languages) >= 2
 
 
+def test_cache_invalidation_on_nested_marker_change(tmp_path):
+    backend = tmp_path / "apps" / "backend"
+    backend.mkdir(parents=True)
+    (backend / "pyproject.toml").write_text('[project]\nname = "backend"\n')
+    first = detect_profile(str(tmp_path))
+    assert [ws.path for ws in first.workspaces] == ["apps/backend"]
+
+    frontend = tmp_path / "apps" / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text('{"name": "frontend"}')
+    second = detect_profile(str(tmp_path))
+
+    assert {ws.path for ws in second.workspaces} == {"apps/backend", "apps/frontend"}
+
+
+def test_cache_invalidation_on_workspace_override_change(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "myapp"\n')
+    config = tmp_path / ".fettle.toml"
+    config.write_text('[profile]\ntest_command = "make test-v1"\n')
+    assert detect_profile(str(tmp_path)).workspaces[0].test_command == "make test-v1"
+
+    config.write_text('[profile]\ntest_command = "make test-version-two"\n')
+
+    assert detect_profile(str(tmp_path)).workspaces[0].test_command == "make test-version-two"
+
+
 def test_does_not_walk_outside_repo_root(tmp_path):
     inner = tmp_path / "project"
     inner.mkdir()
@@ -83,3 +109,23 @@ def test_custom_commands_from_fettle_toml_override(tmp_path):
     ws = profile.workspaces[0]
     assert ws.test_command == "make test"
     assert ws.lint_command == "make lint"
+
+
+def test_nested_workspaces_receive_path_specific_overrides(tmp_path):
+    backend = tmp_path / "apps" / "backend"
+    backend.mkdir(parents=True)
+    (backend / "pyproject.toml").write_text('[project]\nname = "backend"\n')
+    frontend = tmp_path / "apps" / "frontend"
+    frontend.mkdir(parents=True)
+    (frontend / "package.json").write_text('{"name": "frontend"}')
+    (tmp_path / ".fettle.toml").write_text(
+        '[[profile.workspaces]]\npath = "apps/backend"\ntest_command = "make backend-test"\n'
+        '[[profile.workspaces]]\npath = "apps/frontend"\ntest_command = "make frontend-test"\n'
+    )
+
+    profile = detect_profile(str(tmp_path), use_cache=False)
+    commands = {ws.path: ws.test_command for ws in profile.workspaces}
+    assert commands == {
+        "apps/backend": "make backend-test",
+        "apps/frontend": "make frontend-test",
+    }

@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -15,8 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from fettle.trace import get_recent_decisions
 
 
-def explain_entry(entry: dict) -> str:
+def explain_entry(entry: dict, *, detailed: bool = False, json_output: bool = False) -> str:
     """Format a single trace entry as a human-readable explanation."""
+    if json_output:
+        return json.dumps(entry, sort_keys=True)
     lines = []
     hook = entry.get("hook", "unknown")
     status = entry.get("status", "unknown")
@@ -46,6 +49,11 @@ def explain_entry(entry: dict) -> str:
             msg = f.get("message", "")
             loc = f"{f.get('file', '')}:{f.get('line', '')}" if f.get("file") else ""
             lines.append(f"    • [{code}] {loc} — {msg}")
+            if detailed:
+                for label, key in (("Impact", "impact"), ("Action", "action"),
+                                   ("Rerun", "rerun_command"), ("Evidence", "evidence_id")):
+                    if f.get(key):
+                        lines.append(f"      {label}: {f[key]}")
         if len(findings) > 5:
             lines.append(f"    ... and {len(findings) - 5} more")
         lines.append("")
@@ -60,12 +68,24 @@ def explain_entry(entry: dict) -> str:
     elif status == "skipped":
         lines.append("  Outcome: Skipped — file was not in scope for checking.")
 
+    if detailed and entry.get("evidence"):
+        lines.append("  Evidence:")
+        for evidence in entry["evidence"][:5]:
+            detail = ", ".join(
+                f"{key}={evidence[key]}" for key in ("exit_code", "duration_ms", "scope", "tool_version")
+                if key in evidence
+            )
+            lines.append(f"    {evidence.get('evidence_id', '?')} ({evidence.get('kind', '?')})"
+                         + (f": {detail}" if detail else ""))
+
     return "\n".join(lines)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fettle explain")
     parser.add_argument("--last", type=int, default=1, help="Show last N decisions")
+    parser.add_argument("--detailed", action="store_true")
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     entries = get_recent_decisions(limit=args.last)
@@ -76,7 +96,7 @@ def main() -> None:
 
     print(f"── Last {len(entries)} Fettle Decision(s) ──\n")
     for entry in reversed(entries):
-        print(explain_entry(entry))
+        print(explain_entry(entry, detailed=args.detailed, json_output=args.json))
         print()
 
 

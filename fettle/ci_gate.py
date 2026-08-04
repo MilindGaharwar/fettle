@@ -40,6 +40,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from fettle.dispatcher_types import CheckResult, HookContext
+from fettle.trace import build_evidence
 
 STAMP_RELPATH = os.path.join(".fettle", "ci-status.json")
 FAILURE_HISTORY_RELPATH = os.path.join(".fettle", "ci-failures.json")
@@ -271,6 +272,10 @@ def run_ci_status(
 
 
 def _write_stamp(cwd: str, stamp: dict) -> None:
+    evidence = build_evidence(
+        "ci", exit_code=0 if stamp.get("ok") else 1, scope=stamp.get("sha", ""),
+    )
+    stamp["evidence_id"] = evidence["evidence_id"]
     path = Path(cwd) / STAMP_RELPATH
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

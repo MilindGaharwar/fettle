@@ -23,11 +23,23 @@ v1 entries (no `schema`/`repo` keys) remain readable forever.
 """
 
 import json
+import hashlib
 import os
+import re
 import sys
 import time
+from typing import Any
 
 AUDIT_SCHEMA_VERSION = 2
+_MAX_TEXT = 2048
+_MAX_FINDINGS = 50
+_MAX_EVIDENCE = 20
+_SECRET_PATTERNS = (
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"(?:ghp_|sk-)[A-Za-z0-9_-]{20,}"),
+    re.compile(r"(?i)(?:api[_-]?key|password|secret|token)\w*\s*[=:]\s*\S+"),
+    re.compile(r"(?i)bearer\s+\S+"),
+)
 
 # Opportunistic rotation threshold (WP-6, audit C4): rotate_trace()
 # existed but nothing in the production path ever called it, so the trace
@@ -37,6 +49,65 @@ _ROTATE_BYTES = 5 * 1024 * 1024
 # One-time stderr warning flag: audit-log loss must be visible (WP: Stage-0
 # failure-visibility), but must never spam or break the hook path.
 _write_failure_warned = False
+
+
+def _redact_text(value: object, limit: int = _MAX_TEXT) -> str:
+    text = str(value)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("***REDACTED***", text)
+    return text[:limit]
+
+
+def build_evidence(kind: str, **fields: Any) -> dict[str, Any]:
+    """Build a bounded, redacted evidence artifact with a content-derived ID."""
+    evidence: dict[str, Any] = {"kind": _redact_text(kind, 64)}
+    for key in ("command", "exit_code", "duration_ms", "scope", "tool_version", "workspace"):
+        value = fields.get(key)
+        if value is None:
+            continue
+        if key == "command":
+            if isinstance(value, (list, tuple)):
+                evidence[key] = [_redact_text(part, 256) for part in value[:50]]
+            else:
+                evidence[key] = _redact_text(value)
+        elif key in {"exit_code", "duration_ms"} and isinstance(value, (int, float)):
+            evidence[key] = value
+        else:
+            evidence[key] = _redact_text(value, 256)
+    canonical = json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+    evidence["evidence_id"] = "ev-" + hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return evidence
+
+
+def _bounded_finding(finding: dict) -> dict:
+    allowed = {
+        "schema_version", "checker", "severity", "file", "line", "column", "code",
+        "message", "blocking", "confidence", "workspace", "suggested_fix", "impact",
+        "action", "rerun_command", "evidence_id", "result_state", "redacted", "check",
+        "error", "detail", "skipped_from", "budget_ms", "event", "_suppressed",
+        "capsule", "lineage", "worktree_item", "runner_error", "fp",
+    }
+    result: dict[str, Any] = {}
+    for key, value in finding.items():
+        if key not in allowed:
+            continue
+        if isinstance(value, str):
+            result[key] = _redact_text(value)
+        elif isinstance(value, (bool, int, float)) or value is None:
+            result[key] = value
+    return result
+
+
+def _bounded_evidence(evidence: dict) -> dict:
+    bounded = build_evidence(
+        str(evidence.get("kind", "unknown")),
+        **{key: evidence[key] for key in (
+            "command", "exit_code", "duration_ms", "scope", "tool_version", "workspace"
+        ) if key in evidence},
+    )
+    if evidence.get("evidence_id"):
+        bounded["evidence_id"] = _redact_text(evidence["evidence_id"], 128)
+    return bounded
 
 
 def _get_trace_path() -> str:
@@ -82,6 +153,7 @@ def log_decision(
     tool: str = "",
     file: str = "",
     findings: list[dict] | None = None,
+    evidence: list[dict] | None = None,
     duration_ms: float = 0.0,
     session_id: str = "",
 ) -> bool:
@@ -101,7 +173,8 @@ def log_decision(
         "tool": tool,
         "file": file,
         "repo": _repo_name(file),
-        "findings": findings or [],
+        "findings": [_bounded_finding(f) for f in (findings or [])[:_MAX_FINDINGS]],
+        "evidence": [_bounded_evidence(e) for e in (evidence or [])[:_MAX_EVIDENCE]],
         "duration_ms": round(duration_ms, 2),
         "session_id": session_id,
         "parent_session_id": parent_session_id,

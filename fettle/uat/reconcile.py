@@ -102,9 +102,15 @@ def reconcile(scenarios: list[dict], transcript: str) -> list[Verdict]:
 def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple[str, str]:
     """Persist the evidence artifact. Returns (path, error)."""
     path = Path(worktree) / ".fettle" / REPORT_NAME
+    from fettle.trace import build_evidence
+    evidence_id = build_evidence(
+        "uat_report", exit_code=0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1,
+        scope=session.get("surface", ""),
+    )["evidence_id"]
     data = {
         "session_id": session.get("session_id", ""),
         "surface": session.get("surface", ""),
+        "evidence_id": evidence_id,
         "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
                       "observed": v.observed, "note": v.note} for v in verdicts],
     }

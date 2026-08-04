@@ -32,6 +32,7 @@ from pathlib import Path
 from fettle.dispatcher_types import CheckResult, HookContext
 from fettle.test_discovery import discover_test_config
 from fettle.test_runner_opts import build_pytest_args, record_failures
+from fettle.trace import build_evidence
 
 STAMP_RELPATH = os.path.join(".fettle", "verify.json")
 FAILURE_HISTORY_RELPATH = os.path.join(".fettle", "test-failures.json")
@@ -198,6 +199,11 @@ def _record_pytest_failures(cwd: str, stdout: str) -> None:
 
 
 def _write_stamp(cwd: str, stamp: dict) -> None:
+    evidence = build_evidence(
+        "verify", command=stamp.get("command", ""), exit_code=stamp.get("exit_code"),
+        duration_ms=float(stamp.get("duration_s", 0)) * 1000, scope=stamp.get("scope", ""),
+    )
+    stamp["evidence_id"] = evidence["evidence_id"]
     path = Path(cwd) / STAMP_RELPATH
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

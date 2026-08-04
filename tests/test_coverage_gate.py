@@ -111,6 +111,7 @@ def test_below_threshold_advisory(tmp_path):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "40%" in result.message
+    assert result.evidence[0].evidence_id.startswith("ev-")
 
 
 def test_below_threshold_enforce_blocks(tmp_path):

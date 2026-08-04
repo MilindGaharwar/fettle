@@ -47,8 +47,11 @@ class ToolRunner:
         self.cwd = cwd
         self.env = env
         self.redact_env_keys = set(redact_env_keys or [])
+        self.last_command: list[str] = []
+        self.last_result: RunResult | None = None
 
     def run(self, cmd: list[str]) -> RunResult:
+        self.last_command = list(cmd)
         run_env: dict[str, str] | None = None
         if self.env:
             run_env = {**os.environ, **self.env}
@@ -61,17 +64,19 @@ class ToolRunner:
                 cwd=self.cwd,
                 env=run_env,
             )
-            return RunResult(
+            result = RunResult(
                 returncode=proc.returncode,
                 stdout=proc.stdout.decode("utf-8", errors="replace"),
                 stderr=proc.stderr.decode("utf-8", errors="replace"),
             )
         except subprocess.TimeoutExpired:
-            return RunResult(returncode=-1, timed_out=True)
+            result = RunResult(returncode=-1, timed_out=True)
         except FileNotFoundError:
-            return RunResult(returncode=-1, tool_missing=True)
+            result = RunResult(returncode=-1, tool_missing=True)
         except OSError as e:
-            return RunResult(returncode=-1, stderr=str(e), tool_missing=True)
+            result = RunResult(returncode=-1, stderr=str(e), tool_missing=True)
+        self.last_result = result
+        return result
 
     def describe_env(self) -> str:
         """Describe env vars for logging, with secrets redacted."""

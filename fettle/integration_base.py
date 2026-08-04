@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from fettle.finding import EvidenceReference
+from fettle.trace import build_evidence
+
 
 class IntegrationStatus(StrEnum):
     PASS = "pass"
@@ -35,6 +38,18 @@ class IntegrationReport:
     findings: list[IntegrationFinding] = field(default_factory=list)
     summary: str = ""
     tool_version: str | None = None
+    evidence_id: str = ""
+    evidence: list[EvidenceReference] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.evidence_id:
+            artifact = build_evidence(
+                "integration", exit_code=0 if self.status == IntegrationStatus.PASS else 1,
+                tool_version=self.tool_version or "", scope=self.status.value,
+            )
+            self.evidence_id = artifact["evidence_id"]
+        if not self.evidence:
+            self.evidence = [EvidenceReference(self.evidence_id, "integration")]
 
 
 class IntegrationAdapter(Protocol):

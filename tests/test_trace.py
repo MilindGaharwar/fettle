@@ -6,7 +6,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from fettle.trace import log_decision, get_recent_decisions, rotate_trace
+from fettle.trace import build_evidence, log_decision, get_recent_decisions, rotate_trace
 
 
 def test_log_decision_creates_file(tmp_path, monkeypatch):
@@ -83,3 +83,37 @@ def test_lineage_fields_from_spawn_env(tmp_path, monkeypatch):
     entry = get_recent_decisions(limit=1)[0]
     assert entry["parent_session_id"] == "parent-1"
     assert entry["capsule_digest"] == "abcd1234abcd1234"
+
+
+def test_structured_evidence_is_bounded_and_redacted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    evidence = build_evidence(
+        "command",
+        command=["tool", "--token=secret-value", "x" * 5000],
+        exit_code=1,
+        output="password=hunter2\n" + "failure\n" * 1000,
+    )
+    log_decision(
+        hook="verify", status="tool_error", evidence=[evidence],
+        findings=[{"message": "token=secret-value", "raw_tool_output": "source" * 1000}],
+    )
+
+    entry = get_recent_decisions(limit=1)[0]
+    serialized = json.dumps(entry)
+    assert evidence["evidence_id"].startswith("ev-")
+    assert "hunter2" not in serialized
+    assert "secret-value" not in serialized
+    assert len(serialized) < 12000
+    assert entry["evidence"][0]["kind"] == "command"
+
+
+def test_evidence_reference_keeps_existing_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+
+    log_decision(
+        hook="dispatcher", status="violation",
+        evidence=[{"evidence_id": "ev-existing123", "kind": "command"}],
+    )
+
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["evidence"] == [{"evidence_id": "ev-existing123", "kind": "command"}]

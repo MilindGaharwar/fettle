@@ -117,6 +117,7 @@ class TestRunCIStatus:
             stamp = ci_gate.run_ci_status(str(repo), _cfg())
         assert stamp["ok"] is True
         assert stamp["overall"] == "success"
+        assert stamp["evidence_id"].startswith("ev-")
         on_disk = json.loads((repo / ci_gate.STAMP_RELPATH).read_text())
         assert on_disk["sha"] == stamp["sha"] and len(stamp["sha"]) == 40
 

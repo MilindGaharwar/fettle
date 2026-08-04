@@ -8,6 +8,12 @@
 - Behavioral evals now report repair success, available turn counts, repeated
   violations, diagnostic bytes, and indeterminate reasons, with Python and
   TypeScript held-out baselines.
+- Audit traces now retain bounded, redacted evidence with stable IDs; verify,
+  coverage, CI, UAT, and integration artifacts link to that evidence. `fettle
+  explain` supports concise, detailed, and JSON Lines output.
+- Workspace discovery now uses one canonical model, supports nested projects,
+  longest-prefix routing, and per-workspace command overrides. Adapter checks
+  expose explicit four-state `CheckRun` outcomes through a compatibility bridge.
 
 ## v1.7.0 — Workflows Everywhere
 

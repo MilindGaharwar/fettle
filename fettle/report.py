@@ -52,6 +52,12 @@ def compute_effectiveness(days: int = 30) -> dict:
     by_file = Counter(f.get("file", "unknown") for f in all_findings)
 
     tool_errors = [e for e in recent if e.get("status") == "tool_error"]
+    evidence_ids = [
+        evidence.get("evidence_id")
+        for entry in recent
+        for evidence in entry.get("evidence", [])
+        if evidence.get("evidence_id")
+    ]
 
     # Stage-0 failure visibility: dispatcher fail-open events (check crashes,
     # budget kills, input/config/registry failures) are part of effectiveness —
@@ -85,6 +91,7 @@ def compute_effectiveness(days: int = 30) -> dict:
         "tool_errors": [{"tool": e.get("tool"), "ts": e.get("timestamp")} for e in tool_errors[:5]],
         "dispatch_failures": dict(dispatch_failures),
         "failing_checks": failing_checks.most_common(5),
+        "evidence_ids": list(dict.fromkeys(evidence_ids))[-20:],
     }
 
 

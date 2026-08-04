@@ -35,3 +35,13 @@ def test_identify_candidates(tmp_path, monkeypatch):
     assert "retire_candidates" in result
     assert "recalibrate_candidates" in result
     assert "active_rules" in result
+
+
+def test_effectiveness_includes_recent_evidence_ids(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    from fettle.trace import build_evidence, log_decision
+    evidence = build_evidence("command", exit_code=1, duration_ms=20)
+    log_decision(hook="verify", status="tool_error", evidence=[evidence])
+
+    result = compute_effectiveness(days=30)
+    assert result["evidence_ids"] == [evidence["evidence_id"]]

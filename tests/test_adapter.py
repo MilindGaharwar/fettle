@@ -4,7 +4,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from fettle.adapters import get_adapter, list_adapters
+from fettle.adapters import CheckRun, get_adapter, list_adapters, run_adapter_check
+from fettle.finding import ResultState
+from fettle.tool_runner import RunResult
+from fettle.workspace import Workspace
 from fettle.adapters.python_adapter import PythonAdapter
 from fettle.profile import detect_profile
 
@@ -89,3 +92,24 @@ def test_get_adapter_by_language():
 def test_get_adapter_unknown():
     adapter = get_adapter("cobol")
     assert adapter is None
+
+
+def test_adapter_run_exposes_tool_error_instead_of_empty_findings(tmp_path):
+    adapter = PythonAdapter(cwd=str(tmp_path))
+    adapter._runner.run = lambda _cmd: RunResult(returncode=-1, tool_missing=True)
+    workspace = Workspace(name="app", path=".", language="python", marker="pyproject.toml")
+
+    run = run_adapter_check(adapter, "lint", workspace, ["app.py"], scope="changed")
+    assert isinstance(run, CheckRun)
+    assert run.result_state == ResultState.TOOL_ERROR
+    assert run.tool_error
+    assert run.evidence[0].kind == "command"
+
+
+def test_adapter_run_marks_clean_result_pass(tmp_path):
+    adapter = PythonAdapter(cwd=str(tmp_path))
+    adapter._runner.run = lambda _cmd: RunResult(returncode=0)
+    workspace = Workspace(name="app", path=".", language="python", marker="pyproject.toml")
+    run = run_adapter_check(adapter, "lint", workspace, [], scope="full")
+    assert run.result_state == ResultState.PASS
+    assert run.findings == []
