@@ -35,7 +35,7 @@ runs configured checks before, after, and at the end of a session.
 agent edits ──▶ Fettle checks ──▶ finding returns in-session ──▶ agent repairs
 ```
 
-**Status: v1.6.2 "CI Truth"**
+**Status: v1.7.0 "Workflows Everywhere"**
 
 ## Quick Start
 

@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.7.0 — Workflows Everywhere
+
+The 17 fettle workflows now install into every supported agent CLI, and
+the config resolver is one honest chain:
+
+- **`fettle workflows install`**: renders the canonical `commands/*.md`
+  into native slash-command formats for Claude Code, VS Code prompts,
+  Codex, Gemini CLI, and OpenCode — marker-owned files, idempotent,
+  user-edited copies never overwritten. `fettle init` installs them for
+  detected agents; `fettle doctor` reports drift (warn-only). Workflow
+  sources ship in the wheel (`fettle/_commands/`).
+- **Workflow content refresh**: all commands run via the `fettle` CLI or
+  `python3 -m fettle.<module>` (no `CLAUDE_PLUGIN_ROOT` scripts); `learn`
+  documents the quarantine flow (`rules/proposed/` → `fettle rules
+  promote`); templates resolve from the installed package.
+- **Unified config resolver** (closes audit H-05): one precedence chain
+  for gates and `fettle config` — defaults → org.toml → team.toml →
+  remote `[extends]` → repo → directory overrides (per-file) → env →
+  capsule (tighten-only). `--print-effective` shows exactly what gates
+  load; `--explain` attributes every key, including env/capsule effects.
+- **Migration note**: `$XDG_CONFIG_HOME/fettle/org.toml` and `team.toml`
+  previously affected only `fettle config` output; they are now enforced
+  at runtime by every gate. Directory `.fettle.toml` files now affect
+  per-file gates. Audit those files if you relied on them being inert.
+- **shellcheck bootstrap**: `fettle init` installs shellcheck (brew/apt),
+  and `fettle doctor --fix` repairs a missing install; the doctor warning
+  carries the per-OS install command.
+- Alignment fixes: VS Code extension is Python-only and drops never-read
+  settings (M-12); `fettle explain` renders finding locations from the
+  global trace (L-01); both trace stores documented (L-02); orphaned CI
+  template removed (L-05); evals scenarios are contained to their
+  workdir — path escapes cannot read or write outside it (L-06).
+
 ## v1.6.2 — CI Truth
 
 CI now proves what the docs claim (audit M-08/M-09/M-10/M-11/L-07):
