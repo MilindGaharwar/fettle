@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.config import load_config, state_dir  # noqa: E402
+from fettle.paths import classify_file  # noqa: E402
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -30,7 +31,6 @@ FRONTEND_PATHS = ["frontend/src/pages/", "frontend/src/components/", "src/pages/
 FRONTEND_EXEMPT = ["components/ui/", "utils/", "hooks/", "stores/", "api/", "test", ".test.", ".spec."]
 
 # From plan_gate.py — comprehensive extension/path exemptions
-IMPL_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".sh"}
 EXEMPT_EXTS = {".md", ".toml", ".json", ".yml", ".yaml", ".txt", ".cfg", ".ini", ".env", ".lock"}
 EXEMPT_PATH_PREFIXES = ("/tmp/", "/var/tmp/")
 EXEMPT_PATH_CONTAINS = ("/tests/", "/test/", "/.fettle/", "/memory/", "/__pycache__/", "/node_modules/", "/.venv/", "/alembic/versions/")
@@ -77,16 +77,7 @@ HARDCODED_PATTERNS = [
 
 def _is_test_file(path: str) -> bool:
     """Detect test files by basename convention."""
-    basename = os.path.basename(path)
-    return (
-        basename.startswith("test_")
-        or basename.endswith("_test.py")
-        or basename.endswith(".test.ts")
-        or basename.endswith(".test.tsx")
-        or basename.endswith(".spec.ts")
-        or basename.endswith(".spec.tsx")
-        or basename == "conftest.py"
-    )
+    return classify_file(path) == "test"
 
 
 def _is_implementation_file(path: str, cwd: str = "") -> bool:
@@ -98,10 +89,7 @@ def _is_implementation_file(path: str, cwd: str = "") -> bool:
     """
     if not path:
         return False
-    _, ext = os.path.splitext(path)
-    if ext in EXEMPT_EXTS:
-        return False
-    if ext not in IMPL_EXTENSIONS:
+    if classify_file(path) != "implementation":
         return False
     if cwd and os.path.isabs(path):
         root = os.path.abspath(cwd)

@@ -11,6 +11,8 @@ import os
 import re
 import sys
 
+from fettle.paths import classify_file
+
 MARKER_RE = re.compile(r"fettle:lean:\s*(.+)")
 TRIGGER_RE = re.compile(r",\s*upgrade when:\s*(.+)", re.IGNORECASE)
 
@@ -19,13 +21,6 @@ EXCLUDED_DIRS = {
     "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".claude",
 }
-
-IMPL_EXTENSIONS = {
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go",
-    ".rb", ".java", ".kt", ".swift", ".c", ".cpp", ".h",
-    ".sh", ".bash", ".zsh",
-}
-
 
 def _should_skip_dir(name: str) -> bool:
     return name in EXCLUDED_DIRS or name.startswith(".")
@@ -65,8 +60,7 @@ def _walk_project(cwd: str) -> list[dict]:
     for root, dirs, files in os.walk(cwd):
         dirs[:] = [d for d in dirs if not _should_skip_dir(d)]
         for fname in files:
-            ext = os.path.splitext(fname)[1].lower()
-            if ext not in IMPL_EXTENSIONS:
+            if classify_file(fname) not in ("implementation", "test"):
                 continue
             full = os.path.join(root, fname)
             rel = os.path.relpath(full, cwd)

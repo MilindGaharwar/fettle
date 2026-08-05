@@ -30,15 +30,15 @@ import time
 from pathlib import Path
 
 from fettle.dispatcher_types import CheckResult, HookContext
+from fettle.paths import classify_file
+from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
 from fettle.test_runner_opts import build_pytest_args, record_failures
 from fettle.trace import build_evidence
+from fettle.workspace import Workspace, route_file_to_workspace
 
 STAMP_RELPATH = os.path.join(".fettle", "verify.json")
 FAILURE_HISTORY_RELPATH = os.path.join(".fettle", "test-failures.json")
-
-_CODE_EXTENSIONS = (".py", ".rs", ".go", ".ts", ".tsx", ".js", ".jsx")
-
 
 # ── Impacted-test mapping (deterministic, name-convention based) ──────────
 
@@ -65,7 +65,7 @@ def _edited_files(edits_path: Path) -> list[str]:
 def _edited_code_files(edits_path: Path) -> list[str]:
     return [
         f for f in _edited_files(edits_path)
-        if f.endswith(_CODE_EXTENSIONS) and os.path.isfile(f)
+        if classify_file(f) in ("implementation", "test") and os.path.isfile(f)
     ]
 
 
@@ -91,7 +91,7 @@ def impacted_tests(cwd: str, edited: list[str], test_roots: list[str]) -> list[s
         if rel.startswith(".."):
             continue
         base = os.path.basename(rel)
-        if base.startswith("test_") or base.removesuffix(".py").endswith("_test"):
+        if classify_file(rel) == "test":
             out[rel] = None
             continue
         stem = Path(base).stem
@@ -125,6 +125,14 @@ def run_verify(
     timeout_s = int(gate_cfg.get("timeout_s", 120))
     scope_cfg = str(gate_cfg.get("scope", "impacted"))
 
+    edits_path = _edits_path(session_id)
+    edited = _edited_code_files(edits_path) if edits_path else []
+    affected = _affected_workspaces(cwd, edited)
+    if len(affected) > 1 or affected and affected[0][0].path != ".":
+        return _run_workspace_verification(
+            cwd, affected, timeout_s=timeout_s, session_id=session_id,
+        )
+
     tc = discover_test_config(cwd)
     stamp: dict = {
         "ok": False, "command": "", "exit_code": -1, "duration_s": 0.0,
@@ -146,8 +154,6 @@ def run_verify(
     scope = "full"
     impacted: list[str] = []
     if not full and scope_cfg == "impacted" and tc.framework == "pytest":
-        edits_path = _edits_path(session_id)
-        edited = _edited_code_files(edits_path) if edits_path else []
         impacted = impacted_tests(cwd, edited, tc.test_roots or ["tests"])
         if impacted:
             scope = "impacted"
@@ -182,6 +188,94 @@ def run_verify(
         stamp["error"] = f"could not launch test command: {e}"
     stamp["duration_s"] = round(time.monotonic() - start, 2)
     stamp["ts"] = time.time()
+    _write_stamp(cwd, stamp)
+    return stamp
+
+
+def _affected_workspaces(cwd: str, edited: list[str]) -> list[tuple[Workspace, list[str]]]:
+    """Group edited code by its canonical workspace."""
+    if not edited:
+        return []
+    root = Path(cwd).resolve()
+    profile = detect_profile(cwd, use_cache=False)
+    grouped: dict[str, tuple[Workspace, list[str]]] = {}
+    for file_path in edited:
+        try:
+            relative = Path(file_path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            continue
+        workspace = route_file_to_workspace(relative, profile.workspaces)
+        if workspace is None:
+            continue
+        grouped.setdefault(workspace.path, (workspace, []))[1].append(relative)
+    return [grouped[path] for path in sorted(grouped)]
+
+
+def _run_workspace_verification(
+    cwd: str,
+    affected: list[tuple[Workspace, list[str]]],
+    *,
+    timeout_s: int,
+    session_id: str | None,
+) -> dict:
+    """Run each affected workspace's configured full test suite."""
+    records: list[dict] = []
+    for workspace, edited in affected:
+        workspace_root = Path(cwd) if workspace.path == "." else Path(cwd) / workspace.path
+        record = {
+            "path": workspace.path,
+            "command": workspace.test_command,
+            "exit_code": -1,
+            "ok": False,
+            "scope": "full",
+            "edited": edited,
+            "error": "",
+            "head_sha": _head_sha(cwd),
+            "dirty_digest": _dirty_digest(str(workspace_root)),
+        }
+        if not workspace.test_command:
+            record["error"] = "no test command discovered for workspace"
+            records.append(record)
+            continue
+        start = time.monotonic()
+        try:
+            proc = subprocess.run(
+                shlex.split(workspace.test_command), cwd=str(workspace_root),
+                capture_output=True, text=True, timeout=timeout_s,
+            )
+            record["exit_code"] = proc.returncode
+            record["ok"] = proc.returncode == 0
+            if proc.returncode != 0:
+                record["error"] = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
+        except subprocess.TimeoutExpired:
+            record["error"] = f"test run exceeded timeout ({timeout_s}s) — result unknown"
+        except (OSError, FileNotFoundError) as error:
+            record["error"] = f"could not launch test command: {error}"
+        record["duration_s"] = round(time.monotonic() - start, 2)
+        evidence = build_evidence(
+            "verify", command=record["command"], exit_code=record["exit_code"],
+            duration_ms=record["duration_s"] * 1000, scope="full", workspace=workspace.path,
+        )
+        record["evidence_id"] = evidence["evidence_id"]
+        records.append(record)
+
+    failed = [record for record in records if not record["ok"]]
+    stamp = {
+        "ok": not failed,
+        "command": " && ".join(record["command"] for record in records),
+        "exit_code": max((record["exit_code"] for record in failed), default=0),
+        "duration_s": round(sum(record.get("duration_s", 0.0) for record in records), 2),
+        "scope": "workspace",
+        "impacted": [],
+        "error": "\n".join(
+            f"[{record['path']}] {record['error']}" for record in failed
+        ),
+        "ts": time.time(),
+        "session_id": session_id or "",
+        "head_sha": _head_sha(cwd),
+        "dirty_digest": _dirty_digest(cwd),
+        "workspaces": records,
+    }
     _write_stamp(cwd, stamp)
     return stamp
 
@@ -298,6 +392,17 @@ def run_check(ctx: HookContext) -> CheckResult:
             problem = "last verification run failed" + (
                 f":\n{detail}" if detail else ""
             )
+        elif stamp.get("workspaces"):
+            affected = _affected_workspaces(str(ctx.cwd), edited)
+            needed = {workspace.path for workspace, _files in affected}
+            verified = {
+                str(record.get("path"))
+                for record in stamp.get("workspaces", [])
+                if isinstance(record, dict) and record.get("ok", False)
+            }
+            missing = sorted(needed - verified)
+            if missing:
+                problem = "the last verification run omitted affected workspace(s): " + ", ".join(missing)
         elif stamp.get("scope") == "impacted":
             # WP-7: everything edited this session must fall inside the
             # verified scope. Full-suite stamps are always a superset; an

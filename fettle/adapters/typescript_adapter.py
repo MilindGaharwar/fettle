@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
+from fettle.adapters import migrate_adapter
+from fettle.workspace import Workspace
 
 
+@migrate_adapter
 class TypeScriptAdapter:
     """TypeScript/JavaScript language adapter."""
 
@@ -118,6 +122,121 @@ class TypeScriptAdapter:
             message="Unused dependencies or exports detected",
             raw_tool_output=result.stdout[-2048:],
         )]
+
+    def _native_lint(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
+        if self._has_script("lint"):
+            result = self._runner.run([workspace.manager or "npm", "run", "lint", *(["--", *files] if files else [])])
+            if result.returncode == 0:
+                return []
+            parsed = self._parse_eslint_json(result.stdout + result.stderr)
+            return parsed or [self._command_failure("lint", files, result)]
+
+        result = self._runner.run([*self._exec_prefix(workspace), "biome", "check", "--reporter=json", *files])
+        if not result.tool_missing:
+            if result.returncode == 0:
+                return []
+            parsed = self._parse_biome(result.stdout + result.stderr)
+            return parsed or [self._command_failure("biome", files, result)]
+        result = self._runner.run([*self._exec_prefix(workspace), "eslint", "--format=json", *(files or ["."])])
+        if result.tool_missing:
+            return [self._advisory("Neither biome nor eslint found in the workspace")]
+        if result.returncode == 0:
+            return []
+        parsed = self._parse_eslint_json(result.stdout + result.stderr)
+        return parsed or [self._command_failure("eslint", files, result)]
+
+    def _native_format_check(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
+        if self._has_script("format"):
+            result = self._runner.run([workspace.manager or "npm", "run", "format", "--", "--check", *files])
+            return [] if result.returncode == 0 else [self._command_failure("format", files, result)]
+        result = self._runner.run([*self._exec_prefix(workspace), "biome", "format", "--check", *files])
+        if result.tool_missing:
+            result = self._runner.run([*self._exec_prefix(workspace), "prettier", "--check", *(files or ["."])])
+        if result.tool_missing:
+            return [self._advisory("Neither biome nor prettier found in the workspace")]
+        return [] if result.returncode == 0 else [self._command_failure("format", files, result)]
+
+    def _native_typecheck(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
+        if self._has_script("typecheck"):
+            result = self._runner.run([workspace.manager or "npm", "run", "typecheck"])
+        else:
+            result = self._runner.run([*self._exec_prefix(workspace), "tsc", "--noEmit"])
+        if result.tool_missing:
+            return [self._advisory("tsc not found in the workspace")]
+        if result.returncode == 0:
+            return []
+        parsed = self._parse_tsc(result.stdout + result.stderr)
+        return parsed or [self._command_failure("tsc", files, result, blocking=True)]
+
+    def _native_test(self, workspace: Workspace, files: list[str], scope: str) -> list[CheckFinding]:
+        if self._has_script("test"):
+            args = [workspace.manager or "npm", "test", *(["--", *files] if files else [])]
+            result = self._runner.run(args)
+        else:
+            result = self._runner.run([*self._exec_prefix(workspace), "vitest", "run", "--reporter=json", *files])
+            if result.tool_missing:
+                result = self._runner.run([*self._exec_prefix(workspace), "jest", "--json", *files])
+        if result.tool_missing:
+            return [self._advisory("Neither a test script, vitest, nor jest was found")]
+        return [] if result.returncode == 0 else [self._command_failure("test", files, result, blocking=True)]
+
+    def _native_build(self, workspace: Workspace) -> list[CheckFinding]:
+        manager = workspace.manager or "npm"
+        if self._has_script("build"):
+            result = self._runner.run([manager, "run", "build"])
+        else:
+            return [self._advisory("No repository build script found")]
+        if result.tool_missing:
+            return [self._advisory(f"Package manager not found: {manager}")]
+        return [] if result.returncode == 0 else [self._command_failure("build", ["package.json"], result, blocking=True)]
+
+    def _native_dependency_check(self, workspace: Workspace) -> list[CheckFinding]:
+        result = self._runner.run([*self._exec_prefix(workspace), "knip", "--reporter=json"])
+        if result.tool_missing:
+            return [self._advisory("knip not found in the workspace")]
+        return [] if result.returncode == 0 else [self._command_failure("knip", ["package.json"], result)]
+
+    def _package_data(self) -> dict:
+        try:
+            from pathlib import Path
+
+            data = json.loads((Path(self._cwd) / "package.json").read_text())
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _has_script(self, name: str) -> bool:
+        scripts = self._package_data().get("scripts", {})
+        return isinstance(scripts, dict) and isinstance(scripts.get(name), str)
+
+    @staticmethod
+    def _exec_prefix(workspace: Workspace) -> list[str]:
+        manager = workspace.manager or "npm"
+        return {
+            "npm": ["npm", "exec", "--"],
+            "pnpm": ["pnpm", "exec"],
+            "yarn": ["yarn", "exec"],
+            "bun": ["bunx"],
+        }.get(manager, [manager, "exec"])
+
+    @staticmethod
+    def _command_failure(
+        checker: str,
+        files: list[str],
+        result,
+        *,
+        blocking: bool = False,
+    ) -> CheckFinding:
+        output = (result.stdout + result.stderr).strip()
+        return CheckFinding(
+            checker=checker,
+            severity=FindingSeverity.ERROR if blocking else FindingSeverity.WARNING,
+            file=files[0] if files else ".",
+            line=0,
+            message=f"{checker} failed",
+            raw_tool_output=output[-2048:],
+            blocking=blocking,
+        )
 
     def _advisory(self, message: str) -> CheckFinding:
         return CheckFinding(

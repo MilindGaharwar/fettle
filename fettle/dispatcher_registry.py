@@ -89,30 +89,12 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     # PostToolUse — Write|Edit (tool-backed)
     CheckSpec(
-        name="post_edit",
-        run=_lazy("fettle.post_edit"),
+        name="adapter_check",
+        run=_lazy("fettle.adapter_check"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
-        extensions=frozenset({".py"}),
+        extensions=frozenset({".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs"}),
         order=25,
-        budget_ms=150,
-    ),
-    CheckSpec(
-        name="post_edit_ts",
-        run=_lazy("fettle.post_edit_ts"),
-        events=frozenset({"PostToolUse"}),
-        tools=frozenset({"Write", "Edit"}),
-        extensions=frozenset({".ts", ".tsx", ".js", ".jsx"}),
-        order=30,
-        budget_ms=80,
-    ),
-    CheckSpec(
-        name="post_edit_go",
-        run=_lazy("fettle.post_edit_go"),
-        events=frozenset({"PostToolUse"}),
-        tools=frozenset({"Write", "Edit"}),
-        extensions=frozenset({".go"}),
-        order=30,
         budget_ms=150,
     ),
     CheckSpec(

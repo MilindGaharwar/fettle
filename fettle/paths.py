@@ -11,6 +11,23 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
+
+
+FileKind = Literal["implementation", "test", "generated", "config", "dependency", "unknown"]
+
+IMPLEMENTATION_EXTENSIONS = frozenset({
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".sh",
+    ".bash", ".zsh",
+})
+DEPENDENCY_FILES = frozenset({
+    "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pipfile",
+    "uv.lock", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "bun.lock", "bun.lockb", "cargo.toml", "cargo.lock", "go.mod", "go.sum",
+})
+CONFIG_FILES = frozenset({
+    ".fettle.toml", "tsconfig.json", "jsconfig.json", "biome.json", "biome.jsonc",
+})
 
 
 def find_repo_root(start: str | Path | None = None) -> Path | None:
@@ -68,25 +85,42 @@ def relative_to_repo(path: str | Path, repo_root: Path) -> str:
 
 def is_implementation_file(path: str | Path) -> bool:
     """Check if a path is an implementation file (not config, not docs)."""
-    IMPL_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".sh"}
-    return Path(path).suffix in IMPL_EXTENSIONS
+    return classify_file(path) == "implementation"
 
 
 def is_test_file(path: str | Path) -> bool:
     """Check if a path is a test file."""
-    p = Path(path)
+    return classify_file(path) == "test"
+
+
+def classify_file(path: str | Path) -> FileKind:
+    """Classify a repository path consistently across adapters and gates."""
+    p = Path(str(path).replace("\\", "/"))
     name = p.name.lower()
     parts = [part.lower() for part in p.parts]
-    return (
+    if (
         name.startswith("test_")
         or name.endswith("_test.py")
-        or name.endswith(".test.ts")
-        or name.endswith(".test.js")
-        or name.endswith(".spec.ts")
-        or name.endswith(".spec.js")
+        or name.endswith("_test.go")
+        or ".test." in name
+        or ".spec." in name
+        or name == "conftest.py"
         or "tests" in parts
         or "test" in parts
-    )
+    ):
+        return "test"
+    if (
+        ".generated." in name or name.endswith(("_generated.py", ".g.dart"))
+        or "generated" in parts or "gen" in parts
+    ):
+        return "generated"
+    if name in DEPENDENCY_FILES or name.startswith("requirements") and name.endswith(".txt"):
+        return "dependency"
+    if name in CONFIG_FILES or name.startswith("tsconfig") and name.endswith(".json"):
+        return "config"
+    if p.suffix.lower() in IMPLEMENTATION_EXTENSIONS:
+        return "implementation"
+    return "unknown"
 
 
 def is_excluded(path: str | Path, exclude_patterns: list[str] | None = None) -> bool:

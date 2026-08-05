@@ -17,10 +17,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.config import load_config  # noqa: E402
+from fettle.paths import classify_file  # noqa: E402
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-IMPL_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go"}
 MANIFEST_FILES = {
     "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
     "Pipfile", "package.json", "Cargo.toml", "go.mod",
@@ -62,7 +62,7 @@ DEFAULT_THRESHOLDS = {
 
 
 def _is_test_path(path: str) -> bool:
-    return "/tests/" in path or "/test/" in path or "test_" in os.path.basename(path)
+    return classify_file(path) == "test"
 
 
 def _is_ignored(path: str) -> bool:
@@ -424,7 +424,7 @@ def main() -> None:
     # Extension guard
     ext = os.path.splitext(file_path)[1].lower()
     is_manifest = _is_manifest(file_path)
-    if ext not in IMPL_EXTENSIONS and not is_manifest:
+    if classify_file(file_path) not in ("implementation", "test") and not is_manifest:
         sys.exit(0)
 
     # Ignore patterns
@@ -481,7 +481,7 @@ def main() -> None:
         candidates.extend(sniff_lr001(file_path, content, changed_lines, cwd, session_id))
 
     # LR002 — abstraction names (regex, all languages)
-    if _budget_ok() and ext in IMPL_EXTENSIONS:
+    if _budget_ok() and classify_file(file_path) in ("implementation", "test"):
         candidates.extend(sniff_lr002(file_path, content, changed_lines, cwd, session_id))
 
     # LR003 — pass-through wrapper (Python AST)
@@ -525,7 +525,7 @@ def run_check(ctx):
 
     ext = os.path.splitext(file_path)[1].lower()
     is_manifest = _is_manifest(file_path)
-    if ext not in IMPL_EXTENSIONS and not is_manifest:
+    if classify_file(file_path) not in ("implementation", "test") and not is_manifest:
         return CheckResult.allow()
     if _is_ignored(file_path):
         return CheckResult.allow()
@@ -577,7 +577,7 @@ def run_check(ctx):
 
     if _budget_ok() and is_manifest:
         candidates.extend(sniff_lr001(file_path, content, changed_lines, cwd, session_id))
-    if _budget_ok() and ext in IMPL_EXTENSIONS:
+    if _budget_ok() and classify_file(file_path) in ("implementation", "test"):
         candidates.extend(sniff_lr002(file_path, content, changed_lines, cwd, session_id))
     if _budget_ok() and tree is not None:
         candidates.extend(sniff_lr003(file_path, tree, changed_lines, cwd, session_id))

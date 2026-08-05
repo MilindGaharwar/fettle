@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from fettle.adapters.typescript_adapter import TypeScriptAdapter
 from fettle.finding import FindingSeverity
 from fettle.profile import Profile
+from fettle.workspace import Workspace
 
 
 @dataclass
@@ -214,3 +215,61 @@ class TestDependencyCheck:
             findings = adapter.dependency_check(["app.ts"])
         assert len(findings) == 1
         assert "knip" in findings[0].message
+
+
+class TestRepositoryNativeCommands:
+    def test_native_lint_prefers_repository_script(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="pnpm")
+        with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)) as invoke:
+            run = adapter.lint(workspace, ["src/app.ts"])
+        assert run.result_state == "pass"
+        assert invoke.call_args.args[0] == ["pnpm", "run", "lint", "--", "src/app.ts"]
+
+    def test_native_lint_uses_manager_exec_before_global_path(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"devDependencies":{"eslint":"9"}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="npm")
+        eslint_output = json.dumps([{"filePath": "app.ts", "messages": []}])
+        with patch.object(adapter._runner, "run", side_effect=[
+            MockResult(tool_missing=True), MockResult(returncode=0, stdout=eslint_output),
+        ]) as invoke:
+            adapter.lint(workspace, ["app.ts"])
+        assert invoke.call_args_list[0].args[0][:3] == ["npm", "exec", "--"]
+        assert invoke.call_args_list[1].args[0][:3] == ["npm", "exec", "--"]
+
+    def test_native_build_uses_script_not_invalid_ci_command(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"build":"tsc"}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="yarn")
+        with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)) as invoke:
+            adapter.build(workspace)
+        assert invoke.call_args.args[0] == ["yarn", "run", "build"]
+
+    def test_native_build_without_script_is_visible_not_an_install(self, tmp_path):
+        (tmp_path / "package.json").write_text('{}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="pnpm")
+        with patch.object(adapter._runner, "run") as invoke:
+            run = adapter.build(workspace)
+        invoke.assert_not_called()
+        assert run.result_state == "violation"
+        assert "build script" in run.findings[0].message.lower()
+
+    def test_tsc_parser_reads_stderr(self, tmp_path):
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="pnpm")
+        error = "src/api.ts(12,5): error TS2322: Wrong type"
+        with patch.object(adapter._runner, "run", return_value=MockResult(returncode=1, stderr=error)):
+            run = adapter.typecheck(workspace, [])
+        assert run.findings[0].code == "TS2322"
+
+    def test_native_nonzero_unparseable_output_is_not_clean(self, tmp_path):
+        (tmp_path / "package.json").write_text('{}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="pnpm")
+        with patch.object(adapter._runner, "run", return_value=MockResult(returncode=1, stderr="bad output")):
+            run = adapter.typecheck(workspace, [])
+        assert run.result_state == "violation"
+        assert run.findings[0].checker == "tsc"

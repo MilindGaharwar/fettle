@@ -115,11 +115,11 @@ and are planning ranges, not commitments.
 | P8 | Attach evidence IDs to verify, coverage, UAT, CI, and integrations | v1.8 | P6 | 2–4 days | Complete |
 | P9 | Consolidate workspace models and nested routing | v1.9 | P3 | 4–7 days | Complete |
 | P10 | Strengthen adapter protocol with explicit `CheckRun` state | v1.9 | P1, P9 | 3–5 days | Complete |
-| P11 | Add adapter-backed dispatcher check and migrate TypeScript | v1.9 | P3, P10 | 3–5 days | Planned |
-| P12 | Migrate Go, Python, and Rust after parity | v1.9 | P11 | 4–7 days | Planned |
-| P13 | Centralize file and test classification | v1.9 | P9, P10 | 3–5 days | Planned |
-| P14 | Verify all affected workspaces and bind evidence | v1.9 | P8, P9, P10 | 3–5 days | Planned |
-| P15 | Complete repository-native JS/TS tooling | v1.10 | P10, P11 | 3–5 days | Planned |
+| P11 | Add adapter-backed dispatcher check and migrate TypeScript | v1.9 | P3, P10 | 3–5 days | Implemented |
+| P12 | Migrate Go, Python, and Rust after parity | v1.9 | P11 | 4–7 days | Implemented |
+| P13 | Centralize file and test classification | v1.9 | P9, P10 | 3–5 days | Implemented |
+| P14 | Verify all affected workspaces and bind evidence | v1.9 | P8, P9, P10 | 3–5 days | Implemented |
+| P15 | Complete repository-native JS/TS tooling | v1.10 | P10, P11 | 3–5 days | Implemented |
 | P16 | Discover Node workspaces and framework metadata | v1.10 | P9, P15 | 2–4 days | Planned |
 | P17 | Establish web CLI/hook/LSP parity and eval corpus | v1.10 | P5, P15, P16 | 3–5 days | Planned |
 | P18 | Add argv-only generic command integration | v1.10 | P1, P6, P10 | 2–4 days | Planned |

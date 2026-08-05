@@ -14,6 +14,13 @@
 - Workspace discovery now uses one canonical model, supports nested projects,
   longest-prefix routing, and per-workspace command overrides. Adapter checks
   expose explicit four-state `CheckRun` outcomes through a compatibility bridge.
+- Post-edit language checks now route through one workspace-aware adapter entry
+  point for Python, JavaScript/TypeScript, Go, and Rust. File classification is
+  shared across gates, and verification records every affected workspace while
+  preserving the existing single-workspace stamp contract.
+- JavaScript/TypeScript checks prefer repository scripts and package-manager
+  execution for ESLint/Biome, Prettier, TypeScript, Vitest/Jest, and Knip;
+  missing tools, missing build scripts, and unparseable failures stay visible.
 
 ## v1.7.0 — Workflows Everywhere
 

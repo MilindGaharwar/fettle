@@ -80,7 +80,7 @@ def test_registry_routes_go_files(tmp_path):
     f = _write_go(tmp_path, "svc/main.go", CLEAN)
     ctx = _ctx(tmp_path, f)
     names = [spec.name for spec in select_checks(ctx)]
-    assert "post_edit_go" in names
+    assert "adapter_check" in names
 
 
 def test_non_go_file_allows(tmp_path):

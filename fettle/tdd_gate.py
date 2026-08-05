@@ -24,6 +24,8 @@ import re
 import time
 from pathlib import Path
 
+from fettle.paths import classify_file
+
 logger = logging.getLogger(__name__)
 
 _EXEMPT_PATTERNS_DEFAULT = [
@@ -39,12 +41,7 @@ def _is_exempt(rel_path: str, exempt_patterns: list[str]) -> bool:
 
 
 def _is_test_file(rel_path: str, test_patterns: list[str]) -> bool:
-    basename = os.path.basename(rel_path)
-    if basename.startswith("test_") or basename.endswith("_test.py"):
-        return True
-    if ".test." in basename or ".spec." in basename:
-        return True
-    if "/tests/" in rel_path or "/test/" in rel_path or rel_path.startswith("tests/"):
+    if classify_file(rel_path) == "test":
         return True
     return any(fnmatch.fnmatch(rel_path, pat) for pat in test_patterns)
 

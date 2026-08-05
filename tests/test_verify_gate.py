@@ -139,6 +139,86 @@ class TestRunVerify:
         stamp = run_verify(str(repo), _cfg(), full=True)
         assert stamp["scope"] == "full"
 
+    def test_mixed_repo_runs_only_affected_workspaces(self, tmp_path):
+        py = tmp_path / "services" / "api"
+        web = tmp_path / "apps" / "web"
+        untouched = tmp_path / "tools" / "worker"
+        for directory in (py, web, untouched):
+            directory.mkdir(parents=True)
+        (py / "pyproject.toml").write_text('[project]\nname="api"\n')
+        (py / "tests").mkdir()
+        (web / "package.json").write_text('{"name":"web","scripts":{"test":"vitest run"}}')
+        (untouched / "go.mod").write_text("module example.test/worker\n")
+        py_file = py / "app.py"
+        web_file = web / "app.ts"
+        py_file.write_text("x = 1")
+        web_file.write_text("const x = 1")
+        state = tmp_path / "state" / "sess-mixed"
+        _write_edits(state, [str(py_file), str(web_file)])
+
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-mixed")
+
+        assert stamp["ok"] is True
+        assert [record["path"] for record in stamp["workspaces"]] == ["apps/web", "services/api"]
+        assert [call.kwargs["cwd"] for call in invoke.call_args_list if call.args[0][0] != "git"] == [
+            str(web), str(py),
+        ]
+        assert all(record["dirty_digest"] for record in stamp["workspaces"])
+
+    def test_mixed_repo_failure_is_visible_per_workspace(self, tmp_path):
+        for path, marker, content in (
+            ("api", "pyproject.toml", '[project]\nname="api"\n'),
+            ("web", "package.json", '{"name":"web"}'),
+        ):
+            root = tmp_path / path
+            root.mkdir()
+            (root / marker).write_text(content)
+            (root / ("app.py" if path == "api" else "app.ts")).write_text("")
+            if path == "api":
+                (root / "tests").mkdir()
+        state = tmp_path / "state" / "sess-mixed"
+        _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
+        results = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 2, "", "web failed"),
+        ]
+
+        def run_command(argv, **kwargs):
+            if argv[0] == "git":
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return results.pop(0)
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.subprocess.run", side_effect=run_command)):
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-mixed")
+
+        assert stamp["ok"] is False
+        assert stamp["exit_code"] == 2
+        assert stamp["workspaces"][1]["error"] == "web failed"
+
+    def test_one_affected_nested_workspace_runs_from_its_root(self, tmp_path):
+        api = tmp_path / "services" / "api"
+        web = tmp_path / "apps" / "web"
+        api.mkdir(parents=True)
+        web.mkdir(parents=True)
+        (api / "pyproject.toml").write_text('[project]\nname="api"\n')
+        (api / "tests").mkdir()
+        source = api / "app.py"
+        source.write_text("")
+        (web / "package.json").write_text('{"name":"web"}')
+        state = tmp_path / "state" / "sess-one"
+        _write_edits(state, [str(source)])
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-one")
+        test_calls = [call for call in invoke.call_args_list if call.args[0][0] != "git"]
+        assert test_calls[0].kwargs["cwd"] == str(api)
+        assert stamp["workspaces"][0]["path"] == "services/api"
+
 
 def _gate_ctx(cwd: Path, config: dict) -> HookContext:
     hook_input = HookInput(
@@ -344,6 +424,51 @@ class TestStopGate:
         past = time.time() - 60
         os.utime(stamp, (past, past))
         os.utime(edits)  # edits mtime newer than stamp
+        with patch("fettle.config.state_dir", return_value=state):
+            assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+
+    def test_multi_workspace_stamp_omitting_affected_workspace_is_rejected(self, tmp_path):
+        for path, marker, filename in (
+            ("api", "pyproject.toml", "app.py"),
+            ("web", "package.json", "app.ts"),
+        ):
+            root = tmp_path / path
+            root.mkdir()
+            (root / marker).write_text("{}" if marker == "package.json" else '[project]\nname="api"\n')
+            (root / filename).write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({
+            "ok": True, "session_id": "sess-g", "scope": "full",
+            "workspaces": [{"path": "api", "ok": True, "scope": "full"}],
+        }))
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "web" in result.message
+
+    def test_multi_workspace_stamp_covering_affected_workspaces_allows(self, tmp_path):
+        for path, marker, filename in (
+            ("api", "pyproject.toml", "app.py"),
+            ("web", "package.json", "app.ts"),
+        ):
+            root = tmp_path / path
+            root.mkdir()
+            (root / marker).write_text("{}" if marker == "package.json" else '[project]\nname="api"\n')
+            (root / filename).write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
+        stamp = tmp_path / STAMP_RELPATH
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text(json.dumps({
+            "ok": True, "session_id": "sess-g", "scope": "full",
+            "workspaces": [
+                {"path": "api", "ok": True, "scope": "full"},
+                {"path": "web", "ok": True, "scope": "full"},
+            ],
+        }))
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
 

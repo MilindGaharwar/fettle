@@ -113,3 +113,38 @@ def test_adapter_run_marks_clean_result_pass(tmp_path):
     run = run_adapter_check(adapter, "lint", workspace, [], scope="full")
     assert run.result_state == ResultState.PASS
     assert run.findings == []
+
+
+def test_all_adapter_operations_support_native_workspace_contract(tmp_path):
+    workspace = Workspace(name="app", path=".", language="python", marker="pyproject.toml")
+    adapter = PythonAdapter(cwd=str(tmp_path))
+    adapter._runner.run = lambda _cmd: RunResult(returncode=0)
+
+    runs = [
+        adapter.lint(workspace, ["app.py"]),
+        adapter.format_check(workspace, ["app.py"]),
+        adapter.typecheck(workspace, ["app.py"]),
+        adapter.test(workspace, ["test_app.py"], "changed"),
+        adapter.build(workspace),
+        adapter.dependency_check(workspace),
+    ]
+
+    assert all(isinstance(run, CheckRun) for run in runs)
+    assert all(run.result_state == ResultState.PASS for run in runs)
+
+
+def test_each_registered_adapter_returns_native_check_run(tmp_path):
+    languages = {
+        "python": "pyproject.toml",
+        "typescript": "package.json",
+        "go": "go.mod",
+        "rust": "Cargo.toml",
+    }
+    for language, marker in languages.items():
+        adapter_type = type(get_adapter(language))
+        adapter = adapter_type(cwd=str(tmp_path))
+        adapter._runner.run = lambda _cmd: RunResult(returncode=0)
+        workspace = Workspace(name="app", path=".", language=language, marker=marker)
+        run = adapter.lint(workspace, [])
+        assert isinstance(run, CheckRun)
+        assert run.result_state == ResultState.PASS

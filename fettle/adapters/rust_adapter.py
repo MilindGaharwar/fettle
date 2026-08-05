@@ -14,8 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
+from fettle.adapters import migrate_adapter
 
 
+@migrate_adapter
 class RustAdapter:
     """Rust language adapter using cargo toolchain."""
 

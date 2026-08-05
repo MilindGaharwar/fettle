@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from fettle.paths import (
-    find_repo_root, is_within_repo,
+    classify_file, find_repo_root, is_within_repo,
     relative_to_repo, is_implementation_file, is_test_file, is_excluded,
 )
 
@@ -84,3 +84,38 @@ def test_is_excluded():
     assert is_excluded("node_modules/pkg/index.js", patterns) is True
     assert is_excluded("src/__pycache__/mod.pyc", patterns) is True
     assert is_excluded("src/app.py", patterns) is False
+
+
+def test_central_file_classification_matrix():
+    cases = {
+        "src/app.py": "implementation",
+        "src/app.tsx": "implementation",
+        "src/main.go": "implementation",
+        "src/lib.rs": "implementation",
+        "tests/test_app.py": "test",
+        "src/app.spec.ts": "test",
+        "pkg/app_test.go": "test",
+        "tests/widget.rs": "test",
+        "src/api.generated.ts": "generated",
+        "src/generated/client.py": "generated",
+        "pyproject.toml": "dependency",
+        "package.json": "dependency",
+        "go.mod": "dependency",
+        "Cargo.lock": "dependency",
+        ".fettle.toml": "config",
+        "tsconfig.json": "config",
+        "README.md": "unknown",
+        "src/App.java": "unknown",
+        "src\\app.test.ts": "test",
+    }
+    assert {path: classify_file(path) for path in cases} == cases
+
+
+def test_registered_adapters_share_central_classification():
+    from fettle.adapters import list_adapters
+    from fettle.workspace import Workspace
+
+    for adapter in list_adapters():
+        workspace = Workspace(path=".", language=adapter.language)
+        assert adapter.classify("tests/test_app.py", workspace) == "test"
+        assert adapter.classify("src/generated/api.ts", workspace) == "generated"

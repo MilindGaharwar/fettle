@@ -16,12 +16,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from fettle.paths import classify_file
+
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 RULES_DIR = PLUGIN_ROOT / "rules"
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
-
-_SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".jsx", ".go")
-
 
 @dataclass
 class CorpusMeasurement:
@@ -55,7 +54,7 @@ def load_budgets(path: str | Path) -> dict:
 def _count_kloc(corpus_dir: Path) -> float:
     total = 0
     for f in corpus_dir.rglob("*"):
-        if f.is_file() and f.suffix in _SOURCE_EXTENSIONS:
+        if f.is_file() and classify_file(f) in ("implementation", "test"):
             total += sum(1 for _ in f.open(errors="replace"))
     return total / 1000.0
 

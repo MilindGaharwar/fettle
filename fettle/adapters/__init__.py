@@ -6,18 +6,17 @@ WP-78: Defines the adapter protocol and provides discovery/registry.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from functools import wraps
+from typing import Protocol
 
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, EvidenceReference, ResultState
+from fettle.paths import FileKind, classify_file
 from fettle.trace import build_evidence
 from fettle.workspace import Workspace
-
-
-FileKind = Literal["implementation", "test", "generated", "config", "dependency", "unknown"]
 
 
 @dataclass
@@ -55,15 +54,63 @@ def run_adapter_check(
     *,
     scope: str = "full",
 ) -> CheckRun:
-    """Bridge legacy adapters to the explicit CheckRun contract during migration."""
+    """Invoke an adapter operation through the workspace-first contract."""
     files = files or []
     method = getattr(adapter, operation)
-    if operation == "build":
-        findings = method(scope)
-    elif operation == "dependency_check":
-        findings = method(files)
-    else:
-        findings = method(scope, files)
+    if operation in ("build", "dependency_check"):
+        return method(workspace)
+    elif operation == "test":
+        return method(workspace, files, scope)
+    return method(workspace, files)
+
+
+def migrate_adapter(cls):
+    """Expose native workspace calls while retaining shipped legacy callers."""
+    if not hasattr(cls, "supports"):
+        cls.supports = lambda self, workspace: workspace.language in {
+            self.language,
+            "javascript" if self.language == "typescript" else self.language,
+        }
+    if not hasattr(cls, "classify"):
+        cls.classify = lambda self, path, workspace: classify_file(path)
+    for operation in ("lint", "format_check", "typecheck", "test", "build", "dependency_check"):
+        legacy = getattr(cls, operation)
+
+        @wraps(legacy)
+        def migrated(self, *args, _operation=operation, _legacy=legacy):
+            if not args or not isinstance(args[0], Workspace):
+                return _legacy(self, *args)
+
+            workspace = args[0]
+            native = getattr(self, f"_native_{_operation}", None)
+            if _operation == "build":
+                scope = "full"
+                findings = native(workspace) if native else _legacy(self, scope)
+            elif _operation == "dependency_check":
+                scope = "full"
+                findings = native(workspace) if native else _legacy(self, [])
+            elif _operation == "test":
+                files = args[1] if len(args) > 1 else []
+                scope = args[2] if len(args) > 2 else "full"
+                findings = native(workspace, files, scope) if native else _legacy(self, scope, files)
+            else:
+                files = args[1] if len(args) > 1 else []
+                scope = "changed" if files else "full"
+                findings = native(workspace, files) if native else _legacy(self, scope, files)
+
+            return _as_check_run(self, workspace, findings, scope)
+
+        setattr(cls, operation, migrated)
+    return cls
+
+
+def _as_check_run(
+    adapter: object,
+    workspace: Workspace,
+    findings: list[CheckFinding],
+    scope: str,
+) -> CheckRun:
+    """Convert one completed legacy operation into the native result contract."""
 
     runner = getattr(adapter, "_runner", None)
     last_result = getattr(runner, "last_result", None)

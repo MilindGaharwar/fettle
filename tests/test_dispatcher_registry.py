@@ -76,6 +76,19 @@ class TestSelectChecks:
         names = [s.name for s in selected]
         assert "capsule_guard" not in names
 
+    def test_supported_languages_use_one_adapter_check(self, tmp_path):
+        for suffix in (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs"):
+            target = tmp_path / f"x{suffix}"
+            target.write_text("")
+            ctx = _ctx(
+                tmp_path, event="PostToolUse", tool="Write",
+                tool_input={"file_path": str(target)},
+            )
+            names = [spec.name for spec in select_checks(ctx)]
+            assert "adapter_check" in names
+            assert "post_edit_ts" not in names
+            assert "post_edit_go" not in names
+
 
 class TestLazyRegistry:
     # WP-13 (audit M-03): importing the registry must not import gate modules.
