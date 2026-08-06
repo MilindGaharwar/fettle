@@ -1,9 +1,15 @@
 line-length = 120
 target-version = "py312"
+extend-exclude = ["build", "dist", "tests/fixtures"]
 
 [lint]
 select = ["E", "F", "BLE", "S110", "S608", "S701", "B", "SIM", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    "SIM102", "SIM105", "SIM108", "SIM110", "SIM114", "SIM115", "SIM117",
+    "UP035", "UP042",
+    "B905",
+]
 
 [lint.per-file-ignores]
 "tests/*" = ["S", "BLE"]

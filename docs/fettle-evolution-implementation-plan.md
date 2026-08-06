@@ -1,6 +1,6 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED for completed/current activities; P33–P43 verification-integrity and P44–P51 change-integrity programs PROPOSED, not authorized
+Status: APPROVED for completed activities; P33 and P44 complete; P34-P43 and P45-P51 remain proposed or evidence-gated
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -137,7 +137,7 @@ and are planning ranges, not commitments.
 | P30 | Extract shared side-effect-controlled analysis service | v1.14 | P12, P17, P19 | 4–7 days | Planned |
 | P31 | Add thin stdio MCP query surface | v1.14 | P30 | 3–5 days | Demand-gated |
 | P32 | Graduate additional LSP languages after parity | v1.14 | P22, P23, P30 | 3–6 days | Evidence-gated |
-| P33 | Make scanner and CI result handling fail closed | next patch | P1, P3 | 1–2 days | Proposed |
+| P33 | Make scanner and CI result handling fail closed | next patch | P1, P3 | 1–2 days | Complete |
 | P34 | Repair mutation selection, execution, and score integrity | next minor | P33 | 2–4 days | Proposed |
 | P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Proposed |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
@@ -148,7 +148,7 @@ and are planning ranges, not commitments.
 | P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
 | P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | Demand-gated |
-| P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Proposed |
+| P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Complete |
 | P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Proposed |
 | P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Proposed |
 | P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Proposed |

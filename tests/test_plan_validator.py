@@ -169,6 +169,21 @@ def test_missing_method_column_fails():
     assert any("method" in e.lower() for e in result.errors)
 
 
+def test_wp_body_stops_at_next_same_or_higher_heading():
+    wp = (
+        "### WP-1 Contract only\n\n"
+        "No implementation task table.\n\n"
+        "## Later reference section\n\n"
+        "| Surface | Required evidence |\n"
+        "|---|---|\n"
+        "| CLI | Exit contract |\n"
+    )
+
+    result = validate_plan(make_plan(wp))
+
+    assert result.passed, result.errors
+
+
 # ---------------------------------------------------------------------------
 # 11. Case-insensitive method matching
 # ---------------------------------------------------------------------------

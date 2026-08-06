@@ -41,8 +41,8 @@ def _gate_quality(root: str, cfg: dict) -> dict:
         from pathlib import Path
 
         from fettle.baseline import filter_new_violations, load_baseline
-        from fettle.quality_scan import load_config as _lc
-        from fettle.quality_scan import run_ruff, run_semgrep
+        from fettle.quality_scan import execute_required_scanners, load_config as _lc
+        from fettle.result import ResultStatus
         from fettle.spec_audit import scan_spec_audit
 
         _cfg = _lc(root)  # sets severity globals inside quality_scan
@@ -51,7 +51,26 @@ def _gate_quality(root: str, cfg: dict) -> dict:
             item.path.replace("\\", "/")
             for item in get_changed_files(root) + get_vs_base(root, base_ref)
         }
-        findings = run_ruff(root) + run_semgrep(root)
+        scanner_results = execute_required_scanners(root)
+        failed = [
+            result for result in scanner_results
+            if result.status in (ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR)
+        ]
+        if failed:
+            detail = "; ".join(f"{result.tool}: {result.message}" for result in failed)
+            status = (
+                ResultStatus.CONFIG_ERROR
+                if any(result.status == ResultStatus.CONFIG_ERROR for result in failed)
+                else ResultStatus.TOOL_ERROR
+            )
+            return {
+                "name": "quality",
+                "ok": False,
+                "status": status.value,
+                "error": detail,
+                "findings": [],
+            }
+        findings = [finding for result in scanner_results for finding in result.findings]
         baseline = load_baseline(Path(root))
         if baseline:
             findings = filter_new_violations(findings, baseline)
@@ -63,6 +82,7 @@ def _gate_quality(root: str, cfg: dict) -> dict:
     return {
         "name": "quality",
         "ok": not errors,
+        "status": "violation" if errors else "pass",
         "findings": [
             f"{f.get('file')}:{f.get('line')} {f.get('code', f.get('rule', ''))}"
             for f in errors
@@ -80,7 +100,14 @@ def _gate_plans(root: str, cfg: dict) -> dict:
         gate = cfg.get("gates", {}).get("plan", {})
         plan_dir = gate.get("plan_dir", "docs")
         plan_glob = gate.get("plan_glob", "*plan*.md")
-        plans = glob.glob(os.path.join(root, plan_dir, plan_glob))
+        excluded = gate.get("exclude", [])
+        plans = [
+            path for path in glob.glob(os.path.join(root, plan_dir, plan_glob))
+            if not any(
+                glob.fnmatch.fnmatch(os.path.relpath(path, root).replace("\\", "/"), pattern)
+                for pattern in excluded
+            )
+        ]
         failed = []
         for plan in plans:
             with open(plan, encoding="utf-8", errors="ignore") as fh:

@@ -15,13 +15,15 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
+from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.config import load_config  # noqa: E402
 from fettle._resources import rules_dir  # noqa: E402
+from fettle.result import ResultStatus  # noqa: E402
 from fettle.spec_audit import scan_spec_audit  # noqa: E402
+from fettle.tool_runner import ToolRunner  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -37,6 +39,17 @@ WARNING_PREFIXES = {"SIM", "UP"}
 
 # Directories that are never part of the project's own code.
 _SKIP_DIRS = {"node_modules", "__pycache__", "venv", "build", "dist"}
+_TOOL_TIMEOUT_S = 120.0
+
+
+@dataclass(frozen=True)
+class ToolScanResult:
+    """Structured scanner outcome; findings alone cannot encode tool failure."""
+
+    tool: str
+    status: ResultStatus
+    findings: list[dict] = field(default_factory=list)
+    message: str = ""
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,6 +95,16 @@ def _is_ignored(rel_path: str, ignore_patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(rel_path, pat) for pat in ignore_patterns)
 
 
+def _is_scannable_file(path: str, root: str, ignore_patterns: list[str]) -> bool:
+    rel_path = os.path.relpath(os.path.abspath(path), root).replace(os.sep, "/")
+    parts = rel_path.split("/")
+    return (
+        rel_path.endswith(".py")
+        and not any(part.startswith(".") or part in _SKIP_DIRS for part in parts[:-1])
+        and not _is_ignored(rel_path, ignore_patterns)
+    )
+
+
 def _classify(rule_id: str, tool_severity: str = "") -> str:
     if rule_id in ERROR_RULES:
         return "ERROR"
@@ -108,35 +131,51 @@ def _severity_order(sev: str) -> int:
 # Tool runners
 # ---------------------------------------------------------------------------
 
-def run_ruff(root: str | list[str]) -> list[dict]:
+def execute_ruff(root: str | list[str]) -> ToolScanResult:
     ruff = _resolve_tool("ruff")
     if not ruff:
-        print("WARNING: ruff not found — skipping ruff checks", file=sys.stderr)
-        return []
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff not found")
 
     targets = [root] if isinstance(root, str) else list(root)
     if not targets:
-        return []
+        return ToolScanResult("ruff", ResultStatus.SKIPPED, message="no Python files in scope")
     ruff_toml = str(rules_dir() / ".ruff.toml")
     cmd = [ruff, "check", "--output-format=json"]
     if os.path.isfile(ruff_toml):
         cmd.extend(["--config", ruff_toml])
     cmd.extend(targets)
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = ToolRunner(timeout_s=_TOOL_TIMEOUT_S).run(cmd)
+    if result.tool_missing:
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff not found")
+    if result.timed_out:
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff timed out")
     # ruff exits 1 when findings exist — that is expected
     if result.returncode not in (0, 1):
-        print(f"WARNING: ruff exited {result.returncode}: {result.stderr.strip()}", file=sys.stderr)
-        return []
+        detail = result.stderr.strip()
+        message = f"ruff exited {result.returncode}"
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message=f"{message}: {detail}" if detail else message)
+
+    if not result.stdout.strip():
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff returned empty output")
 
     try:
-        entries = json.loads(result.stdout) if result.stdout.strip() else []
+        entries = json.loads(result.stdout)
     except json.JSONDecodeError:
-        print("WARNING: could not parse ruff JSON output", file=sys.stderr)
-        return []
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff returned malformed JSON")
+    if not isinstance(entries, list):
+        return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff JSON output must be an array")
 
     findings: list[dict] = []
     for e in entries:
+        if (
+            not isinstance(e, dict)
+            or not isinstance(e.get("filename", ""), str)
+            or not isinstance(e.get("location", {}), dict)
+            or not isinstance(e.get("code", ""), str)
+            or not isinstance(e.get("message", ""), str)
+        ):
+            return ToolScanResult("ruff", ResultStatus.TOOL_ERROR, message="ruff returned a malformed finding")
         findings.append({
             "file": e.get("filename", ""),
             "line": e.get("location", {}).get("row", 0),
@@ -145,37 +184,72 @@ def run_ruff(root: str | list[str]) -> list[dict]:
             "severity": _classify(e.get("code", ""), ""),
             "tool": "ruff",
         })
-    return findings
+    status = ResultStatus.VIOLATION if findings else ResultStatus.PASS
+    return ToolScanResult("ruff", status, findings)
 
 
-def run_semgrep(root: str | list[str]) -> list[dict]:
+def run_ruff(root: str | list[str]) -> list[dict]:
+    """Compatibility wrapper for interactive callers that consume findings."""
+    result = execute_ruff(root)
+    if result.status in (ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR):
+        print(f"WARNING: {result.message}", file=sys.stderr)
+    return result.findings
+
+
+def execute_semgrep(root: str | list[str]) -> ToolScanResult:
     semgrep = _resolve_tool("semgrep")
     if not semgrep:
-        print("WARNING: semgrep not found — skipping semgrep checks", file=sys.stderr)
-        return []
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep not found")
 
     targets = [root] if isinstance(root, str) else list(root)
     if not targets:
-        return []
+        return ToolScanResult("semgrep", ResultStatus.SKIPPED, message="no Python files in scope")
     rules_file = str(rules_dir() / "llm-antipatterns.yml")
     if not os.path.isfile(rules_file):
-        print("WARNING: semgrep rules file not found — skipping semgrep checks", file=sys.stderr)
-        return []
+        return ToolScanResult(
+            "semgrep", ResultStatus.CONFIG_ERROR, message="semgrep rules file not found"
+        )
 
     cmd = [semgrep, "--config", rules_file, "--json", *targets]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = ToolRunner(timeout_s=_TOOL_TIMEOUT_S).run(cmd)
+    if result.tool_missing:
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep not found")
+    if result.timed_out:
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep timed out")
     if result.returncode not in (0, 1):
-        print(f"WARNING: semgrep exited {result.returncode}: {result.stderr.strip()[:200]}", file=sys.stderr)
-        return []
+        detail = result.stderr.strip()[:200]
+        message = f"semgrep exited {result.returncode}"
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message=f"{message}: {detail}" if detail else message)
+
+    if not result.stdout.strip():
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep returned empty output")
 
     try:
-        data = json.loads(result.stdout) if result.stdout.strip() else {}
+        data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        print("WARNING: could not parse semgrep JSON output", file=sys.stderr)
-        return []
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep returned malformed JSON")
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        return ToolScanResult(
+            "semgrep", ResultStatus.TOOL_ERROR, message="semgrep JSON output must contain a results array"
+        )
+    errors = data.get("errors", [])
+    if not isinstance(errors, list):
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep JSON errors must be an array")
+    if errors:
+        first = errors[0]
+        detail = first.get("message", "reported an error") if isinstance(first, dict) else str(first)
+        return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message=f"semgrep error: {detail}")
 
     findings: list[dict] = []
     for r in data.get("results", []):
+        if (
+            not isinstance(r, dict)
+            or not isinstance(r.get("path", ""), str)
+            or not isinstance(r.get("start", {}), dict)
+            or not isinstance(r.get("check_id", ""), str)
+            or not isinstance(r.get("extra", {}), dict)
+        ):
+            return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep returned a malformed finding")
         sev = r.get("extra", {}).get("severity", "warning").upper()
         findings.append({
             "file": r.get("path", ""),
@@ -185,7 +259,23 @@ def run_semgrep(root: str | list[str]) -> list[dict]:
             "severity": _classify(r.get("check_id", "").rsplit(".", 1)[-1], sev),
             "tool": "semgrep",
         })
-    return findings
+    status = ResultStatus.VIOLATION if findings else ResultStatus.PASS
+    return ToolScanResult("semgrep", status, findings)
+
+
+def run_semgrep(root: str | list[str]) -> list[dict]:
+    """Compatibility wrapper for interactive callers that consume findings."""
+    result = execute_semgrep(root)
+    if result.status in (ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR):
+        print(f"WARNING: {result.message}", file=sys.stderr)
+    return result.findings
+
+
+def execute_required_scanners(root: str) -> list[ToolScanResult]:
+    """Run required scanners over the canonical, explicitly collected file set."""
+    root = os.path.abspath(root)
+    targets = _collect_py_files(root, _load_ignore(root))
+    return [execute_ruff(targets), execute_semgrep(targets)]
 
 
 # ---------------------------------------------------------------------------
@@ -269,11 +359,14 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
 
     ignore_patterns = _load_ignore(root)
     if files is not None:
-        targets: str | list[str] = [os.path.abspath(f) for f in files]
+        targets: str | list[str] = [
+            os.path.abspath(f) for f in files
+            if _is_scannable_file(f, root, ignore_patterns)
+        ]
         file_count = len(targets)
     else:
-        targets = root
-        file_count = len(_collect_py_files(root, ignore_patterns))
+        targets = _collect_py_files(root, ignore_patterns)
+        file_count = len(targets)
 
     findings = run_ruff(targets) + run_semgrep(targets) + scan_spec_audit(root, cfg)
     for f in findings:
@@ -299,7 +392,7 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
         for f in findings
     ]
     if files is not None:
-        rel_targets = {os.path.relpath(os.path.abspath(f), root) for f in files}
+        rel_targets = {os.path.relpath(f, root) for f in targets}
         normalized = [f for f in normalized if f["file"] in rel_targets]
     return {"findings": normalized, "file_count": file_count}
 
@@ -324,8 +417,7 @@ def main() -> int:
     py_files = _collect_py_files(root, ignore_patterns)
     file_count = len(py_files)
 
-    # Run tools on the whole directory (they handle file discovery internally)
-    findings = run_ruff(root) + run_semgrep(root) + scan_spec_audit(root, cfg)
+    findings = run_ruff(py_files) + run_semgrep(py_files) + scan_spec_audit(root, cfg)
 
     # Root-relative paths: keeps committed baselines portable across machines
     # and checkout locations.

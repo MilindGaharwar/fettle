@@ -1,6 +1,6 @@
 # UX Spec: Change Integrity Hypergraph
 
-Status: PROPOSED; operator contract and UAT scenarios, no runtime implementation authorized
+Status: APPROVED; P44 contract implementation complete, later user-facing packages remain gated
 
 Architecture: [change-integrity-architecture.md](change-integrity-architecture.md)
 

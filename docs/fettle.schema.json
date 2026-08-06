@@ -58,6 +58,9 @@
               "type": "string",
               "default": "*plan*.md"
             },
+            "exclude": {
+              "type": "array"
+            },
             "max_age_hours": {
               "type": "integer",
               "default": 1,
@@ -1153,6 +1156,9 @@
       "type": "object",
       "properties": {
         "forbidden": {
+          "type": "array"
+        },
+        "exclude": {
           "type": "array"
         },
         "extra_secret_patterns": {

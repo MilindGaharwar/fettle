@@ -137,21 +137,31 @@ def test_critical_directive_in_error_output():
 
 # ─── 8. test_jsonl_dedup_prevents_repeat ─────────────────────────────────────
 def test_jsonl_dedup_prevents_repeat():
-    fixture = os.path.join(FIXTURES, "violations", "bare_except.py")
     tmpdir = tempfile.mkdtemp()
     try:
+        fixture = os.path.join(tmpdir, "warning.py")
+        with open(fixture, "w") as fh:
+            fh.write(
+                "def is_ready(value):\n"
+                "    if value:\n"
+                "        return True\n"
+                "    else:\n"
+                "        return False\n"
+            )
         # First run — creates trace entries
-        run_hook(
+        first_stdout, _, _ = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
             extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
         # Second run — should hit dedup
-        run_hook(
+        second_stdout, _, _ = run_hook(
             {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
             extra_env={"FETTLE_GATE_MODE": "advisory"},
             cwd=tmpdir,
         )
+        assert "SIM103" in first_stdout
+        assert second_stdout == ""
 
         trace_path = os.path.join(tmpdir, ".fettle", "trace.jsonl")
         assert os.path.isfile(trace_path)
@@ -164,6 +174,31 @@ def test_jsonl_dedup_prevents_repeat():
         # The second metric should show dedup_suppressed > 0
         assert len(metrics) >= 2
         assert metrics[-1]["dedup_suppressed"] > 0
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_jsonl_dedup_never_suppresses_errors():
+    fixture = os.path.join(FIXTURES, "violations", "bare_except.py")
+    tmpdir = tempfile.mkdtemp()
+    try:
+        outputs = []
+        for _ in range(2):
+            stdout, _, _ = run_hook(
+                {"tool_input": {"file_path": fixture}, "cwd": tmpdir},
+                extra_env={"FETTLE_GATE_MODE": "advisory"},
+                cwd=tmpdir,
+            )
+            outputs.append(stdout)
+
+        assert all("BLE001" in output for output in outputs)
+        trace_path = os.path.join(tmpdir, ".fettle", "trace.jsonl")
+        with open(trace_path) as fh:
+            metrics = [
+                entry for entry in (json.loads(line) for line in fh)
+                if entry.get("type") == "metric"
+            ]
+        assert metrics[-1]["dedup_suppressed"] == 0
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

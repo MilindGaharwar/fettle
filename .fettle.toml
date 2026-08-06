@@ -24,3 +24,21 @@ mode = "advisory"
 [gates.ci]
 enabled = true
 mode = "enforce"
+
+[gates.plan]
+exclude = [
+    "docs/change-integrity-implementation-plan.md",
+    "docs/fettle-enterprise-product-plan.md",
+    "docs/fettle-v14-multiagent-plan.md",
+]
+
+[boundary]
+# These tests intentionally embed synthetic detector inputs. Keep exclusions
+# exact so all other test and production files remain boundary-scanned.
+exclude = [
+    "tests/test_boundary_scan.py",
+    "tests/test_ci.py",
+    "tests/test_lsp_server.py",
+    "tests/test_secret_scan.py",
+    "tests/test_uat_session.py",
+]

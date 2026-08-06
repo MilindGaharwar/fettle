@@ -8,7 +8,9 @@ import tempfile
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(PLUGIN_DIR))
 
-import ci  # noqa: E402
+from fettle import ci  # noqa: E402
+from fettle.quality_scan import ToolScanResult  # noqa: E402
+from fettle.result import ResultStatus  # noqa: E402
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
@@ -128,6 +130,60 @@ def test_regression_fails_closed_when_scanner_raises(monkeypatch):
     boundary = next(g for g in result["gates"] if g["name"] == "boundary")
     assert boundary["ok"] is False
     assert "error" in boundary
+
+
+def test_quality_gate_fails_closed_when_required_scanner_fails(monkeypatch):
+    d = _git_repo({"a.py": "x = 1\n"})
+
+    monkeypatch.setattr(
+        "fettle.quality_scan.execute_ruff",
+        lambda targets: ToolScanResult(
+            tool="ruff",
+            status=ResultStatus.TOOL_ERROR,
+            message="ruff timed out",
+        ),
+    )
+
+    result = ci.run_ci(d)
+
+    quality = next(g for g in result["gates"] if g["name"] == "quality")
+    assert result["ok"] is False
+    assert quality["ok"] is False
+    assert quality["status"] == ResultStatus.TOOL_ERROR.value
+    assert "timed out" in quality["error"]
+
+
+def test_quality_gate_preserves_scanner_config_error(monkeypatch):
+    d = _git_repo({"a.py": "x = 1\n"})
+    monkeypatch.setattr(
+        "fettle.quality_scan.execute_semgrep",
+        lambda targets: ToolScanResult(
+            tool="semgrep",
+            status=ResultStatus.CONFIG_ERROR,
+            message="rules file not found",
+        ),
+    )
+
+    quality = next(g for g in ci.run_ci(d)["gates"] if g["name"] == "quality")
+
+    assert quality["ok"] is False
+    assert quality["status"] == ResultStatus.CONFIG_ERROR.value
+
+
+def test_plan_gate_honors_explicit_exclusions_without_hiding_other_plans():
+    d = _git_repo({
+        ".fettle.toml": (
+            "[gates.plan]\n"
+            'exclude = ["docs/activity-plan.md"]\n'
+        ),
+        "docs/activity-plan.md": "# Activity Plan\n\nNo WP task format.\n",
+        "docs/invalid-plan.md": "# Invalid Plan\n\nNo work packages.\n",
+    })
+
+    plans = next(g for g in ci.run_ci(d)["gates"] if g["name"] == "plans")
+
+    assert plans["ok"] is False
+    assert plans["findings"] == ["docs/invalid-plan.md"]
 
 
 def test_generated_workflow_parses_and_runs_fettle_ci():

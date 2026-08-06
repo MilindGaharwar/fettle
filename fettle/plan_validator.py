@@ -108,7 +108,13 @@ def _parse_wps(text: str) -> list[tuple[str, str]]:
     for i, m in enumerate(matches):
         wp_name = m.group(2).strip()
         start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        level = len(m.group(1))
+        next_heading = re.search(
+            rf"^#{{1,{level}}}\s+", text[start:], re.MULTILINE
+        )
+        next_wp = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        next_section = start + next_heading.start() if next_heading else len(text)
+        end = min(next_wp, next_section)
         wps.append((wp_name, text[start:end]))
     return wps
 

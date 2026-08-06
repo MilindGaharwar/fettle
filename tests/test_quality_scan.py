@@ -14,6 +14,10 @@ import tempfile
 
 import pytest
 
+from fettle.result import ResultStatus
+from fettle.tool_runner import RunResult
+import fettle.quality_scan as quality_scan
+
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPT = os.path.join(PLUGIN_DIR, "scripts", "quality_scan.py")
 
@@ -92,6 +96,35 @@ class TestQualityScan:
         try:
             parsed, _, _ = run_scan(root)
             assert parsed["file_count"] == 1
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_build_and_dist_are_excluded_from_tool_targets(self):
+        root = make_project({
+            "app.py": CLEAN,
+            "build/generated.py": VIOLATION,
+            "dist/copied.py": VIOLATION,
+        })
+        try:
+            parsed, rc, _ = run_scan(root)
+            assert rc == 0
+            assert parsed["file_count"] == 1
+            assert not any(f["file"].startswith(("build/", "dist/")) for f in parsed["findings"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_changed_files_apply_the_same_directory_exclusions(self):
+        root = make_project({
+            "app.py": CLEAN,
+            "build/generated.py": VIOLATION,
+        })
+        try:
+            result = quality_scan.scan_project(
+                root,
+                files=[os.path.join(root, "app.py"), os.path.join(root, "build", "generated.py")],
+            )
+            assert result["file_count"] == 1
+            assert not any(f["file"].startswith("build/") for f in result["findings"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -187,3 +220,85 @@ class TestQualityScan:
             assert parsed["summary"]["errors"] == 0
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("tool", "run_result", "expected_message"),
+    [
+        ("ruff", RunResult(returncode=-1, tool_missing=True), "not found"),
+        ("ruff", RunResult(returncode=-1, timed_out=True), "timed out"),
+        ("ruff", RunResult(returncode=2, stderr="crashed"), "exited 2"),
+        ("ruff", RunResult(returncode=0, stdout=""), "empty output"),
+        ("ruff", RunResult(returncode=0, stdout="not-json"), "malformed JSON"),
+        ("semgrep", RunResult(returncode=-1, tool_missing=True), "not found"),
+        ("semgrep", RunResult(returncode=-1, timed_out=True), "timed out"),
+        ("semgrep", RunResult(returncode=2, stderr="crashed"), "exited 2"),
+        ("semgrep", RunResult(returncode=0, stdout=""), "empty output"),
+        ("semgrep", RunResult(returncode=0, stdout="not-json"), "malformed JSON"),
+    ],
+)
+def test_structured_tool_execution_never_maps_failure_to_clean(
+    monkeypatch, tool, run_result, expected_message
+):
+    monkeypatch.setattr(quality_scan, "_resolve_tool", lambda _name: f"/bin/{tool}")
+    monkeypatch.setattr(quality_scan.ToolRunner, "run", lambda self, cmd: run_result)
+
+    execute = quality_scan.execute_ruff if tool == "ruff" else quality_scan.execute_semgrep
+    result = execute([__file__])
+
+    assert result.status == ResultStatus.TOOL_ERROR
+    assert result.findings == []
+    assert expected_message.lower() in result.message.lower()
+
+
+def test_structured_tool_execution_rejects_wrong_json_shape(monkeypatch):
+    monkeypatch.setattr(quality_scan, "_resolve_tool", lambda _name: "/bin/ruff")
+    monkeypatch.setattr(
+        quality_scan.ToolRunner,
+        "run",
+        lambda self, cmd: RunResult(returncode=0, stdout="{}"),
+    )
+
+    result = quality_scan.execute_ruff([__file__])
+
+    assert result.status == ResultStatus.TOOL_ERROR
+    assert "JSON output must be an array" in result.message
+
+
+def test_semgrep_reported_parse_errors_never_map_to_clean(monkeypatch):
+    monkeypatch.setattr(quality_scan, "_resolve_tool", lambda _name: "/bin/semgrep")
+    monkeypatch.setattr(
+        quality_scan.ToolRunner,
+        "run",
+        lambda self, cmd: RunResult(
+            returncode=0,
+            stdout=json.dumps({"results": [], "errors": [{"message": "invalid syntax"}]}),
+        ),
+    )
+
+    result = quality_scan.execute_semgrep([__file__])
+
+    assert result.status == ResultStatus.TOOL_ERROR
+    assert "invalid syntax" in result.message
+
+
+@pytest.mark.parametrize(
+    ("tool", "payload"),
+    [
+        ("ruff", '[{"filename": 1}]'),
+        ("semgrep", '{"results":[{"path": 1}],"errors":[]}'),
+    ],
+)
+def test_structured_tool_execution_rejects_malformed_entries(monkeypatch, tool, payload):
+    monkeypatch.setattr(quality_scan, "_resolve_tool", lambda _name: f"/bin/{tool}")
+    monkeypatch.setattr(
+        quality_scan.ToolRunner,
+        "run",
+        lambda self, cmd: RunResult(returncode=0, stdout=payload),
+    )
+
+    execute = quality_scan.execute_ruff if tool == "ruff" else quality_scan.execute_semgrep
+    result = execute([__file__])
+
+    assert result.status == ResultStatus.TOOL_ERROR
+    assert "malformed finding" in result.message

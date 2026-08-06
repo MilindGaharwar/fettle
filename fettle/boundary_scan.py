@@ -153,7 +153,9 @@ def scan_repo(root: str, cfg: dict) -> list[Finding]:
     """Scan every tracked, non-binary, non-ignored file under root."""
     import fnmatch
 
-    forbidden = (cfg.get("boundary") or {}).get("forbidden", [])
+    boundary_cfg = cfg.get("boundary") or {}
+    forbidden = boundary_cfg.get("forbidden", [])
+    excluded = boundary_cfg.get("exclude", [])
     ignore = _load_ignore(root)
     findings: list[Finding] = []
     self_name = os.path.basename(__file__)
@@ -163,7 +165,7 @@ def scan_repo(root: str, cfg: dict) -> list[Finding]:
             continue
         if os.path.basename(rel) == self_name:  # never scan the scanner's own patterns
             continue
-        if any(fnmatch.fnmatch(rel, pat) for pat in ignore):
+        if any(fnmatch.fnmatch(rel, pat) for pat in (*ignore, *excluded)):
             continue
         abspath = os.path.join(root, rel)
         try:

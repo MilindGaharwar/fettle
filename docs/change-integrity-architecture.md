@@ -1,6 +1,6 @@
 # Change Integrity Hypergraph Architecture
 
-Status: PROPOSED; architecture contract only, runtime implementation not authorized
+Status: APPROVED; P44 contract implementation complete
 
 Related documents:
 

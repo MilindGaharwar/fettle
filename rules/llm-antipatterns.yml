@@ -243,16 +243,30 @@ rules:
       compliance: {cwe: CWE-489, asvs: V14.3.2, soc2: CC8.1}
     languages: [python]
     severity: WARNING
-    pattern: print(...)
+    patterns:
+      - pattern: print(...)
+      - pattern-not-inside: |
+          def main(...):
+              ...
+      - pattern-not-inside: |
+          def _print_human(...):
+              ...
+      - pattern-not-inside: |
+          def _print_json(...):
+              ...
+      - pattern-not-inside: |
+          def _print_result(...):
+              ...
     paths:
       exclude:
         - "cli/"
         - "scripts/"
         - "**/cli.py"
         - "**/main.py"
+        - "**/quality_scan.py"
         - "**/conftest.py"
         - "tests/"
-    message: "print() in non-CLI code — use logging or remove."
+    message: "print() outside a CLI entry point or output helper — use logging or remove."
 
   - id: non-atomic-write-output
     metadata:

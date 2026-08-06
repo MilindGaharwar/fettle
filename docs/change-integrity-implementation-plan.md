@@ -1,6 +1,6 @@
 # Change Integrity Hypergraph Implementation Plan
 
-Status: PROPOSED; planning contract only, runtime implementation not authorized
+Status: APPROVED; P44 complete, P45-P51 remain gated by package acceptance
 
 Related documents:
 
@@ -83,7 +83,7 @@ only after their independent graduation evidence exists.
 
 | ID | Activity | Depends on | Estimate | State |
 |---|---|---|---:|---|
-| P44 | Define graph, provider, traversal, snapshot, and fixture contracts | P33 design contract | 3-5 days | Proposed |
+| P44 | Define graph, provider, traversal, snapshot, and fixture contracts | P33 design contract | 3-5 days | Complete |
 | P45 | Build graph-independent committed and working source snapshots | P44 | 5-8 days | Proposed |
 | P46 | Assemble deterministic ephemeral graphs from native providers | P38, P44, P45 | 7-12 days | Proposed |
 | P47 | Add advisory graph status, build, impact, and obligation output | P46 | 5-8 days | Proposed |
@@ -164,6 +164,11 @@ Verification:
 ```bash
 python3 -m pytest tests/test_graph_types.py tests/test_provider_contract.py tests/test_traversal_rules.py -q
 ```
+
+Completion evidence: immutable source, graph, provider, traversal, freshness,
+closure, and obligation contracts are covered by adversarial fixtures and
+cross-process canonical identity tests. P45 runtime snapshot construction is
+not included.
 
 ### P45: Graph-Independent Source Snapshots
 
@@ -614,4 +619,4 @@ The program is complete only when:
 - Phase 3.5 UAT: adversarial BDD scenarios are defined in the UX specification;
   executable automation is required in each authorized package.
 - Feature manifest: not applicable; this repository does not maintain one.
-- Implementation authorization: not granted for P44-P51.
+- Implementation authorization: granted for P44; not granted for P45-P51.

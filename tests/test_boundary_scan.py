@@ -116,3 +116,18 @@ def test_integration_scan_repo_honors_forbidden_config():
         cfg = {"boundary": {"forbidden": ["otherpkg"]}}
         findings = scan_repo(d, cfg)
         assert any(f.code == "forbidden-string" for f in findings)
+
+
+def test_integration_scan_repo_honors_boundary_specific_exclusions():
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        os.makedirs(os.path.join(d, "tests"))
+        for rel in ("tests/security_fixture.py", "src.py"):
+            with open(os.path.join(d, rel), "w") as f:
+                f.write(f'k = "{SYNTH_AWS}"\n')
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+
+        findings = scan_repo(d, {"boundary": {"exclude": ["tests/security_fixture.py"]}})
+
+        assert not any(f.path == "tests/security_fixture.py" for f in findings)
+        assert any(f.path == "src.py" for f in findings)

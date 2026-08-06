@@ -1,0 +1,1 @@
+{"fanout_cap":2,"result_cap":1,"targets":["b","c","d"],"expected_state":"limit_reached"}

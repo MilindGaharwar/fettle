@@ -1,0 +1,1 @@
+{"entries":[{"path":"links/current","object_type":"symlink","symlink_text":"../src/current"},{"path":"vendor/lib","object_type":"gitlink","gitlink_commit":"abc123","submodule_handling":"declared_incomplete"},{"path":"deleted.py","object_type":"tombstone","deleted":true}]}
