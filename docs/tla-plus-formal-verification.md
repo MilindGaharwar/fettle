@@ -1,5 +1,20 @@
 # TLA+ Formal Verification Plan for Fettle
 
+## Status
+
+**WP-1 (PolicyCapsule) and WP-2 (WorkItemClaims) are implemented and passing.**
+
+Runnable specs live in [`specs/tla/`](../specs/tla/README.md). CI runs TLC on
+protocol file changes (`.github/workflows/tla-verify.yml`).
+
+An independent audit (2026-08-06) found and fixed critical issues:
+- NoDuplicateClaim was a logical tautology (always true regardless of state)
+- PlumbingIsolation was literally `TRUE` (vacuous)
+- TamperDetection was subsumed by FailClosed (redundant)
+
+All three were replaced with non-trivial formulations. A mutation test confirms
+TLC detects violations when protocol guards are removed.
+
 ## Overview
 
 This document defines five TLA+ specifications for Fettle's critical subsystems,

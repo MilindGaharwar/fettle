@@ -123,6 +123,46 @@ list or a pass.
 
 ## BDD Acceptance Scenarios
 
+### Scenario: Required scanner cannot produce evidence
+
+Given a CI policy requires Ruff or Semgrep
+When the binary is missing, exits abnormally, times out, or returns malformed output
+Then Fettle reports `tool_error`, not pass
+And names the failed tool and recovery action
+And the CI command exits non-zero while an interactive hook remains visibly fail-open.
+
+### Scenario: Red-before-green evidence is reconstructed
+
+Given a pull request adds a behavior test and implementation change
+When the verification job evaluates the selected test against the merge base
+Then it records the expected failure against the unmodified base
+And records the passing result against the candidate revision
+And binds both commands, revisions, and outputs to one evidence identifier.
+
+### Scenario: A gate is overridden
+
+Given an enforcing gate blocks a change and policy permits an override
+When an authorized operator supplies a reason and expiry
+Then the change can proceed according to policy
+And Fettle records the actor, gate, reason, timestamp, expiry, affected revision,
+and prior evidence identifier
+And reports the override distinctly from a pass.
+
+### Scenario: Mutation analysis produces no trustworthy result
+
+Given changed implementation files are selected for mutation analysis
+When the engine creates no mutants or its result cannot be parsed
+Then Fettle reports `unknown` or `tool_error`, not a 100% mutation score
+And identifies the selected files and the exact rerun command.
+
+### Scenario: A network-backed check is unavailable
+
+Given a local verification command includes an optional network integration
+When the operator is offline or the service is unavailable
+Then local checks continue
+And the network check is displayed as unknown with its last successful evidence time
+And an enforcing CI policy fails unless a recorded override applies.
+
 ### Scenario: First edit in a detected TypeScript workspace
 
 Given a repository has `package.json`, `tsconfig.json`, and an ESLint script
