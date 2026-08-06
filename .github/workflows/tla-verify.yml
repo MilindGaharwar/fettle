@@ -1,0 +1,47 @@
+name: TLA+ Verification
+
+on:
+  push:
+    paths:
+      - 'specs/tla/**'
+      - 'fettle/policy_capsule.py'
+      - 'fettle/capsule_guard.py'
+      - 'fettle/work_items.py'
+      - 'fettle/topology.py'
+      - 'fettle/worktrees.py'
+  pull_request:
+    paths:
+      - 'specs/tla/**'
+      - 'fettle/policy_capsule.py'
+      - 'fettle/capsule_guard.py'
+      - 'fettle/work_items.py'
+      - 'fettle/topology.py'
+      - 'fettle/worktrees.py'
+
+jobs:
+  tla-model-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Download tla2tools.jar
+        run: |
+          curl -fsSL -o specs/tla/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
+      - name: Run TLA+ model checker
+        run: ./specs/tla/run-all.sh
+
+      - name: Upload TLC logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tlc-logs
+          path: /tmp/tlc_*.log

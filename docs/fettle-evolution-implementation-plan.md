@@ -1,8 +1,8 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED — P0–P5 active
+Status: APPROVED for completed/current activities; P33–P43 verification-integrity program PROPOSED, not authorized
 
-Scope: post-v1.7 evolution of Fettle from Python-first governance to a
+Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
 strategic review, competitor analysis, current audit findings, agent-facing
 ergonomics gaps, semantic-delta opportunities, shell-security boundaries, and
@@ -97,19 +97,19 @@ privileged, platform-specific security product.
 
 ## 4. Current Baseline And Authoritative Scope
 
-v1.7.0 is the shipped trust baseline. The activity IDs below are the execution
+v1.8.0 is the shipped trust baseline. The activity IDs below are the execution
 source of truth; release work packages later in this document provide design
 detail. Estimates include tests and documentation for one experienced engineer
 and are planning ranges, not commitments.
 
 | ID | Activity | Release | Depends on | Estimate | State |
 |---|---|---|---|---|---|
-| P0 | Align roadmap, release numbering, and v1.7 baseline | v1.8 | v1.7.0 | 0.5 day | Active |
-| P1 | Define canonical four-state result contract | v1.8 | P0 | 0.5–1 day | Active |
-| P2 | Add actionable fields to the canonical finding | v1.8 | P1 | 0.5–1 day | Active |
-| P3 | Carry findings and evidence through dispatcher transport without changing host wires | v1.8 | P1, P2 | 1–2 days | Active |
-| P4 | Record repair, turn, recurrence, byte, and indeterminate eval metrics | v1.8 | P1 | 1–2 days | Active |
-| P5 | Add Python and TypeScript repair/error behavioral scenarios | v1.8 | P2, P4 | 1–2 days | Active |
+| P0 | Align roadmap, release numbering, and v1.7 baseline | v1.8 | v1.7.0 | 0.5 day | Complete |
+| P1 | Define canonical four-state result contract | v1.8 | P0 | 0.5–1 day | Complete |
+| P2 | Add actionable fields to the canonical finding | v1.8 | P1 | 0.5–1 day | Complete |
+| P3 | Carry findings and evidence through dispatcher transport without changing host wires | v1.8 | P1, P2 | 1–2 days | Complete |
+| P4 | Record repair, turn, recurrence, byte, and indeterminate eval metrics | v1.8 | P1 | 1–2 days | Complete |
+| P5 | Add Python and TypeScript repair/error behavioral scenarios | v1.8 | P2, P4 | 1–2 days | Complete |
 | P6 | Persist bounded, redacted structured evidence in trace | v1.8 | P2, P3 | 1–2 days | Complete |
 | P7 | Render concise, detailed, and JSON findings in report/explain | v1.8 | P2, P6 | 1–2 days | Complete |
 | P8 | Attach evidence IDs to verify, coverage, UAT, CI, and integrations | v1.8 | P6 | 2–4 days | Complete |
@@ -137,11 +137,587 @@ and are planning ranges, not commitments.
 | P30 | Extract shared side-effect-controlled analysis service | v1.14 | P12, P17, P19 | 4–7 days | Planned |
 | P31 | Add thin stdio MCP query surface | v1.14 | P30 | 3–5 days | Demand-gated |
 | P32 | Graduate additional LSP languages after parity | v1.14 | P22, P23, P30 | 3–6 days | Evidence-gated |
+| P33 | Make scanner and CI result handling fail closed | next patch | P1, P3 | 1–2 days | Proposed |
+| P34 | Repair mutation selection, execution, and score integrity | next minor | P33 | 2–4 days | Proposed |
+| P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Proposed |
+| P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
+| P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
+| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Proposed |
+| P39 | Operationalize static and supply-chain controls | following minor | P33, P35 | 4–7 days | Proposed |
+| P40 | Add invariant properties and flake detection selectively | following minor | P33, P37 | 4–7 days | Proposed |
+| P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
+| P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
+| P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | Demand-gated |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
 run alongside the web proving ground after their dependencies close. Work
 marked demand- or evidence-gated is not scheduled until its trigger is met.
+
+### 4.1 Verification-Integrity Program (P33-P43)
+
+#### Program User Story
+
+As a developer or platform engineer relying on Fettle, I want every reported
+pass to be backed by independently reproducible evidence, so that a missing
+tool, parser defect, agent assertion, or mutable local record cannot create
+false confidence.
+
+#### Program Assumptions And Boundaries
+
+1. Fettle remains a governance and integration layer, not a model runtime or
+   universal agent scheduler.
+2. Interactive hooks remain fail-open for session safety, but failures are
+   visible, persisted, actionable, and escalated when repeated.
+3. CI and explicit verification commands fail closed when a required check is
+   unavailable, malformed, timed out, or indeterminate.
+4. Full replay of externally controlled model hosts, network services, and
+   arbitrary filesystem behavior is outside Fettle's ownership boundary.
+5. Replay covers normalized events, effective policy, Fettle decisions,
+   evidence, and recorded runner responses without spending model tokens.
+6. Core installation remains dependency-free. Heavy engines remain CI tools or
+   optional extras.
+7. A check begins advisory. Promotion requires a seeded defect, measured
+   precision, accepted runtime, a recovery action, and a recorded override.
+8. The normal pull-request critical path has a 12-minute ceiling and a
+   three-minute first-feedback target.
+
+#### Alternatives Considered
+
+| Approach | Benefit | Cost/risk | Decision |
+|---|---|---|---|
+| Implement the blueprint V1-V10 in order | Simple narrative | Builds expensive controls on evidence paths that can currently fail clean | Reject |
+| Add all controls to every PR immediately | Maximum apparent coverage | Excessive latency, flaky gates, routine bypass | Reject |
+| Repair evidence integrity, operationalize existing controls, then add independent evidence | Smallest trustworthy sequence; preserves architecture | Delays broad feature count | Adopt |
+| Build a universal deterministic agent simulator | Ambitious reproducibility | Fettle does not control host model, network, clock, or tool runtime | Reject |
+
+#### Required Check Contract
+
+Every check introduced or promoted under P33-P43 must declare:
+
+- Stable check identifier and owner.
+- Applicability and explicit outcomes: `pass`, `violation`, `tool_error`,
+  `unknown`, and `not_applicable`; `unknown` is never serialized as pass.
+- Hard-gate or advisory status for each execution surface.
+- One clean fixture and one seeded defect missed by the prior assurance layer.
+- Recovery and exact rerun command for every non-pass outcome.
+- Wall-clock p50/p95, timeout, output bound, and execution placement.
+- Override policy containing actor, reason, timestamp, expiry, affected
+  revision, check identifier, and prior evidence identifier.
+- Evidence schema version and retention policy.
+
+#### P33: Scanner And CI Result Integrity
+
+Goal: close false-clean paths before relying on any additional automation.
+
+Primary files:
+
+- `fettle/quality_scan.py`
+- `fettle/ci.py`
+- `fettle/tool_runner.py`
+- `fettle/result.py`
+- `tests/test_quality_scan.py`
+- `tests/test_ci.py`
+- `tests/fixtures/`
+
+Implementation slices:
+
+1. Introduce an internal scanner result carrying findings, result state,
+   command, exit code, stderr summary, and tool version.
+2. Map missing binary, abnormal exit, timeout, empty malformed output, and JSON
+   parse failure to `tool_error` or `unknown`; retain empty findings only for a
+   successful clean execution.
+3. Keep interactive callers policy-controlled and visibly fail-open; make
+   `fettle ci` fail closed for required scanner errors.
+4. Add seeded missing-tool, malformed-JSON, timeout, and nonstandard-exit
+   fixtures and verify the existing behavior would miss them.
+5. Preserve concise human output and stable JSON/exit-code contracts.
+
+Acceptance:
+
+- No required Ruff or Semgrep execution failure can yield a clean CI result.
+- Clean, violation, unavailable, malformed, and timeout paths are contract
+  tested independently.
+- First feedback remains below three minutes in GitHub Actions.
+
+Verification:
+
+```bash
+python3 -m pytest tests/test_quality_scan.py tests/test_ci.py tests/test_tool_runner.py -q
+python3 -m fettle.cli ci --root .
+python3 fettle/quality_scan.py --root . --json
+```
+
+#### P34: Mutation Evidence Integrity And Operationalization
+
+Goal: turn the existing mutmut wrapper into trustworthy, bounded evidence.
+
+Primary files:
+
+- `fettle/mutation_test.py`
+- `fettle/changeset.py`
+- `fettle/ratchet.py`
+- `tests/test_mutation_test.py`
+- `.github/workflows/ci.yml`
+- `.github/workflows/mutation.yml` (new, only if a separate workflow is needed)
+
+Implementation slices:
+
+1. Select changed implementation files against an explicit merge-base SHA,
+   including added, modified, renamed, and deleted paths where meaningful.
+2. Pin a supported mutmut version in CI and capture both `run` and `results`
+   exit codes, stderr, timeout, and engine version.
+3. Parse a version-pinned machine-readable store or verified output grammar;
+   reject unknown grammar instead of guessing.
+4. Treat zero generated or zero parsed mutants as `unknown`, never 100%.
+5. Report killed, survived, timeout, suspicious, and untested mutants; include
+   actionable survivor identifiers and files.
+6. Run changed-module mutation as advisory with a ten-minute hard bound. Run
+   full mutation nightly with retained artifacts.
+7. Establish a baseline only after three stable runs, then ratchet without
+   allowing a lower score unless P35 records an override.
+
+Acceptance:
+
+- Seeded weak assertions produce a surviving mutant that ordinary coverage
+  misses.
+- Tool failure, parser drift, and zero-mutant runs cannot pass.
+- Mutation never extends the blocking PR critical path beyond 12 minutes;
+  advisory completion may report separately.
+
+Verification:
+
+```bash
+python3 -m pytest tests/test_mutation_test.py -q
+python3 -m fettle.mutation_test --root . --paths fettle/ --json
+```
+
+#### P35: Seeded-Defect And Recorded-Override Contract
+
+Goal: make value and bypasses observable before promoting any gate.
+
+Primary files:
+
+- `fettle/finding.py`
+- `fettle/trace.py`
+- `fettle/suppressions_v3.py`
+- `fettle/config.py`
+- `fettle/config_schema.py`
+- `docs/fettle.schema.json`
+- `tests/fixtures/verification/` (new)
+- `tests/test_trace.py`
+- `tests/test_suppressions_v3.py`
+
+Implementation slices:
+
+1. Define a fixture manifest linking each check to clean and known-bad cases,
+   the prior suite result, expected finding, and maximum runtime.
+2. Add a conformance test that executes every enabled/promotable check against
+   its manifest and rejects missing seeded evidence.
+3. Define one override record schema with actor, reason, timestamp, expiry,
+   check, scope, revision, policy digest, and evidence ID.
+4. Route structured suppressions, gate bypasses, and ratchet exceptions through
+   that schema. Deprecate unrecorded global bypass for CI; preserve an emergency
+   interactive escape that emits a prominent trace event.
+5. Report overridden distinctly from pass and expose active/expired overrides
+   through `fettle report` and JSON output.
+
+Acceptance:
+
+- Every promoted gate catches a committed defect that the preceding assurance
+  layer misses.
+- CI cannot use an anonymous, reasonless, or non-expiring override.
+- Expired overrides fail closed in CI and remain visible in audit output.
+
+#### P36: Independent Red-Before-Green Reconstruction
+
+Goal: prove a new behavior test detects the absence of its implementation
+without trusting agent-authored assertions about execution order.
+
+Primary files:
+
+- `fettle/tdd_gate.py`
+- `fettle/changeset.py`
+- `fettle/worktrees.py`
+- `fettle/verify.py`
+- `tests/test_tdd_gate.py`
+- `.github/workflows/ci.yml`
+
+Implementation slices:
+
+1. Keep edit-order guidance advisory; do not represent it as red-phase proof.
+2. Define an evidence artifact containing test node identifier, command,
+   expected failure signature, merge-base SHA, candidate SHA, exit status,
+   bounded output hashes, duration, and exemptions.
+3. In an isolated temporary worktree, apply only the selected new/changed test
+   to the merge-base implementation and execute that node.
+4. Require a meaningful assertion failure, not import, syntax, setup, timeout,
+   or missing-tool failure.
+5. Execute the same test against the candidate and require green evidence.
+6. Start with Python defect fixes and behavior additions. Exempt docs,
+   generated files, configuration-only changes, test-only maintenance,
+   refactors with unchanged behavior, and unsupported test frameworks through
+   P35's recorded override path.
+7. Run advisory until at least 30 qualifying PRs establish precision and p95
+   runtime; promote only if false blocks stay below 2%.
+
+Acceptance:
+
+- A test that passes on the base is rejected as non-proving.
+- Infrastructure failures are reported as `tool_error`, not accepted as red.
+- Evidence can be reproduced locally from the recorded SHAs and command.
+
+#### P37: Versioned Behavioral Benchmark
+
+Goal: measure whether Fettle changes improve agent outcomes rather than merely
+matching static regexes.
+
+Primary files:
+
+- `fettle/evals_runner.py`
+- `evals/README.md`
+- `evals/scenarios/`
+- `tests/test_evals_runner.py`
+- `.github/workflows/evals.yml` (new)
+
+Implementation slices:
+
+1. Version scenario schema and benchmark corpus independently from Fettle.
+2. Add representative bug-fix, feature, refactor, missing-tool, contradiction,
+   underspecification, refusal, and recovery scenarios with executable outcome
+   checks.
+3. Replace regex-only grading where possible with tests, exit codes, file
+   containment, and behavior-preservation checks.
+4. Record benchmark version, Fettle commit, runner/model identity when exposed,
+   prompt/workflow digest, success, turns, duration, token/cost data when
+   exposed, interventions, and unrelated regressions.
+5. Run at least three repetitions for live comparisons and report median,
+   range, and failure distribution. Indeterminate runs remain separate.
+6. Keep static schema and grader tests blocking. Run live evals only for
+   relevant prompt/workflow/agent/tool changes or on schedule; begin advisory.
+7. Store raw transcripts as access-controlled, bounded artifacts with secret
+   redaction; publish only aggregate results by default.
+
+Acceptance:
+
+- The benchmark detects one seeded behavior regression missed by unit tests.
+- A candidate cannot appear improved solely by dropping indeterminate runs.
+- Corpus changes produce a new benchmark version and do not rewrite historical
+  results.
+
+#### P38: Canonical Traceability And Drift Evidence
+
+Goal: connect specifications, scenarios, tests, governed code, and executed
+results without relying on filename similarity.
+
+Primary files:
+
+- `fettle/spec_model.py`
+- `fettle/trace_requirements.py`
+- `fettle/spec_audit.py`
+- `fettle/semantic.py`
+- `tests/test_spec_model.py`
+- `tests/test_spec_audit.py`
+
+Implementation slices:
+
+1. Make `spec_model.py` stable IDs and scenario markers canonical; deprecate
+   filename-substring inference in `trace_requirements.py`.
+2. Validate that markers target existing active specifications and scenarios.
+3. Bind successful test result evidence to scenario markers; declaration alone
+   counts as linked but not verified.
+4. Use spec `scope` globs to flag code changes whose governing active spec was
+   neither changed nor explicitly reviewed in an audit artifact.
+5. Report uncovered scenarios, unknown markers, unlinked tests, changed governed
+   regions, and executed specification coverage separately.
+
+Acceptance:
+
+- Renaming prose or files does not break stable IDs.
+- A marker in a skipped or failing test does not count as verified coverage.
+- A changed governed file without spec review produces an actionable advisory.
+
+#### P39: Static And Supply-Chain Operationalization
+
+Goal: use proven ecosystem controls before writing bespoke scanners.
+
+Primary files:
+
+- `.github/workflows/ci.yml`
+- `.github/dependabot.yml` (new if Dependabot is selected)
+- `fettle/supply_chain.py`
+- `fettle/secret_scan.py`
+- `fettle/complexity_check.py`
+- `fettle/boundary_rules.py`
+- `pyproject.toml`
+
+Implementation slices:
+
+1. Record strict-type coverage and ratchet it; keep mypy advisory until its
+   accepted baseline reaches zero blocking findings.
+2. Add scheduled dead-code reporting with reviewed exclusions; do not block
+   until seeded defects and precision justify promotion.
+3. Run architecture-boundary rules in CI and test cycles as well as hooks;
+   retain language-specific limitations in output.
+4. Add GitHub dependency review, vulnerability, license, and branch-history
+   secret scanning with pinned actions and severity policy.
+5. Retain release SBOM, build provenance, Sigstore/SLSA attestation, pinned
+   tools, and RECORD verification already present.
+6. Do not build package popularity, maintainer-count, or download-volume scoring
+   into Fettle; use human dependency review for ambiguous trust decisions.
+
+Acceptance:
+
+- New vulnerable, incompatible-license, or secret-bearing fixtures are caught
+  at the configured boundary.
+- Scanner unavailability follows P33 and never becomes clean.
+- Existing core runtime dependencies remain empty.
+
+#### P40: Selective Invariant And Flake Verification
+
+Goal: add independent runtime signal only where a concrete invariant or
+nondeterminism risk exists.
+
+Primary files:
+
+- `tests/`
+- `.github/workflows/ci.yml`
+- `.github/workflows/flake.yml` (new)
+- `fettle/pact_adapter.py`
+- `fettle/blackduck_adapter.py`
+
+Implementation slices:
+
+1. Introduce Hypothesis as a development-only dependency for selected parsers,
+   policy resolution, path containment, event normalization, and state-machine
+   invariants; store minimized failing examples as ordinary regression tests.
+2. Add a scheduled repeat-run flake job, classify failures by stable test ID,
+   and require owner, issue, first-seen date, and expiry for quarantine.
+3. Keep quarantined tests visible and excluded only from the blocking lane;
+   expired quarantine fails the maintenance job.
+4. Describe Pact honestly as broker-status integration unless Fettle invokes
+   provider/consumer verification; do not claim contract execution otherwise.
+5. Add performance or memory gates only for measured critical paths with stable
+   environments; begin with dispatcher budget regressions.
+
+Acceptance:
+
+- A seeded nondeterministic test is detected and cannot disappear silently.
+- At least one property finds or prevents an edge case not covered by examples.
+- Performance gates compare like environments and expose variance.
+
+#### P41: Commit-Linked Governance Evidence
+
+Goal: evolve mutable local traces into queryable evidence with tamper detection
+without creating a hosted control plane.
+
+Primary files:
+
+- `fettle/trace.py`
+- `fettle/provenance_gate.py`
+- `fettle/session_report.py`
+- `fettle/lineage_report.py`
+- `fettle/scope_creep.py`
+- `fettle/loop_detect.py`
+- `fettle/claims_gate.py`
+
+Implementation slices:
+
+1. Define a versioned run manifest linking normalized agent identity when
+   available, runner/model version when exposed, workflow/prompt digest, policy
+   digest, specification IDs, repository commit, parent run, and evidence IDs.
+2. Hash-chain records and periodically anchor the terminal digest to a commit,
+   CI artifact attestation, or signed release artifact. Describe this as
+   tamper-evident, not immutable.
+3. Preserve bounded redaction and make rotation retain chain checkpoints and
+   retention metadata.
+4. Extend loop detection from identical calls to repeated edits of the same
+   region with unchanged test outcomes; remain advisory until precision is
+   measured.
+5. Add configurable file/module/diff thresholds. Interactive excess requests
+   review; Fettle-owned runners may stop. External host sessions cannot be
+   universally terminated.
+6. Enforce token ceilings only where runners expose usage and Fettle owns their
+   lifecycle; wall-clock ceilings remain universally available for owned
+   subprocesses.
+
+Acceptance:
+
+- Editing or deleting a middle ledger record breaks chain verification.
+- Every generated commit can identify its governing evidence when Fettle owns
+  the commit flow; externally created commits report coverage as unknown.
+- Secrets and raw prompts are not persisted by default.
+
+#### P42: Deterministic Event And Check Replay
+
+Goal: reproduce Fettle decisions without claiming deterministic reproduction of
+external models or arbitrary hosts.
+
+Primary files:
+
+- `fettle/event.py`
+- `fettle/agents/`
+- `fettle/dispatcher.py`
+- `fettle/trace.py`
+- `fettle/runners/`
+- `fettle/replay.py` (new)
+- `tests/test_replay.py` (new)
+
+Implementation slices:
+
+1. Define a recording bundle containing normalized events, effective policy,
+   relevant file-content hashes or explicitly included fixture snapshots,
+   check versions, runner response fixtures, monotonic offsets, and run ID.
+2. Inject clock and runner seams only into workflow code that Fettle owns; do
+   not ban ordinary wall-clock use repository-wide.
+3. Replay dispatcher selection and check decisions with network and model calls
+   replaced by recorded responses.
+4. Add fault points for timeout, malformed response, truncated output, runner
+   error, and bounded file-write failure at Fettle-owned interfaces.
+5. Compare canonical result states, findings, evidence IDs, and side-effect
+   manifests while ignoring explicitly nondeterministic presentation fields.
+6. Profile representative owned paths: dispatch, config, analyzers, subprocess
+   wait, and runner wait. Keep model inference separate when host telemetry is
+   unavailable.
+
+Acceptance:
+
+- A recorded scanner parse failure reproduces the same canonical decision
+  without network or token use.
+- Fault injection covers each owned interface and produces P33-compliant
+  non-pass outcomes.
+- Recording bundles are bounded, redacted, schema-versioned, and portable.
+
+#### P43: Narrow Formal-Methods Decision Gate
+
+Goal: use formal methods only after evidence identifies a consequential
+concurrent state machine.
+
+Candidate scope:
+
+- Worktree claim and locking transitions.
+- Verification-stamp invalidation under concurrent edits.
+- Retry/idempotency behavior in a future Fettle-owned background UAT runner.
+
+Entry criteria:
+
+- A documented safety invariant whose violation loses work, attributes work to
+  the wrong actor, or accepts stale verification.
+- At least two interacting actors or retry paths that example and property
+  tests cannot cover economically.
+- An implementation owner capable of reviewing TLA+/PlusCal independently.
+
+Deliverable if admitted:
+
+1. A narrow model and explicit environment assumptions.
+2. Checked invariants and retained counterexamples.
+3. Property/state-machine tests derived from the same invariants.
+4. A refinement map from model actions to implementation operations.
+
+Do not model a Fettle agent scheduler unless Fettle later owns one. P43 remains
+demand-gated and advisory; a plausible-looking model is not release evidence.
+
+#### Program Sequence And Graduation
+
+```text
+P33 evidence integrity
+  +--> P34 mutation integrity
+  +--> P35 seeded defects + overrides
+          +--> P36 red/green reconstruction
+          +--> P38 traceability
+          +--> P39 static + supply chain
+P33 + existing eval substrate --> P37 benchmark
+P37 + P33 --> P40 properties + flakes
+P35 + P38 --> P41 governance evidence
+P33 + P37 + P41 --> P42 replay
+P40 + P42 --concrete concurrency need--> P43 formal model
+```
+
+| Stage | Packages | Graduation evidence |
+|---|---|---|
+| A: Trust existing results | P33 | All scanner failure modes are canonical non-pass; seeded fixtures pass |
+| B: Operationalize existing controls | P34, P35 | Mutation is honest and bounded; each promoted check has value and override evidence |
+| C: Add independent evidence | P36, P37, P38 | CI reconstructs red/green; benchmark variance and executed spec coverage are reported |
+| D: Broaden assurance selectively | P39, P40 | Ecosystem controls and invariant tests meet precision and runtime budgets |
+| E: Govern and reproduce | P41, P42 | Evidence is commit-linked and tamper-evident; owned decisions replay offline |
+| F: Formalize only proven risk | P43 | Entry criteria are documented and independently approved |
+
+No later stage is authorized merely because this plan exists. Each package ends
+with a proposal review and requires explicit agreement before implementation.
+
+#### Pull-Request And Scheduled Budgets
+
+| Check group | Placement | Initial status | Budget |
+|---|---|---|---:|
+| Ruff, Semgrep, boundaries, secrets, spec lint | PR | Blocking after P33 | 2 min |
+| Unit tests and branch coverage | PR, parallel matrix | Blocking | 8 min |
+| Type and architecture ratchets | PR | Advisory first | 3 min |
+| Changed-module mutation | PR, separate completion | Advisory first | 10 min hard bound |
+| Eval schema and deterministic graders | PR | Blocking | 1 min |
+| Red/green reconstruction | Qualifying PRs | Advisory first | 5 min target |
+| Live repeated model evals | Relevant PR or scheduled | Advisory | Outside normal critical path |
+| Full mutation, dead code, and flake detection | Nightly | Advisory until graduated | 30-60 min |
+| Full dependency/service integrations | PR or scheduled by policy | Policy-controlled | 5-10 min |
+
+Jobs run in parallel. The blocking critical path must remain at or below 12
+minutes at p95 across 20 runs. A package that exceeds its budget is moved out of
+the critical path or redesigned before enforcement.
+
+#### Program-Level Blast Radius
+
+Highest-risk surfaces:
+
+- `fettle/result.py`, `fettle/finding.py`, and `fettle/tool_runner.py`: result
+  semantics shared by all checks.
+- `fettle/quality_scan.py` and `fettle/ci.py`: CI trust boundary.
+- `fettle/trace.py`: every audit and evidence consumer.
+- `fettle/config.py`, schema, and suppressions: policy and bypass behavior.
+- `fettle/dispatcher.py`: interactive fail-open behavior must not regress.
+- `fettle/changeset.py` and worktrees: merge-base and isolation correctness.
+- GitHub workflows: PR latency, permissions, secrets, and release behavior.
+
+Required controls:
+
+- Run `kgraph impact` before each behavior-changing package.
+- Land one result-producing integration at a time with parity tests.
+- Never conflate interactive fail-open with CI fail-closed semantics.
+- Pin third-party actions and tools; bound subprocess output and time.
+- Use temporary worktrees without mutating the operator's working tree.
+- Preserve zero core runtime dependencies.
+- Run four-agent event conformance after dispatcher or replay changes.
+- Run package smoke, full tests, Fettle scan, and manual CLI acceptance before
+  release.
+
+#### Program Success Criteria
+
+P33-P42 are complete only when:
+
+1. No required tool failure, timeout, malformed output, or zero-result parse is
+   represented as pass.
+2. Every enforced check has a seeded defect, declared cost, recovery action,
+   and recorded override.
+3. Red-before-green evidence is independently reconstructed for supported
+   qualifying changes.
+4. Mutation score and behavioral benchmark results identify their engine/corpus
+   versions and preserve indeterminate outcomes.
+5. Specification coverage distinguishes declared links from executed evidence.
+6. Required supply-chain controls run without adding core runtime dependencies.
+7. Governance evidence is commit-linked, bounded, redacted, and tamper-evident.
+8. Fettle-owned event/check decisions replay offline from a versioned bundle.
+9. Interactive hooks remain responsive and visibly fail-open; CI remains
+   independently fail-closed.
+10. Blocking PR p95 stays at or below 12 minutes for 20 consecutive runs.
+
+#### Deliberate Non-Goals
+
+- Universal deterministic replay of external agent hosts.
+- Repository-wide prohibition of wall-clock APIs.
+- Package trust scoring based on popularity or maintainer counts.
+- Automatic property generation from unrestricted natural-language prose.
+- Fettle-owned staging infrastructure for arbitrary applications.
+- A TLA+ model of an agent scheduler Fettle does not own.
+- Mandatory live-model evaluation on every pull request.
+- Universal red-before-green enforcement for non-behavioral changes.
 
 ## 5. Dependency Spine
 
@@ -964,7 +1540,180 @@ The program is successful when:
 - Bespoke permanent adapters for every commercial scanner.
 - Enforce-by-default framework heuristics.
 
-## 16. Planning Gate Status
+## 16. TLA+ Formal Verification
+
+### Motivation
+
+Fettle's correctness guarantees depend on protocol-level properties
+(monotonicity, fail-closed, mutual exclusion, temporal ordering) that unit tests
+cannot exhaustively cover. TLA+ model-checking explores all reachable states,
+finding violations that require specific interleavings or edge-case sequences
+that are impractical to enumerate by hand.
+
+Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-verification.md).
+
+### Work Packages
+
+| WP | Subsystem | Priority | Properties | Est. |
+|----|-----------|----------|------------|------|
+| TLA-1 | Policy Capsule Delegation | Critical | Monotonic strictness, depth bound, tamper→block, fail-closed, no spurious block | 2 days |
+| TLA-2 | Work Item Claims + Topology | High | No duplicate claim, disjoint parallelism, unknown-scope conservative, claim-before-work | 2 days |
+| TLA-3 | Verify Gate Temporal Ordering | Medium | Fresh stamp required, session binding, green required, coverage complete, workspace coverage | 1 day |
+| TLA-4 | Dispatcher Budget & Priority | Low | Budget respected, priority order, first-block-wins, fail-open, always terminates | 1 day |
+| TLA-5 | TDD Gate Phase Ordering | Low | Test-first required, preexisting test suffices, evidence persists, exempt paths pass | 0.5 day |
+
+### Safety Properties (Summary)
+
+**TLA-1 Policy Capsule:**
+- A child's effective policy is always >= strict as its parent's on every key
+- Lineage depth never exceeds 16 (no unbounded delegation recursion)
+- Any capsule body modification after writing → all tool calls blocked
+- Env asserts capsule + (missing/unreadable/version skew) → block
+- Machine-local plumbing keys never propagate from parent to child
+- Untampered + valid capsule → never triggers spurious block
+
+**TLA-2 Work Items & Topology:**
+- No two live sessions can hold the same item simultaneously
+- Items approved for parallel execution have non-overlapping footprints
+- An item with no declared scope conflicts with all other items
+- No edits to files in an item's scope without holding its claim
+- A claim whose worktree is gone can always be reclaimed
+- Release always succeeds (no deadlock in the lock path)
+
+**TLA-3 Verify Gate:**
+- Stamp older than latest edit + tree changed → gate blocks/advises
+- Stamp from session X cannot satisfy gate in session Y
+- A red stamp (ok=false) never passes the gate
+- Impacted-scope stamp must cover all files edited this session
+- Multi-workspace edits require all affected workspaces verified
+- Correct edit→verify→stop sequence always passes
+
+**TLA-4 Dispatcher:**
+- Total wall-clock never exceeds event budget (modulo one check overrun)
+- Checks execute in registry priority order (no reordering)
+- After a BLOCK result, no further checks execute
+- A check exception never produces BLOCK (fail-open)
+- Repeated failures surface advisory only after >= 3 occurrences
+- The dispatcher always produces output (never hangs)
+
+**TLA-5 TDD Gate:**
+- In enforce mode, impl edit without prior test_edit is blocked
+- If accept_preexisting is true and test exists on disk, impl is allowed
+- A test_edit event is never lost (append-only log)
+- Files matching exempt patterns are never blocked
+- test_edit(M) then impl_edit(M) always produces ALLOW
+
+### Implementation Phases
+
+#### Phase 1: Infrastructure (0.5 day)
+
+| Task | Description |
+|------|-------------|
+| T1.1 | Create `specs/tla/` directory with README |
+| T1.2 | Add TLC runner script (`specs/tla/run-all.sh`) |
+| T1.3 | Add CI integration (GitHub Actions, `tlaplus/tla-toolbox` Docker) |
+| T1.4 | Document local TLA+ setup (Java 11+, `tla2tools.jar`) |
+
+#### Phase 2: TLA-1 Policy Capsule (2 days)
+
+| Task | Description |
+|------|-------------|
+| T2.1 | Write `PolicyCapsule.tla` modeling agents, capsules, merge, tamper |
+| T2.2 | Write `PolicyCapsule.cfg` with small model (4 agents, 3 keys, depth=3) |
+| T2.3 | Run TLC; fix spec until all 5 safety + 2 liveness properties pass |
+| T2.4 | Mutation tests: remove depth check → TLC finds DepthBound violation |
+| T2.5 | Mutation tests: weaken merge → TLC finds MonotonicStrictness violation |
+| T2.6 | Mutation tests: skip digest check → TLC finds TamperDetection violation |
+| T2.7 | Document findings; file issues for any code-level bugs discovered |
+
+#### Phase 3: TLA-2 Work Items & Topology (2 days)
+
+| Task | Description |
+|------|-------------|
+| T3.1 | Write `WorkItemClaims.tla` modeling sessions, items, flock, worktree liveness |
+| T3.2 | Write `TopologyConflicts.tla` for pairwise disjointness logic |
+| T3.3 | Write `.cfg` files (3 items × 3 sessions × 3 worktrees × 3 files) |
+| T3.4 | Run TLC; verify NoDuplicateClaim under all interleavings |
+| T3.5 | Add stale-claim reclamation scenario (worktree dies, new session claims) |
+| T3.6 | Mutation test: remove flock → TLC finds duplicate claim race |
+| T3.7 | Mutation test: allow unknown-scope parallelism → TLC finds overlap |
+
+#### Phase 4: TLA-3 Verify Gate (1 day)
+
+| Task | Description |
+|------|-------------|
+| T4.1 | Write `VerifyGate.tla` modeling edits, stamps, clock, gate evaluation |
+| T4.2 | Write `.cfg` with 3 files × 2 workspaces × 2 sessions |
+| T4.3 | Run TLC; verify all 5 safety properties and ValidPathClears liveness |
+| T4.4 | Mutation test: remove freshness check → TLC finds stale stamp accepted |
+| T4.5 | Mutation test: remove session binding → TLC finds cross-session reuse |
+
+#### Phase 5: TLA-4 Dispatcher (1 day)
+
+| Task | Description |
+|------|-------------|
+| T5.1 | Write `Dispatcher.tla` modeling checks, budget, exceptions, finalization |
+| T5.2 | Write `.cfg` with 4 checks, budget=250ms, realistic durations |
+| T5.3 | Run TLC; verify budget, ordering, fail-open, termination |
+| T5.4 | Mutation test: allow exception to produce block → TLC finds FailOpen violation |
+| T5.5 | Trace analysis: budget-exhaustion and exception-then-block scenarios |
+
+#### Phase 6: TLA-5 TDD Gate (0.5 day)
+
+| Task | Description |
+|------|-------------|
+| T6.1 | Write `TDDGate.tla` modeling modules, evidence set, preexisting tests |
+| T6.2 | Write two `.cfg` files (enforce mode + advisory mode) |
+| T6.3 | Run TLC in both modes; verify test-first enforcement |
+| T6.4 | Mutation test: clear evidence set → TLC finds TestEvidencePersists violation |
+
+#### Phase 7: Integration & Reporting (0.5 day)
+
+| Task | Description |
+|------|-------------|
+| T7.1 | Run full suite; collect state-space statistics per spec |
+| T7.2 | Document bugs found by model checking (if any) |
+| T7.3 | Add `fettle tla` CLI command to run specs locally |
+| T7.4 | Update ROADMAP.md with TLA+ verification status |
+
+### State-Space Estimates
+
+| Spec | States (est.) | Time | Diameter |
+|------|--------------|------|----------|
+| PolicyCapsule | ~50K | <30s | 8 |
+| WorkItemClaims | ~200K | <2min | 12 |
+| VerifyGate | ~10K | <10s | 6 |
+| Dispatcher | ~5K | <5s | 5 |
+| TDDGate | ~3K | <5s | 4 |
+
+### Value Assessment
+
+| WP | Bugs TLA+ Could Find | Confidence |
+|----|----------------------|------------|
+| TLA-1 | Policy escalation via merge ordering, lineage overflow, version-field escape | Very High |
+| TLA-2 | Race in claim (flock removed/bypassed), parallel items with hidden overlap | High |
+| TLA-3 | Stale stamp accepted, cross-session stamp reuse, impacted-scope gap | Medium-High |
+| TLA-4 | Priority inversion, silent fail-closed, budget accounting off-by-one | Medium |
+| TLA-5 | False positive block, evidence loss on crash | Low-Medium |
+
+### Dependencies
+
+- Requires: Java 11+ (TLC runtime), `tla2tools.jar` from https://github.com/tlaplus/tlaplus/releases
+- Optional: TLA+ Toolbox or VS Code TLA+ extension for interactive exploration
+- Blocks: none (verification is additive; no code changes required to run specs)
+- Informs: any bugs found feed back as code fixes into the relevant release WP
+
+### Success Criteria
+
+1. All 5 specs pass TLC model-checking with zero invariant violations.
+2. Mutation tests confirm TLC catches at least one violation per removed guard.
+3. State-space exploration completes in under 5 minutes total (CI-feasible).
+4. Any real bugs found are fixed and regression-tested before the next release.
+5. Specs are maintained alongside code changes to verified subsystems.
+
+---
+
+## 17. Planning Gate Status
 
 - Phase 0 UX: complete in `docs/polyglot-governance.ux-spec.md`.
 - Phase 0.5 UI: not applicable; this plan changes CLI, hook, LSP, and protocol
@@ -974,3 +1723,6 @@ The program is successful when:
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
+- P33–P43 planning status: proposed. UX/BDD additions are recorded in
+  `docs/polyglot-governance.ux-spec.md`; no package is authorized until its
+  proposal review is explicitly accepted.

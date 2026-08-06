@@ -10,3 +10,8 @@ uv.lock
 .coverage
 .coverage.*
 coverage.xml
+
+# TLA+ model checker (auto-downloaded and generated)
+specs/tla/tla2tools.jar
+specs/tla/*_TTrace_*
+specs/tla/states/
