@@ -1,6 +1,6 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED for completed/current activities; P33–P43 verification-integrity program PROPOSED, not authorized
+Status: APPROVED for completed/current activities; P33–P43 verification-integrity and P44–P51 change-integrity programs PROPOSED, not authorized
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -148,11 +148,34 @@ and are planning ranges, not commitments.
 | P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
 | P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | Demand-gated |
+| P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Proposed |
+| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Proposed |
+| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Proposed |
+| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Proposed |
+| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Proposed |
+| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Proposed |
+| P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
+| P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
 run alongside the web proving ground after their dependencies close. Work
 marked demand- or evidence-gated is not scheduled until its trigger is met.
+
+P44-P51 form the proposed change-integrity hypergraph program. Its authoritative
+architecture, UX/UAT contract, staged implementation details, migration gates,
+and persistence admission criteria are maintained in:
+
+- [Change integrity architecture](change-integrity-architecture.md)
+- [Change integrity UX specification](change-integrity.ux-spec.md)
+- [Change integrity implementation plan](change-integrity-implementation-plan.md)
+
+The program begins with an ephemeral graph and cannot authorize blocking graph
+decisions until P33 closes false-clean result paths. P35 is required for
+overrides, and P41 or an approved successor is required for durable graph-bound
+attestations. Existing semantic, topology, claim, and verification behavior
+remains authoritative until each consumer passes its own shadow graduation.
+P51 may close with a no-go decision; SQLite is not an assumed deliverable.
 
 ### 4.1 Verification-Integrity Program (P33-P43)
 
@@ -1726,3 +1749,6 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
 - P33–P43 planning status: proposed. UX/BDD additions are recorded in
   `docs/polyglot-governance.ux-spec.md`; no package is authorized until its
   proposal review is explicitly accepted.
+- P44–P51 planning status: proposed. Architecture, UX/BDD, and implementation
+  contracts are recorded in the change-integrity document set; no package is
+  authorized until its proposal review is explicitly accepted.

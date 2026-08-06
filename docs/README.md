@@ -23,6 +23,12 @@ Start with the path that matches what you are trying to accomplish.
 - [VS Code integration](../integrations/vscode/README.md): current Python editor
   diagnostics and source installation.
 - [Roadmap](ROADMAP.md): prioritized future work and graduation triggers.
+- [Change integrity architecture](change-integrity-architecture.md): proposed
+  immutable-snapshot and hypergraph trust contract.
+- [Change integrity UX specification](change-integrity.ux-spec.md): proposed
+  impact, obligation, failure-state, accessibility, and UAT contract.
+- [Change integrity implementation plan](change-integrity-implementation-plan.md):
+  proposed staged delivery and graduation gates; runtime work is not authorized.
 - [Changelog](../CHANGELOG.md): shipped behavior by release.
 - [Contributing](../CONTRIBUTING.md): development setup and verification.
 - [Security policy](../SECURITY.md): supported releases and private reporting.

@@ -19,11 +19,18 @@ for current capabilities and operational boundaries.
 | Current | Repair verification evidence integrity before adding more gates | Scanner/tool errors cannot become clean; mutation results cannot manufacture a score; every gate has a seeded-defect control and recorded override contract |
 | Graduated | Canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
 | Next | Independent red/green evidence, expanded evals, traceability, and changed-module mutation | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |
+| Proposed | Ephemeral change-integrity hypergraph and advisory impact | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
+| Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
 | Later | Native web, enterprise adapters, advisory framework packs, semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
 
 The authoritative activity sequence, dependencies, estimates, and demand gates
 are maintained in the
 [Fettle evolution implementation plan](fettle-evolution-implementation-plan.md).
+The proposed hypergraph program is detailed in the
+[change integrity architecture](change-integrity-architecture.md),
+[UX specification](change-integrity.ux-spec.md), and
+[implementation plan](change-integrity-implementation-plan.md). Runtime work is
+not authorized by those planning documents.
 
 ## Formal Verification (TLA+)
 
@@ -44,7 +51,7 @@ Specs are CI-gated on changes to verified source files
 - No automatic promotion of machine-drafted rules. Humans approve policy
   changes.
 - No persistent semantic database until repository-based, on-demand analysis
-  proves too slow.
+  proves too slow and the change-integrity persistence admission gate passes.
 - No whole-system rewrite in Go or Rust without measured Python startup cost
   exceeding hook budgets. Optimize the hot path first.
 
