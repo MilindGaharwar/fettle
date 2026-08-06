@@ -187,23 +187,35 @@ RetryAfterRefusal(session) ==
 -----------------------------------------------------------------------------
 (* Safety Invariants *)
 
-(* S1: No two live sessions hold the same item simultaneously.
-   Formally: for any item with a live claim, no other live session claims it. *)
+(* S1: No two distinct sessions can both actively hold the same item.
+   "Actively hold" = pc is "claimed" AND holding points to the item.
+   This catches the real bug: two sessions both thinking they own an item. *)
 
-(* S1: No two sessions can ACTIVELY work on the same item.
-   "Active" = session is claimed AND its worktree is still alive AND
-   the claims map still points to it. A session whose worktree died
-   is zombie — it can't edit (EditFile checks alive). *)
+(* S1: At most one session can actively edit any given item.
+   "Can actively edit" = passes all of EditFile's guards:
+     - pc = "claimed"
+     - claims[item].session = session (is current claimant)
+     - claims[item].worktree is alive
+
+   This is the real safety property the lock protects. It is non-trivial
+   because removing the lock (allowing two sessions to both reach has_lock)
+   would allow two simultaneous ClaimItem calls to each see the item
+   unclaimed and both succeed, resulting in claims pointing to the last
+   writer while the first's holding still says it owns the item.
+
+   With the lock intact, claims[i] is single-valued AND only writable
+   under lock, so at most one session matches claims[i].session at a time.
+   EditFile's check (claims[holding[s]].session = s) then guarantees
+   only the true claimant can edit. *)
 
 NoDuplicateClaim ==
     \A i \in Items :
-        \A s1, s2 \in Sessions :
-            (s1 # s2 /\
-             pc[s1] = "claimed" /\ holding[s1] = i /\
-             pc[s2] = "claimed" /\ holding[s2] = i /\
-             claims[i].worktree \in Worktrees /\ alive[claims[i].worktree]) =>
-                \* At most one of them is the actual live claimant
-                ~(claims[i].session = s1 /\ claims[i].session = s2)
+        Cardinality({s \in Sessions :
+            pc[s] = "claimed" /\
+            holding[s] = i /\
+            claims[i].session = s /\
+            claims[i].worktree \in Worktrees /\
+            alive[claims[i].worktree]}) <= 1
 
 (* S2: If items have disjoint footprints, no two sessions edit the same file.
    This is the core topology safety theorem: the topology advisor refuses

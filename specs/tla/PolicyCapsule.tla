@@ -29,9 +29,10 @@ VARIABLES
     effective,      \* [agent -> policy function]
     blocked,        \* [agent -> BOOLEAN]
     tampered,       \* Set of agents whose capsule was tampered
+    local_used,     \* [agent -> policy function] local policy used during merge
     pc              \* [agent -> process state]
 
-vars == <<capsules, effective, blocked, tampered, pc>>
+vars == <<capsules, effective, blocked, tampered, local_used, pc>>
 
 -----------------------------------------------------------------------------
 (* Type invariant *)
@@ -99,6 +100,7 @@ Init ==
           ELSE [key \in PolicyKeys |-> "off"]]
     /\ blocked = [a \in Agents |-> FALSE]
     /\ tampered = {}
+    /\ local_used = [a \in Agents |-> BaselinePolicy]
     /\ pc = [a \in Agents |->
           IF a = RootAgent THEN "ready" ELSE "idle"]
 
@@ -125,7 +127,7 @@ WriteCapsule(parent, child) ==
                lineage |-> new_lineage,
                written |-> TRUE]]
     /\ pc' = [pc EXCEPT ![child] = "capsule_written"]
-    /\ UNCHANGED <<effective, blocked, tampered>>
+    /\ UNCHANGED <<effective, blocked, tampered, local_used>>
 
 (* Parent attempts to spawn but lineage is at cap — must fail loudly. *)
 
@@ -135,7 +137,7 @@ SpawnAtMaxDepth(parent, child) ==
     /\ pc[child] = "idle"
     /\ Len(capsules[parent].lineage) >= MaxDepth
     /\ pc' = [pc EXCEPT ![parent] = "spawn_rejected"]
-    /\ UNCHANGED <<capsules, effective, blocked, tampered>>
+    /\ UNCHANGED <<capsules, effective, blocked, tampered, local_used>>
 
 (* An adversary tampers with a written capsule (modifies policy body
    without updating digest — simulates file modification). *)
@@ -147,7 +149,7 @@ Tamper(agent) ==
     /\ \E new_policy \in [PolicyKeys -> ModeValues] :
           /\ new_policy # capsules[agent].policy  \* actual modification
           /\ capsules' = [capsules EXCEPT ![agent].policy = new_policy]
-    /\ UNCHANGED <<effective, blocked, pc>>
+    /\ UNCHANGED <<effective, blocked, local_used, pc>>
 
 (* Child verifies capsule and merges with local policy.
    Fail-closed: digest mismatch or lineage overflow -> blocked. *)
@@ -161,10 +163,11 @@ VerifyAndMerge(agent, local_policy) ==
           THEN \* FAIL CLOSED: capsule_guard blocks all tool calls
                /\ blocked' = [blocked EXCEPT ![agent] = TRUE]
                /\ pc' = [pc EXCEPT ![agent] = "blocked"]
-               /\ UNCHANGED <<capsules, effective, tampered>>
+               /\ UNCHANGED <<capsules, effective, tampered, local_used>>
           ELSE \* VERIFIED: merge monotonically stricter
                /\ effective' = [effective EXCEPT ![agent] =
                       MonotonicMerge(cap.policy, local_policy)]
+               /\ local_used' = [local_used EXCEPT ![agent] = local_policy]
                /\ pc' = [pc EXCEPT ![agent] = "ready"]
                /\ UNCHANGED <<capsules, blocked, tampered>>
 
@@ -190,12 +193,13 @@ MonotonicStrictness ==
 DepthBound ==
     \A agent \in Agents : Len(capsules[agent].lineage) <= MaxDepth
 
-(* S3: Tampered capsule leads to blocked state after verification. *)
+(* S3: A tampered agent can NEVER reach "ready" state — it must be blocked.
+   This is the real tamper detection guarantee: tampering always gets caught. *)
 
 TamperDetection ==
     \A agent \in Agents :
-        (agent \in tampered /\ pc[agent] \in {"blocked"}) =>
-            blocked[agent] = TRUE
+        (agent \in tampered /\ pc[agent] # "capsule_written") =>
+            pc[agent] = "blocked"
 
 (* S4: If verification fails (for any reason), agent is blocked. *)
 
@@ -203,18 +207,15 @@ FailClosed ==
     \A agent \in Agents :
         pc[agent] = "blocked" => blocked[agent] = TRUE
 
-(* S5: Plumbing keys in effective policy come from local, not parent.
-   We verify this by checking that a child's plumbing key can differ
-   from its parent's — i.e., the merge did NOT force the parent value. *)
-(* Note: This is structural — MonotonicMerge already implements it.
-   We verify it hasn't been broken by checking the merge definition. *)
+(* S5: Plumbing keys in effective policy equal the local policy used during
+   merge, NOT the parent's capsule policy. This ensures machine-local keys
+   (paths, endpoints) don't propagate across worktree boundaries (D-A5). *)
 
 PlumbingIsolation ==
     \A agent \in Agents :
-        pc[agent] = "ready" =>
+        (pc[agent] = "ready" /\ Len(capsules[agent].lineage) > 0) =>
             \A key \in PlumbingKeys :
-                \* Plumbing keys are not constrained by MonotonicStrictness
-                TRUE  \* (verified by exclusion from S1's key set)
+                effective[agent][key] = local_used[agent][key]
 
 (* L2: A verified, untampered capsule never triggers block. *)
 
