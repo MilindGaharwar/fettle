@@ -78,7 +78,7 @@ def install_hooks(repo_root: Path) -> None:
                 "matcher": "Write|Edit",
                 "hooks": [{
                     "type": "command",
-                    "command": f"bash {plugin_path}/scripts/run.sh post_edit.py",
+                    "command": f"bash {plugin_path}/fettle/run.sh post_edit.py",
                     "timeout": 15000,
                 }]
             }]

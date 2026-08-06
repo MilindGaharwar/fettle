@@ -11,7 +11,7 @@
 - **Static side — CI-safe.** Scenario schema validation, check evaluation,
   verdict composition. Runs in pytest with a fake runner
   (`tests/test_evals_runner.py`). Never launches an agent CLI, never needs
-  API keys. `python scripts/evals_runner.py validate` is the CI entry.
+  API keys. `python3 scripts/evals_runner.py validate` is the CI entry.
 - **Live side — trusted-operator only, never public CI.** `run` launches
   `claude -p` in a scratch workdir with Fettle hooks active and grades the
   transcript plus resulting files. Costs tokens; transcripts may be
@@ -46,3 +46,8 @@ harness does not infer turns from prose.
 python3 scripts/evals_runner.py validate                 # CI-safe
 python3 scripts/evals_runner.py run evals/scenarios/hook-catches-debug-statement   # LIVE
 ```
+
+Run static validation for every contribution that changes a scenario, grader,
+diagnostic message, or language rule. Live runs require an installed Claude CLI
+and should use a trusted scratch environment; inspect generated transcripts
+before sharing them.

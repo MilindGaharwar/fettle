@@ -215,10 +215,7 @@ def test_version_metadata_aligned():
     with open(os.path.join(_REPO_ROOT, "CHANGELOG.md")) as fh:
         changelog_version = re.search(r"^## v(\d+\.\d+\.\d+)", fh.read(), re.MULTILINE).group(1)
 
-    with open(os.path.join(_REPO_ROOT, "README.md")) as fh:
-        readme_version = re.search(r"\*\*Status: v(\d+\.\d+\.\d+)", fh.read()).group(1)
-
-    assert pyproject_version == init_version == changelog_version == readme_version
+    assert pyproject_version == init_version == changelog_version
 
 
 def test_cli_version_matches_pyproject():

@@ -12,16 +12,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
+from fettle.paths import FileKind, classify_file
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
-from fettle.adapters import migrate_adapter
+from fettle.adapters import CheckRun, as_check_run
+from fettle.workspace import Workspace
 
 
-@migrate_adapter
 class RustAdapter:
     """Rust language adapter using cargo toolchain."""
 
     language = "rust"
+    extensions = frozenset({".rs"})
 
     def __init__(self, cwd: str | None = None):
         self._cwd = cwd or os.getcwd()
@@ -30,7 +32,18 @@ class RustAdapter:
     def detect(self, profile: Profile) -> bool:
         return "rust" in profile.languages
 
-    def lint(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def supports(self, workspace: Workspace) -> bool:
+        return workspace.language == self.language
+
+    def classify(self, path: str, workspace: Workspace) -> FileKind:
+        return classify_file(path)
+
+    def lint(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._lint(), "changed" if files else "full",
+        )
+
+    def _lint(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "clippy", "--message-format=short", "--", "-D", "warnings"])
         if result.tool_missing:
             return [self._advisory("cargo not found")]
@@ -38,7 +51,12 @@ class RustAdapter:
             return []
         return self._parse_cargo_output(result.stderr, "clippy")
 
-    def format_check(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def format_check(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._format_check(), "changed" if files else "full",
+        )
+
+    def _format_check(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "fmt", "--check"])
         if result.tool_missing:
             return [self._advisory("cargo fmt not found")]
@@ -50,7 +68,12 @@ class RustAdapter:
             suggested_fix="Run: cargo fmt",
         )]
 
-    def typecheck(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def typecheck(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._typecheck(), "changed" if files else "full",
+        )
+
+    def _typecheck(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "check", "--message-format=short"])
         if result.tool_missing:
             return [self._advisory("cargo not found")]
@@ -58,7 +81,10 @@ class RustAdapter:
             return []
         return self._parse_cargo_output(result.stderr, "cargo-check")
 
-    def test(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def test(self, workspace: Workspace, files: list[str], scope: str) -> CheckRun:
+        return as_check_run(self, workspace, self._test(), scope)
+
+    def _test(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "test"])
         if result.tool_missing:
             return [self._advisory("cargo not found")]
@@ -71,7 +97,10 @@ class RustAdapter:
             blocking=True,
         )]
 
-    def build(self, tier: str) -> list[CheckFinding]:
+    def build(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._build(), "full")
+
+    def _build(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "build"])
         if result.tool_missing:
             return [self._advisory("cargo not found")]
@@ -84,7 +113,10 @@ class RustAdapter:
             blocking=True,
         )]
 
-    def dependency_check(self, files: list[str]) -> list[CheckFinding]:
+    def dependency_check(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._dependency_check(), "full")
+
+    def _dependency_check(self) -> list[CheckFinding]:
         result = self._runner.run(["cargo", "audit"])
         if result.tool_missing:
             return [self._advisory("cargo-audit not installed")]

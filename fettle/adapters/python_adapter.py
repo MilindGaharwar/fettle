@@ -11,16 +11,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
+from fettle.paths import FileKind, classify_file
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
-from fettle.adapters import migrate_adapter
+from fettle.adapters import CheckRun, as_check_run
+from fettle.workspace import Workspace
 
 
-@migrate_adapter
 class PythonAdapter:
     """Python language adapter using ruff, pyright, pytest, deptry."""
 
     language = "python"
+    extensions = frozenset({".py"})
 
     def __init__(self, cwd: str | None = None):
         self._cwd = cwd or os.getcwd()
@@ -33,7 +35,18 @@ class PythonAdapter:
     def detect(self, profile: Profile) -> bool:
         return "python" in profile.languages
 
-    def lint(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def supports(self, workspace: Workspace) -> bool:
+        return workspace.language == self.language
+
+    def classify(self, path: str, workspace: Workspace) -> FileKind:
+        return classify_file(path)
+
+    def lint(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._lint(files), "changed" if files else "full",
+        )
+
+    def _lint(self, files: list[str]) -> list[CheckFinding]:
         args = [self._ruff_cmd, "check", "--output-format=json"]
         if files:
             args.extend(files)
@@ -46,7 +59,12 @@ class PythonAdapter:
             return []
         return self._parse_ruff_json(result.stdout)
 
-    def format_check(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def format_check(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._format_check(files), "changed" if files else "full",
+        )
+
+    def _format_check(self, files: list[str]) -> list[CheckFinding]:
         args = [self._ruff_cmd, "format", "--check", "--diff"]
         if files:
             args.extend(files)
@@ -67,7 +85,12 @@ class PythonAdapter:
             rerun_command=f"ruff format --check {' '.join(files) if files else '.'}",
         )]
 
-    def typecheck(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def typecheck(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._typecheck(files), "changed" if files else "full",
+        )
+
+    def _typecheck(self, files: list[str]) -> list[CheckFinding]:
         args = [self._pyright_cmd, "--outputjson"]
         if files:
             args.extend(files)
@@ -78,7 +101,10 @@ class PythonAdapter:
             return []
         return self._parse_pyright_json(result.stdout)
 
-    def test(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def test(self, workspace: Workspace, files: list[str], scope: str) -> CheckRun:
+        return as_check_run(self, workspace, self._test(files), scope)
+
+    def _test(self, files: list[str]) -> list[CheckFinding]:
         args = [self._pytest_cmd, "-m", "pytest", "-q", "--tb=short"]
         if files:
             args.extend(files)
@@ -98,7 +124,10 @@ class PythonAdapter:
             blocking=True,
         )]
 
-    def build(self, tier: str) -> list[CheckFinding]:
+    def build(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._build(), "full")
+
+    def _build(self) -> list[CheckFinding]:
         result = self._runner.run(["pip", "install", "-e", ".", "--dry-run"])
         if result.tool_missing:
             return [self._advisory("pip not available")]
@@ -114,7 +143,10 @@ class PythonAdapter:
             blocking=True,
         )]
 
-    def dependency_check(self, files: list[str]) -> list[CheckFinding]:
+    def dependency_check(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._dependency_check(), "full")
+
+    def _dependency_check(self) -> list[CheckFinding]:
         result = self._runner.run([self._deptry_cmd, "."])
         if result.tool_missing:
             return [self._advisory(f"{self._deptry_cmd} not available — install with: pip install deptry")]

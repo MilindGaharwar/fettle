@@ -19,9 +19,10 @@ registration, if you prefer:
 }
 ```
 
-in `~/.config/opencode/config.json`. Set `FETTLE_PLUGIN_ROOT` if Fettle is
-installed somewhere other than `~/.claude/plugins/fettle`. Restart OpenCode
-after changing its configuration.
+in `~/.config/opencode/config.json`. The transport defaults to
+`~/.claude/plugins/fettle`, where `fettle init` links the checkout when Claude
+Code is installed. Otherwise set `FETTLE_PLUGIN_ROOT` to the checkout root
+before starting OpenCode. Restart OpenCode after changing its configuration.
 
 The adapter maps:
 

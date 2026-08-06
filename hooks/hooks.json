@@ -1,5 +1,5 @@
 {
-  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS. Timeouts are in seconds (Claude Code hook semantics). scripts/ is a compat symlink to fettle/ (one-release deprecation window).",
+  "description": "Fettle enforcement hooks — single dispatcher per event, SubagentStart remains JS. Timeouts are in seconds (Claude Code hook semantics).",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/fettle/run.sh dispatcher.py",
             "timeout": 10
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/fettle/run.sh dispatcher.py",
             "timeout": 15
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh dispatcher.py",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/fettle/run.sh dispatcher.py",
             "timeout": 60
           }
         ]

@@ -1,26 +1,90 @@
 # Changelog
 
-## Unreleased — v1.8 target
+## v1.8.0 — Canonical Workspace/Adapter Substrate
 
-- Added the canonical `pass`, `violation`, `tool_error`, and `unknown` result
-  states, actionable finding fields, and evidence references without changing
-  strict agent-host hook output.
-- Behavioral evals now report repair success, available turn counts, repeated
-  violations, diagnostic bytes, and indeterminate reasons, with Python and
-  TypeScript held-out baselines.
-- Audit traces now retain bounded, redacted evidence with stable IDs; verify,
-  coverage, CI, UAT, and integration artifacts link to that evidence. `fettle
-  explain` supports concise, detailed, and JSON Lines output.
-- Workspace discovery now uses one canonical model, supports nested projects,
-  longest-prefix routing, and per-workspace command overrides. Adapter checks
-  expose explicit four-state `CheckRun` outcomes through a compatibility bridge.
-- Post-edit language checks now route through one workspace-aware adapter entry
-  point for Python, JavaScript/TypeScript, Go, and Rust. File classification is
-  shared across gates, and verification records every affected workspace while
-  preserving the existing single-workspace stamp contract.
+**Released 2026-08-07**
+
+The v1.7.x unreleased R2 work graduates with 2,102 passing tests and a unified
+workspace/adapter layer. This release consolidates polyglot post-edit checks,
+fixes agent-hook paths, and improves documentation and onboarding.
+
+### Canonical Result States
+
+- Every adapter operation returns one of four explicit states: `pass`,
+  `violation`, `tool_error`, or `unknown`. Missing tools, timeouts, and
+  malformed output are reported as degraded analysis, not clean passes.
+- Findings carry actionable fields (file, line, code, message, rerun command)
+  and optional evidence references. The host-wire contract remains strict and
+  unchanged for Claude Code/Codex/Gemini/OpenCode transports.
+- Behavioral evals report repair success, turn counts, repeated violations,
+  diagnostic bytes, and indeterminate reasons, with Python and TypeScript
+  held-out baselines validating the feedback loop.
+
+### Workspace-Aware Polyglot Checks
+
+- Workspace discovery uses one canonical model supporting nested projects
+  (monorepos), longest-prefix routing, and per-workspace command overrides.
+- Post-edit lint routes through one workspace-aware adapter entry point for
+  Python, JavaScript/TypeScript, Go, and Rust. File classification is shared
+  across gates.
 - JavaScript/TypeScript checks prefer repository scripts and package-manager
-  execution for ESLint/Biome, Prettier, TypeScript, Vitest/Jest, and Knip;
-  missing tools, missing build scripts, and unparseable failures stay visible.
+  execution (ESLint/Biome, Prettier, TypeScript, Vitest/Jest, Knip). Missing
+  tools, missing build scripts, and unparseable failures surface explicitly.
+- Semgrep rules for TypeScript and Go now run inside their language adapters
+  (`ts-antipatterns.yml`, `go-antipatterns.yml`). Obsolete standalone
+  `post_edit_ts.py` and `post_edit_go.py` routes removed.
+- Verification records every affected workspace while preserving the existing
+  single-workspace stamp contract. Deleted code remains verification-relevant.
+- Nested Python workspaces use impacted-test mapping when reliable, falling
+  back to full suites instead of treating empty mapping as success.
+
+### Agent Integration Fixes
+
+- Claude Code/Codex/OpenCode hook paths corrected from `scripts/run.sh` to
+  `fettle/run.sh`. Hooks.json and install.py now reference the correct launcher,
+  protected by a regression test.
+- OpenCode transport updated to use `fettle/run.sh` with clearer environment
+  variable guidance in docs/OPENCODE.md.
+- Workflows error messages improved: distinguish missing directory vs empty
+  directory, and provide actionable hints for pipx editable-installs.
+
+### Documentation & Onboarding
+
+- README.md overhauled with compelling positioning, unique feature highlights,
+  clear pipx installation guidance (avoid editable installs for bundled
+  resources), and better structure for new users.
+- All docs/ reviewed for consistency: README.md index, CONFIG.md workspace
+  contract, ROADMAP.md graduation status, OPENCODE.md launcher paths.
+- CONTRIBUTING.md and SECURITY.md added with development setup, verification
+  guidance, and vulnerability reporting channels.
+- Error messages across workflows and install paths made more actionable.
+
+### Testing & Verification
+
+- 2,102 collected tests passing (up from 2,100+).
+- Test suite covers adapter unification, workspace routing, deleted-file
+  handling, hook launcher paths, and Semgrep integration per language.
+- Quality scan gates: Ruff, Fettle scan, schema/CLI consistency, eval
+  validation, impacted-workspace verification.
+
+### Breaking Changes
+
+- The temporary `migrate_adapter` compatibility bridge removed. Adapters now
+  follow the canonical `LanguageAdapter` protocol with `supports()`,
+  `classify()`, and workspace-first operations.
+- Standalone `post_edit_go.py` and `post_edit_ts.py` deleted. All polyglot
+  post-edit checks route through `fettle.adapter_check.run_adapter_check()`.
+
+### Migration Notes
+
+- Existing `.fettle.toml` files remain compatible. No action required unless
+  you have custom language adapters (update to workspace-first protocol).
+- Agent hooks installed by v1.7.0 will auto-update paths when you run
+  `fettle init` from the new checkout. Alternatively, manually update
+  `scripts/run.sh` → `fettle/run.sh` in your hook configurations.
+- pipx editable installs (`pipx install -e .`) bypass the build step that
+  bundles `commands/` into the wheel. Use `pipx install --force .` for
+  non-editable installs, or install from PyPI once v1.8.0 is published
 
 ## v1.7.0 — Workflows Everywhere
 

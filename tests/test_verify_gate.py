@@ -219,6 +219,75 @@ class TestRunVerify:
         assert test_calls[0].kwargs["cwd"] == str(api)
         assert stamp["workspaces"][0]["path"] == "services/api"
 
+    def test_deleted_file_still_routes_to_affected_workspace(self, tmp_path):
+        api = tmp_path / "services" / "api"
+        api.mkdir(parents=True)
+        (api / "pyproject.toml").write_text('[project]\nname="api"\n')
+        (api / "tests").mkdir()
+        deleted = api / "widget.py"
+        state = tmp_path / "state" / "sess-deleted"
+        _write_edits(state, [str(deleted)])
+        completed = subprocess.CompletedProcess([], 0, "", "")
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-deleted")
+
+        test_calls = [call for call in invoke.call_args_list if call.args[0][0] != "git"]
+        assert test_calls[0].kwargs["cwd"] == str(api)
+        assert stamp["workspaces"][0]["edited"] == ["services/api/widget.py"]
+
+    def test_nested_python_workspace_runs_impacted_tests(self, tmp_path):
+        api = tmp_path / "services" / "api"
+        tests = api / "tests"
+        tests.mkdir(parents=True)
+        (api / "pyproject.toml").write_text('[project]\nname="api"\n')
+        source = api / "widget.py"
+        source.write_text("x = 1\n")
+        (tests / "test_widget.py").write_text("def test_widget(): assert True\n")
+        (tests / "test_other.py").write_text("def test_other(): assert True\n")
+        state = tmp_path / "state" / "sess-impacted"
+        _write_edits(state, [str(source)])
+        completed = subprocess.CompletedProcess([], 0, "", "")
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-impacted")
+
+        test_call = next(call for call in invoke.call_args_list if call.args[0][0] != "git")
+        assert "tests/test_widget.py" in test_call.args[0]
+        assert "tests/test_other.py" not in test_call.args[0]
+        assert stamp["workspaces"][0]["scope"] == "impacted"
+        assert stamp["workspaces"][0]["impacted"] == ["tests/test_widget.py"]
+
+    def test_workspace_impacted_tests_preserve_pytest_flags(self, tmp_path):
+        api = tmp_path / "services" / "api"
+        tests = api / "tests"
+        tests.mkdir(parents=True)
+        (api / "pyproject.toml").write_text('[project]\nname="api"\n')
+        source = api / "widget.py"
+        source.write_text("x = 1\n")
+        (tests / "test_widget.py").write_text("def test_widget(): assert True\n")
+        state = tmp_path / "state" / "sess-flags"
+        _write_edits(state, [str(source)])
+        completed = subprocess.CompletedProcess([], 0, "", "")
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile") as detect,
+              patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
+            from fettle.workspace import Workspace
+
+            detect.return_value.workspaces = [Workspace(
+                name="api", path="services/api", language="python",
+                marker="pyproject.toml", test_command="python -m pytest tests --cov=src",
+                test_roots=["tests"],
+            )]
+            stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-flags")
+
+        test_call = next(call for call in invoke.call_args_list if call.args[0][0] != "git")
+        assert "--cov=src" in test_call.args[0]
+        assert stamp["workspaces"][0]["command"].endswith("tests/test_widget.py")
+
 
 def _gate_ctx(cwd: Path, config: dict) -> HookContext:
     hook_input = HookInput(
@@ -249,6 +318,15 @@ class TestStopGate:
         _write_edits(state, [str(doc)])
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+
+    def test_deleted_code_still_requires_verification(self, tmp_path):
+        deleted = tmp_path / "removed.py"
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(deleted)])
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "fettle verify" in result.message
 
     def test_missing_stamp_advisory_with_command(self, tmp_path):
         src = tmp_path / "src.py"

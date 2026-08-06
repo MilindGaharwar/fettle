@@ -12,38 +12,61 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
+from fettle.paths import FileKind, classify_file
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
-from fettle.adapters import migrate_adapter
+from fettle.adapters import CheckRun, as_check_run, semgrep_findings
+from fettle.workspace import Workspace
 
 
-@migrate_adapter
 class GoAdapter:
     """Go language adapter."""
 
     language = "go"
+    extensions = frozenset({".go"})
 
     def __init__(self, cwd: str | None = None):
         self._cwd = cwd or os.getcwd()
         self._runner = ToolRunner(timeout_s=90, cwd=self._cwd)
+        self._config: dict = {}
 
     def detect(self, profile: Profile) -> bool:
         return "go" in profile.languages
 
-    def lint(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def supports(self, workspace: Workspace) -> bool:
+        return workspace.language == self.language
+
+    def classify(self, path: str, workspace: Workspace) -> FileKind:
+        return classify_file(path)
+
+    def lint(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._native_lint(workspace, files),
+            "changed" if files else "full",
+        )
+
+    def _native_lint(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
+        findings = semgrep_findings(
+            files, cwd=self._cwd, config=self._config, rule_pack="go-antipatterns.yml",
+        )
         result = self._runner.run(["golangci-lint", "run", "--out-format=line-number"])
         if result.tool_missing:
             result = self._runner.run(["go", "vet", "./..."])
             if result.tool_missing:
-                return [self._advisory("Neither golangci-lint nor go found")]
+                return findings + [self._advisory("Neither golangci-lint nor go found")]
             if result.returncode == 0:
-                return []
-            return self._parse_go_output(result.stderr, "go-vet")
+                return findings
+            return findings + self._parse_go_output(result.stderr, "go-vet")
         if result.returncode == 0:
-            return []
-        return self._parse_golangci(result.stdout)
+            return findings
+        return findings + self._parse_golangci(result.stdout)
 
-    def format_check(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def format_check(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._format_check(files), "changed" if files else "full",
+        )
+
+    def _format_check(self, files: list[str]) -> list[CheckFinding]:
         result = self._runner.run(["gofmt", "-l", "."])
         if result.tool_missing:
             return [self._advisory("gofmt not found")]
@@ -57,7 +80,12 @@ class GoAdapter:
             suggested_fix="Run: gofmt -w .",
         ) for f in unformatted[:10]]
 
-    def typecheck(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def typecheck(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._typecheck(), "changed" if files else "full",
+        )
+
+    def _typecheck(self) -> list[CheckFinding]:
         result = self._runner.run(["go", "vet", "./..."])
         if result.tool_missing:
             return [self._advisory("go not found")]
@@ -65,7 +93,10 @@ class GoAdapter:
             return []
         return self._parse_go_output(result.stderr, "go-vet")
 
-    def test(self, tier: str, files: list[str]) -> list[CheckFinding]:
+    def test(self, workspace: Workspace, files: list[str], scope: str) -> CheckRun:
+        return as_check_run(self, workspace, self._test(), scope)
+
+    def _test(self) -> list[CheckFinding]:
         result = self._runner.run(["go", "test", "./..."])
         if result.tool_missing:
             return [self._advisory("go not found")]
@@ -78,7 +109,10 @@ class GoAdapter:
             blocking=True,
         )]
 
-    def build(self, tier: str) -> list[CheckFinding]:
+    def build(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._build(), "full")
+
+    def _build(self) -> list[CheckFinding]:
         result = self._runner.run(["go", "build", "./..."])
         if result.tool_missing:
             return [self._advisory("go not found")]
@@ -91,7 +125,10 @@ class GoAdapter:
             blocking=True,
         )]
 
-    def dependency_check(self, files: list[str]) -> list[CheckFinding]:
+    def dependency_check(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._dependency_check(), "full")
+
+    def _dependency_check(self) -> list[CheckFinding]:
         result = self._runner.run(["govulncheck", "./..."])
         if result.tool_missing:
             return [self._advisory("govulncheck not installed — run: go install golang.org/x/vuln/cmd/govulncheck@latest")]

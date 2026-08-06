@@ -6,24 +6,21 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-v1.7.0 provides four-agent event normalization, advisory-first session gates,
-unified layered policy resolution with provenance (org/team packs, digest-
-pinned central policy, per-directory overrides), guided workflows installable
-into every supported agent environment, central reporting, living-spec and
-verification evidence, governed delegation primitives, quarantined rule
-proposals, and reliable-session artifacts. The 2026-08 dual external audits
-are fully remediated. See the [README](../README.md) for capabilities and
-operational boundaries.
+The released package remains v1.7.0. The current mainline additionally has R1
+evidence-contract work and the graduated R2 canonical workspace/adapter
+substrate described in the [unreleased changelog](../CHANGELOG.md): explicit four-state results,
+workspace-aware post-edit lint for Python, JavaScript/TypeScript, Go, and Rust,
+and affected-workspace verification. See the [README](../README.md) for current
+capabilities and operational boundaries.
 
 ## Priorities
 
-| Priority | Outcome | Graduation trigger |
+| Status | Outcome | Graduation trigger |
 |---|---|---|
-| 1 | v1.8: canonical result, finding, and evidence contracts | Tool failures cannot appear clean; every non-pass result has a recovery action |
-| 2 | v1.8: Python and TypeScript agent-ergonomics baseline | Repair, turns, recurrence, bytes, and indeterminate runs are recorded |
-| 3 | v1.9: canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
-| 4 | v1.10–v1.12: native web, enterprise adapters, and advisory framework packs | Each stack passes clean, violation, error, routing, and behavioral-eval gates |
-| 5 | v1.13+: semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
+| Current | Complete R1 evidence and agent-ergonomics graduation | Every gate emits a canonical state; Python and TypeScript baselines are recorded; every non-pass path has a recovery action |
+| Graduated | Canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
+| Next | Native web, enterprise adapters, and advisory framework packs | Each stack passes clean, violation, error, routing, and behavioral-eval gates |
+| Later | Semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
 
 The authoritative activity sequence, dependencies, estimates, and demand gates
 are maintained in the

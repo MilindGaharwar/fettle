@@ -63,9 +63,10 @@ def _edited_files(edits_path: Path) -> list[str]:
 
 
 def _edited_code_files(edits_path: Path) -> list[str]:
+    """Return edited implementation/tests, including files deleted after editing."""
     return [
         f for f in _edited_files(edits_path)
-        if classify_file(f) in ("implementation", "test") and os.path.isfile(f)
+        if classify_file(f) in ("implementation", "test")
     ]
 
 
@@ -130,7 +131,12 @@ def run_verify(
     affected = _affected_workspaces(cwd, edited)
     if len(affected) > 1 or affected and affected[0][0].path != ".":
         return _run_workspace_verification(
-            cwd, affected, timeout_s=timeout_s, session_id=session_id,
+            cwd,
+            affected,
+            timeout_s=timeout_s,
+            session_id=session_id,
+            impacted=not full and scope_cfg == "impacted",
+            parallel=bool(gate_cfg.get("parallel", False)),
         )
 
     tc = discover_test_config(cwd)
@@ -217,8 +223,10 @@ def _run_workspace_verification(
     *,
     timeout_s: int,
     session_id: str | None,
+    impacted: bool,
+    parallel: bool,
 ) -> dict:
-    """Run each affected workspace's configured full test suite."""
+    """Run reliable impacted tests or each affected workspace's full suite."""
     records: list[dict] = []
     for workspace, edited in affected:
         workspace_root = Path(cwd) if workspace.path == "." else Path(cwd) / workspace.path
@@ -230,6 +238,7 @@ def _run_workspace_verification(
             "scope": "full",
             "edited": edited,
             "error": "",
+            "impacted": [],
             "head_sha": _head_sha(cwd),
             "dirty_digest": _dirty_digest(str(workspace_root)),
         }
@@ -237,10 +246,30 @@ def _run_workspace_verification(
             record["error"] = "no test command discovered for workspace"
             records.append(record)
             continue
+        argv = shlex.split(workspace.test_command)
+        if impacted and workspace.language == "python":
+            workspace_files = [str(Path(cwd) / file_path) for file_path in edited]
+            mapped = impacted_tests(
+                str(workspace_root), workspace_files, workspace.test_roots or ["tests"],
+            )
+            if mapped:
+                record["scope"] = "impacted"
+                record["impacted"] = mapped
+                argv = [
+                    arg for arg in argv
+                    if arg.rstrip("/") not in (workspace.test_roots or [])
+                ]
+                argv += build_pytest_args(
+                    mode="changed",
+                    files=mapped,
+                    failure_history=str(workspace_root / FAILURE_HISTORY_RELPATH),
+                    parallel=parallel,
+                )
+                record["command"] = shlex.join(argv)
         start = time.monotonic()
         try:
             proc = subprocess.run(
-                shlex.split(workspace.test_command), cwd=str(workspace_root),
+                argv, cwd=str(workspace_root),
                 capture_output=True, text=True, timeout=timeout_s,
             )
             record["exit_code"] = proc.returncode
@@ -254,7 +283,7 @@ def _run_workspace_verification(
         record["duration_s"] = round(time.monotonic() - start, 2)
         evidence = build_evidence(
             "verify", command=record["command"], exit_code=record["exit_code"],
-            duration_ms=record["duration_s"] * 1000, scope="full", workspace=workspace.path,
+            duration_ms=record["duration_s"] * 1000, scope=record["scope"], workspace=workspace.path,
         )
         record["evidence_id"] = evidence["evidence_id"]
         records.append(record)

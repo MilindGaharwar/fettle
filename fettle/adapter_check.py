@@ -43,6 +43,7 @@ def run_check(ctx: HookContext) -> CheckResult:
 
     workspace_root = ctx.cwd if workspace.path == "." else ctx.cwd / workspace.path
     adapter = type(registered)(cwd=str(workspace_root))
+    adapter._config = ctx.config
     run = run_adapter_check(
         adapter, "lint", workspace, [str(canonical_target)], scope="changed",
     )

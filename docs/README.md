@@ -8,6 +8,7 @@ Start with the path that matches what you are trying to accomplish.
 |---|---|
 | Evaluate locally without agent hooks | Install `finefettle`, then run `fettle check --changed` |
 | Add agent-session checks | Follow the [README quick start](../README.md#quick-start) from a Git checkout |
+| Understand polyglot routing | Read [Languages and surfaces](#languages-and-surfaces) |
 | Fit policy to one developer | `fettle init --profile solo` |
 | Add shared plans and worklogs | `fettle init --profile team` |
 | Evaluate stricter multi-agent controls | `fettle init --profile enterprise` in a test repository first |
@@ -23,6 +24,26 @@ Start with the path that matches what you are trying to accomplish.
   diagnostics and source installation.
 - [Roadmap](ROADMAP.md): prioritized future work and graduation triggers.
 - [Changelog](../CHANGELOG.md): shipped behavior by release.
+- [Contributing](../CONTRIBUTING.md): development setup and verification.
+- [Security policy](../SECURITY.md): supported releases and private reporting.
+
+## Languages and Surfaces
+
+Support is described by surface rather than by one blanket "supported
+languages" label:
+
+| Surface | Current scope |
+|---|---|
+| Agent post-edit lint | Python, JavaScript/TypeScript, Go, and Rust through workspace-aware adapters |
+| `fettle verify` | Every affected discovered workspace with a test command; impacted-test narrowing is currently Python-specific |
+| `fettle check --changed` | Changed Python files |
+| `fettle check --all` | Python Ruff and bundled Semgrep scan |
+| LSP / VS Code diagnostics | Python |
+
+Repositories may contain nested workspaces. Fettle discovers project markers,
+uses longest-prefix routing for an edited file, and keeps tool failures distinct
+from a clean result. The adapter result vocabulary is `pass`, `violation`,
+`tool_error`, and `unknown`.
 
 ## Agent Workflows
 

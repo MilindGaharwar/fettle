@@ -245,9 +245,13 @@ def install(agents: list[str], scope: str, repo_root: Path,
     that are not installed; an explicitly named agent always installs.
     """
     steps: list[Step] = []
-    flows = load_workflows()
+    source = commands_dir()
+    if not source.is_dir():
+        hint = "pipx install . --force" if "site-packages" in str(source) else "git clone and run from repo root"
+        return [Step("workflows", "error", f"commands directory not found: {source} ({hint})")]
+    flows = load_workflows(source)
     if not flows:
-        return [Step("workflows", "error", f"no commands found in {commands_dir()}")]
+        return [Step("workflows", "error", f"no .md workflow files in {source}")]
     for agent in agents:
         if detect and not _detected(agent, repo_root):
             steps.append(Step(f"workflows:{agent}", "skipped", f"{agent} not detected"))

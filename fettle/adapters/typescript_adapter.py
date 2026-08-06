@@ -12,138 +12,86 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fettle.finding import CheckFinding, FindingSeverity, Confidence
+from fettle.paths import FileKind, classify_file
 from fettle.profile import Profile
 from fettle.tool_runner import ToolRunner
-from fettle.adapters import migrate_adapter
+from fettle.adapters import CheckRun, as_check_run, semgrep_findings
 from fettle.workspace import Workspace
 
 
-@migrate_adapter
 class TypeScriptAdapter:
     """TypeScript/JavaScript language adapter."""
 
     language = "typescript"
+    extensions = frozenset({".js", ".jsx", ".ts", ".tsx"})
 
     def __init__(self, cwd: str | None = None):
         self._cwd = cwd or os.getcwd()
         self._runner = ToolRunner(timeout_s=60, cwd=self._cwd)
+        self._config: dict = {}
 
     def detect(self, profile: Profile) -> bool:
         return "typescript" in profile.languages or "javascript" in profile.languages
 
-    def lint(self, tier: str, files: list[str]) -> list[CheckFinding]:
-        # Try biome first, fall back to eslint
-        result = self._runner.run(["biome", "check", "--reporter=json", *files])
-        if not result.tool_missing:
-            return self._parse_biome(result.stdout) if result.returncode != 0 else []
+    def supports(self, workspace: Workspace) -> bool:
+        return workspace.language in {"javascript", "typescript"}
 
-        args = ["eslint", "--format=json", *files] if files else ["eslint", "--format=json", "."]
-        result = self._runner.run(args)
-        if result.tool_missing:
-            return [self._advisory("Neither biome nor eslint found")]
-        if result.returncode == 0:
-            return []
-        return self._parse_eslint_json(result.stdout)
+    def classify(self, path: str, workspace: Workspace) -> FileKind:
+        return classify_file(path)
 
-    def format_check(self, tier: str, files: list[str]) -> list[CheckFinding]:
-        result = self._runner.run(["biome", "format", "--check", *files])
-        if not result.tool_missing:
-            if result.returncode == 0:
-                return []
-            return [CheckFinding(
-                checker="biome-format", severity=FindingSeverity.WARNING,
-                file=files[0] if files else ".", line=0,
-                message="Format violations found",
-                suggested_fix="Run: biome format --write",
-            )]
+    def lint(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._native_lint(workspace, files),
+            "changed" if files else "full",
+        )
 
-        result = self._runner.run(["prettier", "--check", *(files or ["."])])
-        if result.tool_missing:
-            return [self._advisory("Neither biome nor prettier found")]
-        if result.returncode == 0:
-            return []
-        return [CheckFinding(
-            checker="prettier", severity=FindingSeverity.WARNING,
-            file=files[0] if files else ".", line=0,
-            message="Format violations found",
-            suggested_fix="Run: prettier --write .",
-        )]
+    def format_check(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._native_format_check(workspace, files),
+            "changed" if files else "full",
+        )
 
-    def typecheck(self, tier: str, files: list[str]) -> list[CheckFinding]:
-        result = self._runner.run(["tsc", "--noEmit"])
-        if result.tool_missing:
-            return [self._advisory("tsc not found")]
-        if result.returncode == 0:
-            return []
-        return self._parse_tsc(result.stdout)
+    def typecheck(self, workspace: Workspace, files: list[str]) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._native_typecheck(workspace, files),
+            "changed" if files else "full",
+        )
 
-    def test(self, tier: str, files: list[str]) -> list[CheckFinding]:
-        # Try vitest first, then jest
-        result = self._runner.run(["vitest", "run", "--reporter=json", *files])
-        if result.tool_missing:
-            result = self._runner.run(["jest", "--json", *files])
-        if result.tool_missing:
-            return [self._advisory("Neither vitest nor jest found")]
-        if result.returncode == 0:
-            return []
-        return [CheckFinding(
-            checker="test-js", severity=FindingSeverity.ERROR,
-            file=files[0] if files else ".", line=0,
-            message="Test failures detected",
-            raw_tool_output=result.stdout[-2048:],
-            blocking=True,
-        )]
+    def test(self, workspace: Workspace, files: list[str], scope: str) -> CheckRun:
+        return as_check_run(self, workspace, self._native_test(workspace, files, scope), scope)
 
-    def build(self, tier: str) -> list[CheckFinding]:
-        # Detect package manager
-        for cmd in ("pnpm", "npm", "yarn"):
-            result = self._runner.run([cmd, "ci"])
-            if not result.tool_missing:
-                if result.returncode == 0:
-                    return []
-                return [CheckFinding(
-                    checker=f"{cmd}-ci", severity=FindingSeverity.ERROR,
-                    file="package.json", line=0,
-                    message=f"{cmd} ci failed",
-                    raw_tool_output=result.stderr[-2048:],
-                    blocking=True,
-                )]
-        return [self._advisory("No package manager found")]
+    def build(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(self, workspace, self._native_build(workspace), "full")
 
-    def dependency_check(self, files: list[str]) -> list[CheckFinding]:
-        result = self._runner.run(["knip", "--reporter=json"])
-        if result.tool_missing:
-            return [self._advisory("knip not found — install with: npm install -D knip")]
-        if result.returncode == 0:
-            return []
-        return [CheckFinding(
-            checker="knip", severity=FindingSeverity.WARNING,
-            file="package.json", line=0,
-            message="Unused dependencies or exports detected",
-            raw_tool_output=result.stdout[-2048:],
-        )]
+    def dependency_check(self, workspace: Workspace) -> CheckRun:
+        return as_check_run(
+            self, workspace, self._native_dependency_check(workspace), "full",
+        )
 
     def _native_lint(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
+        findings = semgrep_findings(
+            files, cwd=self._cwd, config=self._config, rule_pack="ts-antipatterns.yml",
+        )
         if self._has_script("lint"):
             result = self._runner.run([workspace.manager or "npm", "run", "lint", *(["--", *files] if files else [])])
             if result.returncode == 0:
-                return []
+                return findings
             parsed = self._parse_eslint_json(result.stdout + result.stderr)
-            return parsed or [self._command_failure("lint", files, result)]
+            return findings + (parsed or [self._command_failure("lint", files, result)])
 
         result = self._runner.run([*self._exec_prefix(workspace), "biome", "check", "--reporter=json", *files])
         if not result.tool_missing:
             if result.returncode == 0:
-                return []
+                return findings
             parsed = self._parse_biome(result.stdout + result.stderr)
-            return parsed or [self._command_failure("biome", files, result)]
+            return findings + (parsed or [self._command_failure("biome", files, result)])
         result = self._runner.run([*self._exec_prefix(workspace), "eslint", "--format=json", *(files or ["."])])
         if result.tool_missing:
-            return [self._advisory("Neither biome nor eslint found in the workspace")]
+            return findings + [self._advisory("Neither biome nor eslint found in the workspace")]
         if result.returncode == 0:
-            return []
+            return findings
         parsed = self._parse_eslint_json(result.stdout + result.stderr)
-        return parsed or [self._command_failure("eslint", files, result)]
+        return findings + (parsed or [self._command_failure("eslint", files, result)])
 
     def _native_format_check(self, workspace: Workspace, files: list[str]) -> list[CheckFinding]:
         if self._has_script("format"):

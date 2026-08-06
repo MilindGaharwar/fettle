@@ -10,9 +10,11 @@ import sys
 from dataclasses import dataclass
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from fettle.adapters.typescript_adapter import TypeScriptAdapter
-from fettle.finding import FindingSeverity
+from fettle.finding import CheckFinding, FindingSeverity
 from fettle.profile import Profile
 from fettle.workspace import Workspace
 
@@ -23,6 +25,16 @@ class MockResult:
     stdout: str = ""
     stderr: str = ""
     tool_missing: bool = False
+
+
+@pytest.fixture(autouse=True)
+def _no_semgrep_by_default():
+    with patch("fettle.adapters.typescript_adapter.semgrep_findings", return_value=[]):
+        yield
+
+
+def _workspace() -> Workspace:
+    return Workspace(path=".", language="typescript", manager="npm")
 
 
 class TestDetection:
@@ -50,7 +62,7 @@ class TestLint:
         eslint_clean = MockResult(returncode=0, stdout="[]")
 
         with patch.object(adapter._runner, "run", side_effect=[biome_miss, eslint_clean]):
-            findings = adapter.lint("fast", [str(tmp_path / "app.ts")])
+            findings = adapter.lint(_workspace(), [str(tmp_path / "app.ts")]).findings
         assert findings == []
 
     def test_eslint_findings_parsed(self, tmp_path):
@@ -66,7 +78,7 @@ class TestLint:
         eslint_result = MockResult(returncode=1, stdout=eslint_output)
 
         with patch.object(adapter._runner, "run", side_effect=[biome_miss, eslint_result]):
-            findings = adapter.lint("fast", ["/tmp/app.ts"])
+            findings = adapter.lint(_workspace(), ["/tmp/app.ts"]).findings
 
         assert len(findings) == 2
         assert findings[0].file == "/tmp/app.ts"
@@ -85,7 +97,7 @@ class TestLint:
         biome_result = MockResult(returncode=1, stdout=biome_output)
 
         with patch.object(adapter._runner, "run", return_value=biome_result):
-            findings = adapter.lint("fast", ["src/app.ts"])
+            findings = adapter.lint(_workspace(), ["src/app.ts"]).findings
 
         assert len(findings) == 1
         assert findings[0].checker == "biome"
@@ -96,7 +108,7 @@ class TestLint:
         miss = MockResult(tool_missing=True)
 
         with patch.object(adapter._runner, "run", return_value=miss):
-            findings = adapter.lint("fast", ["app.ts"])
+            findings = adapter.lint(_workspace(), ["app.ts"]).findings
 
         assert len(findings) == 1
         assert findings[0].severity == FindingSeverity.INFO
@@ -108,22 +120,23 @@ class TestLint:
         bad_json = MockResult(returncode=1, stdout="NOT JSON{{{")
 
         with patch.object(adapter._runner, "run", side_effect=[biome_miss, bad_json]):
-            findings = adapter.lint("fast", ["app.ts"])
-        assert findings == []
+            run = adapter.lint(_workspace(), ["app.ts"])
+        assert run.result_state == "violation"
+        assert run.findings[0].checker == "eslint"
 
 
 class TestTypecheck:
     def test_tsc_clean(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)):
-            findings = adapter.typecheck("fast", [])
+            findings = adapter.typecheck(_workspace(), []).findings
         assert findings == []
 
     def test_tsc_errors_parsed(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         tsc_out = "src/api.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/api.ts(20,1): error TS2304: Cannot find name 'foo'.\n"
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=1, stdout=tsc_out)):
-            findings = adapter.typecheck("fast", [])
+            findings = adapter.typecheck(_workspace(), []).findings
 
         assert len(findings) == 2
         assert findings[0].file == "src/api.ts"
@@ -136,7 +149,7 @@ class TestTypecheck:
     def test_tsc_missing(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(tool_missing=True)):
-            findings = adapter.typecheck("fast", [])
+            findings = adapter.typecheck(_workspace(), []).findings
         assert len(findings) == 1
         assert "tsc" in findings[0].message
 
@@ -145,16 +158,15 @@ class TestFormatCheck:
     def test_biome_format_clean(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)):
-            findings = adapter.format_check("fast", ["app.ts"])
+            findings = adapter.format_check(_workspace(), ["app.ts"]).findings
         assert findings == []
 
     def test_biome_format_violations(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=1)):
-            findings = adapter.format_check("fast", ["app.ts"])
+            findings = adapter.format_check(_workspace(), ["app.ts"]).findings
         assert len(findings) == 1
-        assert findings[0].checker == "biome-format"
-        assert "biome format --write" in findings[0].suggested_fix
+        assert findings[0].checker == "format"
 
     def test_prettier_fallback(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
@@ -162,35 +174,37 @@ class TestFormatCheck:
         prettier_fail = MockResult(returncode=1)
 
         with patch.object(adapter._runner, "run", side_effect=[biome_miss, prettier_fail]):
-            findings = adapter.format_check("fast", ["app.ts"])
+            findings = adapter.format_check(_workspace(), ["app.ts"]).findings
         assert len(findings) == 1
-        assert "prettier" in findings[0].suggested_fix
+        assert findings[0].checker == "format"
 
 
 class TestBuild:
     def test_pnpm_ci_success(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"build":"tsc"}}')
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)):
-            findings = adapter.build("fast")
+            findings = adapter.build(_workspace()).findings
         assert findings == []
 
     def test_npm_ci_failure(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"build":"tsc"}}')
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
-        pnpm_miss = MockResult(tool_missing=True)
         npm_fail = MockResult(returncode=1, stderr="ERR! peer dep missing")
 
-        with patch.object(adapter._runner, "run", side_effect=[pnpm_miss, npm_fail]):
-            findings = adapter.build("fast")
+        with patch.object(adapter._runner, "run", return_value=npm_fail):
+            findings = adapter.build(_workspace()).findings
         assert len(findings) == 1
         assert findings[0].severity == FindingSeverity.ERROR
         assert findings[0].blocking is True
 
     def test_no_package_manager(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"build":"tsc"}}')
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         miss = MockResult(tool_missing=True)
 
         with patch.object(adapter._runner, "run", return_value=miss):
-            findings = adapter.build("fast")
+            findings = adapter.build(_workspace()).findings
         assert len(findings) == 1
         assert "package manager" in findings[0].message.lower()
 
@@ -199,25 +213,72 @@ class TestDependencyCheck:
     def test_knip_clean(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=0)):
-            findings = adapter.dependency_check(["app.ts"])
+            findings = adapter.dependency_check(_workspace()).findings
         assert findings == []
 
     def test_knip_finds_unused(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(returncode=1, stdout='{"unused":["lodash"]}')):
-            findings = adapter.dependency_check(["app.ts"])
+            findings = adapter.dependency_check(_workspace()).findings
         assert len(findings) == 1
-        assert "unused" in findings[0].message.lower()
+        assert findings[0].message == "knip failed"
 
     def test_knip_missing(self, tmp_path):
         adapter = TypeScriptAdapter(cwd=str(tmp_path))
         with patch.object(adapter._runner, "run", return_value=MockResult(tool_missing=True)):
-            findings = adapter.dependency_check(["app.ts"])
+            findings = adapter.dependency_check(_workspace()).findings
         assert len(findings) == 1
         assert "knip" in findings[0].message
 
 
 class TestRepositoryNativeCommands:
+    def test_native_lint_preserves_semgrep_findings(self, tmp_path):
+        target = tmp_path / "app.ts"
+        target.write_text("console.log('debug')")
+        (tmp_path / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="npm")
+        finding = CheckFinding(
+            checker="semgrep", severity=FindingSeverity.WARNING, file="app.ts",
+            line=1, code="debug-print-ts", message="debug print",
+        )
+        with (patch("fettle.adapters.typescript_adapter.semgrep_findings", return_value=[finding]),
+              patch.object(adapter._runner, "run", return_value=MockResult(returncode=0))):
+            run = adapter.lint(workspace, [str(target)])
+        assert run.result_state == "violation"
+        assert run.findings[0].code == "debug-print-ts"
+
+    def test_native_lint_semgrep_malformed_output_is_not_clean(self, tmp_path):
+        target = tmp_path / "app.ts"
+        target.write_text("const x = 1")
+        (tmp_path / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="npm")
+        error = CheckFinding(
+            checker="semgrep-adapter", severity=FindingSeverity.INFO, file="", line=0,
+            message="semgrep not available: malformed output", blocking=False,
+        )
+        with (patch("fettle.adapters.typescript_adapter.semgrep_findings", return_value=[error]),
+              patch.object(adapter._runner, "run", return_value=MockResult(returncode=0))):
+            run = adapter.lint(workspace, [str(target)])
+        assert run.result_state == "tool_error"
+        assert "semgrep" in run.tool_error
+
+    def test_native_lint_semgrep_reported_error_is_not_clean(self, tmp_path):
+        target = tmp_path / "app.ts"
+        target.write_text("const x = 1")
+        (tmp_path / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
+        adapter = TypeScriptAdapter(cwd=str(tmp_path))
+        workspace = Workspace(path=".", language="typescript", manager="npm")
+        error = CheckFinding(
+            checker="semgrep-adapter", severity=FindingSeverity.INFO, file="", line=0,
+            message="semgrep not available: invalid rule", blocking=False,
+        )
+        with (patch("fettle.adapters.typescript_adapter.semgrep_findings", return_value=[error]),
+              patch.object(adapter._runner, "run", return_value=MockResult(returncode=0))):
+            run = adapter.lint(workspace, [str(target)])
+        assert run.result_state == "tool_error"
+
     def test_native_lint_prefers_repository_script(self, tmp_path):
         (tmp_path / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
         adapter = TypeScriptAdapter(cwd=str(tmp_path))

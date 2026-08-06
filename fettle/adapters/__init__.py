@@ -6,15 +6,27 @@ WP-78: Defines the adapter protocol and provides discovery/registry.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import wraps
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
 from typing import Protocol
 
 import sys
-import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from fettle.finding import CheckFinding, EvidenceReference, ResultState
-from fettle.paths import FileKind, classify_file
+from fettle._resources import rules_dir
+from fettle.finding import (
+    CheckFinding,
+    Confidence,
+    EvidenceReference,
+    FindingSeverity,
+    ResultState,
+)
+from fettle.paths import FileKind
+from fettle.project_rules import extra_rule_configs
+from fettle.semgrep_util import anchored_semgrep_args
 from fettle.trace import build_evidence
 from fettle.workspace import Workspace
 
@@ -46,6 +58,97 @@ class LanguageAdapter(Protocol):
     def dependency_check(self, workspace: Workspace) -> CheckRun: ...
 
 
+def semgrep_findings(
+    files: list[str],
+    *,
+    cwd: str,
+    config: dict,
+    rule_pack: str,
+) -> list[CheckFinding]:
+    """Run one bundled rule pack and project rules for changed files."""
+    if not files:
+        return []
+    semgrep = _resolve_tool("semgrep")
+    rules_file = rules_dir() / rule_pack
+    if semgrep is None:
+        return [_adapter_error("semgrep not found")]
+    if not rules_file.is_file():
+        return [_adapter_error(f"semgrep rules not available: {rule_pack}")]
+
+    findings: list[CheckFinding] = []
+    for file_path in files:
+        anchor_args, anchor_cwd = anchored_semgrep_args(file_path, cwd=cwd)
+        config_args = ["--config", str(rules_file)]
+        for extra in extra_rule_configs(config, anchor_cwd):
+            config_args.extend(["--config", extra])
+        try:
+            proc = subprocess.run(
+                [semgrep, *config_args, "--json", *anchor_args],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=anchor_cwd,
+            )
+            if not proc.stdout.strip():
+                findings.append(_adapter_error("semgrep not available: empty output"))
+                continue
+            raw = json.loads(proc.stdout)
+        except subprocess.TimeoutExpired:
+            findings.append(_adapter_error("semgrep not available: timed out"))
+            continue
+        except (json.JSONDecodeError, OSError) as error:
+            findings.append(_adapter_error(f"semgrep not available: {error}"))
+            continue
+        if not isinstance(raw, dict):
+            findings.append(_adapter_error("semgrep not available: malformed output"))
+            continue
+        errors = raw.get("errors", [])
+        if errors:
+            first = errors[0] if isinstance(errors, list) else errors
+            message = first.get("message", first) if isinstance(first, dict) else first
+            findings.append(_adapter_error(f"semgrep not available: {message}"))
+            continue
+        for item in raw.get("results", []):
+            if not isinstance(item, dict):
+                continue
+            start = item.get("start", {})
+            extra = item.get("extra", {})
+            severity = str(extra.get("severity", "")) if isinstance(extra, dict) else ""
+            findings.append(CheckFinding(
+                checker="semgrep",
+                severity=(
+                    FindingSeverity.ERROR
+                    if "error" in severity.lower()
+                    else FindingSeverity.WARNING
+                ),
+                file=str(item.get("path") or file_path),
+                line=int(start.get("line", 0)) if isinstance(start, dict) else 0,
+                code=str(item.get("check_id", "")),
+                message=str(extra.get("message", "")) if isinstance(extra, dict) else "",
+                rerun_command=f"semgrep --config {rules_file} {file_path}",
+            ))
+    return findings
+
+
+def _resolve_tool(name: str) -> str | None:
+    local = Path.home() / ".local" / "bin" / name
+    if local.is_file() and os.access(local, os.X_OK):
+        return str(local)
+    return shutil.which(name)
+
+
+def _adapter_error(message: str) -> CheckFinding:
+    return CheckFinding(
+        checker="semgrep-adapter",
+        severity=FindingSeverity.INFO,
+        file="",
+        line=0,
+        message=message,
+        confidence=Confidence.HIGH,
+        blocking=False,
+    )
+
+
 def run_adapter_check(
     adapter: object,
     operation: str,
@@ -64,53 +167,13 @@ def run_adapter_check(
     return method(workspace, files)
 
 
-def migrate_adapter(cls):
-    """Expose native workspace calls while retaining shipped legacy callers."""
-    if not hasattr(cls, "supports"):
-        cls.supports = lambda self, workspace: workspace.language in {
-            self.language,
-            "javascript" if self.language == "typescript" else self.language,
-        }
-    if not hasattr(cls, "classify"):
-        cls.classify = lambda self, path, workspace: classify_file(path)
-    for operation in ("lint", "format_check", "typecheck", "test", "build", "dependency_check"):
-        legacy = getattr(cls, operation)
-
-        @wraps(legacy)
-        def migrated(self, *args, _operation=operation, _legacy=legacy):
-            if not args or not isinstance(args[0], Workspace):
-                return _legacy(self, *args)
-
-            workspace = args[0]
-            native = getattr(self, f"_native_{_operation}", None)
-            if _operation == "build":
-                scope = "full"
-                findings = native(workspace) if native else _legacy(self, scope)
-            elif _operation == "dependency_check":
-                scope = "full"
-                findings = native(workspace) if native else _legacy(self, [])
-            elif _operation == "test":
-                files = args[1] if len(args) > 1 else []
-                scope = args[2] if len(args) > 2 else "full"
-                findings = native(workspace, files, scope) if native else _legacy(self, scope, files)
-            else:
-                files = args[1] if len(args) > 1 else []
-                scope = "changed" if files else "full"
-                findings = native(workspace, files) if native else _legacy(self, scope, files)
-
-            return _as_check_run(self, workspace, findings, scope)
-
-        setattr(cls, operation, migrated)
-    return cls
-
-
-def _as_check_run(
+def as_check_run(
     adapter: object,
     workspace: Workspace,
     findings: list[CheckFinding],
     scope: str,
 ) -> CheckRun:
-    """Convert one completed legacy operation into the native result contract."""
+    """Convert one completed adapter operation into the canonical result contract."""
 
     runner = getattr(adapter, "_runner", None)
     last_result = getattr(runner, "last_result", None)
@@ -123,12 +186,16 @@ def _as_check_run(
     if last_result is not None and (last_result.tool_missing or last_result.timed_out):
         error = "tool not found" if last_result.tool_missing else "tool timed out"
         return CheckRun(ResultState.TOOL_ERROR, findings, evidence, scope, error)
-    if findings and all(
-        finding.checker.endswith("-adapter")
-        and ("not found" in finding.message.lower() or "not available" in finding.message.lower())
-        for finding in findings
-    ):
-        return CheckRun(ResultState.TOOL_ERROR, findings, evidence, scope, findings[0].message)
+    errors = [
+        finding for finding in findings
+        if finding.checker.endswith("-adapter")
+        and any(
+            phrase in finding.message.lower()
+            for phrase in ("not found", "not available", "timed out", "malformed", "empty output")
+        )
+    ]
+    if errors:
+        return CheckRun(ResultState.TOOL_ERROR, findings, evidence, scope, errors[0].message)
     state = ResultState.VIOLATION if findings else ResultState.PASS
     return CheckRun(state, findings, evidence, scope)
 

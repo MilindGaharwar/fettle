@@ -4,7 +4,14 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from fettle.adapters import CheckRun, get_adapter, list_adapters, run_adapter_check
+from fettle.adapters import (
+    CheckRun,
+    as_check_run,
+    get_adapter,
+    list_adapters,
+    run_adapter_check,
+)
+from fettle.paths import classify_file
 from fettle.finding import ResultState
 from fettle.tool_runner import RunResult
 from fettle.workspace import Workspace
@@ -21,6 +28,10 @@ def test_adapter_registry_discovers_python():
 def test_adapter_protocol_enforced():
     adapter = PythonAdapter()
     assert hasattr(adapter, "language")
+    assert adapter.extensions == frozenset({".py"})
+    assert "extensions" in type(adapter).__dict__
+    assert "supports" in type(adapter).__dict__
+    assert "classify" in type(adapter).__dict__
     assert hasattr(adapter, "detect")
     assert hasattr(adapter, "lint")
     assert hasattr(adapter, "format_check")
@@ -28,6 +39,23 @@ def test_adapter_protocol_enforced():
     assert hasattr(adapter, "test")
     assert hasattr(adapter, "build")
     assert hasattr(adapter, "dependency_check")
+
+
+def test_registered_adapters_declare_protocol_metadata():
+    languages = {
+        "python": (".py", "python"),
+        "typescript": (".tsx", "javascript"),
+        "go": (".go", "go"),
+        "rust": (".rs", "rust"),
+    }
+    for adapter in list_adapters():
+        extension, workspace_language = languages[adapter.language]
+        workspace = Workspace(path=".", language=workspace_language)
+        assert extension in adapter.extensions
+        assert adapter.supports(workspace)
+        assert adapter.classify(f"src/app{extension}", workspace) == classify_file(
+            f"src/app{extension}"
+        )
 
 
 def test_python_adapter_detects_from_profile(tmp_path):
@@ -47,7 +75,8 @@ def test_python_adapter_does_not_detect_node(tmp_path):
 def test_python_lint_wraps_ruff(tmp_path):
     (tmp_path / "bad.py").write_text("import os\nimport sys\nx = 1\n")
     adapter = PythonAdapter(cwd=str(tmp_path))
-    findings = adapter.lint("fast", [str(tmp_path / "bad.py")])
+    workspace = Workspace(path=".", language="python")
+    findings = adapter.lint(workspace, [str(tmp_path / "bad.py")]).findings
     # If ruff is available, it should find unused imports
     # If not available, should return advisory finding
     assert isinstance(findings, list)
@@ -56,21 +85,24 @@ def test_python_lint_wraps_ruff(tmp_path):
 def test_python_format_wraps_ruff_format(tmp_path):
     (tmp_path / "ugly.py").write_text("x=1\ny  =  2\n")
     adapter = PythonAdapter(cwd=str(tmp_path))
-    findings = adapter.format_check("changed", [str(tmp_path / "ugly.py")])
+    workspace = Workspace(path=".", language="python")
+    findings = adapter.format_check(workspace, [str(tmp_path / "ugly.py")]).findings
     assert isinstance(findings, list)
 
 
 def test_python_typecheck_wraps_pyright(tmp_path):
     (tmp_path / "typed.py").write_text("x: int = 'hello'\n")
     adapter = PythonAdapter(cwd=str(tmp_path))
-    findings = adapter.typecheck("changed", [str(tmp_path / "typed.py")])
+    workspace = Workspace(path=".", language="python")
+    findings = adapter.typecheck(workspace, [str(tmp_path / "typed.py")]).findings
     assert isinstance(findings, list)
 
 
 def test_python_test_wraps_pytest(tmp_path):
     (tmp_path / "test_x.py").write_text("def test_ok(): assert True\n")
     adapter = PythonAdapter(cwd=str(tmp_path))
-    findings = adapter.test("full", [str(tmp_path / "test_x.py")])
+    workspace = Workspace(path=".", language="python")
+    findings = adapter.test(workspace, [str(tmp_path / "test_x.py")], "full").findings
     assert isinstance(findings, list)
 
 
@@ -79,7 +111,8 @@ def test_missing_tool_produces_advisory(tmp_path):
     adapter = PythonAdapter(cwd=str(tmp_path))
     # Force a missing tool scenario by using a fake tool name
     adapter._ruff_cmd = "nonexistent_ruff_xyz"
-    findings = adapter.lint("fast", [str(tmp_path / "app.py")])
+    workspace = Workspace(path=".", language="python")
+    findings = adapter.lint(workspace, [str(tmp_path / "app.py")]).findings
     assert any("not found" in f.message.lower() or "not available" in f.message.lower() for f in findings)
 
 
@@ -113,6 +146,17 @@ def test_adapter_run_marks_clean_result_pass(tmp_path):
     run = run_adapter_check(adapter, "lint", workspace, [], scope="full")
     assert run.result_state == ResultState.PASS
     assert run.findings == []
+
+
+def test_adapter_run_prioritizes_tool_error_over_other_findings(tmp_path):
+    adapter = PythonAdapter(cwd=str(tmp_path))
+    workspace = Workspace(name="app", path=".", language="python", marker="pyproject.toml")
+    findings = [
+        adapter._advisory("semgrep not available: malformed output"),
+        adapter._parse_ruff_text("app.py:1:1: F401 unused import")[0],
+    ]
+    run = as_check_run(adapter, workspace, findings, "changed")
+    assert run.result_state == ResultState.TOOL_ERROR
 
 
 def test_all_adapter_operations_support_native_workspace_contract(tmp_path):

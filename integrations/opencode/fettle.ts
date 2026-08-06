@@ -5,7 +5,7 @@ import { join } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 
 const pluginRoot = process.env.FETTLE_PLUGIN_ROOT ?? join(homedir(), ".claude", "plugins", "fettle")
-const launcher = join(pluginRoot, "scripts", "run.sh")
+const launcher = join(pluginRoot, "fettle", "run.sh")
 
 const toolNames: Record<string, string> = {
   bash: "Bash",

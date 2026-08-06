@@ -193,6 +193,18 @@ def test_rust_impl_files_counted():
     assert rc == 2
 
 
+def test_central_classification_counts_go_and_tsx_implementation_files():
+    entries = [
+        make_entry("/project/cmd/main.go"),
+        make_entry("/project/src/App.tsx"),
+    ]
+    stdout, stderr, rc = run_hook("git push", entries)
+    assert rc == 2
+    parsed = json.loads(stdout.strip())
+    assert "main.go" in parsed["reason"]
+    assert "App.tsx" in parsed["reason"]
+
+
 # ─── 14. hookSpecificOutput contains impl file count ────────────────────────
 def test_hook_specific_output_contains_metadata():
     entries = [make_entry("/project/scripts/post_edit.py")]

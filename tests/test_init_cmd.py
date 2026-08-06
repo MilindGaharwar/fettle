@@ -96,6 +96,11 @@ class TestAgentDetection:
         config = json.loads((Path.home() / ".config" / "opencode" / "config.json").read_text())
         assert any("fettle.ts" in p for p in config["plugin"])
 
+    def test_opencode_transport_uses_current_launcher(self) -> None:
+        transport = (Path(PLUGIN_DIR) / "integrations" / "opencode" / "fettle.ts").read_text()
+        assert 'join(pluginRoot, "fettle", "run.sh")' in transport
+        assert 'join(pluginRoot, "scripts", "run.sh")' not in transport
+
     def test_opencode_preserves_existing_config(self, repo) -> None:
         oc_dir = Path.home() / ".config" / "opencode"
         oc_dir.mkdir(parents=True)

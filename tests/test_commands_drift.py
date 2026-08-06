@@ -7,6 +7,7 @@ drift test pins docs/fettle.schema.json to config.DEFAULTS.
 """
 
 import re
+import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -34,6 +35,25 @@ def test_no_claude_plugin_root_refs():
 def test_no_scripts_run_sh_refs():
     offenders = [c.name for c in COMMANDS if "scripts/run.sh" in c.read_text(encoding="utf-8")]
     assert offenders == [], f"legacy scripts/run.sh referenced in: {offenders}"
+
+
+def test_active_hook_launchers_exist(capsys):
+    hooks = json.loads((REPO / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    commands = [
+        hook["command"]
+        for groups in hooks["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+        if hook["type"] == "command" and "run.sh" in hook["command"]
+    ]
+    assert commands
+    assert all("/fettle/run.sh" in command for command in commands)
+    assert (REPO / "fettle" / "run.sh").is_file()
+
+    from fettle.install import install_hooks
+
+    install_hooks(REPO)
+    assert f"bash {REPO}/fettle/run.sh post_edit.py" in capsys.readouterr().out
 
 
 def test_every_referenced_fettle_subcommand_exists():

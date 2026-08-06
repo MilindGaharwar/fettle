@@ -29,6 +29,27 @@ scope. Org/team packs may set `_name = "acme"` for provenance display.
 Inspect the result with `fettle config --print-effective` (exactly what
 gates load) and `fettle config --explain` (which layer set each key).
 
+## Workspace and adapter behavior
+
+The lint hook discovers nested Python, JavaScript/TypeScript, Go, and Rust
+projects from their native project markers and routes each edited file to the
+most specific matching workspace. Checks run from that workspace root, so local
+tool configuration and repository scripts take precedence over unrelated root
+settings.
+
+Language adapters expose lint, format, typecheck, test, build, and dependency
+operations through one workspace-first contract. The post-edit hook currently
+invokes lint; other workflows use the operations relevant to their surface.
+Every adapter operation has an explicit result state: `pass`, `violation`,
+`tool_error`, or `unknown`. Missing tools, timeouts, and malformed output must
+not be interpreted as a pass.
+
+`fettle verify` groups session edits by affected workspace and records each
+workspace result in `.fettle/verify.json`. For Python workspaces it narrows to
+convention-matched impacted tests when that mapping is non-empty; otherwise it
+runs the discovered full test command. Deleted implementation and test files
+still participate in workspace routing.
+
 A machine-readable schema is published at
 [fettle.schema.json](fettle.schema.json) (generated from the built-in
 defaults; a test keeps it current). Validate your config locally:

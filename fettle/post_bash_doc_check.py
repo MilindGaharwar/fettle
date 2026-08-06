@@ -20,19 +20,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.config import load_config, state_dir  # noqa: E402
+from fettle.paths import classify_file  # noqa: E402
 
 _GIT_PUSH_RE = re.compile(r"\bgit\s+push\b")
 
-_IMPL_EXTENSIONS = {".py", ".rs", ".sh", ".js", ".ts"}
 _DOC_EXTENSIONS = {".md", ".rst", ".txt"}
-_TEST_PATH_FRAGMENTS = ("/tests/", "/test/", "test_")
 
 
 def _is_impl(path: str) -> bool:
-    ext = os.path.splitext(path)[1].lower()
-    if ext not in _IMPL_EXTENSIONS:
-        return False
-    return not any(frag in path for frag in _TEST_PATH_FRAGMENTS)
+    return classify_file(path) == "implementation"
 
 
 def _is_doc(path: str) -> bool:
@@ -116,10 +112,10 @@ def main() -> None:
     if mode == "advisory":
         output["decision"] = "continue"
         output["reason"] = "[ADVISORY] " + reason
-        print(json.dumps(output))
+        print(json.dumps(output))  # nosemgrep: debug-print-statement -- hook stdout protocol
         sys.exit(0)
 
-    print(json.dumps(output))
+    print(json.dumps(output))  # nosemgrep: debug-print-statement -- hook stdout protocol
     sys.exit(2)
 
 
