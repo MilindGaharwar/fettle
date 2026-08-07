@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from fettle.authorship_gate import ROLE_RANK, VALID_ROLES, run_check
 
