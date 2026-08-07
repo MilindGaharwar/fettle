@@ -1,81 +1,119 @@
-"""WP-X4 — Mutation Testing Command tests."""
+"""P34 mutation evidence integrity contracts."""
 
+import subprocess
 from unittest.mock import patch
 
-from fettle.mutation_test import compute_score, run_mutation_test, _parse_results, format_report
+import pytest
+
+from fettle.mutation_test import (
+    _get_all_py_files,
+    _get_changed_py_files,
+    _parse_result_ids,
+    _run_mutmut,
+    compute_score,
+    main,
+    run_mutation_test,
+)
 
 
-def test_compute_score_all_killed():
-    assert compute_score(10, 0) == 100.0
+def _proc(code=0, out="", err=""):
+    return subprocess.CompletedProcess([], code, out, err)
 
 
-def test_compute_score_mixed():
-    assert compute_score(7, 3) == 70.0
+def test_score_counts_every_non_skipped_outcome_and_rejects_zero():
+    assert compute_score(6, 1, 1, 1, 1) == 60
+    assert compute_score(0, 0, 0, 0, 0) is None
 
 
-def test_compute_score_none():
-    assert compute_score(0, 0) == 100.0
+@pytest.mark.parametrize("bad", ["12,45", "mutant-12", "12\n45", "12  45 extra"])
+def test_result_id_parser_is_strict(bad):
+    with pytest.raises(ValueError):
+        _parse_result_ids(bad)
+    assert _parse_result_ids("12 45\n") == ["12", "45"]
 
 
-def test_parse_results_with_survivors():
-    output = "Survived:\n- mutant 1 in app.py\n- mutant 2 in app.py\nKilled:\n- mutant 3\n- mutant 4\n- mutant 5\n"
-    result = _parse_results(output)
-    assert result["survived"] == 2
-    assert len(result["survivors"]) == 2
+def test_changed_selection_uses_merge_base_and_handles_renames_and_deletes(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/new.py").write_text("")
+    diff = "R100\tsrc/old.py\tsrc/new.py\nD\tsrc/gone.py\nM\ttests/test_app.py\n"
+    with patch("fettle.mutation_test.subprocess.run", side_effect=[_proc(out="abc\n"), _proc(out=diff)]) as run:
+        result = _get_changed_py_files(str(tmp_path), ["src/"], "origin/main")
+    assert result["files"] == ["src/new.py"]
+    assert result["deleted"] == ["src/gone.py"]
+    assert run.call_args_list[0].args[0] == ["git", "merge-base", "origin/main", "HEAD"]
 
 
-def test_parse_results_summary_line():
-    output = "Summary: 8 killed, 2 survived\n"
-    result = _parse_results(output)
-    assert result["killed"] == 8
-    assert result["survived"] == 2
+def test_merge_base_failure_is_unknown():
+    with patch("fettle.mutation_test.subprocess.run", return_value=_proc(128, err="bad revision")):
+        result = _get_changed_py_files(".", ["src/"], "missing")
+    assert result["status"] == "unknown"
+    assert result["passed"] is False
 
 
-def test_tool_missing():
+def test_full_selection_finds_python_only(tmp_path):
+    (tmp_path / "src/nested").mkdir(parents=True)
+    (tmp_path / "src/app.py").write_text("")
+    (tmp_path / "src/nested/no.txt").write_text("")
+    assert _get_all_py_files(str(tmp_path), ["src/"]) == ["src/app.py"]
+
+
+def test_engine_collects_all_states_and_exit_evidence():
+    outputs = ["1 2", "3", "4", "5", "6", "7"]
+    calls = [_proc(out="mutmut version 2.5.1\n"), _proc(14), _proc(), *[_proc(out=item) for item in outputs]]
+    with patch("fettle.mutation_test.subprocess.run", side_effect=calls):
+        result = _run_mutmut(".", ["src/app.py"], 600)
+    assert result["status"] == "completed"
+    assert [result[state] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")] == [2, 1, 1, 1, 1, 1]
+    assert result["run_exit_code"] == 14
+    assert result["survivors"] == ["3"]
+
+
+def test_fatal_run_exit_is_bounded_tool_error():
+    with patch("fettle.mutation_test.subprocess.run", side_effect=[_proc(out="mutmut version 2.5.1\n"), _proc(1, err="x" * 5000)]):
+        result = _run_mutmut(".", ["src/app.py"], 600)
+    assert result["status"] == "tool_error"
+    assert len(result["stderr"]) == 2000
+
+
+def test_wrong_version_and_parser_drift_cannot_pass():
+    with patch("fettle.mutation_test.subprocess.run", return_value=_proc(out="mutmut version 3.0.0\n")):
+        wrong = _run_mutmut(".", ["src/app.py"], 600)
+    calls = [_proc(out="mutmut version 2.5.1\n"), _proc(), _proc(), _proc(out="bad")]
+    with patch("fettle.mutation_test.subprocess.run", side_effect=calls):
+        drift = _run_mutmut(".", ["src/app.py"], 600)
+    assert wrong["status"] == "tool_error"
+    assert drift["status"] == "unknown"
+    assert drift["score"] is None
+
+
+def test_timeout_is_tool_error():
+    with patch("fettle.mutation_test.subprocess.run", side_effect=[_proc(out="mutmut version 2.5.1\n"), subprocess.TimeoutExpired([], 600)]):
+        result = _run_mutmut(".", ["src/app.py"], 600)
+    assert result["status"] == "tool_error"
+
+
+def test_zero_mutants_is_unknown_not_perfect():
+    engine = {"status": "completed", "engine_version": "2.5.1", "run_exit_code": 0, "results_exit_code": 0,
+              "killed": 0, "survived": 0, "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
+              "survivors": []}
+    selection = {"status": "completed", "merge_base": "abc", "files": ["src/app.py"], "deleted": []}
+    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection), patch("fettle.mutation_test._run_mutmut", return_value=engine):
+        result = run_mutation_test(".", {"paths": ["src/"]})
+    assert result["status"] == "unknown"
+    assert result["passed"] is False
+
+
+def test_no_files_is_distinct_from_missing_tool():
     with patch("fettle.mutation_test._has_mutmut", return_value=False):
-        report = run_mutation_test(".", {"paths": ["src/"]})
-    assert report["status"] == "tool_missing"
-    assert "mutmut" in report["message"]
+        assert run_mutation_test(".", {})["status"] == "tool_error"
+    selection = {"status": "completed", "merge_base": "abc", "files": [], "deleted": []}
+    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection):
+        result = run_mutation_test(".", {})
+    assert result["status"] == "not_applicable"
+    assert result["passed"] is True
 
 
-def test_nothing_to_mutate():
-    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
-          patch("fettle.mutation_test._get_changed_py_files", return_value=[])):
-        report = run_mutation_test(".", {"paths": ["src/"]})
-    assert report["status"] == "nothing_to_mutate"
-
-
-def test_completed_below_threshold():
-    mock_results = {"status": "completed", "survivors": ["mutant 1"], "killed": 5, "survived": 5}
-    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
-          patch("fettle.mutation_test._get_changed_py_files", return_value=["src/app.py"]),
-          patch("fettle.mutation_test._run_mutmut", return_value=mock_results)):
-        report = run_mutation_test(".", {"paths": ["src/"], "threshold": 70, "timeout_s": 60})
-    assert report["status"] == "completed"
-    assert report["score"] == 50.0
-    assert report["passed"] is False
-
-
-def test_completed_above_threshold():
-    mock_results = {"status": "completed", "survivors": [], "killed": 9, "survived": 1}
-    with (patch("fettle.mutation_test._has_mutmut", return_value=True),
-          patch("fettle.mutation_test._get_changed_py_files", return_value=["src/app.py"]),
-          patch("fettle.mutation_test._run_mutmut", return_value=mock_results)):
-        report = run_mutation_test(".", {"paths": ["src/"], "threshold": 70, "timeout_s": 60})
-    assert report["passed"] is True
-    assert report["score"] == 90.0
-
-
-def test_format_report_completed():
-    report = {"status": "completed", "score": 75.0, "killed": 9, "survived": 3,
-              "survivors": ["mutant in line 5"], "threshold": 70, "passed": True}
-    output = format_report(report)
-    assert "75.0%" in output
-    assert "PASS" in output
-    assert "mutant" in output
-
-
-def test_format_report_tool_missing():
-    report = {"status": "tool_missing", "message": "mutmut not found", "score": None}
-    output = format_report(report)
-    assert "mutmut not found" in output
+def test_cli_returns_two_for_unknown(monkeypatch):
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", lambda root, cfg: {"status": "unknown", "score": None, "passed": False})
+    monkeypatch.setattr("sys.argv", ["mutation_test", "--json"])
+    assert main() == 2

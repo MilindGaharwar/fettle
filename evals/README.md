@@ -1,5 +1,8 @@
 # Fettle Behavioral Evaluations
 
+Static rule fixtures answer "did the analyzer match?" This lab answers the more
+important product question: **did the feedback help an agent change behavior?**
+
 > Structure adapted with attribution from
 > [superpowers-evals](https://github.com/prime-radiant-inc/superpowers-evals)
 > (quorum), radically slimmed. Rule *matching* is proven by
@@ -51,3 +54,13 @@ Run static validation for every contribution that changes a scenario, grader,
 diagnostic message, or language rule. Live runs require an installed Claude CLI
 and should use a trusted scratch environment; inspect generated transcripts
 before sharing them.
+
+## Interpreting Results
+
+- `pass` means every declared observable check passed.
+- `fail` is valid negative evidence: the agent did not achieve the scenario.
+- `indeterminate` means the experiment itself was not trustworthy and must not
+  be counted as a pass or failure.
+
+Compare language and message changes against held-out scenarios. Do not tune a
+diagnostic on the same scenarios used to claim improvement.

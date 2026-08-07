@@ -8,6 +8,24 @@ Fettle reads a single optional `.fettle.toml` at your project root, plus
 optional org/team packs and scoped overrides — all resolved by **one
 resolver** shared by every gate and by `fettle config` (v1.7.0, WP-20).
 
+## Start safely
+
+For a new repository, prefer generated advisory defaults over copying a large
+configuration:
+
+```bash
+fettle init --dry-run
+fettle init --profile solo
+fettle config --validate
+fettle config --explain
+fettle doctor
+```
+
+Use `team` when you need shared plans and worklogs. Evaluate `enterprise` in a
+test repository before relying on stricter delegation and evidence gates. A
+gate should move to `enforce` only after its tools, recovery path, and signal
+quality are known in your environment.
+
 ## Policy source precedence
 
 Later sources win (the capsule may only tighten):

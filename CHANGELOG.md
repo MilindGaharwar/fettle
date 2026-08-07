@@ -1,5 +1,63 @@
 # Changelog
 
+## v1.9.0 — Trustworthy Change Evidence
+
+**Released 2026-08-07**
+
+This release strengthens Fettle's evidence boundary: scanner failures remain
+visible, change-integrity records have deterministic contracts, selected
+concurrent protocols are model-checked, and multi-agent roles can enforce
+authorship separation. Mutation testing is now honest and operational in an
+advisory workflow, but remains evidence-gated rather than enforced.
+
+### Evidence Integrity
+
+- Required scanner and CI failures use canonical non-pass states instead of
+  becoming clean results through malformed output, missing tools, or wrapper
+  errors (P33).
+- Mutation analysis pins `mutmut==2.5.1`, selects changes from an explicit
+  merge base, distinguishes changed and full-source runs, and fails closed on
+  tool errors, parser errors, timeouts, and zero-mutant runs (P34).
+- A seeded weak-assertion fixture proves the mutation wrapper reports two
+  surviving mutants and a `0.0%` score rather than manufacturing success.
+- Pull-request and scheduled mutation jobs retain JSON evidence. They remain
+  advisory until three stable CI runs establish a baseline and ratchet.
+
+### Change-Integrity Contracts
+
+- Canonical source, graph, provider, traversal, freshness, closure, and
+  obligation records use deterministic identities and fail-visible states
+  (P44).
+- An adversarial fixture corpus covers cycles, duplicate facts, malformed
+  attributes, oversized output, provider failures, and path/Unicode variants.
+- Runtime snapshots, graph assembly, advisory impact, and graph-bound CI remain
+  proposed and do not replace existing authoritative checks in this release.
+
+### Formal Verification And Multi-Agent Roles
+
+- TLA+ models check Policy Capsule monotonicity and Work Item Claim safety,
+  including claim exclusivity, conservative unknown scope, claim-before-work,
+  and lock mutual exclusion (P43, two of five planned models).
+- CI reruns TLC when modeled source changes; the `tla_sync` hook advises when
+  source annotations and specifications drift.
+- The authorship gate and `--role` plumbing can require test and implementation
+  changes to come from separate roles in multi-agent work (P52).
+- P43 and P52 remain in progress: additional models, refinement evidence,
+  adversarial path coverage, and an evidenced multi-agent flow are still
+  required for graduation.
+
+### Documentation And Distribution
+
+- README and task-oriented documentation now distinguish CLI/CI installation
+  from live-agent hook installation, and describe supported agents, languages,
+  evidence states, and trust boundaries without implying unshipped behavior.
+- The source distribution now includes all 17 workflow command sources, so a
+  wheel reconstructed from the sdist retains the same bundled workflows.
+- Release CI verifies bundled rules and commands in both the wheel and an
+  installation reconstructed from the sdist before OIDC publication.
+- Package metadata adds Documentation and Issues links and declares version
+  `1.9.0` with no runtime dependencies.
+
 ## v1.8.0 — Canonical Workspace/Adapter Substrate
 
 **Released 2026-08-07**

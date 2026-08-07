@@ -1,216 +1,261 @@
-"""WP-X4 — Mutation Testing Command.
-
-Wraps mutmut to run mutation testing on changed Python files.
-Reports surviving mutants and mutation score.
-"""
+"""P34 mutation testing with bounded, fail-visible mutmut evidence."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+MUTMUT_VERSION = "2.5.1"
+_STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
+_ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
 
 
-_ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
+def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, cwd=root, env=_ENV, capture_output=True, text=True, timeout=timeout)
 
 
-def _get_changed_py_files(root: str, paths: list[str]) -> list[str]:
-    """Get changed .py files from git diff, filtered to configured paths."""
+def _bounded(text: str) -> str:
+    return text.strip()[-2000:]
+
+
+def _error(status: str, message: str, **evidence) -> dict:
+    return {"status": status, "message": message, "score": None, "passed": False, **evidence}
+
+
+def _get_changed_py_files(root: str, paths: list[str], base: str) -> dict:
+    """Select existing implementation files against an explicit merge base."""
     try:
-        result = subprocess.run(
-            ["git", "-C", root, "diff", "--name-only", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["git", "-C", root, "diff", "--name-only", "--cached"],
-                capture_output=True, text=True, timeout=5,
-            )
-        files = [f for f in result.stdout.strip().splitlines() if f.endswith(".py")]
-        if paths:
-            files = [f for f in files if any(f.startswith(p) for p in paths)]
-        return files
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return []
+        merge_base = _run(["git", "merge-base", base, "HEAD"], root, 10)
+        if merge_base.returncode or not merge_base.stdout.strip():
+            return _error("unknown", "Cannot resolve merge base: " + _bounded(merge_base.stderr))
+        sha = merge_base.stdout.strip()
+        diff = _run(["git", "diff", "--name-status", "-M", sha, "HEAD", "--"], root, 10)
+    except subprocess.TimeoutExpired:
+        return _error("unknown", "Git change selection timed out")
+    except OSError as exc:
+        return _error("tool_error", f"Git change selection failed: {exc}")
+
+    if diff.returncode:
+        return _error("unknown", "Cannot select changed files: " + _bounded(diff.stderr))
+    selected: set[str] = set()
+    deleted: set[str] = set()
+    for line in diff.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            return _error("unknown", "Unrecognized git --name-status output")
+        status, path = parts[0][:1], parts[-1]
+        if not path.endswith(".py") or (paths and not any(path.startswith(item) for item in paths)):
+            continue
+        if status == "D":
+            deleted.add(path)
+        elif status in {"A", "M", "R", "C"} and (Path(root) / path).is_file():
+            selected.add(path)
+    return {"status": "completed", "merge_base": sha, "files": sorted(selected), "deleted": sorted(deleted)}
+
+
+def _get_all_py_files(root: str, paths: list[str]) -> list[str]:
+    root_path = Path(root)
+    files: set[str] = set()
+    for item in paths:
+        target = root_path / item
+        if target.is_file() and target.suffix == ".py":
+            files.add(target.relative_to(root_path).as_posix())
+        elif target.is_dir():
+            files.update(path.relative_to(root_path).as_posix() for path in target.rglob("*.py") if path.is_file())
+    return sorted(files)
 
 
 def _has_mutmut() -> bool:
-    import shutil
-    if shutil.which("mutmut"):
-        return True
-    local = os.path.expanduser("~/.local/bin/mutmut")
-    return os.path.isfile(local) and os.access(local, os.X_OK)
+    return shutil.which("mutmut", path=_ENV["PATH"]) is not None
 
 
-def _run_mutmut(root: str, paths_to_mutate: list[str], timeout_s: int) -> dict:
-    """Run mutmut and parse results."""
-    if not paths_to_mutate:
-        return {"status": "nothing_to_mutate", "survivors": [], "killed": 0, "survived": 0}
+def _parse_result_ids(output: str) -> list[str]:
+    output = output.strip()
+    if not output:
+        return []
+    if not re.fullmatch(r"\d+(?: \d+)*", output):
+        raise ValueError("unrecognized mutmut result-ids output")
+    return output.split()
 
-    paths_arg = ",".join(paths_to_mutate)
+
+def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
+    """Run mutmut 2.5.1 and reconstruct each outcome from verified ID output."""
     try:
-        subprocess.run(
-            ["mutmut", "run", "--paths-to-mutate=" + paths_arg, "--no-progress"],
-            capture_output=True, text=True, timeout=timeout_s,
-            cwd=root, env=_ENV,
+        version = _run(["mutmut", "version"], root, 30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _error("tool_error", f"Cannot check mutmut version: {exc}")
+    match = re.fullmatch(r"\s*mutmut version (\d+\.\d+\.\d+)\s*", version.stdout)
+    actual = match.group(1) if match else "unrecognized"
+    if version.returncode or actual != MUTMUT_VERSION:
+        return _error(
+            "tool_error",
+            f"Unsupported mutmut version {actual}; install mutmut=={MUTMUT_VERSION}",
+            engine_version=actual,
+            version_exit_code=version.returncode,
+            stderr=_bounded(version.stderr),
+        )
+
+    try:
+        run = _run(
+            ["mutmut", "run", "--paths-to-mutate=" + ",".join(files), "--no-progress", "--simple-output"],
+            root,
+            timeout,
         )
     except subprocess.TimeoutExpired:
-        return {"status": "timeout", "survivors": [], "killed": 0, "survived": 0}
-    except FileNotFoundError:
-        return {"status": "tool_missing", "survivors": [], "killed": 0, "survived": 0}
+        return _error("tool_error", f"Mutation run timed out after {timeout}s", engine_version=actual)
+    except OSError as exc:
+        return _error("tool_error", f"Cannot execute mutmut: {exc}", engine_version=actual)
 
-    # Parse results from mutmut results
-    try:
-        results_proc = subprocess.run(
-            ["mutmut", "results"],
-            capture_output=True, text=True, timeout=30,
-            cwd=root, env=_ENV,
+    # mutmut 2.x uses bits 2/4/8 for survivor/timeout/suspicious outcomes.
+    if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
+        return _error(
+            "tool_error",
+            "mutmut run failed",
+            engine_version=actual,
+            run_exit_code=run.returncode,
+            stderr=_bounded(run.stderr or run.stdout),
         )
-        return _parse_results(results_proc.stdout)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return {"status": "parse_error", "survivors": [], "killed": 0, "survived": 0}
-
-
-def _parse_results(output: str) -> dict:
-    """Parse mutmut results output."""
-    survivors: list[str] = []
-    killed = 0
-    survived = 0
-
-    in_survived = False
-    for line in output.splitlines():
-        line = line.strip()
-        if "Survived" in line or "survived" in line:
-            in_survived = True
-            continue
-        if "Killed" in line or "killed" in line:
-            in_survived = False
-            continue
-        if in_survived and line.startswith("- "):
-            survivors.append(line[2:])
-            survived += 1
-        elif line.startswith("- ") and not in_survived:
-            killed += 1
-
-    # Fallback: count from summary line if present
-    import re
-    m = re.search(r"(\d+)\s+killed", output)
-    if m:
-        killed = int(m.group(1))
-    m = re.search(r"(\d+)\s+survived", output)
-    if m:
-        survived = int(m.group(1))
-
-    return {"status": "completed", "survivors": survivors[:20], "killed": killed, "survived": survived}
-
-
-def compute_score(killed: int, survived: int) -> float:
-    total = killed + survived
-    if total == 0:
-        return 100.0
-    return (killed / total) * 100
-
-
-def run_mutation_test(root: str, cfg: dict) -> dict:
-    """Run mutation testing and return report."""
-    if not _has_mutmut():
-        return {
-            "status": "tool_missing",
-            "message": "mutmut not found. Install: pip install mutmut",
-            "score": None,
-        }
-
-    paths = cfg.get("paths", ["src/"])
-    exclude = cfg.get("exclude", ["tests/", "migrations/"])
-    timeout_s = int(cfg.get("timeout_s", 300))
-    threshold = float(cfg.get("threshold", 70))
-
-    changed_files = _get_changed_py_files(root, paths)
-    changed_files = [f for f in changed_files if not any(f.startswith(e) for e in exclude)]
-
-    if not changed_files:
-        return {
-            "status": "nothing_to_mutate",
-            "message": "No implementation files changed",
-            "score": None,
-        }
-
-    results = _run_mutmut(root, changed_files, timeout_s)
-
-    if results["status"] in ("timeout", "tool_missing", "parse_error"):
-        return {
-            "status": results["status"],
-            "message": "Mutation testing " + results["status"],
-            "score": None,
-        }
-
-    score = compute_score(results["killed"], results["survived"])
-    passed = score >= threshold
+    try:
+        results = _run(["mutmut", "results"], root, 30)
+        if results.returncode:
+            return _error(
+                "tool_error",
+                "mutmut results failed",
+                engine_version=actual,
+                run_exit_code=run.returncode,
+                results_exit_code=results.returncode,
+                stderr=_bounded(results.stderr or results.stdout),
+            )
+        ids: dict[str, list[str]] = {}
+        for state in _STATES:
+            result_ids = _run(["mutmut", "result-ids", state], root, 30)
+            if result_ids.returncode:
+                return _error(
+                    "tool_error",
+                    f"mutmut result-ids {state} failed",
+                    engine_version=actual,
+                    result_ids_exit_code=result_ids.returncode,
+                    stderr=_bounded(result_ids.stderr or result_ids.stdout),
+                )
+            ids[state] = _parse_result_ids(result_ids.stdout)
+    except ValueError as exc:
+        return _error("unknown", str(exc), engine_version=actual, run_exit_code=run.returncode)
+    except subprocess.TimeoutExpired:
+        return _error("tool_error", "mutmut result collection timed out", engine_version=actual)
+    except OSError as exc:
+        return _error("tool_error", f"Cannot read mutmut results: {exc}", engine_version=actual)
 
     return {
         "status": "completed",
-        "score": round(score, 1),
-        "killed": results["killed"],
-        "survived": results["survived"],
-        "survivors": results["survivors"],
-        "threshold": threshold,
-        "passed": passed,
-        "files_tested": changed_files,
+        "engine_version": actual,
+        "run_exit_code": run.returncode,
+        "results_exit_code": results.returncode,
+        **{state: len(ids[state]) for state in _STATES},
+        "survivors": ids["survived"][:20],
+        "stderr": _bounded(run.stderr),
     }
+
+
+def compute_score(killed: int, survived: int, timeout: int, suspicious: int, untested: int) -> float | None:
+    total = killed + survived + timeout + suspicious + untested
+    return None if total == 0 else killed / total * 100
+
+
+def _rerun(root: str, paths: list[str], timeout: int, threshold: float, base: str, all_files: bool) -> str:
+    argv = [
+        sys.executable, "-m", "fettle.mutation_test", "--root", root,
+        "--paths", ",".join(paths), "--timeout", str(timeout), "--threshold", str(threshold),
+    ]
+    argv.extend(["--all"] if all_files else ["--base", base])
+    return shlex.join([*argv, "--json"])
+
+
+def run_mutation_test(root: str, cfg: dict) -> dict:
+    paths = cfg.get("paths", ["src/"])
+    excluded = cfg.get("exclude", ["tests/", "migrations/"])
+    timeout = int(cfg.get("timeout_s", 600))
+    threshold = float(cfg.get("threshold", 70))
+    base = str(cfg.get("base", "origin/main"))
+    all_files = bool(cfg.get("all", False))
+    rerun = _rerun(root, paths, timeout, threshold, base, all_files)
+    if not _has_mutmut():
+        return _error(
+            "tool_error",
+            f"mutmut not found. Install: python -m pip install mutmut=={MUTMUT_VERSION}",
+            rerun_command=rerun,
+        )
+
+    selection = (
+        {"status": "completed", "merge_base": None, "files": _get_all_py_files(root, paths), "deleted": []}
+        if all_files else _get_changed_py_files(root, paths, base)
+    )
+    if selection["status"] != "completed":
+        return {**selection, "files_tested": [], "deleted_files": selection.get("deleted", []), "rerun_command": rerun}
+    files = [path for path in selection["files"] if not any(path.startswith(item) for item in excluded)]
+    common = {
+        "merge_base": selection["merge_base"],
+        "selection": "all" if all_files else "changed",
+        "files_tested": files,
+        "deleted_files": selection["deleted"],
+        "rerun_command": rerun,
+    }
+    if not files:
+        return {
+            "status": "not_applicable", "message": "No existing implementation files changed",
+            "score": None, "passed": True, **common,
+        }
+    result = _run_mutmut(root, files, timeout)
+    if result["status"] != "completed":
+        return {**result, **common}
+    score = compute_score(*(result[state] for state in _STATES[:5]))
+    if score is None:
+        evidence = {key: value for key, value in result.items() if key != "status"}
+        return _error("unknown", "mutmut reported zero scored mutants", **evidence, **common)
+    return {**result, "score": round(score, 1), "threshold": threshold, "passed": score >= threshold, **common}
 
 
 def format_report(report: dict) -> str:
-    """Format mutation test report."""
-    lines = ["# Mutation Test Report", ""]
-
-    if report["status"] == "tool_missing":
-        return lines[0] + "\n\n" + report["message"]
-    if report["status"] == "nothing_to_mutate":
-        return lines[0] + "\n\n" + report["message"]
-
-    lines.append("**Score:** " + str(report.get("score", "N/A")) + "%"
-                 + (" PASS" if report.get("passed") else " FAIL"))
-    lines.append("**Killed:** " + str(report.get("killed", 0)))
-    lines.append("**Survived:** " + str(report.get("survived", 0)))
-    lines.append("**Threshold:** " + str(report.get("threshold", 70)) + "%")
-    lines.append("")
-
-    survivors = report.get("survivors", [])
-    if survivors:
-        lines.append("## Surviving Mutants")
-        for s in survivors[:10]:
-            lines.append("- " + s)
-    lines.append("")
-
-    return "\n".join(lines)
+    lines = ["# Mutation Test Report", "", f"**Status:** {report['status']}"]
+    if report.get("message"):
+        lines.extend(["", report["message"]])
+    if report["status"] == "completed":
+        lines.extend([
+            f"**Score:** {report['score']}%" + (" PASS" if report["passed"] else " FAIL"),
+            f"**Engine:** mutmut {report['engine_version']}",
+            *[f"**{state.title()}:** {report[state]}" for state in _STATES],
+            f"**Threshold:** {report['threshold']}%",
+        ])
+        if report["survivors"]:
+            lines.extend(["", "## Surviving Mutants", *[f"- {item}" for item in report["survivors"]]])
+    if report.get("rerun_command"):
+        lines.extend(["", f"**Rerun:** `{report['rerun_command']}`"])
+    return "\n".join(lines) + "\n"
 
 
-def main():
-    import argparse
-
+def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle mutation testing")
-    parser.add_argument("--root", default=".", help="Project root")
-    parser.add_argument("--paths", default="src/", help="Comma-separated paths to mutate")
-    parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds")
-    parser.add_argument("--threshold", type=float, default=70, help="Minimum score")
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--paths", default="src/")
+    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--threshold", type=float, default=70)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-
-    cfg = {
-        "paths": args.paths.split(","),
-        "timeout_s": args.timeout,
-        "threshold": args.threshold,
-    }
-
-    report = run_mutation_test(args.root, cfg)
-
-    if args.json:
-        print(json.dumps(report, indent=2))
-    else:
-        print(format_report(report))
-
-    return 0 if report.get("passed", True) else 1
+    report = run_mutation_test(args.root, {
+        "paths": args.paths.split(","), "base": args.base, "all": args.all,
+        "timeout_s": args.timeout, "threshold": args.threshold,
+    })
+    output = json.dumps(report, indent=2) if args.json else format_report(report)
+    sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
+    return 2 if report["status"] in {"unknown", "tool_error"} else (0 if report.get("passed", True) else 1)
 
 
 if __name__ == "__main__":

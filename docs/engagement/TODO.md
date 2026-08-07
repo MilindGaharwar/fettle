@@ -107,6 +107,22 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
         core, fail-visible), registry + doctor/UAT probes, FETTLE_EVAL_RUNNER
   - [x] S13.5 tests + docs + work note (capability matrix)
 
+## Phase D — Post-v1.8 trust evolution
+- [x] D1. P33 scanner and CI result integrity
+- [x] D2. P44 immutable change-integrity contracts and adversarial corpus
+- [~] D3. P43 narrow formal verification — Policy Capsule and Work Item Claims
+      implemented; Verify Gate, Dispatcher, TDD Gate, property/state-machine
+      tests, and refinement maps remain
+- [~] D4. P34 mutation evidence integrity — fail-closed wrapper, seeded weak
+      assertion, and advisory changed/full workflow implemented; three retained
+      stable CI runs remain before baseline and ratchet graduation
+- [ ] D5. P35 seeded-defect and recorded-override contract
+- [?] D6. P45-P51 change-integrity runtime — gated by package-specific
+      authorization and prerequisites in the evolution plan
+- [~] D7. P52 authorship separation — role gate and capsule plumbing shipped;
+      TLA+ role invariants, adversarial path coverage, topology guidance, and
+      an evidenced multi-agent flow remain
+
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
 - Every increment: tests + work note + independently reviewable.

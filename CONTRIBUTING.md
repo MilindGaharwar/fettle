@@ -62,3 +62,30 @@ include credentials, private transcripts, proprietary source, or generated
 
 Security vulnerabilities follow [SECURITY.md](SECURITY.md), not the public issue
 tracker.
+
+## Documentation
+
+Write for the reader's next action:
+
+- `README.md` explains the problem, differentiators, quick start, and honest
+  product boundaries.
+- `docs/README.md` routes users to task-specific guides.
+- `docs/CONFIG.md` is the authoritative policy reference.
+- `CHANGELOG.md` records shipped behavior; `docs/ROADMAP.md` records graduation
+  triggers.
+- `docs/archive/` and historical engagement notes preserve provenance and must
+  not be rewritten as current instructions.
+
+Avoid unverified exclusivity, performance, adoption, or security claims. Prefer
+specific behavior that a user can reproduce.
+
+## Release checklist
+
+1. Keep `pyproject.toml`, `fettle/__init__.py`, and the first changelog heading
+   on the same version.
+2. Run the full tests, Ruff, Fettle CI, config validation, and `git diff --check`.
+3. Build both sdist and wheel; install from the sdist in a clean environment.
+4. Verify the console script, bundled rules, and all 17 workflow commands.
+5. Push the reviewed commit, then push the matching `vX.Y.Z` tag. The release
+   workflow performs OIDC publishing, provenance attestation, SBOM generation,
+   and GitHub release creation.

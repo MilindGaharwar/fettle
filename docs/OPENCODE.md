@@ -1,5 +1,8 @@
 # OpenCode Integration
 
+Use this guide when you want Fettle findings inside OpenCode rather than only
+from the standalone CLI.
+
 Fettle's OpenCode plugin forwards OpenCode lifecycle events to the same
 dispatcher used by Claude Code. Since WP-140, the dispatcher understands
 OpenCode's **native** event shapes (`tool.execute.before/after`,
@@ -33,6 +36,24 @@ The adapter maps:
 Claude Code continues to use `hooks/hooks.json` directly; installing this
 adapter does not alter or replace that integration.
 
-The adapter forwards local event payloads to Fettle's Python dispatcher. Run
-`fettle doctor` after setup, restart OpenCode, and test an advisory rule before
-enabling blocking modes.
+The adapter forwards local event payloads to Fettle's Python dispatcher.
+
+## Verify the Integration
+
+1. Run `fettle doctor` in the target repository.
+2. Restart OpenCode after installation or configuration changes.
+3. Edit a Python file with a known advisory Ruff finding.
+4. Confirm OpenCode receives a Fettle advisory with a recovery action.
+5. Run `fettle explain` if the expected finding does not appear.
+
+Keep the first trial advisory. Only enable blocking modes after the transport,
+tool availability, and recovery flow work in your repository.
+
+## Recover From Setup Problems
+
+| Symptom | Action |
+|---|---|
+| Plugin is not loaded | Check the `file://` path, then restart OpenCode |
+| Fettle executable or dispatcher is missing | Set `FETTLE_PLUGIN_ROOT` to the checkout root and rerun `fettle doctor` |
+| No findings appear | Confirm the event reached `.fettle/trace.jsonl`, then verify the relevant gate is enabled |
+| External analyzer is unavailable | Install the tool or leave the gate advisory; unavailable analysis is not a clean result |

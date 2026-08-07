@@ -26,3 +26,12 @@ Fettle is application-level quality governance, not an operating-system
 sandbox. Shell mediation, policy capsules, worktrees, and agent hooks are
 defense-in-depth controls; use least-privilege credentials, isolated runners,
 repository protections, and independent CI for hard boundaries.
+
+Fettle's Python package has no runtime dependencies, but enabled analyzers,
+agent hosts, language toolchains, and external integrations have their own
+supply chains and permissions. Pin and review them according to your threat
+model.
+
+Official tagged releases are published through PyPI Trusted Publishing. The
+GitHub release includes distributions and a CycloneDX SBOM; GitHub build
+provenance can be checked with `gh attestation verify`.

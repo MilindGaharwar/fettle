@@ -54,12 +54,19 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --quiet dist/*.whl
           /tmp/smoke/bin/fettle --version
-          /tmp/smoke/bin/python -c "from fettle._resources import rules_dir; d = rules_dir(); assert d.is_dir() and any(d.glob('*.yml')), d"
+          /tmp/smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; r = rules_dir(); c = commands_dir(); assert r.is_dir() and any(r.glob('*.yml')), r; assert c.is_dir() and len(list(c.glob('*.md'))) == 17, c"
           # WP-11: bare wheel has no pyyaml — evals must fail with guidance, not a traceback
           /tmp/smoke/bin/python -c "import fettle.evals_runner" 2>&1 | grep -q "finefettle\[evals\]"
           WHEEL=$(ls dist/*.whl)
           /tmp/smoke/bin/pip install --quiet "${WHEEL}[evals]"
           /tmp/smoke/bin/python -c "import fettle.evals_runner"
+
+      - name: Prove sdist reconstructs a complete wheel
+        run: |
+          python -m venv /tmp/sdist-smoke
+          /tmp/sdist-smoke/bin/pip install --quiet dist/*.tar.gz
+          /tmp/sdist-smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; assert any(rules_dir().glob('*.yml')); assert len(list(commands_dir().glob('*.md'))) == 17"
+          /tmp/sdist-smoke/bin/fettle workflows list
 
       # WP-147: SLSA provenance + Sigstore signatures for every artifact,
       # via GitHub's native attestation (verify: `gh attestation verify`).

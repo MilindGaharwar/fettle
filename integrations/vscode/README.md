@@ -4,7 +4,7 @@
 
 <h1 align="center">Fettle for VS Code</h1>
 
-<p align="center"><b>The quality harness for AI-generated code — live in your editor.</b></p>
+<p align="center"><b>Fettle's Python quality findings, rendered where you edit.</b></p>
 
 Surfaces Fettle's current Python LSP findings as native VS Code diagnostics,
 using the workspace's `.fettle.toml`. Agent hooks and editor diagnostics share
@@ -47,6 +47,9 @@ npx @vscode/vsce package
 code --install-extension fettle-0.9.0.vsix
 ```
 
+The VSIX filename reflects the extension package version, not the Fettle Python
+package version.
+
 ## Configuration
 
 | Setting | Default | Description |
@@ -68,3 +71,14 @@ Hook-only process gates, shell guards, and Stop-time checks are not editor
 diagnostics.
 
 Project config is read from `.fettle.toml` at the workspace root.
+
+## Verify and Recover
+
+1. Open a Python file in a repository containing `.fettle.toml`.
+2. Run **Fettle: Restart Language Server**.
+3. Introduce a known Ruff finding and confirm a native diagnostic appears.
+4. Check the Fettle output channel if startup fails.
+
+If diagnostics stay empty, verify `fettle.pythonPath`, run `fettle doctor` in a
+terminal, and confirm Ruff is available to that interpreter. Hook-only gates,
+JavaScript/TypeScript, Go, and Rust are not part of the current editor surface.

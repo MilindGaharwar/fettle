@@ -1,0 +1,61 @@
+name: Mutation evidence
+
+on:
+  pull_request:
+    paths:
+      - "fettle/**/*.py"
+      - "tests/**/*.py"
+      - ".github/workflows/mutation.yml"
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    name: mutation (${{ github.event_name == 'pull_request' && 'changed' || 'full' }}, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned mutation tools
+        run: python -m pip install --quiet -e . pytest==9.1.1 mutmut==2.5.1
+
+      - name: Changed-file mutation evidence
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: >-
+          python -m fettle.mutation_test
+          --root .
+          --paths fettle/
+          --base origin/${{ github.base_ref }}
+          --timeout 600
+          --json
+          > mutation-report.json
+
+      - name: Full mutation evidence
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        run: >-
+          python -m fettle.mutation_test
+          --root .
+          --paths fettle/
+          --all
+          --timeout 1800
+          --json
+          > mutation-report.json
+
+      - name: Retain mutation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutation-evidence-${{ github.run_id }}
+          path: mutation-report.json
+          if-no-files-found: error

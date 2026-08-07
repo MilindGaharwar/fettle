@@ -5,5 +5,8 @@ include CHANGELOG.md
 recursive-include rules *.yml
 recursive-include rules *.toml
 recursive-include hooks *.json *.js
-recursive-include integrations *.ts
+include integrations/opencode/fettle.ts
+include integrations/vscode/src/extension.ts
+prune integrations/vscode/node_modules
 recursive-include templates *.yml *.yaml *.md
+recursive-include commands *.md

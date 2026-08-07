@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finefettle"
-version = "1.8.0"
-description = "In-session quality governance for Claude Code, Codex CLI, Gemini CLI, and OpenCode"
+version = "1.9.0"
+description = "Quality governance and evidence for AI coding sessions across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
 readme = "README.md"
 license = "MIT"
 authors = [{name = "Milind Gaharwar"}]
@@ -36,7 +36,9 @@ fettle = "fettle.cli:main"
 
 [project.urls]
 Repository = "https://github.com/MilindGaharwar/fettle"
+Documentation = "https://github.com/MilindGaharwar/fettle/tree/main/docs"
 Changelog = "https://github.com/MilindGaharwar/fettle/blob/main/CHANGELOG.md"
+Issues = "https://github.com/MilindGaharwar/fettle/issues"
 
 [tool.setuptools]
 packages = ["fettle", "fettle.adapters", "fettle.agents", "fettle.runners", "fettle.uat"]

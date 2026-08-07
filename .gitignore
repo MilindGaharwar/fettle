@@ -10,6 +10,9 @@ uv.lock
 .coverage
 .coverage.*
 coverage.xml
+build/
+dist/
+.mutmut-cache
 
 # TLA+ model checker (auto-downloaded and generated)
 specs/tla/tla2tools.jar

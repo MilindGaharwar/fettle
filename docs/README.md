@@ -1,100 +1,103 @@
 # Fettle Documentation
 
-Start with the path that matches what you are trying to accomplish.
+Fettle is easiest to understand as a feedback and evidence layer around AI
+coding. Start with the outcome you need rather than reading every subsystem.
 
-## Adopt Fettle
+## Choose Your Path
 
-| Goal | Start here |
-|---|---|
-| Evaluate locally without agent hooks | Install `finefettle`, then run `fettle check --changed` |
-| Add agent-session checks | Follow the [README quick start](../README.md#quick-start) from a Git checkout |
-| Understand polyglot routing | Read [Languages and surfaces](#languages-and-surfaces) |
-| Fit policy to one developer | `fettle init --profile solo` |
-| Add shared plans and worklogs | `fettle init --profile team` |
-| Evaluate stricter multi-agent controls | `fettle init --profile enterprise` in a test repository first |
+| I want to... | Start here | Expected result |
+|---|---|---|
+| Evaluate Fettle without changing agent settings | `pipx install finefettle`, then `fettle check --changed` | A local quality report |
+| Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
+| Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
+| Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
+| Coordinate a team | `fettle init --profile team` | Plans, worklogs, and shared evidence |
+| Evaluate delegated-agent governance | `fettle init --profile enterprise` in a test repository | Capsules, claims, verification, and reports to validate |
+| Integrate an enterprise analyzer | [Configuration: integrations](CONFIG.md#integrations-integrations-wp-14b) | Explicit, opt-in SonarQube, Black Duck, or Pact evidence |
+
+## The Core Journey
+
+1. Run `fettle init --dry-run` and inspect what would change.
+2. Initialize with an appropriate profile.
+3. Run `fettle doctor`; resolve missing required tools or invalid policy.
+4. Trigger one known advisory finding in a test branch.
+5. Use `fettle explain` to inspect the reason and recovery action.
+6. Run `fettle verify`, then retain CI as the independent authority.
+7. Measure signal before promoting any gate to `enforce`.
 
 ## Active Guides
 
-- [Configuration reference](CONFIG.md): gate defaults, modes, central policy,
-  telemetry, environment variables, and state.
-- [OpenCode integration](OPENCODE.md): transport setup and event mapping.
-- [Behavioral evaluations](../evals/README.md): static validation and trusted
-  live-agent experiments.
-- [VS Code integration](../integrations/vscode/README.md): current Python editor
-  diagnostics and source installation.
-- [Roadmap](ROADMAP.md): prioritized future work and graduation triggers.
-- [Change integrity architecture](change-integrity-architecture.md): proposed
-  immutable-snapshot and hypergraph trust contract.
-- [Change integrity UX specification](change-integrity.ux-spec.md): proposed
-  impact, obligation, failure-state, accessibility, and UAT contract.
-- [Change integrity implementation plan](change-integrity-implementation-plan.md):
-  proposed staged delivery and graduation gates; runtime work is not authorized.
-- [Changelog](../CHANGELOG.md): shipped behavior by release.
-- [Contributing](../CONTRIBUTING.md): development setup and verification.
-- [Security policy](../SECURITY.md): supported releases and private reporting.
+- [Configuration reference](CONFIG.md): precedence, modes, every gate family,
+  central policy, integrations, telemetry, workspace routing, and state.
+- [OpenCode integration](OPENCODE.md): setup, event mapping, verification, and
+  recovery.
+- [VS Code integration](../integrations/vscode/README.md): source installation
+  and the current Python-only diagnostic boundary.
+- [Behavioral evaluations](../evals/README.md): CI-safe static evaluation and
+  trusted-operator live experiments.
+- [Roadmap](ROADMAP.md): shipped baseline, active trust work, and graduation
+  triggers.
+- [Changelog](../CHANGELOG.md): behavior shipped in each release.
+- [Contributing](../CONTRIBUTING.md): setup and evidence expected from changes.
+- [Security policy](../SECURITY.md): supported releases, private reporting, and
+  trust boundaries.
 
-## Languages and Surfaces
+## Capability Matrix
 
-Support is described by surface rather than by one blanket "supported
-languages" label:
+| Surface | Current scope | Important boundary |
+|---|---|---|
+| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, OpenCode | Host transports differ; normalized policy is shared |
+| Post-edit adapters | Python, JavaScript/TypeScript, Go, Rust | Native tools must be available |
+| `fettle check` | Python Ruff and bundled Semgrep rules | Not the full polyglot adapter surface |
+| `fettle verify` | Every affected discovered workspace with a test command | Impacted-test narrowing is Python-specific |
+| LSP / VS Code | Python | Hook-only process gates are not editor diagnostics |
+| External integrations | SonarQube, Black Duck/Polaris, Pact | Disabled by default; credentials come from environment variables |
+| Guided workflows | 17 workflows across supported agents | Workflows guide agent reasoning; CLI commands remain deterministic automation |
+| Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
 
-| Surface | Current scope |
-|---|---|
-| Agent post-edit lint | Python, JavaScript/TypeScript, Go, and Rust through workspace-aware adapters |
-| `fettle verify` | Every affected discovered workspace with a test command; impacted-test narrowing is currently Python-specific |
-| `fettle check --changed` | Changed Python files |
-| `fettle check --all` | Python Ruff and bundled Semgrep scan |
-| LSP / VS Code diagnostics | Python |
-
-Repositories may contain nested workspaces. Fettle discovers project markers,
-uses longest-prefix routing for an edited file, and keeps tool failures distinct
-from a clean result. The adapter result vocabulary is `pass`, `violation`,
-`tool_error`, and `unknown`.
+Every analyzer result preserves the distinction between `pass`, `violation`,
+`tool_error`, and `unknown`. Surface-specific non-applicable outcomes are also
+reported explicitly. Missing or malformed evidence must not become clean.
 
 ## Agent Workflows
 
-Fettle ships guided slash-command workflows, canonically defined under
-`commands/` and installable into every supported agent environment with
-`fettle workflows install` (run automatically by `fettle init`). They
-complement deterministic CLI commands by asking the agent to interpret
-findings, conduct reviews, or create evidence artifacts.
+Canonical workflow sources live in `commands/`, ship in the wheel, and install
+with `fettle workflows install` (also run by `fettle init`).
 
-- Quality: `/fettle:quality`, `/fettle:pr-review`, `/fettle:review`,
-  `/fettle:explain`, `/fettle:report`.
-- Security and readiness: `/fettle:security-review`, `/fettle:threat-model`,
-  `/fettle:preflight`, `/fettle:ops-review`.
-- Planning and records: `/fettle:plan-activate`, `/fettle:plan-complete`,
-  `/fettle:worklog`, `/fettle:baseline`.
-- Governance: `/fettle:learn`, `/fettle:mcp-approve`, `/fettle:mcp-revoke`,
-  `/fettle:lean-debt`.
+| Category | Workflows |
+|---|---|
+| Quality | quality, PR review, cross-review, explain, report, baseline |
+| Security and readiness | security review, threat model, preflight, operations review |
+| Planning and records | plan activate, plan complete, worklog, lean debt |
+| Governance | incident learning, MCP approval, MCP revocation |
 
-Naming per host: Claude Code and Gemini CLI use `/fettle:<name>`; VS Code and
-OpenCode use `/fettle-<name>`; Codex CLI uses `/prompts:fettle-<name>`. Treat
-`fettle --help` and the active CLI documentation as authoritative for
-automation; the workflows add agent interpretation around those commands.
+Invocation names vary by host: Claude Code and Gemini CLI use
+`/fettle:<name>`; VS Code and OpenCode use `/fettle-<name>`; Codex CLI uses
+`/prompts:fettle-<name>`.
 
-## Operating Model
+## Trust Model
 
-1. Begin advisory and inspect `fettle explain` plus `.fettle/trace.jsonl`.
-2. Fix missing tools and wiring with `fettle doctor`.
-3. Measure noise before promoting a gate to `enforce`.
-4. Keep tests and CI as independent evidence boundaries.
-5. For delegated agents, validate capsule, worktree, and claim behavior in your
-   own runner before relying on strict enforcement.
+- Hooks are early feedback and default to advisory behavior.
+- CI and explicit verification are independent evidence boundaries.
+- Tool errors and unknown analysis remain visible.
+- Capsules can tighten inherited policy but cannot loosen it.
+- Telemetry is off by default and can only be enabled by digest-pinned central
+  policy.
+- Shell guards and multi-agent controls supplement, but do not replace,
+  least-privilege credentials and isolated runners.
 
-## Verification Scope
+## Architecture and Future Work
 
-Use change-sensitive verification:
+These documents explain active design contracts and evidence-gated work; they
+are not all descriptions of shipped runtime behavior:
 
-- Documentation-only changes: validate links, formats, examples, metadata, and
-  `git diff --check`.
-- Run a targeted test when documentation participates in a code contract, such
-  as README/package version alignment.
-- Run the full suite for behavior-changing code, shared configuration logic, or
-  broad refactors.
+- [Evolution implementation plan](fettle-evolution-implementation-plan.md)
+- [Polyglot governance UX contract](polyglot-governance.ux-spec.md)
+- [Change-integrity architecture](change-integrity-architecture.md)
+- [Change-integrity UX contract](change-integrity.ux-spec.md)
+- [Change-integrity implementation plan](change-integrity-implementation-plan.md)
+- [TLA+ formal verification](tla-plus-formal-verification.md)
 
-## Scope Notes
-
-The repository also contains archived plans and engagement records. They retain
-design provenance but are not current product instructions. Use this index,
-the configuration reference, and the changelog for active behavior.
+`docs/archive/` and `docs/engagement/` preserve decisions, audits, and work
+history. Use this index, the configuration reference, and the changelog for
+current product instructions.

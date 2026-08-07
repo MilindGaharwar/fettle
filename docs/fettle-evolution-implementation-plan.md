@@ -1,6 +1,6 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED for completed activities; P33 and P44 complete; P34-P43 and P45-P51 remain proposed or evidence-gated
+Status: APPROVED for completed activities; P33 and P44 complete; P34, P43, and P52 partially implemented; P35-P42 and P45-P51 remain proposed or evidence-gated
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -138,7 +138,7 @@ and are planning ranges, not commitments.
 | P31 | Add thin stdio MCP query surface | v1.14 | P30 | 3–5 days | Demand-gated |
 | P32 | Graduate additional LSP languages after parity | v1.14 | P22, P23, P30 | 3–6 days | Evidence-gated |
 | P33 | Make scanner and CI result handling fail closed | next patch | P1, P3 | 1–2 days | Complete |
-| P34 | Repair mutation selection, execution, and score integrity | next minor | P33 | 2–4 days | Proposed |
+| P34 | Repair mutation selection, execution, and score integrity | next minor | P33 | 2–4 days | In progress |
 | P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Proposed |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
 | P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
@@ -147,7 +147,7 @@ and are planning ranges, not commitments.
 | P40 | Add invariant properties and flake detection selectively | following minor | P33, P37 | 4–7 days | Proposed |
 | P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
-| P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | Demand-gated |
+| P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | In progress (2 of 5 models) |
 | P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Complete |
 | P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Proposed |
 | P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Proposed |
@@ -156,16 +156,17 @@ and are planning ranges, not commitments.
 | P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Proposed |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
-| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Proposed |
+| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | In progress |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
 run alongside the web proving ground after their dependencies close. Work
 marked demand- or evidence-gated is not scheduled until its trigger is met.
 
-P44-P51 form the proposed change-integrity hypergraph program. Its authoritative
-architecture, UX/UAT contract, staged implementation details, migration gates,
-and persistence admission criteria are maintained in:
+P44-P51 form the change-integrity hypergraph program. P44's immutable contract
+and adversarial-fixture layer is complete; P45-P51 remain gated. The program's
+authoritative architecture, UX/UAT contract, staged implementation details,
+migration gates, and persistence admission criteria are maintained in:
 
 - [Change integrity architecture](change-integrity-architecture.md)
 - [Change integrity UX specification](change-integrity.ux-spec.md)
@@ -315,6 +316,12 @@ Verification:
 python3 -m pytest tests/test_mutation_test.py -q
 python3 -m fettle.mutation_test --root . --paths fettle/ --json
 ```
+
+Status 2026-08-07: explicit merge-base and full-source selection, pinned engine
+validation, strict result parsing, fail-closed zero-mutant and tool-error states,
+a seeded surviving-mutant fixture, and advisory changed/full CI lanes are
+implemented. Three retained stable CI runs remain before establishing the
+baseline and ratchet, so P34 has not graduated.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 
@@ -639,7 +646,13 @@ Deliverable if admitted:
 4. A refinement map from model actions to implementation operations.
 
 Do not model a Fettle agent scheduler unless Fettle later owns one. P43 remains
-demand-gated and advisory; a plausible-looking model is not release evidence.
+advisory; a plausible-looking model is not release evidence.
+
+Status 2026-08-07: `PolicyCapsule` and `WorkItemClaims` models are implemented,
+mutation-checked, and CI-gated. Verify Gate, Dispatcher, and TDD Gate models are
+not implemented. The required property/state-machine tests and refinement maps
+from model actions to implementation operations also remain, so P43 is not
+complete.
 
 #### Program Sequence And Graduation
 
@@ -1466,6 +1479,11 @@ Add a `role` field to the PolicyCapsule spec and verify:
   spawns tester and implementer children, each constrained to its file set.
 - TLA+ role invariants verified via TLC.
 
+Status 2026-08-07: role propagation, monotonic capsule merging, spawn plumbing,
+and PreToolUse file-authority enforcement are implemented and unit-tested. The
+TLA+ role invariants, adversarial path/symlink coverage, topology recommendation,
+and evidenced end-to-end multi-agent session remain, so P52 has not graduated.
+
 Estimate: 2–3 days.
 
 ## 7. Cross-Cutting Test Strategy
@@ -1857,9 +1875,12 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
-- P33–P43 planning status: proposed. UX/BDD additions are recorded in
-  `docs/polyglot-governance.ux-spec.md`; no package is authorized until its
-  proposal review is explicitly accepted.
-- P44–P51 planning status: proposed. Architecture, UX/BDD, and implementation
-  contracts are recorded in the change-integrity document set; no package is
-  authorized until its proposal review is explicitly accepted.
+- P33–P43 status: P33 is complete; P34 is implemented but awaits three stable
+  retained CI runs; P43 has two of five planned models but has not met its
+  completion contract; P35–P42 remain proposed or evidence-gated.
+  UX/BDD additions are recorded in `docs/polyglot-governance.ux-spec.md`.
+- P44–P51 status: P44 is complete. Architecture, UX/BDD, and implementation
+  contracts are recorded in the change-integrity document set; P45–P51 are not
+  authorized until their package proposal review is explicitly accepted.
+- P52 status: role-based enforcement is implemented, but its TLA+, adversarial,
+  topology, and end-to-end graduation evidence remains.
