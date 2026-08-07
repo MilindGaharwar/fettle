@@ -351,7 +351,10 @@ implemented. Retained runs `31183880854`, `31183880954`, and `31183881105`
 are invalid: every report is `tool_error` because the mutation environment
 omitted the PyYAML test dependency. The workflow now installs the development
 dependencies, and a strict evaluator requires three equivalent successful full
-runs before establishing the baseline and ratchet. P34 has not graduated.
+runs before establishing the baseline and ratchet. Replacement runs
+`31186179762`, `31186179925`, and `31186180110` also remain invalid because the
+baseline test suite requires Semgrep, which the development extra omitted. The
+workflow now installs all runtime tools. P34 has not graduated.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 
