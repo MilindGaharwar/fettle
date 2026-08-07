@@ -140,6 +140,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         order=50,
         budget_ms=300,
     ),
+    # PreToolUse — authorship separation (P52, WP-520)
+    CheckSpec(
+        name="authorship_gate",
+        run=_lazy("fettle.authorship_gate"),
+        events=frozenset({"PreToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=14,
+        budget_ms=20,
+    ),
     # PreToolUse + PostToolUse — TDD ordering
     CheckSpec(
         name="tdd_gate",

@@ -53,8 +53,14 @@ def spawn_agent(
     worktree_item: str = "",
     timeout_s: int = 600,
     runner: AgentRunner | None = None,
+    role: str = "",
 ) -> SpawnResult:
     """Launch ``runner_name`` on ``task`` under the current effective policy.
+
+    ``role`` narrows the child's file authority (P52): "implementer", "tester",
+    "reviewer", or "" (inherit parent's role unchanged). The role is written
+    into the capsule policy and subject to monotonic merge — a child cannot
+    widen its role beyond the parent's.
 
     ``runner`` is injectable for tests; production resolves the registry.
     """
@@ -73,6 +79,21 @@ def spawn_agent(
 
     # Effective policy — already capsule-merged when we are ourselves a child.
     config = load_config(str(repo_root))
+    if role:
+        from fettle.authorship_gate import VALID_ROLES, ROLE_RANK
+        current_role = config.get("role", "solo")
+        current_rank = ROLE_RANK.get(current_role, 0)
+        new_rank = ROLE_RANK.get(role, 0)
+        if role not in VALID_ROLES:
+            result.error = f"invalid role '{role}' — must be one of: {', '.join(sorted(VALID_ROLES))}"
+            return result
+        if new_rank < current_rank:
+            result.error = (
+                f"cannot widen role from '{current_role}' to '{role}' "
+                f"— children may only narrow their role"
+            )
+            return result
+        config["role"] = role
     parent_doc, err = resolve_env_capsule()
     if err:
         result.error = f"refusing to spawn under an unverifiable capsule: {err}"

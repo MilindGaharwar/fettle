@@ -216,3 +216,33 @@ class TestMonotonicMerge:
         loc = {"x": {f"k{i}": f"loc{i}" for i in range(40)}}
         _, ignored = merge_for_child(cap, loc)
         assert len(ignored) == 20
+
+    # P52: role merge semantics
+
+    def test_role_child_cannot_widen(self) -> None:
+        cap = {"role": "implementer"}
+        loc = {"role": "solo"}
+        eff, ignored = merge_for_child(cap, loc)
+        assert eff["role"] == "implementer"
+        assert ignored and ignored[0]["key"] == "role"
+
+    def test_role_child_may_narrow(self) -> None:
+        cap = {"role": "solo"}
+        loc = {"role": "tester"}
+        eff, ignored = merge_for_child(cap, loc)
+        assert eff["role"] == "tester"
+        assert ignored == []
+
+    def test_role_same_rank_keeps_local(self) -> None:
+        cap = {"role": "implementer"}
+        loc = {"role": "tester"}
+        eff, ignored = merge_for_child(cap, loc)
+        assert eff["role"] == "tester"
+        assert ignored == []
+
+    def test_role_reviewer_cannot_be_widened(self) -> None:
+        cap = {"role": "reviewer"}
+        loc = {"role": "implementer"}
+        eff, ignored = merge_for_child(cap, loc)
+        assert eff["role"] == "reviewer"
+        assert ignored

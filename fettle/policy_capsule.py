@@ -58,6 +58,15 @@ STRICTER_DIRECTION: dict[str, str] = {
     "gates.plan.threshold": "min",
 }
 
+# Role strictness ladder (P52, WP-520): higher rank = more restricted.
+# A child may only hold a role of equal or greater rank than its parent.
+_ROLE_RANK: dict[str, int] = {
+    "solo": 0,
+    "implementer": 1,
+    "tester": 1,
+    "reviewer": 2,
+}
+
 _MAX_FINDINGS = 20
 
 _last_error: str = ""
@@ -273,6 +282,16 @@ def merge_for_child(
                 stricter = min(cap_v, loc_v) if direction == "min" else max(cap_v, loc_v)
                 out[key] = stricter
                 if stricter != loc_v:
+                    note(path, cap_v, loc_v)
+                continue
+            # Role key: higher rank = more restricted; child cannot widen.
+            if path == "role" and isinstance(cap_v, str) and isinstance(loc_v, str):
+                cap_rank = _ROLE_RANK.get(cap_v, 0)
+                loc_rank = _ROLE_RANK.get(loc_v, 0)
+                if loc_rank >= cap_rank:
+                    out[key] = loc_v  # child is equal or stricter
+                else:
+                    out[key] = cap_v  # capsule (stricter) wins
                     note(path, cap_v, loc_v)
                 continue
             # Default: capsule wins (covers loosening lists per D-A2).
