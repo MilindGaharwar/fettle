@@ -71,6 +71,7 @@ def test_engine_collects_all_states_and_exit_evidence():
     assert result["run_exit_code"] == 14
     assert result["survivors"] == ["3"]
     assert result["duration_ms"] == 2500
+    assert result["test_runner"] == "python -m pytest -x --assert=plain --testmon"
 
 
 def test_fatal_run_exit_is_bounded_tool_error():
@@ -141,6 +142,7 @@ def _stable_report(**changes):
         "schema_version": "1",
         "status": "completed",
         "engine_version": "2.5.1",
+        "test_runner": "python -m pytest -x --assert=plain --testmon",
         "revision": "a" * 40,
         "selection": "all",
         "files_tested": ["fettle/a.py"],
@@ -176,6 +178,7 @@ def test_stability_requires_three_identical_completed_full_reports():
         ([_stable_report(), _stable_report(status="tool_error"), _stable_report()], "not completed"),
         ([_stable_report(), _stable_report(killed=7, survived=2, score=70.0), _stable_report()], "outcomes differ"),
         ([_stable_report(), _stable_report(revision="b" * 40), _stable_report()], "revisions differ"),
+        ([_stable_report(), _stable_report(test_runner="pytest"), _stable_report()], "unsupported test runner"),
         ([_stable_report(), _stable_report(duration_ms=2_100_001), _stable_report()], "runtime bound"),
     ],
 )

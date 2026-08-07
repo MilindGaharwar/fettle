@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "objective": "Complete full mutation evidence within 35 minutes without weakening mutation scope",
+    "metric": "successful full-run duration_ms <= 2100000 with valid nonzero outcomes",
+    "created": "2026-08-07",
+    "best_score": null,
+    "best_node": null,
+    "total_nodes": 4,
+    "merged_nodes": 0,
+    "pruned_nodes": 0,
+    "convergence_counter": 0
+  },
+  "tree": {
+    "ROOT": {
+      "id": "ROOT",
+      "parent": null,
+      "hypothesis": "Complete full mutation evidence within 35 minutes without weakening mutation scope",
+      "status": "active",
+      "children": [
+        "1",
+        "2",
+        "3"
+      ],
+      "evidence": null,
+      "insight": null,
+      "constraints": []
+    },
+    "1": {
+      "id": "1",
+      "parent": "ROOT",
+      "hypothesis": "Use mutmut's pytest-testmon integration to select dependency-relevant tests per mutant; falsified if the full report remains incomplete or exceeds 2,100,000 ms",
+      "status": "running",
+      "children": [],
+      "evidence": null,
+      "insight": null,
+      "constraints": []
+    },
+    "2": {
+      "id": "2",
+      "parent": "ROOT",
+      "hypothesis": "Shard the complete production file set into independently bounded reports and aggregate outcomes; falsified if aggregation cannot prove complete, non-overlapping scope",
+      "status": "pending",
+      "children": [],
+      "evidence": null,
+      "insight": null,
+      "constraints": []
+    },
+    "3": {
+      "id": "3",
+      "parent": "ROOT",
+      "hypothesis": "Use coverage contexts to select tests per mutant with full-suite survivor confirmation; falsified if contexts are incomplete or runtime remains above 2,100,000 ms",
+      "status": "pending",
+      "children": [],
+      "evidence": null,
+      "insight": null,
+      "constraints": []
+    }
+  }
+}

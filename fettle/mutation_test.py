@@ -17,6 +17,7 @@ MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
+_TEST_RUNNER = "python -m pytest -x --assert=plain --testmon"
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -107,7 +108,10 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
     started = time.monotonic()
     try:
         run = _run(
-            ["mutmut", "run", "--paths-to-mutate=" + ",".join(files), "--no-progress", "--simple-output"],
+            [
+                "mutmut", "run", "--paths-to-mutate=" + ",".join(files),
+                "--runner", _TEST_RUNNER, "--no-progress", "--simple-output",
+            ],
             root,
             timeout,
         )
@@ -158,6 +162,7 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
     return {
         "status": "completed",
         "engine_version": actual,
+        "test_runner": _TEST_RUNNER,
         "run_exit_code": run.returncode,
         "results_exit_code": results.returncode,
         **{state: len(ids[state]) for state in _STATES},
@@ -190,6 +195,8 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
             return {"status": "unstable", "errors": [f"report {index} has an invalid revision"]}
         if report.get("engine_version") != MUTMUT_VERSION:
             return {"status": "unstable", "errors": [f"report {index} has an unsupported engine"]}
+        if report.get("test_runner") != _TEST_RUNNER:
+            return {"status": "unstable", "errors": [f"report {index} has an unsupported test runner"]}
         if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
             return {"status": "unstable", "errors": [f"report {index} has no tested files"]}
         counts = [report.get(state) for state in _STATES]
@@ -205,7 +212,7 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
     first = reports[0]
     if any(report["revision"] != first["revision"] for report in reports[1:]):
         return {"status": "unstable", "errors": ["report revisions differ"]}
-    identity = ("engine_version", "files_tested")
+    identity = ("engine_version", "test_runner", "files_tested")
     if any(any(report[key] != first[key] for key in identity) for report in reports[1:]):
         return {"status": "unstable", "errors": ["report execution scopes differ"]}
     outcomes = (*_STATES, "score")
@@ -218,6 +225,7 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
             "schema_version": "1",
             "revision": first["revision"],
             "engine_version": first["engine_version"],
+            "test_runner": first["test_runner"],
             "files_tested": first["files_tested"],
             **{key: first[key] for key in outcomes},
             "run_ids": run_ids or [],

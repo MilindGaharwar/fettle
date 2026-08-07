@@ -356,6 +356,12 @@ runs before establishing the baseline and ratchet. Replacement runs
 baseline test suite requires Semgrep, which the development extra omitted. The
 workflow now installs all runtime tools. P34 has not graduated.
 
+Runtime note 2026-08-07: full runs `31187357044`, `31187357306`, and
+`31187357350` passed the unmutated baseline but each reached the 1,800-second
+wrapper limit. The next candidate uses mutmut's native pytest-testmon
+integration to retain full production-file scope while selecting tests by
+recorded code dependencies. Its runner is pinned in retained evidence.
+
 #### P35: Seeded-Defect And Recorded-Override Contract
 
 Goal: make value and bypasses observable before promoting any gate.
