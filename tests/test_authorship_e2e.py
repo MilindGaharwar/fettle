@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,7 +18,6 @@ import pytest
 
 from fettle.authorship_gate import run_check as authorship_check
 from fettle.policy_capsule import (
-    apply_env_capsule,
     merge_for_child,
     resolve_env_capsule,
     verify,
