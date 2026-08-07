@@ -114,6 +114,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         order=40,
         budget_ms=80,
     ),
+    # PostToolUse — TLA+ spec staleness advisory
+    CheckSpec(
+        name="tla_sync",
+        run=_lazy("fettle.tla_sync"),
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        order=88,
+        budget_ms=10,
+    ),
     # PostToolUse — all tools
     CheckSpec(
         name="loop_detect",
