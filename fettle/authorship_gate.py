@@ -19,7 +19,6 @@ and blocking if the session's role forbids that file category.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from fettle.dispatcher_types import CheckResult, HookContext
 from fettle.paths import classify_file
