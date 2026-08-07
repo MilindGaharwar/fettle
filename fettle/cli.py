@@ -728,6 +728,7 @@ def cmd_spawn(args: argparse.Namespace) -> None:
     result = spawn_agent(
         args.runner, args.task, os.getcwd(),
         worktree_item=args.worktree, timeout_s=args.timeout,
+        role=getattr(args, "role", "") or "",
     )
     if result.error:
         print(f"Error: {result.error}", file=sys.stderr)
@@ -1397,6 +1398,8 @@ def main() -> None:
                          help="Provision + claim a per-item worktree as the child's cwd")
     p_spawn.add_argument("--timeout", type=int, default=600,
                          help="Child run timeout in seconds (default 600)")
+    p_spawn.add_argument("--role", default="", choices=["implementer", "tester", "reviewer"],
+                         help="Narrow child's file authority (P52)")
 
     p_rules = subparsers.add_parser(
         "rules", help="Machine-drafted rule lifecycle: proposed → learned (WP-163)")
