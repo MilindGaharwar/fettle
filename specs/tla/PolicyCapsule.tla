@@ -2,7 +2,8 @@
 (***************************************************************************)
 (* TLA+ formal model of Fettle's policy capsule delegation protocol.       *)
 (*                                                                         *)
-(* Source: fettle/policy_capsule.py, fettle/capsule_guard.py               *)
+(* Source: fettle/policy_capsule.py, fettle/capsule_guard.py,              *)
+(*         fettle/authorship_gate.py                                        *)
 (*                                                                         *)
 (* The capsule protocol ensures that child agents spawned by a parent      *)
 (* can never operate under a weaker policy than the parent's. Properties:  *)
@@ -11,6 +12,9 @@
 (*   S3: TamperDetection — modified capsule -> all tool calls blocked      *)
 (*   S4: FailClosed — env asserts invalid capsule -> block                 *)
 (*   S5: PlumbingIsolation — plumbing keys stay local                      *)
+(*   S6: RoleMonotonicity — child role rank >= parent role rank             *)
+(*   S7: RoleFileAuthority — implementer never edits test, tester never    *)
+(*       edits impl                                                         *)
 (*   L1: ValidSpawnSucceeds — valid spawn always produces usable capsule   *)
 (*   L2: NoSpuriousBlock — verified untampered capsule never blocked       *)
 (***************************************************************************)
@@ -22,7 +26,8 @@ CONSTANTS
     Agents,         \* Set of agent identifiers
     PolicyKeys,     \* Set of policy key names
     PlumbingKeys,   \* Subset of PolicyKeys that are machine-local
-    ModeValues      \* Ordered mode values (e.g., {"off", "advisory", "enforce"})
+    ModeValues,     \* Ordered mode values (e.g., {"off", "advisory", "enforce"})
+    FileKinds       \* {"test", "impl"} — file categories for role authority
 
 VARIABLES
     capsules,       \* [agent -> record: policy, digest, lineage, written]
@@ -30,9 +35,26 @@ VARIABLES
     blocked,        \* [agent -> BOOLEAN]
     tampered,       \* Set of agents whose capsule was tampered
     local_used,     \* [agent -> policy function] local policy used during merge
+    role,           \* [agent -> role string] effective role after merge
+    edits,          \* [agent -> SUBSET FileKinds] file kinds edited by this agent
     pc              \* [agent -> process state]
 
-vars == <<capsules, effective, blocked, tampered, local_used, pc>>
+vars == <<capsules, effective, blocked, tampered, local_used, role, edits, pc>>
+
+-----------------------------------------------------------------------------
+(* Role definitions — must precede TypeOK *)
+
+Roles == {"solo", "implementer", "tester", "reviewer"}
+
+RoleRank(r) == CASE r = "solo"        -> 0
+               []   r = "implementer"  -> 1
+               []   r = "tester"       -> 1
+               []   r = "reviewer"     -> 2
+
+MergeRole(parent_role, local_role) ==
+    IF RoleRank(local_role) >= RoleRank(parent_role)
+    THEN local_role
+    ELSE parent_role
 
 -----------------------------------------------------------------------------
 (* Type invariant *)
@@ -48,6 +70,8 @@ TypeOK ==
     /\ effective \in [Agents -> [PolicyKeys -> ModeValues]]
     /\ blocked \in [Agents -> BOOLEAN]
     /\ tampered \subseteq Agents
+    /\ role \in [Agents -> Roles]
+    /\ edits \in [Agents -> SUBSET FileKinds]
     /\ pc \in [Agents -> PCStates]
 
 -----------------------------------------------------------------------------
@@ -101,6 +125,8 @@ Init ==
     /\ blocked = [a \in Agents |-> FALSE]
     /\ tampered = {}
     /\ local_used = [a \in Agents |-> BaselinePolicy]
+    /\ role = [a \in Agents |-> "solo"]
+    /\ edits = [a \in Agents |-> {}]
     /\ pc = [a \in Agents |->
           IF a = RootAgent THEN "ready" ELSE "idle"]
 
@@ -114,11 +140,13 @@ Init ==
    already has apply_env_capsule() merged in.
    Precondition: parent lineage + 1 <= MaxDepth (D-A6). *)
 
-WriteCapsule(parent, child) ==
+WriteCapsule(parent, child, child_role) ==
     /\ parent # child
     /\ pc[parent] = "ready"
     /\ pc[child] = "idle"
     /\ Len(capsules[parent].lineage) < MaxDepth
+    /\ child_role \in Roles
+    /\ RoleRank(child_role) >= RoleRank(role[parent])  \* cannot widen
     /\ LET new_lineage == Append(capsules[parent].lineage, parent)
            parent_effective == effective[parent]
        IN capsules' = [capsules EXCEPT ![child] =
@@ -126,8 +154,9 @@ WriteCapsule(parent, child) ==
                digest |-> Digest(parent_effective),
                lineage |-> new_lineage,
                written |-> TRUE]]
+    /\ role' = [role EXCEPT ![child] = child_role]
     /\ pc' = [pc EXCEPT ![child] = "capsule_written"]
-    /\ UNCHANGED <<effective, blocked, tampered, local_used>>
+    /\ UNCHANGED <<effective, blocked, tampered, local_used, edits>>
 
 (* Parent attempts to spawn but lineage is at cap — must fail loudly. *)
 
@@ -137,7 +166,7 @@ SpawnAtMaxDepth(parent, child) ==
     /\ pc[child] = "idle"
     /\ Len(capsules[parent].lineage) >= MaxDepth
     /\ pc' = [pc EXCEPT ![parent] = "spawn_rejected"]
-    /\ UNCHANGED <<capsules, effective, blocked, tampered, local_used>>
+    /\ UNCHANGED <<capsules, effective, blocked, tampered, local_used, role, edits>>
 
 (* An adversary tampers with a written capsule (modifies policy body
    without updating digest — simulates file modification). *)
@@ -149,7 +178,7 @@ Tamper(agent) ==
     /\ \E new_policy \in [PolicyKeys -> ModeValues] :
           /\ new_policy # capsules[agent].policy  \* actual modification
           /\ capsules' = [capsules EXCEPT ![agent].policy = new_policy]
-    /\ UNCHANGED <<effective, blocked, local_used, pc>>
+    /\ UNCHANGED <<effective, blocked, local_used, role, edits, pc>>
 
 (* Child verifies capsule and merges with local policy.
    Fail-closed: digest mismatch or lineage overflow -> blocked. *)
@@ -163,16 +192,33 @@ VerifyAndMerge(agent, local_policy) ==
           THEN \* FAIL CLOSED: capsule_guard blocks all tool calls
                /\ blocked' = [blocked EXCEPT ![agent] = TRUE]
                /\ pc' = [pc EXCEPT ![agent] = "blocked"]
-               /\ UNCHANGED <<capsules, effective, tampered, local_used>>
+               /\ UNCHANGED <<capsules, effective, tampered, local_used, role, edits>>
           ELSE \* VERIFIED: merge monotonically stricter
                /\ effective' = [effective EXCEPT ![agent] =
                       MonotonicMerge(cap.policy, local_policy)]
                /\ local_used' = [local_used EXCEPT ![agent] = local_policy]
                /\ pc' = [pc EXCEPT ![agent] = "ready"]
-               /\ UNCHANGED <<capsules, blocked, tampered>>
+               /\ UNCHANGED <<capsules, blocked, tampered, role, edits>>
 
 (* A ready child can itself spawn deeper children (recursive delegation). *)
 (* This is modeled by WriteCapsule with the child as parent. *)
+
+(* A ready agent edits a file. The authorship_gate enforces:
+   - implementer: can only edit "impl" files
+   - tester: can only edit "test" files
+   - reviewer: cannot edit anything
+   - solo: can edit both *)
+
+EditFile(agent, file_kind) ==
+    /\ pc[agent] = "ready"
+    /\ ~blocked[agent]
+    /\ file_kind \in FileKinds
+    /\ \/ role[agent] = "solo"
+       \/ (role[agent] = "implementer" /\ file_kind = "impl")
+       \/ (role[agent] = "tester" /\ file_kind = "test")
+    \* reviewer has no matching disjunct — cannot edit
+    /\ edits' = [edits EXCEPT ![agent] = edits[agent] \cup {file_kind}]
+    /\ UNCHANGED <<capsules, effective, blocked, tampered, local_used, role, pc>>
 
 -----------------------------------------------------------------------------
 (* Safety Invariants *)
@@ -224,6 +270,27 @@ NoSpuriousBlock ==
         (agent \notin tampered /\ pc[agent] = "ready") =>
             blocked[agent] = FALSE
 
+(* S6: Role monotonicity — a child's effective role rank is always >=
+   its parent's role rank. A child can never widen its authority. *)
+
+RoleMonotonicity ==
+    \A agent \in Agents :
+        (pc[agent] = "ready" /\ Len(capsules[agent].lineage) > 0) =>
+            LET parent == capsules[agent].lineage[Len(capsules[agent].lineage)]
+            IN pc[parent] = "ready" =>
+               RoleRank(role[agent]) >= RoleRank(role[parent])
+
+(* S7: Role-based file authority — an implementer never edits a test file,
+   a tester never edits an implementation file, a reviewer edits nothing.
+   This is the core authorship separation safety guarantee. *)
+
+RoleFileAuthority ==
+    \A agent \in Agents :
+        pc[agent] = "ready" =>
+            /\ (role[agent] = "implementer" => "test" \notin edits[agent])
+            /\ (role[agent] = "tester" => "impl" \notin edits[agent])
+            /\ (role[agent] = "reviewer" => edits[agent] = {})
+
 -----------------------------------------------------------------------------
 (* Temporal properties *)
 
@@ -239,12 +306,14 @@ ValidSpawnEventuallyReady ==
 (* Next-state relation *)
 
 Next ==
-    \E parent, child \in Agents :
-        \/ WriteCapsule(parent, child)
+    \/ \E parent, child \in Agents :
+        \/ \E r \in Roles : WriteCapsule(parent, child, r)
         \/ SpawnAtMaxDepth(parent, child)
         \/ Tamper(child)
         \/ \E local \in [PolicyKeys -> ModeValues] :
                VerifyAndMerge(child, local)
+    \/ \E agent \in Agents, fk \in FileKinds :
+           EditFile(agent, fk)
 
 (* Fairness: every enabled action eventually fires *)
 
