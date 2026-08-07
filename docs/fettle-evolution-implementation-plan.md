@@ -371,7 +371,12 @@ limit without completing. Full scheduled and manual evidence therefore runs as
 twelve deterministic, size-balanced shards with 1,800-second worker bounds. A
 separate aggregator accepts the run only when every shard completes against the
 same revision and execution identity and the file scopes are complete and
-non-overlapping.
+non-overlapping. Held-out run `31209029718` showed that twelve-way source-byte
+balancing is still too coarse: all eleven retained workers reached the
+1,800-second wrapper limit, shard 8 lost its runner with exit 143 before upload,
+and the aggregator correctly rejected the incomplete set. The next bounded
+experiment uses 48 deterministic partitions without changing scope, timeout,
+or aggregation integrity.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 
