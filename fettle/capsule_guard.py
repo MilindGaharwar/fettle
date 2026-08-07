@@ -8,6 +8,9 @@ gets a once-per-session advisory naming them (silent policy correction is
 its own failure mode).
 
 Design doc: docs/engagement/12-stage-a-policy-continuity.md §2.4.
+
+TLA+ formal spec: specs/tla/PolicyCapsule.tla
+Verified invariants: S3 TamperDetection, S4 FailClosed, L2 NoSpuriousBlock.
 """
 
 from __future__ import annotations

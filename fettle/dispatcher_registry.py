@@ -114,7 +114,7 @@ CHECKS: tuple[CheckSpec, ...] = (
         order=40,
         budget_ms=80,
     ),
-    # PostToolUse — TLA+ spec staleness advisory
+    # PostToolUse — TLA+ spec staleness advisory (per-edit)
     CheckSpec(
         name="tla_sync",
         run=_lazy("fettle.tla_sync"),
@@ -122,6 +122,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=frozenset({"Write", "Edit"}),
         order=88,
         budget_ms=10,
+    ),
+    # Stop — TLA+ spec staleness mtime check
+    CheckSpec(
+        name="tla_sync_stop",
+        run=_lazy("fettle.tla_sync"),
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=57,
+        budget_ms=20,
     ),
     # PostToolUse — all tools
     CheckSpec(

@@ -14,6 +14,15 @@ mismatch, unparseable file the env asserts exists) and fail-open on version
 skew (D-A1: a newer fettle_capsule version is ignored with a warning, not
 treated as an attack — mixed-version fleets are normal).
 
+TLA+ formal spec: specs/tla/PolicyCapsule.tla
+Verified invariants:
+  S1 MonotonicStrictness — effective[child] >= effective[parent] per key
+  S2 DepthBound — lineage length <= MAX_LINEAGE_DEPTH
+  S3 TamperDetection — tampered agent can never reach "ready"
+  S4 FailClosed — blocked state always sets blocked flag
+  S5 PlumbingIsolation — plumbing keys equal local_used, not parent
+  L2 NoSpuriousBlock — untampered + ready => not blocked
+
 Stdlib only.
 """
 

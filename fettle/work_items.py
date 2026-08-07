@@ -11,6 +11,13 @@ Two kinds of state, two homes:
   never by filename or location).
 - Claims are *runtime coordination state*: ``<git-common-dir>/fettle/
   claims.json``, shared across every worktree of the repo, never committed.
+
+TLA+ formal spec: specs/tla/WorkItemClaims.tla
+Verified invariants:
+  S1 NoDuplicateClaim — at most one session can actively edit per item
+  S3 UnknownScopeConservative — no-scope items have footprint = all files
+  S4 ClaimBeforeWork — edits stay within claimed item's footprint
+  LockMutualExclusion — at most one session holds flock at a time
 """
 
 from __future__ import annotations

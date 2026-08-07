@@ -11,6 +11,9 @@ v1.3 retrospective *before* the merge, not at it.
 Items with no declared scope have an unknowable footprint and are treated
 as conflicting with everything (conservative by design — declare scope to
 unlock parallelism).
+
+TLA+ formal spec: specs/tla/WorkItemClaims.tla
+Verified invariants: S3 UnknownScopeConservative, S4 ClaimBeforeWork.
 """
 
 from __future__ import annotations

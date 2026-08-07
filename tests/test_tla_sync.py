@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,7 +65,7 @@ class TestTlaSync:
         ))
         result = run_check(ctx)
         assert result.decision.value == "advisory"
-        assert "PolicyCapsule" in str(result.findings[0].message if result.findings else result.message)
+        assert "PolicyCapsule" in result.message
 
     def test_allows_unverified_file(self):
         ctx = FakeContext(input=FakeInput(
@@ -111,6 +112,60 @@ class TestTlaSync:
         ctx = FakeContext(input=FakeInput(
             tool_input={},
             session_id="s6",
+        ))
+        result = run_check(ctx)
+        assert result.decision.value == "allow"
+
+
+class TestTlaSyncStop:
+    def test_stop_no_edits_allows(self, tmp_path):
+        tla_sync._edited_verified_files.clear()
+        ctx = FakeContext(input=FakeInput(
+            hook_event_name="Stop",
+            tool_input={},
+            cwd=tmp_path,
+            session_id="stop1",
+        ))
+        result = run_check(ctx)
+        assert result.decision.value == "allow"
+
+    def test_stop_stale_spec_advises(self, tmp_path):
+        tla_sync._edited_verified_files.clear()
+        src = tmp_path / "fettle" / "policy_capsule.py"
+        spec = tmp_path / "specs" / "tla" / "PolicyCapsule.tla"
+        src.parent.mkdir(parents=True)
+        spec.parent.mkdir(parents=True)
+        spec.write_text("old spec")
+        time.sleep(0.05)
+        src.write_text("new code")
+
+        tla_sync._edited_verified_files.add("fettle/policy_capsule.py")
+        ctx = FakeContext(input=FakeInput(
+            hook_event_name="Stop",
+            tool_input={},
+            cwd=tmp_path,
+            session_id="stop2",
+        ))
+        result = run_check(ctx)
+        assert result.decision.value == "advisory"
+        assert "PolicyCapsule.tla" in result.message
+
+    def test_stop_fresh_spec_allows(self, tmp_path):
+        tla_sync._edited_verified_files.clear()
+        src = tmp_path / "fettle" / "policy_capsule.py"
+        spec = tmp_path / "specs" / "tla" / "PolicyCapsule.tla"
+        src.parent.mkdir(parents=True)
+        spec.parent.mkdir(parents=True)
+        src.write_text("code")
+        time.sleep(0.05)
+        spec.write_text("updated spec")
+
+        tla_sync._edited_verified_files.add("fettle/policy_capsule.py")
+        ctx = FakeContext(input=FakeInput(
+            hook_event_name="Stop",
+            tool_input={},
+            cwd=tmp_path,
+            session_id="stop3",
         ))
         result = run_check(ctx)
         assert result.decision.value == "allow"
