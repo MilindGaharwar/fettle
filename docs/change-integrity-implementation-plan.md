@@ -243,9 +243,15 @@ Implementation slices:
    only after all required providers finish.
 4. Publish a completed generation atomically within the process. Never expose
    the mutable assembly graph.
-5. Add full-build reconciliation fixtures before admitting any incremental
+5. Build bidirectional sparse incidence indexes for node-to-edge and edge-to-node
+   traversal. Compact integer handles may optimize one completed generation but
+   remain non-canonical and never enter provider output, stable JSON, evidence,
+   attestations, or graph digests.
+6. Represent containment and hierarchy through typed edges and incidences;
+   prohibit ancestry, nesting position, and dot notation from canonical IDs.
+7. Add full-build reconciliation fixtures before admitting any incremental
    provider output to enforcement.
-6. Keep external providers disabled by default and label all imported trust and
+8. Keep external providers disabled by default and label all imported trust and
    source-handshake limitations.
 
 Acceptance:
@@ -256,6 +262,9 @@ Acceptance:
   observe partial publication.
 - Existing native semantic links are represented with parity or documented,
   approved differences.
+- Overlapping memberships traverse in both directions without changing node
+  identity when an entity is regrouped; no durable output exposes local integer
+  handles.
 - Full graph construction stays within an agreed explicit-command budget on a
   maintained small, medium, and large repository corpus.
 

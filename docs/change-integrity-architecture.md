@@ -230,6 +230,12 @@ A hyperedge is used only when one relationship genuinely joins multiple roles.
 Ordinary binary relationships remain binary edges represented by the same
 incidence model.
 
+Containment and hierarchy are relationships, not identity structure. Providers
+represent them as typed edges and incidences such as `contains`, `belongs-to`,
+or a more specific declared relation. Canonical node and edge IDs never encode
+ancestry, nesting position, or a dot-separated hierarchy; regrouping an
+otherwise unchanged entity must not change its identity.
+
 Example:
 
 ```text
@@ -254,6 +260,13 @@ edge type: api-contract
 - Canonical ordering is bytewise over normalized fields.
 - Unknown fields are rejected for digest construction until a schema version
   defines whether they are enforcement-relevant.
+
+An in-memory generation may assign compact integer handles to nodes, edges, and
+incidences for adjacency indexes or traversal performance. These handles are
+generation-local implementation details: they are derived only after canonical
+ordering, may change between generations, and must never appear in stable JSON,
+evidence, attestations, provider output, or graph-digest input. The canonical
+SHA-256 IDs remain the only durable references.
 
 ```text
 graph_digest = sha256(
