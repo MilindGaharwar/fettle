@@ -156,6 +156,7 @@ and are planning ranges, not commitments.
 | P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Proposed |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
+| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Proposed |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
@@ -1356,6 +1357,116 @@ tool errors as explicit diagnostics or status, not an empty diagnostic set.
 
 Graduation trigger: the same fixture produces the same canonical findings over
 CLI, hook, LSP, and MCP, modulo transport fields.
+
+### R10: Authorship Separation Enforcement
+
+Goal: guarantee that the agent writing tests is never the same agent writing
+the implementation being tested, and that the implementing agent cannot modify
+the tests. This prevents an agent from manufacturing passing tests for broken
+code.
+
+#### WP-520: Role-Based File Authority
+
+**Principle:** Tests must never be written by the same agent writing the code.
+The agent running the implementation must never be allowed to change the tests.
+Any changes to tests must be evaluated and implemented by a separate
+independent agent.
+
+**Design:**
+
+Introduce a `role` policy key carried through the capsule protocol:
+
+```python
+# New policy key in .fettle.toml or capsule
+[gates.authorship]
+enabled = true
+mode = "enforce"  # advisory | enforce
+roles = ["tester", "implementer", "reviewer"]
+```
+
+The role determines which file categories a session may edit:
+
+| Role | May edit implementation | May edit tests | May edit both |
+|------|----------------------|----------------|---------------|
+| `implementer` | Yes | No | No |
+| `tester` | No | Yes | No |
+| `reviewer` | No | No | No (read-only) |
+| `solo` (default) | Yes | Yes | Yes (backwards-compatible) |
+
+**Enforcement mechanism:**
+
+1. `fettle spawn` accepts `--role tester|implementer|reviewer`:
+   ```bash
+   fettle spawn claude --task "implement item-a" --role implementer --worktree item-a
+   fettle spawn claude --task "write tests for item-a" --role tester --worktree item-a-tests
+   ```
+
+2. The role is written into the policy capsule (new field: `policy.role`).
+
+3. A new `authorship_gate.py` (PreToolUse) checks:
+   - Classify the target file via `paths.classify_file()` → `"test"` or `"implementation"`
+   - Compare against the session's role from the resolved capsule policy
+   - Block if the role forbids editing that file category
+
+4. The capsule's monotonic merge ensures a child cannot weaken its role:
+   - `role` uses a strictness ladder: `solo > implementer/tester > reviewer`
+   - A parent with `role: implementer` cannot spawn a child with `role: solo`
+   - A parent with `role: solo` CAN spawn children with any narrower role
+
+**Interaction with existing gates:**
+
+- `tdd_gate.py`: still enforces test-first ordering within a `solo` session.
+  Under authorship separation, the tester session edits tests first, then the
+  implementer session is spawned — the ordering is structural, not temporal.
+- `topology.py`: scope declarations ensure test and impl worktrees don't
+  overlap on implementation files. The tester's scope covers `tests/`; the
+  implementer's scope covers `src/`.
+- `claims_gate.py`: each role claims its own work item or shares a parent
+  item with disjoint file scopes.
+- `verify_gate.py`: verification must be run by a session that can see both
+  test and implementation results — the parent (`solo`) or a dedicated
+  `reviewer`.
+
+**Primary files:**
+
+- `fettle/authorship_gate.py` (new)
+- `fettle/policy_capsule.py` (add `role` to merge semantics)
+- `fettle/spawn.py` (add `--role` parameter)
+- `fettle/dispatcher_registry.py` (register new gate)
+- `fettle/config_schema.py` (add `gates.authorship` schema)
+- `tests/test_authorship_gate.py` (new)
+- `tests/test_policy_capsule.py` (extend role merge tests)
+
+**TLA+ extension:**
+
+Add a `role` field to the PolicyCapsule spec and verify:
+- S6 (RoleMonotonicity): a child's role is always equal or stricter than its
+  parent's
+- S7 (RoleFileAuthority): an agent with role `implementer` never transitions
+  to a state where it edits a test file, and vice versa
+
+**Acceptance criteria:**
+
+1. A `role: implementer` session is blocked from writing any file classified
+   as `"test"` by `paths.classify_file()`.
+2. A `role: tester` session is blocked from writing any file classified as
+   `"implementation"`.
+3. A child agent cannot escalate its role through capsule manipulation.
+4. Default behavior (`role: solo`) is unchanged — no regression for single-
+   agent workflows.
+5. The topology advisor recommends `writer-reviewer` or separate tester/
+   implementer worktrees when role-separated items are detected.
+6. TLA+ spec extended and passing with role invariants.
+
+**Graduation trigger:**
+
+- Role enforcement passes adversarial tests (agent attempts to edit forbidden
+  file categories through path manipulation, symlinks, tool aliases).
+- At least one real multi-agent session demonstrates the full flow: parent
+  spawns tester and implementer children, each constrained to its file set.
+- TLA+ role invariants verified via TLC.
+
+Estimate: 2–3 days.
 
 ## 7. Cross-Cutting Test Strategy
 
