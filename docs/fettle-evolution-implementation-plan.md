@@ -347,10 +347,11 @@ python3 -m fettle.mutation_test --root . --paths fettle/ --json
 Status 2026-08-07: explicit merge-base and full-source selection, pinned engine
 validation, strict result parsing, fail-closed zero-mutant and tool-error states,
 a seeded surviving-mutant fixture, and advisory changed/full CI lanes are
-implemented. Three retained stable mutation-workflow runs remain before
-establishing the baseline and ratchet; `gh run list --workflow mutation.yml`
-returned no runs on 2026-08-07, so ordinary green CI runs cannot be substituted
-as mutation evidence and P34 has not graduated.
+implemented. Retained runs `31183880854`, `31183880954`, and `31183881105`
+are invalid: every report is `tool_error` because the mutation environment
+omitted the PyYAML test dependency. The workflow now installs the development
+dependencies, and a strict evaluator requires three equivalent successful full
+runs before establishing the baseline and ratchet. P34 has not graduated.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 

@@ -10,11 +10,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
+_STABILITY_RUNTIME_MS = 35 * 60 * 1000
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -102,6 +104,7 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
             stderr=_bounded(version.stderr),
         )
 
+    started = time.monotonic()
     try:
         run = _run(
             ["mutmut", "run", "--paths-to-mutate=" + ",".join(files), "--no-progress", "--simple-output"],
@@ -160,12 +163,67 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
         **{state: len(ids[state]) for state in _STATES},
         "survivors": ids["survived"][:20],
         "stderr": _bounded(run.stderr),
+        "duration_ms": round((time.monotonic() - started) * 1000),
     }
 
 
 def compute_score(killed: int, survived: int, timeout: int, suspicious: int, untested: int) -> float | None:
     total = killed + survived + timeout + suspicious + untested
     return None if total == 0 else killed / total * 100
+
+
+def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) -> dict:
+    """Accept only three equivalent, successful full-run mutation reports."""
+    if len(reports) != 3:
+        return {"status": "unstable", "errors": ["stability requires exactly three reports"]}
+    if run_ids is not None and len(run_ids) != 3:
+        return {"status": "unstable", "errors": ["stability requires exactly three run IDs"]}
+
+    for index, report in enumerate(reports, start=1):
+        if report.get("status") != "completed":
+            return {"status": "unstable", "errors": [f"report {index} is not completed"]}
+        if report.get("schema_version") != "1":
+            return {"status": "unstable", "errors": [f"report {index} has an unsupported schema"]}
+        if report.get("selection") != "all":
+            return {"status": "unstable", "errors": [f"report {index} is not a full mutation run"]}
+        if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
+            return {"status": "unstable", "errors": [f"report {index} has an invalid revision"]}
+        if report.get("engine_version") != MUTMUT_VERSION:
+            return {"status": "unstable", "errors": [f"report {index} has an unsupported engine"]}
+        if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
+            return {"status": "unstable", "errors": [f"report {index} has no tested files"]}
+        counts = [report.get(state) for state in _STATES]
+        if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts):
+            return {"status": "unstable", "errors": [f"report {index} has invalid outcomes"]}
+        expected_score = compute_score(*(report[state] for state in _STATES[:5]))
+        if expected_score is None or report.get("score") != round(expected_score, 1):
+            return {"status": "unstable", "errors": [f"report {index} has an invalid score"]}
+        duration = report.get("duration_ms")
+        if not isinstance(duration, int) or isinstance(duration, bool) or not 0 <= duration <= _STABILITY_RUNTIME_MS:
+            return {"status": "unstable", "errors": [f"report {index} exceeds the runtime bound"]}
+
+    first = reports[0]
+    if any(report["revision"] != first["revision"] for report in reports[1:]):
+        return {"status": "unstable", "errors": ["report revisions differ"]}
+    identity = ("engine_version", "files_tested")
+    if any(any(report[key] != first[key] for key in identity) for report in reports[1:]):
+        return {"status": "unstable", "errors": ["report execution scopes differ"]}
+    outcomes = (*_STATES, "score")
+    if any(any(report[key] != first[key] for key in outcomes) for report in reports[1:]):
+        return {"status": "unstable", "errors": ["report outcomes differ"]}
+
+    return {
+        "status": "stable",
+        "baseline": {
+            "schema_version": "1",
+            "revision": first["revision"],
+            "engine_version": first["engine_version"],
+            "files_tested": first["files_tested"],
+            **{key: first[key] for key in outcomes},
+            "run_ids": run_ids or [],
+            "max_duration_ms": max(report["duration_ms"] for report in reports),
+        },
+    }
 
 
 def _rerun(root: str, paths: list[str], timeout: int, threshold: float, base: str, all_files: bool) -> str:
@@ -192,6 +250,14 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
             rerun_command=rerun,
         )
 
+    try:
+        revision_result = _run(["git", "rev-parse", "HEAD"], root, 10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _error("tool_error", f"Cannot resolve tested revision: {exc}", rerun_command=rerun)
+    revision = revision_result.stdout.strip()
+    if revision_result.returncode or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        return _error("unknown", "Cannot resolve tested revision", rerun_command=rerun)
+
     selection = (
         {"status": "completed", "merge_base": None, "files": _get_all_py_files(root, paths), "deleted": []}
         if all_files else _get_changed_py_files(root, paths, base)
@@ -200,6 +266,8 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
         return {**selection, "files_tested": [], "deleted_files": selection.get("deleted", []), "rerun_command": rerun}
     files = [path for path in selection["files"] if not any(path.startswith(item) for item in excluded)]
     common = {
+        "schema_version": "1",
+        "revision": revision,
         "merge_base": selection["merge_base"],
         "selection": "all" if all_files else "changed",
         "files_tested": files,

@@ -10,6 +10,7 @@ from fettle.mutation_test import (
     _get_changed_py_files,
     _parse_result_ids,
     _run_mutmut,
+    evaluate_stability,
     compute_score,
     main,
     run_mutation_test,
@@ -60,12 +61,16 @@ def test_full_selection_finds_python_only(tmp_path):
 def test_engine_collects_all_states_and_exit_evidence():
     outputs = ["1 2", "3", "4", "5", "6", "7"]
     calls = [_proc(out="mutmut version 2.5.1\n"), _proc(14), _proc(), *[_proc(out=item) for item in outputs]]
-    with patch("fettle.mutation_test.subprocess.run", side_effect=calls):
+    with (
+        patch("fettle.mutation_test.subprocess.run", side_effect=calls),
+        patch("fettle.mutation_test.time.monotonic", side_effect=[10.0, 12.5]),
+    ):
         result = _run_mutmut(".", ["src/app.py"], 600)
     assert result["status"] == "completed"
     assert [result[state] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")] == [2, 1, 1, 1, 1, 1]
     assert result["run_exit_code"] == 14
     assert result["survivors"] == ["3"]
+    assert result["duration_ms"] == 2500
 
 
 def test_fatal_run_exit_is_bounded_tool_error():
@@ -113,7 +118,69 @@ def test_no_files_is_distinct_from_missing_tool():
     assert result["passed"] is True
 
 
+@pytest.mark.parametrize("failure", [OSError("git missing"), subprocess.TimeoutExpired([], 10)])
+def test_revision_resolution_failure_is_tool_error(failure):
+    with (
+        patch("fettle.mutation_test._has_mutmut", return_value=True),
+        patch("fettle.mutation_test._run", side_effect=failure),
+    ):
+        result = run_mutation_test(".", {})
+
+    assert result["status"] == "tool_error"
+    assert result["passed"] is False
+
+
 def test_cli_returns_two_for_unknown(monkeypatch):
     monkeypatch.setattr("fettle.mutation_test.run_mutation_test", lambda root, cfg: {"status": "unknown", "score": None, "passed": False})
     monkeypatch.setattr("sys.argv", ["mutation_test", "--json"])
     assert main() == 2
+
+
+def _stable_report(**changes):
+    report = {
+        "schema_version": "1",
+        "status": "completed",
+        "engine_version": "2.5.1",
+        "revision": "a" * 40,
+        "selection": "all",
+        "files_tested": ["fettle/a.py"],
+        "killed": 8,
+        "survived": 1,
+        "timeout": 0,
+        "suspicious": 0,
+        "untested": 1,
+        "skipped": 0,
+        "score": 80.0,
+        "duration_ms": 1000,
+    }
+    report.update(changes)
+    return report
+
+
+def test_stability_requires_three_identical_completed_full_reports():
+    result = evaluate_stability(
+        [_stable_report(duration_ms=value) for value in (900, 1000, 2_100_000)],
+        run_ids=["1", "2", "3"],
+    )
+
+    assert result["status"] == "stable"
+    assert result["baseline"]["score"] == 80.0
+    assert result["baseline"]["run_ids"] == ["1", "2", "3"]
+    assert result["baseline"]["max_duration_ms"] == 2_100_000
+
+
+@pytest.mark.parametrize(
+    "reports,error",
+    [
+        ([_stable_report()] * 2, "exactly three"),
+        ([_stable_report(), _stable_report(status="tool_error"), _stable_report()], "not completed"),
+        ([_stable_report(), _stable_report(killed=7, survived=2, score=70.0), _stable_report()], "outcomes differ"),
+        ([_stable_report(), _stable_report(revision="b" * 40), _stable_report()], "revisions differ"),
+        ([_stable_report(), _stable_report(duration_ms=2_100_001), _stable_report()], "runtime bound"),
+    ],
+)
+def test_stability_rejects_incomplete_or_inconsistent_evidence(reports, error):
+    result = evaluate_stability(reports, run_ids=["1", "2", "3"])
+
+    assert result["status"] == "unstable"
+    assert error in result["errors"][0]
