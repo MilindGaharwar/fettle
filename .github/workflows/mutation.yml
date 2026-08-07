@@ -9,13 +9,19 @@ on:
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
+    inputs:
+      diagnostic:
+        description: "Allow a full mutation run up to two hours"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   mutation:
     name: mutation (${{ github.event_name == 'pull_request' && 'changed' || 'full' }}, advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.diagnostic && 125 || 35 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -50,7 +56,7 @@ jobs:
           --root .
           --paths fettle/
           --all
-          --timeout 1800
+          --timeout ${{ inputs.diagnostic && 7200 || 1800 }}
           --json
           > mutation-report.json
 

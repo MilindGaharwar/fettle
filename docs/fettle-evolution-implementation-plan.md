@@ -360,7 +360,13 @@ Runtime note 2026-08-07: full runs `31187357044`, `31187357306`, and
 `31187357350` passed the unmutated baseline but each reached the 1,800-second
 wrapper limit. The next candidate uses mutmut's native pytest-testmon
 integration to retain full production-file scope while selecting tests by
-recorded code dependencies. Its runner is pinned in retained evidence.
+recorded code dependencies. Its runner is pinned in retained evidence. Held-out
+run `31193102459` also reached the 1,800-second limit and retained a fail-visible
+`tool_error`, so dependency selection alone is insufficient. A manually
+dispatched diagnostic run may use a 7,200-second wrapper limit to measure total
+completion time; routine PR and scheduled limits remain unchanged. That timing
+will size the next complete, non-overlapping sharding experiment and is not
+itself graduation evidence.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 

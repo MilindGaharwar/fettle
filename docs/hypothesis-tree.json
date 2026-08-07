@@ -7,8 +7,8 @@
     "best_node": null,
     "total_nodes": 4,
     "merged_nodes": 0,
-    "pruned_nodes": 0,
-    "convergence_counter": 0
+    "pruned_nodes": 1,
+    "convergence_counter": 1
   },
   "tree": {
     "ROOT": {
@@ -23,23 +23,30 @@
       ],
       "evidence": null,
       "insight": null,
-      "constraints": []
+      "constraints": [
+        "Dependency-selected pytest-testmon execution did not complete full mutation scope within 1,800 seconds."
+      ]
     },
     "1": {
       "id": "1",
       "parent": "ROOT",
       "hypothesis": "Use mutmut's pytest-testmon integration to select dependency-relevant tests per mutant; falsified if the full report remains incomplete or exceeds 2,100,000 ms",
-      "status": "running",
+      "status": "pruned",
       "children": [],
-      "evidence": null,
-      "insight": null,
+      "evidence": {
+        "run_id": "31193102459",
+        "revision": "a56c68c452b60a6e697e3b41853a79556c711910",
+        "result": "tool_error",
+        "message": "Mutation run timed out after 1800s"
+      },
+      "insight": "Test dependency selection alone is insufficient to bound a repository-wide mutmut run; measure total completion time before sizing independently bounded shards.",
       "constraints": []
     },
     "2": {
       "id": "2",
       "parent": "ROOT",
       "hypothesis": "Shard the complete production file set into independently bounded reports and aggregate outcomes; falsified if aggregation cannot prove complete, non-overlapping scope",
-      "status": "pending",
+      "status": "selected",
       "children": [],
       "evidence": null,
       "insight": null,
