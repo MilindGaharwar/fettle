@@ -65,6 +65,14 @@ def explain_entry(entry: dict, *, detailed: bool = False, json_output: bool = Fa
         lines.append("  Run `fettle doctor` to diagnose.")
     elif status == "config_error":
         lines.append("  Outcome: Configuration error — .fettle.toml may be invalid.")
+    elif status == "overridden":
+        overrides = entry.get("overrides", [])
+        lines.append("  Outcome: The check did not pass; an authorized override allowed it.")
+        for override in overrides[:5]:
+            lines.append(
+                f"    {override.get('override_id', '?')} by {override.get('actor', '?')}: "
+                f"{override.get('reason', '(no reason)')} (expires {override.get('expiry', '?')})"
+            )
     elif status == "skipped":
         lines.append("  Outcome: Skipped — file was not in scope for checking.")
 

@@ -41,6 +41,19 @@ class TestExplainEntry:
         output = explain_entry(entry)
         assert "Configuration error" in output
 
+    def test_overridden_entry_is_not_described_as_pass(self):
+        entry = {
+            "hook": "ci", "status": "overridden", "timestamp": "2026-08-07T00:00:00Z",
+            "findings": [], "overrides": [{
+                "override_id": "ov-123", "actor": "maintainer", "reason": "accepted risk",
+                "expiry": "2026-08-08T00:00:00Z", "check_id": "ci.verdict",
+            }],
+        }
+        output = explain_entry(entry)
+        assert "did not pass" in output
+        assert "ov-123" in output
+        assert "accepted risk" in output
+
     def test_many_findings_truncated(self):
         findings = [{"code": f"E{i:03d}", "message": f"issue {i}",
                      "file": "x.py", "line": i} for i in range(10)]

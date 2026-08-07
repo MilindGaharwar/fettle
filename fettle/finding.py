@@ -36,6 +36,7 @@ class FindingSeverity(StrEnum):
 class ResultState(StrEnum):
     PASS = "pass"
     VIOLATION = "violation"
+    OVERRIDDEN = "overridden"
     TOOL_ERROR = "tool_error"
     UNKNOWN = "unknown"
 

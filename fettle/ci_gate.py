@@ -28,7 +28,9 @@ Off by default. Modes: advisory | enforce.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -39,8 +41,10 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from fettle.dispatcher_types import CheckResult, HookContext
-from fettle.trace import build_evidence
+from fettle.dispatcher_types import CheckResult, Decision, HookContext
+from fettle.finding import ResultState
+from fettle.overrides import OverrideContext, load_override_ledger, select_override
+from fettle.trace import build_evidence, log_decision
 
 STAMP_RELPATH = os.path.join(".fettle", "ci-status.json")
 FAILURE_HISTORY_RELPATH = os.path.join(".fettle", "ci-failures.json")
@@ -55,6 +59,13 @@ _GITHUB_REMOTE_RE = re.compile(
 _REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 _GREEN_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
+
+
+def policy_digest(config: dict) -> str:
+    """Content identity of the effective policy governing the CI verdict."""
+    gate_cfg = config.get("gates", {}).get("ci", {})
+    canonical = json.dumps(gate_cfg, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
 # ── Plumbing (each a seam for tests) ──────────────────────────────────────
@@ -348,7 +359,18 @@ def run_check(ctx: HookContext) -> CheckResult:
 
     stamp_path = ctx.cwd / STAMP_RELPATH
     problem = ""
-    if not stamp_path.is_file():
+    stamp: dict | None = None
+    stamp_ts: float | None = None
+    try:
+        push_ts = float(push.get("ts", ""))
+        if not math.isfinite(push_ts):
+            raise ValueError
+    except (TypeError, ValueError):
+        push_ts = None
+        problem = "last push timestamp is invalid"
+    if problem:
+        pass
+    elif not stamp_path.is_file():
         problem = "remote CI status was never checked"
     else:
         try:
@@ -357,11 +379,18 @@ def run_check(ctx: HookContext) -> CheckResult:
             stamp = None
         if not isinstance(stamp, dict):
             problem = "CI status stamp is unreadable"
-        elif stamp.get("sha") != push.get("sha"):
+        else:
+            try:
+                stamp_ts = float(stamp.get("ts", 0))
+                if not math.isfinite(stamp_ts):
+                    raise ValueError
+            except (TypeError, ValueError):
+                problem = "CI status timestamp is invalid"
+        if not problem and stamp.get("sha") != push.get("sha"):
             problem = "CI status is for a different commit than the last push"
-        elif float(stamp.get("ts", 0)) < float(push.get("ts", 0)):
+        elif not problem and stamp_ts is not None and push_ts is not None and stamp_ts < push_ts:
             problem = "CI status predates the last push (stale)"
-        elif not stamp.get("ok", False):
+        elif not problem and not stamp.get("ok", False):
             detail = str(stamp.get("error", "")).strip()
             repro = str(stamp.get("reproduce", "")).strip()
             problem = f"remote CI is not green ({stamp.get('overall', '?')})"
@@ -384,5 +413,52 @@ def run_check(ctx: HookContext) -> CheckResult:
         "additionalContext": msg,
     }
     if cfg.get("mode", "advisory") == "enforce":
+        evidence_id = str((stamp or {}).get("evidence_id", "")).strip()
+        if (
+            isinstance(stamp, dict)
+            and stamp.get("sha") == push.get("sha")
+            and stamp_ts is not None
+            and push_ts is not None
+            and stamp_ts >= push_ts
+            and not stamp.get("ok", False)
+            and evidence_id
+        ):
+            ledger = load_override_ledger(ctx.cwd)
+            if ledger.invalid:
+                msg += "\nCanonical override ledger is invalid; override evaluation failed closed."
+                hso["additionalContext"] = msg
+            else:
+                selection = select_override(ledger.records, OverrideContext(
+                    check_id="ci.verdict",
+                    scope=".",
+                    revision=str(push.get("sha", "")),
+                    policy_digest=policy_digest(ctx.config),
+                    evidence_id=evidence_id,
+                    surface="ci",
+                ))
+                if selection.status == "overridden" and selection.record is not None:
+                    record = selection.record
+                    override_msg = (
+                        f"CI gate OVERRIDDEN by {record.actor}: {record.reason}\n"
+                        f"Override: {record.override_id} (expires {record.expiry})\n{msg}"
+                    )
+                    override_hso = dict(hso, additionalContext=override_msg)
+                    if log_decision(
+                        hook="ci_gate",
+                        status="overridden",
+                        file=str(ctx.cwd),
+                        evidence=[{"kind": "ci", "evidence_id": evidence_id,
+                                   "scope": str(push.get("sha", ""))}],
+                        overrides=[record.to_dict()],
+                        session_id=ctx.session_id or "",
+                    ):
+                        return CheckResult(
+                            decision=Decision.ADVISORY,
+                            message=override_msg,
+                            hook_specific_output=override_hso,
+                            result_state=ResultState.OVERRIDDEN,
+                        )
+                    msg += "\nOverride audit write failed; override evaluation failed closed."
+                    hso["additionalContext"] = msg
         return CheckResult.block(msg, hook_specific_output=hso)
     return CheckResult.advisory(msg, hook_specific_output=hso)

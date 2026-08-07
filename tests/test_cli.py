@@ -92,6 +92,71 @@ def test_cli_explain_supports_detailed_json(tmp_path, monkeypatch, capsys):
     assert entry["evidence"][0]["evidence_id"] == "ev-ruff123"
 
 
+def test_cli_overrides_validate_json_fails_closed_on_invalid_ledger(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    ledger = tmp_path / ".fettle" / "overrides.json"
+    ledger.parent.mkdir()
+    ledger.write_text('{"schema_version":"1","overrides":[{"actor":"anonymous"}]}')
+    from fettle.cli import main
+
+    with patch("sys.argv", ["fettle", "overrides", "validate", "--json"]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    output = __import__("json").loads(capsys.readouterr().out)
+    assert output["invalid_count"] == 1
+
+
+def test_cli_overrides_list_shows_empty_state(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    from fettle.cli import main
+
+    with patch("sys.argv", ["fettle", "overrides", "list"]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert "No recorded overrides" in capsys.readouterr().out
+
+
+def test_cli_verification_check_runs_committed_promoted_fixture(capsys):
+    from fettle.cli import main
+
+    with patch("sys.argv", ["fettle", "verification", "check", "--json"]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    output = __import__("json").loads(capsys.readouterr().out)
+    assert output["results"][0]["check_id"] == "ci.verdict"
+    assert output["results"][0]["status"] == "pass"
+
+
+def test_cli_report_json_includes_override_inventory(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    ledger = tmp_path / ".fettle" / "overrides.json"
+    ledger.parent.mkdir()
+    ledger.write_text('{"schema_version":"1","overrides":[{"actor":"anonymous"}]}')
+    from fettle.trace import log_decision
+    log_decision(hook="quality", status="pass")
+    from fettle.cli import main
+
+    with patch("sys.argv", ["fettle", "report", "--json"]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    output = __import__("json").loads(capsys.readouterr().out)
+    assert output["override_inventory"]["invalid_count"] == 1
+
+
 # --- `fettle check` exit-code contract (WP-133 / audit D1+D2) ---
 # 0 = clean, 1 = error-severity findings, 2 = usage/environment error.
 # Codes must be identical for text and --json modes.
@@ -223,4 +288,3 @@ def test_cli_version_matches_pyproject():
     from fettle.cli import _version
     with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
         assert _version() == tomllib.load(fh)["project"]["version"]
-

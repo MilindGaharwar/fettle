@@ -34,6 +34,7 @@ AUDIT_SCHEMA_VERSION = 2
 _MAX_TEXT = 2048
 _MAX_FINDINGS = 50
 _MAX_EVIDENCE = 20
+_MAX_OVERRIDES = 20
 _SECRET_PATTERNS = (
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"(?:ghp_|sk-)[A-Za-z0-9_-]{20,}"),
@@ -110,6 +111,18 @@ def _bounded_evidence(evidence: dict) -> dict:
     return bounded
 
 
+def _bounded_override(override: dict) -> dict:
+    allowed = {
+        "schema_version", "override_id", "actor", "reason", "timestamp", "expiry",
+        "check_id", "scope", "revision", "policy_digest", "evidence_id", "surface",
+    }
+    return {
+        key: _redact_text(value, 2048 if key == "reason" else 256)
+        for key, value in override.items()
+        if key in allowed and isinstance(value, str)
+    }
+
+
 def _get_trace_path() -> str:
     state_dir = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
     trace_dir = os.path.join(state_dir, "fettle")
@@ -154,6 +167,7 @@ def log_decision(
     file: str = "",
     findings: list[dict] | None = None,
     evidence: list[dict] | None = None,
+    overrides: list[dict] | None = None,
     duration_ms: float = 0.0,
     session_id: str = "",
 ) -> bool:
@@ -175,6 +189,7 @@ def log_decision(
         "repo": _repo_name(file),
         "findings": [_bounded_finding(f) for f in (findings or [])[:_MAX_FINDINGS]],
         "evidence": [_bounded_evidence(e) for e in (evidence or [])[:_MAX_EVIDENCE]],
+        "overrides": [_bounded_override(o) for o in (overrides or [])[:_MAX_OVERRIDES]],
         "duration_ms": round(duration_ms, 2),
         "session_id": session_id,
         "parent_session_id": parent_session_id,

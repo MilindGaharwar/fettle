@@ -496,6 +496,12 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(json.dumps(data, indent=2) if args.json else render_compliance_table(data))
         return
     data = compute_org_report(args.days) if args.org else compute_effectiveness(args.days)
+    if not args.org and "error" not in data:
+        from fettle.paths import find_repo_root
+        from fettle.report import compute_override_inventory
+        repo_root = find_repo_root()
+        if repo_root:
+            data["override_inventory"] = compute_override_inventory(repo_root)
     if args.json:
         print(json.dumps(data, indent=2))
         sys.exit(1 if "error" in data else 0)
@@ -643,6 +649,78 @@ def cmd_suppressions(args: argparse.Namespace) -> None:
     """Manage suppressions with expiry and owner (WP-120)."""
     from fettle.suppressions_v3 import cmd_suppressions as _cmd_suppressions
     _cmd_suppressions(args)
+
+
+def cmd_overrides(args: argparse.Namespace) -> None:
+    """Inspect and validate revision-bound override records."""
+    from fettle.overrides import load_override_ledger, summarize_ledger
+    from fettle.paths import find_repo_root
+
+    project_root = find_repo_root()
+    if not project_root:
+        print("Error: not inside a repository.", file=sys.stderr)
+        sys.exit(2)
+    summary = summarize_ledger(load_override_ledger(project_root))
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    elif not any(
+        summary[key] for key in ("active_count", "pending_count", "expired_count", "invalid_count")
+    ):
+        print("No recorded overrides. Enforcing decisions remain unchanged.")
+    else:
+        print("── Recorded Overrides ──")
+        for label in ("active", "pending", "expired"):
+            for record in summary[label]:
+                print(
+                    f"  {label.upper():<7} {record['override_id']}  {record['check_id']}  "
+                    f"{record['scope']}  expires {record['expiry']}"
+                )
+        for error in summary["invalid"]:
+            print(f"  INVALID {error}")
+    if args.overrides_action == "validate" and (
+        summary["pending_count"] or summary["expired_count"] or summary["invalid_count"]
+    ):
+        sys.exit(1)
+    sys.exit(0)
+
+
+def cmd_verification(args: argparse.Namespace) -> None:
+    """Run committed seeded-defect conformance manifests."""
+    from fettle.verification_fixtures import BUILTIN_RUNNERS, evaluate_manifest, load_manifests
+
+    root = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "verification"
+    promoted = {"ci.verdict"}
+    loaded = load_manifests(root, promoted_check_ids=promoted)
+    selected = [
+        manifest for manifest in loaded.manifests
+        if not args.check_id or manifest.check_id == args.check_id
+    ]
+    errors = list(loaded.errors)
+    if args.check_id and not selected:
+        errors.append(f"check '{args.check_id}' has no seeded-defect manifest")
+    results = [
+        {
+            "check_id": manifest.check_id,
+            "status": result.status,
+            "errors": list(result.errors),
+            "rerun_command": manifest.rerun_command,
+        }
+        for manifest in selected
+        for result in (evaluate_manifest(manifest, BUILTIN_RUNNERS),)
+    ]
+    payload = {"schema_version": "1", "results": results, "errors": errors}
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for result in results:
+            mark = "PASS" if result["status"] == "pass" else result["status"].upper()
+            print(f"  {mark:<10} {result['check_id']}")
+            for error in result["errors"]:
+                print(f"    {error}")
+        for error in errors:
+            print(f"  INVALID    {error}")
+    failed = errors or any(result["status"] != "pass" for result in results)
+    sys.exit(1 if failed else 0)
 
 
 def cmd_lsp(args: argparse.Namespace) -> None:
@@ -1332,7 +1410,10 @@ def main() -> None:
     p_ratchet_promote.add_argument("rule_id", help="Rule ID to promote")
     p_ratchet_demote = ratchet_sub.add_parser("demote", help="Demote rule enforce -> advisory")
     p_ratchet_demote.add_argument("rule_id", help="Rule ID to demote")
-    p_ratchet_demote.add_argument("--reason", required=True, help="Reason for demotion")
+    p_ratchet_demote.add_argument(
+        "--override", required=True,
+        help="Active canonical override ID authorizing this rule demotion",
+    )
     ratchet_sub.add_parser("sync", help="Re-aggregate evidence from trace")
 
     # WP-120: Suppressions with expiry and owner
@@ -1349,6 +1430,26 @@ def main() -> None:
     p_supp_rm.add_argument("index", type=int, help="0-based suppression index")
     supp_sub.add_parser("report", help="Suppressions report (expired, ownerless)")
     supp_sub.add_parser("expired", help="Show expired suppressions (now findings)")
+
+    p_overrides = subparsers.add_parser(
+        "overrides", help="Inspect revision-bound enforcing-decision overrides")
+    overrides_sub = p_overrides.add_subparsers(dest="overrides_action")
+    for action, help_text in (
+        ("list", "Show active, expired, and invalid override records"),
+        ("validate", "Fail if the override ledger contains expired or invalid records"),
+    ):
+        command = overrides_sub.add_parser(action, help=help_text)
+        command.add_argument("--json", action="store_true", help="JSON output")
+    p_overrides.set_defaults(overrides_action="list", json=False)
+
+    p_verification = subparsers.add_parser(
+        "verification", help="Run seeded-defect conformance evidence")
+    verification_sub = p_verification.add_subparsers(dest="verification_action")
+    p_verification_check = verification_sub.add_parser(
+        "check", help="Validate and execute committed verification manifests")
+    p_verification_check.add_argument("--check", dest="check_id", default="")
+    p_verification_check.add_argument("--json", action="store_true", help="JSON output")
+    p_verification.set_defaults(verification_action="check", check_id="", json=False)
 
     subparsers.add_parser("lsp", help="Start the LSP server for editor integration (WP-125)")
 
@@ -1547,6 +1648,8 @@ def main() -> None:
         "ci": cmd_ci,
         "ratchet": cmd_ratchet,
         "suppressions": cmd_suppressions,
+        "overrides": cmd_overrides,
+        "verification": cmd_verification,
         "lsp": cmd_lsp,
         "spec": cmd_spec,
         "spawn": cmd_spawn,

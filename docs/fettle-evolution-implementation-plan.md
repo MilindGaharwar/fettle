@@ -1,6 +1,6 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED for completed activities; P33 and P44 complete; P34, P43, and P52 partially implemented; P35-P42 and P45-P51 remain proposed or evidence-gated
+Status: APPROVED for completed activities; P33, P35, and P44 complete; P34, P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed, blocked, or evidence-gated
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -97,7 +97,7 @@ privileged, platform-specific security product.
 
 ## 4. Current Baseline And Authoritative Scope
 
-v1.8.0 is the shipped trust baseline. The activity IDs below are the execution
+v1.9.0 is the shipped trust baseline. The activity IDs below are the execution
 source of truth; release work packages later in this document provide design
 detail. Estimates include tests and documentation for one experienced engineer
 and are planning ranges, not commitments.
@@ -139,7 +139,7 @@ and are planning ranges, not commitments.
 | P32 | Graduate additional LSP languages after parity | v1.14 | P22, P23, P30 | 3–6 days | Evidence-gated |
 | P33 | Make scanner and CI result handling fail closed | next patch | P1, P3 | 1–2 days | Complete |
 | P34 | Repair mutation selection, execution, and score integrity | next minor | P33 | 2–4 days | In progress |
-| P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Proposed |
+| P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Complete |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
 | P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
 | P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Proposed |
@@ -157,6 +157,15 @@ and are planning ranges, not commitments.
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
 | P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | In progress |
+| P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Proposed |
+| P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Proposed |
+| P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Proposed |
+| P56 | Add comparators and immediate/eventual/snapshot/monotonic evaluation | following minor | P55 | 4-6 days | Proposed |
+| P57 | Add cross-view web/UAT state-consistency adapter | later minor | P55, P56 | 5-8 days | Proposed |
+| P58 | Add optional deterministic and property-based state sequences | later minor | P55, P56 | 5-8 days | Evidence-gated |
+| P59 | Add advisory duplicate-state and invalidation heuristics | unscheduled | P53, measured corpus | 5-8 days | Evidence-gated |
+| P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | Blocked on P35 -> P38 |
+| P61 | Pilot state-consistency contracts and decide per-surface graduation | after P57-P60 as applicable | P55-P60 evidence | 30 qualifying runs | Evidence-gated |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
@@ -178,6 +187,24 @@ overrides, and P41 or an approved successor is required for durable graph-bound
 attestations. Existing semantic, topology, claim, and verification behavior
 remains authoritative until each consumer passes its own shadow graduation.
 P51 may close with a no-go decision; SQLite is not an assumed deliverable.
+
+P53-P61 form the state-consistency program. P53-P54 establish explicit
+ownership, mutation, canonical-read, observer, comparator, and consistency-model
+contracts before any application execution. P55-P56 add bounded API/CLI
+execution and deterministic evaluation. Browser journeys, stateful sequences,
+and static heuristics remain separately gated because their flake, dependency,
+and false-positive risks differ. P60 cannot begin until P35's override contract
+and P38's traceability contract graduate; P61 may approve only the surfaces and
+contract classes that meet their own evidence thresholds. Detailed UX, BDD,
+security, package sequencing, and graduation criteria are maintained in:
+
+- [State consistency UX specification](state-consistency.ux-spec.md)
+- [State consistency implementation plan](state-consistency-implementation-plan.md)
+
+The state-consistency program does not infer business identity from matching
+field names and does not treat application or adapter failure as a clean result.
+P53 is the first package eligible for proposal acceptance; P54-P61 remain
+unauthorized until their package-specific review.
 
 ### 4.1 Verification-Integrity Program (P33-P43)
 
@@ -320,8 +347,10 @@ python3 -m fettle.mutation_test --root . --paths fettle/ --json
 Status 2026-08-07: explicit merge-base and full-source selection, pinned engine
 validation, strict result parsing, fail-closed zero-mutant and tool-error states,
 a seeded surviving-mutant fixture, and advisory changed/full CI lanes are
-implemented. Three retained stable CI runs remain before establishing the
-baseline and ratchet, so P34 has not graduated.
+implemented. Three retained stable mutation-workflow runs remain before
+establishing the baseline and ratchet; `gh run list --workflow mutation.yml`
+returned no runs on 2026-08-07, so ordinary green CI runs cannot be substituted
+as mutation evidence and P34 has not graduated.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 
@@ -359,6 +388,19 @@ Acceptance:
   layer misses.
 - CI cannot use an anonymous, reasonless, or non-expiring override.
 - Expired overrides fail closed in CI and remain visible in audit output.
+
+Status 2026-08-07: complete. The promoted `ci.verdict` gate has committed clean
+and known-bad fixtures whose preceding assurance result remains green; the
+registered conformance runner catches the seeded red verdict without executing
+manifest-provided commands. Canonical overrides are stored separately from
+legacy suppressions and bind actor, reason, timestamp, expiry, check, scope,
+revision, effective CI-policy digest, prior evidence, and surface. The enforcing
+CI Stop gate applies only an exact active match, emits an auditable `overridden`
+non-pass outcome, and fails closed for missing, mismatched, future-dated,
+expired, invalid, or unauditable records. Evidence: `fettle verification check
+--check ci.verdict` passed; override CLI UAT passed; the full suite passed with
+2262 tests; Ruff and `git diff --check` passed; `fettle check --changed` reported
+no errors (11 existing/non-blocking CLI print warnings).
 
 #### P36: Independent Red-Before-Green Reconstruction
 
@@ -1875,12 +1917,16 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
-- P33–P43 status: P33 is complete; P34 is implemented but awaits three stable
+- P33–P43 status: P33 and P35 are complete; P34 is implemented but awaits three stable
   retained CI runs; P43 has two of five planned models but has not met its
-  completion contract; P35–P42 remain proposed or evidence-gated.
+  completion contract; P36–P42 remain proposed or evidence-gated.
   UX/BDD additions are recorded in `docs/polyglot-governance.ux-spec.md`.
 - P44–P51 status: P44 is complete. Architecture, UX/BDD, and implementation
   contracts are recorded in the change-integrity document set; P45–P51 are not
   authorized until their package proposal review is explicitly accepted.
 - P52 status: role-based enforcement is implemented, but its TLA+, adversarial,
   topology, and end-to-end graduation evidence remains.
+- P53–P61 status: state-consistency UX/UAT and implementation contracts are
+  recorded in the state-consistency document set. P53 is proposed as the next
+  contract-only package; P54–P61 are not authorized, and P60 remains blocked on
+  P35 and P38.

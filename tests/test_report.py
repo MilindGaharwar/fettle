@@ -5,7 +5,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from fettle.report import compute_effectiveness, identify_candidates
+from fettle.report import compute_effectiveness, compute_override_inventory, identify_candidates
 
 
 def test_compute_effectiveness_no_data(tmp_path, monkeypatch):
@@ -45,3 +45,30 @@ def test_effectiveness_includes_recent_evidence_ids(tmp_path, monkeypatch):
 
     result = compute_effectiveness(days=30)
     assert result["evidence_ids"] == [evidence["evidence_id"]]
+
+
+def test_effectiveness_counts_overrides_separately_from_pass(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    from fettle.trace import log_decision
+    log_decision(hook="quality", status="pass")
+    log_decision(hook="quality", status="overridden", overrides=[{
+        "override_id": "ov-123", "actor": "maintainer", "reason": "accepted risk",
+        "expiry": "2026-09-01T00:00:00Z", "check_id": "quality", "scope": "src/app.py",
+    }])
+
+    result = compute_effectiveness(days=30)
+
+    assert result["pass_rate_pct"] == 50.0
+    assert result["overridden_count"] == 1
+    assert result["recent_overrides"][0]["override_id"] == "ov-123"
+
+
+def test_override_inventory_exposes_active_expired_and_invalid(tmp_path):
+    ledger = tmp_path / ".fettle" / "overrides.json"
+    ledger.parent.mkdir()
+    ledger.write_text('{"schema_version":"1","overrides":[{"actor":"anonymous"}]}')
+
+    result = compute_override_inventory(tmp_path)
+
+    assert result["invalid_count"] == 1
+    assert result["active_count"] == 0

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from fettle.graph_types import canonical_digest
+from fettle.overrides import OverrideRecord
 from fettle.provider_contract import Completeness, ProviderFactSet, ProviderRunState, TrustClass
 
 
@@ -77,6 +78,7 @@ class ObligationDecision:
     policy_digest: str = ""
     graph_digest: str = ""
     evidence_id: str = ""
+    override_id: str = ""
 
     @classmethod
     def create(
@@ -91,6 +93,7 @@ class ObligationDecision:
         policy_digest: str = "",
         graph_digest: str = "",
         evidence_id: str = "",
+        override: OverrideRecord | None = None,
     ) -> ObligationDecision:
         if not obligation_id:
             raise ValueError("obligation id is required")
@@ -99,9 +102,19 @@ class ObligationDecision:
         if resolution == ObligationResolution.NOT_APPLICABLE and not reason:
             raise ValueError("not applicable requires a reason")
         if resolution == ObligationResolution.OVERRIDDEN:
-            override_fields = (actor, reason, expiry, revision, policy_digest, graph_digest, evidence_id)
-            if not all(override_fields):
-                raise ValueError("all override fields are required")
+            if override is None:
+                raise ValueError("overridden resolution requires a canonical override record")
+            expected_check = "change-integrity.obligation"
+            expected_scope = f"obligations/{obligation_id}"
+            if override.check_id != expected_check or override.scope != expected_scope:
+                raise ValueError("override record does not match the obligation")
+            actor = override.actor
+            reason = override.reason
+            expiry = override.expiry
+            revision = override.revision
+            policy_digest = override.policy_digest
+            evidence_id = override.evidence_id
+        override_id = override.override_id if override is not None else ""
         payload = {
             "obligation_id": obligation_id,
             "resolution": resolution,
@@ -112,9 +125,10 @@ class ObligationDecision:
             "policy_digest": policy_digest,
             "graph_digest": graph_digest,
             "evidence_id": evidence_id,
+            "override_id": override_id,
         }
         return cls(canonical_digest(payload), obligation_id, resolution, actor, reason, expiry,
-                   revision, policy_digest, graph_digest, evidence_id)
+                   revision, policy_digest, graph_digest, evidence_id, override_id)
 
 
 @dataclass(frozen=True, order=True)

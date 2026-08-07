@@ -6,6 +6,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+from fettle.overrides import OverrideRecord
 from fettle.trace import build_evidence, log_decision, get_recent_decisions, rotate_trace
 
 
@@ -117,3 +118,19 @@ def test_evidence_reference_keeps_existing_id(tmp_path, monkeypatch):
 
     entry = get_recent_decisions(limit=1)[0]
     assert entry["evidence"] == [{"evidence_id": "ev-existing123", "kind": "command"}]
+
+
+def test_override_is_recorded_distinctly_and_bounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    record = OverrideRecord.create(
+        actor="maintainer", reason="accepted risk", timestamp="2026-08-07T10:00:00Z",
+        expiry="2026-08-08T10:00:00Z", check_id="gate", scope="src/app.py",
+        revision="a" * 40, policy_digest="b" * 64, evidence_id="ev-prior", surface="ci",
+    )
+
+    log_decision(hook="gate", status="overridden", overrides=[record.to_dict()])
+
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["status"] == "overridden"
+    assert entry["overrides"][0]["override_id"] == record.override_id
+    assert entry["overrides"][0]["reason"] == "accepted risk"

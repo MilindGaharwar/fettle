@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "check_id": "ci.verdict",
+  "owner": "fettle-maintainers",
+  "runner": "ci-verdict-json",
+  "clean_fixture": "clean",
+  "defect_fixture": "known-bad",
+  "prior_suite_expected": "pass",
+  "expected_state": "violation",
+  "expected_finding_code": "CI_FAILED",
+  "max_runtime_ms": 100,
+  "rerun_command": "fettle verification check --check ci.verdict"
+}

@@ -19,9 +19,16 @@ import os
 import sys
 import time
 from collections import Counter
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.trace import get_recent_decisions
+
+
+def compute_override_inventory(project_root: Path) -> dict:
+    """Return active, expired, and invalid repository override records."""
+    from fettle.overrides import load_override_ledger, summarize_ledger
+    return summarize_ledger(load_override_ledger(project_root))
 
 
 def compute_effectiveness(days: int = 30) -> dict:
@@ -58,6 +65,13 @@ def compute_effectiveness(days: int = 30) -> dict:
         for evidence in entry.get("evidence", [])
         if evidence.get("evidence_id")
     ]
+    override_entries = [e for e in recent if e.get("status") == "overridden"]
+    recent_overrides = [
+        override
+        for entry in override_entries
+        for override in entry.get("overrides", [])
+        if isinstance(override, dict)
+    ][-20:]
 
     # Stage-0 failure visibility: dispatcher fail-open events (check crashes,
     # budget kills, input/config/registry failures) are part of effectiveness —
@@ -92,6 +106,8 @@ def compute_effectiveness(days: int = 30) -> dict:
         "dispatch_failures": dict(dispatch_failures),
         "failing_checks": failing_checks.most_common(5),
         "evidence_ids": list(dict.fromkeys(evidence_ids))[-20:],
+        "overridden_count": len(override_entries),
+        "recent_overrides": recent_overrides,
     }
 
 
@@ -198,6 +214,7 @@ def main() -> None:
     print(f"  Pass rate: {report['pass_rate_pct']}%")
     print(f"  Violation rate: {report['violation_rate_pct']}%")
     print(f"  Tool error rate: {report['tool_error_rate_pct']}%")
+    print(f"  Overridden decisions: {report['overridden_count']}")
     print(f"  Total findings: {report['total_findings']}")
 
     if report["top_violations"]:

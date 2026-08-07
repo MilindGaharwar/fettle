@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from fettle.overrides import OverrideRecord
+
 from fettle.graph_types import Node
 from fettle.provider_contract import Completeness, ProviderFactSet, ProviderRunState, TrustClass
 from fettle.traversal_rules import (
@@ -118,17 +120,22 @@ def test_obligation_identity_is_stable_but_resolution_requires_complete_evidence
 
 
 def test_override_resolution_is_bound_to_actor_policy_graph_and_expiry():
-    with pytest.raises(ValueError, match="override fields"):
+    with pytest.raises(ValueError, match="override record"):
         ObligationDecision.create(
-            "obligation", ObligationResolution.OVERRIDDEN, actor="maintainer", reason="accepted risk",
+            "obligation", ObligationResolution.OVERRIDDEN,
         )
 
-    decision = ObligationDecision.create(
-        "obligation", ObligationResolution.OVERRIDDEN, actor="maintainer", reason="accepted risk",
+    override = OverrideRecord.create(
+        actor="maintainer", reason="accepted risk", timestamp="2026-08-01T00:00:00Z",
         expiry="2026-09-01T00:00:00Z", revision="abc123", policy_digest="policy",
-        graph_digest="graph", evidence_id="prior-evidence",
+        evidence_id="prior-evidence", check_id="change-integrity.obligation",
+        scope="obligations/obligation", surface="ci",
+    )
+    decision = ObligationDecision.create(
+        "obligation", ObligationResolution.OVERRIDDEN, override=override, graph_digest="graph",
     )
     assert decision.resolution == ObligationResolution.OVERRIDDEN
+    assert decision.override_id == override.override_id
 
 
 def test_traversal_rule_requires_triggers_outputs_surface_and_recovery():

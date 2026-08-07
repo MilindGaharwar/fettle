@@ -182,6 +182,14 @@ class TestIsSuppressed:
         supps = [Suppression(rule="BLE001", path="")]
         assert is_suppressed("BLE001", "anything/here.py", supps)
 
+    def test_legacy_suppression_is_not_a_ci_override(self):
+        suppression = Suppression(
+            rule="BLE001", reason="legacy", owner="@alice", until="2099-01-01",
+        )
+        assert not hasattr(suppression, "override_id")
+        assert not hasattr(suppression, "revision")
+        assert not hasattr(suppression, "policy_digest")
+
 
 class TestGetExpiredOwnerless:
     def test_get_expired(self):

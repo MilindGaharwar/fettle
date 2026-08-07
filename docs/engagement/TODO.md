@@ -115,13 +115,18 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       tests, and refinement maps remain
 - [~] D4. P34 mutation evidence integrity — fail-closed wrapper, seeded weak
       assertion, and advisory changed/full workflow implemented; three retained
-      stable CI runs remain before baseline and ratchet graduation
-- [ ] D5. P35 seeded-defect and recorded-override contract
+      stable mutation-workflow runs remain before baseline and ratchet graduation
+- [x] D5. P35 seeded-defect and recorded-override contract — promoted
+      `ci.verdict` seeded evidence and fail-closed, revision/evidence/policy-bound
+      enforcing override path verified
 - [?] D6. P45-P51 change-integrity runtime — gated by package-specific
       authorization and prerequisites in the evolution plan
 - [~] D7. P52 authorship separation — role gate and capsule plumbing shipped;
       TLA+ role invariants, adversarial path coverage, topology guidance, and
       an evidenced multi-agent flow remain
+- [ ] D8. P53-P61 state consistency contracts — P53-P54 scheduled for the next
+      minor and P55-P56 for the following minor; review and authorize P53/SC1
+      before any runner, browser adapter, static heuristic, or enforcement work
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

@@ -7,11 +7,13 @@ import json
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from fettle import ci_gate
 from fettle.dispatcher_types import HookContext, HookInput
+from fettle.overrides import OverrideRecord, save_override_ledger
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -255,6 +257,33 @@ def _stamp(repo: Path, sha: str, *, ok: bool, ts: float | None = None, **extra: 
     path.write_text(json.dumps(stamp))
 
 
+def _override(
+    repo: Path,
+    sha: str,
+    config: dict,
+    evidence_id: str = "ev-ci-red",
+    *,
+    expired: bool = False,
+) -> OverrideRecord:
+    now = datetime.now(UTC).replace(microsecond=0)
+    timestamp = now - timedelta(hours=2) if expired else now - timedelta(minutes=1)
+    expiry = now - timedelta(hours=1) if expired else now + timedelta(hours=1)
+    record = OverrideRecord.create(
+        actor="maintainer@example.com",
+        reason="accepted CI risk under incident FET-123",
+        timestamp=timestamp.isoformat().replace("+00:00", "Z"),
+        expiry=expiry.isoformat().replace("+00:00", "Z"),
+        check_id="ci.verdict",
+        scope=".",
+        revision=sha,
+        policy_digest=ci_gate.policy_digest(config),
+        evidence_id=evidence_id,
+        surface="ci",
+    )
+    save_override_ledger(repo, [record])
+    return record
+
+
 class TestStopGate:
     def test_disabled_allows(self, tmp_path: Path) -> None:
         assert ci_gate.run_check(_ctx(tmp_path, _cfg(enabled=False))).decision.value == "allow"
@@ -322,6 +351,86 @@ class TestStopGate:
         assert "https://x/CI" in result.message
         assert "python3 -m pytest" in result.message
 
+    def test_enforcing_red_stamp_with_exact_override_is_audited_advisory(
+        self, tmp_path: Path,
+    ) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        config = _cfg(mode="enforce")
+        _record(state, sha, ts=time.time() - 60)
+        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        override = _override(tmp_path, sha, config)
+
+        with patch("fettle.config.state_dir", return_value=state), \
+             patch.object(ci_gate, "log_decision") as log:
+            result = ci_gate.run_check(_ctx(tmp_path, config))
+
+        assert result.decision.value == "advisory"
+        assert "OVERRIDDEN" in result.message
+        assert override.override_id in result.message
+        assert log.call_args.kwargs["status"] == "overridden"
+        assert log.call_args.kwargs["overrides"] == [override.to_dict()]
+
+    def test_enforcing_override_fails_closed_when_audit_write_fails(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        config = _cfg(mode="enforce")
+        _record(state, sha, ts=time.time() - 60)
+        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _override(tmp_path, sha, config)
+
+        with patch("fettle.config.state_dir", return_value=state), \
+             patch.object(ci_gate, "log_decision", return_value=False):
+            result = ci_gate.run_check(_ctx(tmp_path, config))
+
+        assert result.decision.value == "block"
+        assert "audit write failed" in result.message
+
+    def test_enforcing_red_stamp_rejects_mismatched_override(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        config = _cfg(mode="enforce")
+        _record(state, sha, ts=time.time() - 60)
+        _stamp(tmp_path, sha, ok=False, evidence_id="ev-current", error="CI failed")
+        _override(tmp_path, sha, config, evidence_id="ev-prior")
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(tmp_path, config))
+
+        assert result.decision.value == "block"
+
+    def test_enforcing_red_stamp_rejects_expired_override(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        config = _cfg(mode="enforce")
+        _record(state, sha, ts=time.time() - 60)
+        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _override(tmp_path, sha, config, expired=True)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(tmp_path, config))
+
+        assert result.decision.value == "block"
+
+    def test_enforcing_red_stamp_rejects_invalid_override_ledger(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        _record(state, sha, ts=time.time() - 60)
+        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        ledger = tmp_path / ".fettle" / "overrides.json"
+        ledger.write_text("not json")
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision.value == "block"
+        assert "override ledger is invalid" in result.message
+
     def test_corrupt_stamp_is_a_problem_not_a_pass(self, tmp_path: Path) -> None:
         state = tmp_path / "state"
         state.mkdir()
@@ -333,6 +442,30 @@ class TestStopGate:
             result = ci_gate.run_check(_ctx(tmp_path, _cfg()))
         assert result.decision.value == "advisory"
         assert "unreadable" in result.message
+
+    def test_enforcing_stamp_with_invalid_timestamp_fails_closed(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = "a" * 40
+        _record(state, sha)
+        _stamp(tmp_path, sha, ok=False, ts="not-a-timestamp", evidence_id="ev-ci-red")
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision.value == "block"
+        assert "timestamp is invalid" in result.message
+
+    def test_enforcing_push_with_invalid_timestamp_fails_closed(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        _record(state, "a" * 40, ts=float("nan"))
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision.value == "block"
+        assert "push timestamp is invalid" in result.message
 
 
 # ── registry + CLI wiring ─────────────────────────────────────────────────

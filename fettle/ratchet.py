@@ -224,13 +224,31 @@ def promote_rule(
     )
 
 
-def demote_rule(project_root: Path, rule_id: str, reason: str) -> str:
-    """Demote enforce -> advisory, requires a reason.
+def demote_rule(project_root: Path, rule_id: str, override_id: str) -> str:
+    """Demote enforce -> advisory through an active canonical override.
 
     Returns status message.
     """
-    if not reason.strip():
-        return "Refused: a reason is required for demotion"
+    from fettle.overrides import load_override_ledger
+
+    if not override_id.strip():
+        return "Refused: a recorded override ID is required for demotion"
+    ledger = load_override_ledger(project_root)
+    if ledger.invalid:
+        return "Refused: override ledger is invalid: " + ledger.invalid[0]
+    override = next(
+        (record for record in ledger.records if record.override_id == override_id), None,
+    )
+    if override is None:
+        return f"Refused: override '{override_id}' was not found"
+    if override.is_expired():
+        return f"Refused: override '{override_id}' is expired"
+    if not (
+        override.check_id == "ratchet.demote"
+        and override.scope == f"rules/{rule_id}"
+        and override.surface == "ci"
+    ):
+        return f"Refused: override '{override_id}' does not authorize demotion of '{rule_id}'"
 
     data = load_ratchet(project_root)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -250,7 +268,8 @@ def demote_rule(project_root: Path, rule_id: str, reason: str) -> str:
 
     rule_data["mode"] = "advisory"
     rule_data["demoted_at"] = now
-    rule_data["demotion_reason"] = reason
+    rule_data["demotion_reason"] = override.reason
+    rule_data["demotion_override_id"] = override.override_id
 
     # Refresh evidence snapshot
     evidence = aggregate_evidence(project_root)
@@ -258,7 +277,10 @@ def demote_rule(project_root: Path, rule_id: str, reason: str) -> str:
         rule_data["evidence"] = asdict(evidence[rule_id])
 
     save_ratchet(project_root, data)
-    return f"Demoted '{rule_id}' to advisory (reason: {reason})"
+    return (
+        f"Demoted '{rule_id}' to advisory under {override.override_id} "
+        f"(reason: {override.reason})"
+    )
 
 
 def ratchet_status(project_root: Path) -> list[dict]:
@@ -347,12 +369,14 @@ def cmd_ratchet(args: argparse.Namespace) -> None:
 
     elif action == "demote":
         rule_id = args.rule_id
-        reason = getattr(args, "reason", None) or ""
-        if not reason.strip():
-            print("Error: --reason is required for demotion.", file=sys.stderr)
+        override_id = getattr(args, "override", None) or ""
+        if not override_id.strip():
+            print("Error: --override is required for demotion.", file=sys.stderr)
             sys.exit(1)
-        result = demote_rule(project_root, rule_id, reason)
+        result = demote_rule(project_root, rule_id, override_id)
         print(result)
+        if result.startswith("Refused"):
+            sys.exit(1)
 
     elif action == "sync":
         evidence = aggregate_evidence(project_root)

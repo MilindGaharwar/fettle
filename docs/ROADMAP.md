@@ -24,6 +24,7 @@ or partial form and remain subject to the graduation triggers below. See the
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
 | In progress | Authorship separation (P52) | Role-based edit enforcement is implemented; TLA+ role invariants, adversarial path coverage, and an evidenced multi-agent flow remain before graduation |
 | Next | Seeded-defect controls, independent red/green evidence, expanded evals, and traceability | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |
+| Scheduled | State consistency contracts (P53-P61) | P53-P54 contract authoring targets the next minor; execution follows only after contract validation, and later surfaces graduate independently without treating tool failure or intentional snapshots as defects |
 | Proposed | Runtime change-integrity snapshots, ephemeral graph, and advisory impact (P45-P48) | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
 | Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
 | Later | Native web, enterprise adapters, advisory framework packs, semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
@@ -36,6 +37,13 @@ The proposed hypergraph program is detailed in the
 [UX specification](change-integrity.ux-spec.md), and
 [implementation plan](change-integrity-implementation-plan.md). Runtime work is
 not authorized by those planning documents.
+
+The scheduled state-divergence program is defined in the
+[state consistency UX specification](state-consistency.ux-spec.md) and
+[implementation plan](state-consistency-implementation-plan.md). It begins with
+explicit contracts rather than inferred field-name relationships. P53-P54 are
+scheduled for the next minor, P55-P56 for the following minor, and P57-P61 stay
+package- or evidence-gated; scheduling does not itself authorize implementation.
 
 ## Formal Verification (TLA+)
 

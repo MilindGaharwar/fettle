@@ -15,6 +15,7 @@ from fettle.ratchet import (
     ratchet_status,
     save_ratchet,
 )
+from fettle.overrides import OverrideRecord, save_override_ledger
 
 
 # --- Fixtures ---
@@ -341,8 +342,19 @@ def test_promote_rule_already_enforced(tmp_path, monkeypatch):
 # --- demote_rule ---
 
 
-def test_demote_rule_with_reason(tmp_path, monkeypatch):
-    """Demotes an enforced rule when reason is given."""
+def _demotion_override(tmp_path, rule_id="F401"):
+    record = OverrideRecord.create(
+        actor="maintainer", reason="Too many false positives in new codebase",
+        timestamp="2026-08-01T00:00:00Z", expiry="2099-08-01T00:00:00Z",
+        check_id="ratchet.demote", scope=f"rules/{rule_id}", revision="a" * 40,
+        policy_digest="b" * 64, evidence_id="ev-ratchet", surface="ci",
+    )
+    save_override_ledger(tmp_path, [record])
+    return record
+
+
+def test_demote_rule_with_canonical_override(tmp_path, monkeypatch):
+    """Demotes an enforced rule only through a recorded override."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
 
     # Set up as enforced first
@@ -358,7 +370,8 @@ def test_demote_rule_with_reason(tmp_path, monkeypatch):
     _write_trace(tmp_path, entries)
     promote_rule(tmp_path, "F401")
 
-    result = demote_rule(tmp_path, "F401", "Too many false positives in new codebase")
+    override = _demotion_override(tmp_path)
+    result = demote_rule(tmp_path, "F401", override.override_id)
     assert "Demoted" in result
     assert "advisory" in result
 
@@ -368,12 +381,15 @@ def test_demote_rule_with_reason(tmp_path, monkeypatch):
     assert data["rules"]["F401"]["demotion_reason"] == "Too many false positives in new codebase"
 
 
-def test_demote_rule_no_reason(tmp_path, monkeypatch):
-    """Refuses demotion without a reason."""
+def test_demote_rule_requires_active_matching_override(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     result = demote_rule(tmp_path, "F401", "")
     assert "Refused" in result
-    assert "reason" in result
+    assert "override" in result
+
+    wrong = _demotion_override(tmp_path, "OTHER")
+    result = demote_rule(tmp_path, "F401", wrong.override_id)
+    assert "does not authorize" in result
 
 
 def test_demote_rule_already_advisory(tmp_path, monkeypatch):
@@ -387,7 +403,8 @@ def test_demote_rule_already_advisory(tmp_path, monkeypatch):
     }
     save_ratchet(tmp_path, data)
 
-    result = demote_rule(tmp_path, "F401", "want to demote")
+    override = _demotion_override(tmp_path)
+    result = demote_rule(tmp_path, "F401", override.override_id)
     assert "already in advisory mode" in result
 
 
