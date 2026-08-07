@@ -75,6 +75,22 @@ def _get_all_py_files(root: str, paths: list[str]) -> list[str]:
     return sorted(files)
 
 
+def _shard_files(root: str, files: list[str], index: int, count: int) -> list[str]:
+    """Partition files deterministically while balancing source byte size."""
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("shard index must be within shard count")
+    if not files:
+        raise ValueError("cannot shard an empty file list")
+    shards: list[list[str]] = [[] for _ in range(count)]
+    sizes = [0] * count
+    ordered = sorted(files, key=lambda path: (-(Path(root) / path).stat().st_size, path))
+    for path in ordered:
+        target = min(range(count), key=lambda item: (sizes[item], item))
+        shards[target].append(path)
+        sizes[target] += (Path(root) / path).stat().st_size
+    return sorted(shards[index])
+
+
 def _has_mutmut() -> bool:
     return shutil.which("mutmut", path=_ENV["PATH"]) is not None
 
@@ -177,6 +193,88 @@ def compute_score(killed: int, survived: int, timeout: int, suspicious: int, unt
     return None if total == 0 else killed / total * 100
 
 
+def aggregate_shards(
+    root: str,
+    reports: list[dict],
+    paths: list[str],
+    excluded: list[str],
+    shard_count: int,
+    threshold: float,
+) -> dict:
+    """Combine only complete, equivalent shards that exactly cover full scope."""
+    if shard_count < 1:
+        return _error("unknown", "Aggregation requires a positive shard count")
+    if len(reports) != shard_count:
+        return _error("unknown", f"Aggregation requires exactly {shard_count} shard reports")
+    reports = sorted(reports, key=lambda report: report.get("shard_index", -1))
+    expected_indexes = list(range(shard_count))
+    if [report.get("shard_index") for report in reports] != expected_indexes:
+        return _error("unknown", "Shard indexes are incomplete or duplicated")
+    for index, report in enumerate(reports):
+        if report.get("status") != "completed":
+            return _error("tool_error", f"Shard {index} is not completed")
+        if report.get("schema_version") != "1" or report.get("selection") != "shard":
+            return _error("unknown", f"Shard {index} has unsupported evidence")
+        if report.get("shard_count") != shard_count:
+            return _error("unknown", f"Shard {index} has inconsistent shard count")
+        if report.get("engine_version") != MUTMUT_VERSION or report.get("test_runner") != _TEST_RUNNER:
+            return _error("unknown", f"Shard {index} has unsupported execution identity")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
+            return _error("unknown", f"Shard {index} has an invalid revision")
+        if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
+            return _error("unknown", f"Shard {index} has no tested files")
+        counts = [report.get(state) for state in _STATES]
+        if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts):
+            return _error("unknown", f"Shard {index} has invalid outcomes")
+        duration = report.get("duration_ms")
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 0:
+            return _error("unknown", f"Shard {index} has invalid duration")
+    first = reports[0]
+    identity = ("revision", "engine_version", "test_runner")
+    if any(any(report.get(key) != first.get(key) for key in identity) for report in reports[1:]):
+        return _error("unknown", "Shard execution identities differ")
+
+    expected = [
+        path for path in _get_all_py_files(root, paths)
+        if not any(path.startswith(item) for item in excluded)
+    ]
+    tested = [path for report in reports for path in report.get("files_tested", [])]
+    if len(tested) != len(set(tested)):
+        return _error("unknown", "Shard file scopes overlap")
+    if sorted(tested) != expected:
+        return _error("unknown", "Shard file scope does not match full mutation scope")
+    try:
+        revision = _run(["git", "rev-parse", "HEAD"], root, 10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _error("tool_error", "Cannot verify aggregate revision: " + str(exc))
+    if revision.returncode or revision.stdout.strip() != first["revision"]:
+        return _error("unknown", "Shard revision does not match aggregate checkout")
+    counts = {state: sum(report[state] for report in reports) for state in _STATES}
+    score = compute_score(*(counts[state] for state in _STATES[:5]))
+    if score is None:
+        return _error("unknown", "Aggregated shards reported zero scored mutants")
+    survivors = [item for report in reports for item in report.get("survivors", [])][:20]
+    return {
+        "schema_version": "1",
+        "status": "completed",
+        "revision": first["revision"],
+        "merge_base": None,
+        "selection": "all",
+        "files_tested": expected,
+        "deleted_files": [],
+        "engine_version": first["engine_version"],
+        "test_runner": first["test_runner"],
+        "shard_count": shard_count,
+        **counts,
+        "survivors": survivors,
+        "score": round(score, 1),
+        "threshold": threshold,
+        "passed": score >= threshold,
+        "duration_ms": max(report["duration_ms"] for report in reports),
+        "total_duration_ms": sum(report["duration_ms"] for report in reports),
+    }
+
+
 def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) -> dict:
     """Accept only three equivalent, successful full-run mutation reports."""
     if len(reports) != 3:
@@ -250,6 +348,8 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     threshold = float(cfg.get("threshold", 70))
     base = str(cfg.get("base", "origin/main"))
     all_files = bool(cfg.get("all", False))
+    shard_index = cfg.get("shard_index")
+    shard_count = cfg.get("shard_count")
     rerun = _rerun(root, paths, timeout, threshold, base, all_files)
     if not _has_mutmut():
         return _error(
@@ -273,15 +373,24 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     if selection["status"] != "completed":
         return {**selection, "files_tested": [], "deleted_files": selection.get("deleted", []), "rerun_command": rerun}
     files = [path for path in selection["files"] if not any(path.startswith(item) for item in excluded)]
+    if shard_index is not None or shard_count is not None:
+        if not all_files or not isinstance(shard_index, int) or not isinstance(shard_count, int):
+            return _error("unknown", "Sharding requires --all, --shard-index, and --shard-count")
+        try:
+            files = _shard_files(root, files, shard_index, shard_count)
+        except (OSError, ValueError) as exc:
+            return _error("unknown", "Cannot choose mutation partition: " + str(exc))
     common = {
         "schema_version": "1",
         "revision": revision,
         "merge_base": selection["merge_base"],
-        "selection": "all" if all_files else "changed",
+        "selection": "shard" if shard_index is not None else ("all" if all_files else "changed"),
         "files_tested": files,
         "deleted_files": selection["deleted"],
         "rerun_command": rerun,
     }
+    if shard_index is not None:
+        common.update({"shard_index": shard_index, "shard_count": shard_count})
     if not files:
         return {
             "status": "not_applicable", "message": "No existing implementation files changed",
@@ -323,12 +432,29 @@ def main() -> int:
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--threshold", type=float, default=70)
+    parser.add_argument("--shard-index", type=int)
+    parser.add_argument("--shard-count", type=int)
+    parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    report = run_mutation_test(args.root, {
-        "paths": args.paths.split(","), "base": args.base, "all": args.all,
-        "timeout_s": args.timeout, "threshold": args.threshold,
-    })
+    paths = args.paths.split(",")
+    if args.aggregate:
+        if args.shard_count is None or args.shard_count < 1:
+            report = _error("unknown", "--aggregate requires a positive --shard-count")
+        else:
+            report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
+            try:
+                reports = [json.loads(path.read_text()) for path in report_paths]
+            except (OSError, json.JSONDecodeError) as exc:
+                report = _error("unknown", f"Cannot read shard reports: {exc}")
+            else:
+                report = aggregate_shards(args.root, reports, paths, ["tests/", "migrations/"], args.shard_count, args.threshold)
+    else:
+        report = run_mutation_test(args.root, {
+            "paths": paths, "base": args.base, "all": args.all,
+            "timeout_s": args.timeout, "threshold": args.threshold,
+            "shard_index": args.shard_index, "shard_count": args.shard_count,
+        })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
     return 2 if report["status"] in {"unknown", "tool_error"} else (0 if report.get("passed", True) else 1)

@@ -366,7 +366,12 @@ run `31193102459` also reached the 1,800-second limit and retained a fail-visibl
 dispatched diagnostic run may use a 7,200-second wrapper limit to measure total
 completion time; routine PR and scheduled limits remain unchanged. That timing
 will size the next complete, non-overlapping sharding experiment and is not
-itself graduation evidence.
+itself graduation evidence. Diagnostic run `31197332468` reached that 7,200-second
+limit without completing. Full scheduled and manual evidence therefore runs as
+twelve deterministic, size-balanced shards with 1,800-second worker bounds. A
+separate aggregator accepts the run only when every shard completes against the
+same revision and execution identity and the file scopes are complete and
+non-overlapping.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 

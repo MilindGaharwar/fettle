@@ -24,7 +24,8 @@
       "evidence": null,
       "insight": null,
       "constraints": [
-        "Dependency-selected pytest-testmon execution did not complete full mutation scope within 1,800 seconds."
+        "Dependency-selected pytest-testmon execution did not complete full mutation scope within 1,800 seconds.",
+        "A monolithic diagnostic run did not complete within 7,200 seconds; full evidence must execute as independently bounded shards."
       ]
     },
     "1": {
@@ -46,10 +47,16 @@
       "id": "2",
       "parent": "ROOT",
       "hypothesis": "Shard the complete production file set into independently bounded reports and aggregate outcomes; falsified if aggregation cannot prove complete, non-overlapping scope",
-      "status": "selected",
+      "status": "running",
       "children": [],
-      "evidence": null,
-      "insight": null,
+      "evidence": {
+        "diagnostic_run_id": "31197332468",
+        "revision": "23dec2b14d7a0afc759b223919b31dafc5fab524",
+        "result": "tool_error",
+        "message": "Mutation run timed out after 7200s",
+        "candidate_shard_count": 12
+      },
+      "insight": "The full scope requires more than four ideal 1,800-second partitions; start with twelve size-balanced shards and prove exact non-overlapping coverage during aggregation.",
       "constraints": []
     },
     "3": {

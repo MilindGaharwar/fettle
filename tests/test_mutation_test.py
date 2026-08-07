@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from fettle.mutation_test import (
+    _shard_files,
+    aggregate_shards,
     _get_all_py_files,
     _get_changed_py_files,
     _parse_result_ids,
@@ -56,6 +58,24 @@ def test_full_selection_finds_python_only(tmp_path):
     (tmp_path / "src/app.py").write_text("")
     (tmp_path / "src/nested/no.txt").write_text("")
     assert _get_all_py_files(str(tmp_path), ["src/"]) == ["src/app.py"]
+
+
+def test_shards_are_deterministic_balanced_and_complete(tmp_path):
+    files = ["src/a.py", "src/b.py", "src/c.py"]
+    for path, size in zip(files, (100, 60, 20), strict=True):
+        target = tmp_path / path
+        target.parent.mkdir(exist_ok=True)
+        target.write_text("x" * size)
+
+    shards = [_shard_files(str(tmp_path), files, index, 2) for index in range(2)]
+
+    assert shards == [["src/a.py"], ["src/b.py", "src/c.py"]]
+    assert sorted(path for shard in shards for path in shard) == files
+
+
+def test_shards_reject_empty_scope(tmp_path):
+    with pytest.raises(ValueError, match="empty"):
+        _shard_files(str(tmp_path), [], 0, 1)
 
 
 def test_engine_collects_all_states_and_exit_evidence():
@@ -157,6 +177,75 @@ def _stable_report(**changes):
     }
     report.update(changes)
     return report
+
+
+def _shard_report(index, files, **changes):
+    report = _stable_report(
+        selection="shard",
+        shard_index=index,
+        shard_count=2,
+        files_tested=files,
+        duration_ms=1000 + index,
+    )
+    report.update(changes)
+    return report
+
+
+def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
+        result = aggregate_shards(
+            str(tmp_path),
+            [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])],
+            ["fettle/"],
+            [],
+            2,
+            70,
+        )
+
+    assert result["status"] == "completed"
+    assert result["selection"] == "all"
+    assert result["files_tested"] == ["fettle/a.py", "fettle/b.py"]
+    assert result["killed"] == 16
+    assert result["score"] == 80.0
+    assert result["duration_ms"] == 1001
+    assert result["total_duration_ms"] == 2001
+
+
+@pytest.mark.parametrize(
+    "reports,message",
+    [
+        ([_shard_report(0, ["fettle/a.py"])], "exactly 2"),
+        ([_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/a.py"])], "overlap"),
+        ([_shard_report(0, ["fettle/a.py"]), _shard_report(1, [])], "no tested files"),
+        ([_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"], status="tool_error")], "not completed"),
+    ],
+)
+def test_aggregate_shards_rejects_incomplete_evidence(tmp_path, reports, message):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+
+    result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] in {"unknown", "tool_error"}
+    assert message in result["message"]
+
+
+def test_aggregate_shards_rejects_wrong_checkout_revision(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")):
+        result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] == "unknown"
+    assert "checkout" in result["message"]
 
 
 def test_stability_requires_three_identical_completed_full_reports():
