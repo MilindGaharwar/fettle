@@ -3,21 +3,42 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
+_CACHE_STATES = {
+    "ok_killed": "killed",
+    "bad_survived": "survived",
+    "bad_timeout": "timeout",
+    "ok_suspicious": "suspicious",
+    "untested": "untested",
+    "skipped": "skipped",
+}
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
-_TEST_RUNNER = "python -m pytest -x --assert=plain --testmon"
+_TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
+_SHARD_LINES = 125
+_SHARED_TESTS = {
+    "fettle/__main__.py": ["tests/test_cli.py"],
+    "fettle/agents/claude_code.py": ["tests/test_agents.py"],
+    "fettle/agents/codex.py": ["tests/test_agents.py"],
+    "fettle/agents/gemini.py": ["tests/test_agents.py"],
+    "fettle/agents/opencode.py": ["tests/test_agents.py"],
+    "fettle/runners/_subprocess.py": ["tests/test_runners.py"],
+    "fettle/uat/__init__.py": ["tests/test_uat_surfaces.py"],
+}
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -91,6 +112,77 @@ def _shard_files(root: str, files: list[str], index: int, count: int) -> list[st
     return sorted(shards[index])
 
 
+def _shard_ranges(root: str, files: list[str], index: int, count: int) -> list[dict]:
+    """Partition source lines exactly once, splitting modules too large for one worker."""
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("shard index must be within shard count")
+    chunks: list[dict] = []
+    for file in files:
+        line_count = len((Path(root) / file).read_text(encoding="utf-8").splitlines())
+        for start in range(1, line_count + 1, _SHARD_LINES):
+            chunks.append({"file": file, "start": start, "end": min(start + _SHARD_LINES - 1, line_count)})
+    if len(chunks) < count:
+        raise ValueError("shard count exceeds source range count")
+    shards: list[list[dict]] = [[] for _ in range(count)]
+    sizes = [0] * count
+    for chunk in sorted(chunks, key=lambda item: (-(item["end"] - item["start"] + 1), item["file"], item["start"])):
+        target = min(range(count), key=lambda item: (sizes[item], item))
+        shards[target].append(chunk)
+        sizes[target] += chunk["end"] - chunk["start"] + 1
+    return sorted(shards[index], key=lambda item: (item["file"], item["start"]))
+
+
+def _patch_for_ranges(root: str, ranges: list[dict]) -> str:
+    """Create a parse-only unified diff whose added lines whitelist mutation locations."""
+    root_path = Path(root)
+    sections: list[str] = []
+    for item in ranges:
+        lines = (root_path / item["file"]).read_text(encoding="utf-8").splitlines()
+        selected = lines[item["start"] - 1:item["end"]]
+        sections.extend([
+            f"--- a/{item['file']}",
+            f"+++ b/{item['file']}",
+            f"@@ -{item['start']},0 +{item['start']},{len(selected)} @@",
+            *["+" + line for line in selected],
+        ])
+    return "\n".join(sections) + "\n"
+
+
+def _mapped_tests(root: str, files: list[str]) -> dict[str, list[str]]:
+    """Map each production module to convention and direct-import tests."""
+    root_path = Path(root)
+    test_paths = sorted((root_path / "tests").glob("test_*.py"))
+    imports: dict[str, set[str]] = {}
+    for test_path in test_paths:
+        relative = test_path.relative_to(root_path).as_posix()
+        try:
+            tree = ast.parse(test_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.setdefault(alias.name, set()).add(relative)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.setdefault(node.module, set()).add(relative)
+                for alias in node.names:
+                    imports.setdefault(f"{node.module}.{alias.name}", set()).add(relative)
+
+    mapped: dict[str, list[str]] = {}
+    for file in files:
+        module = file.removesuffix(".py").replace("/", ".")
+        if module.endswith(".__init__"):
+            module = module.removesuffix(".__init__")
+        matches = set(imports.get(module, set())) | set(_SHARED_TESTS.get(file, []))
+        stem = Path(file).stem
+        if stem not in {"__init__", "__main__"}:
+            candidate = root_path / "tests" / f"test_{stem}.py"
+            if candidate.is_file():
+                matches.add(candidate.relative_to(root_path).as_posix())
+        mapped[file] = sorted(matches)
+    return mapped
+
+
 def _has_mutmut() -> bool:
     return shutil.which("mutmut", path=_ENV["PATH"]) is not None
 
@@ -104,8 +196,68 @@ def _parse_result_ids(output: str) -> list[str]:
     return output.split()
 
 
-def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
+def _collect_results(root: str, engine_version: str, run_exit_code: int) -> tuple[dict[str, list[str]] | None, dict | None]:
+    try:
+        results = _run(["mutmut", "results"], root, 30)
+        if results.returncode:
+            return None, _error(
+                "tool_error", "mutmut results failed", engine_version=engine_version,
+                run_exit_code=run_exit_code, results_exit_code=results.returncode,
+                stderr=_bounded(results.stderr or results.stdout),
+            )
+        ids: dict[str, list[str]] = {}
+        for state in _STATES:
+            result_ids = _run(["mutmut", "result-ids", state], root, 30)
+            if result_ids.returncode:
+                return None, _error(
+                    "tool_error", f"mutmut result-ids {state} failed",
+                    engine_version=engine_version, result_ids_exit_code=result_ids.returncode,
+                    stderr=_bounded(result_ids.stderr or result_ids.stdout),
+                )
+            ids[state] = _parse_result_ids(result_ids.stdout)
+    except ValueError as exc:
+        return None, _error("unknown", str(exc), engine_version=engine_version, run_exit_code=run_exit_code)
+    except subprocess.TimeoutExpired:
+        return None, _error("tool_error", "mutmut result collection timed out", engine_version=engine_version)
+    except OSError as exc:
+        return None, _error("tool_error", f"Cannot read mutmut results: {exc}", engine_version=engine_version)
+    all_ids = [item for state_ids in ids.values() for item in state_ids]
+    if len(all_ids) != len(set(all_ids)):
+        return None, _error("unknown", "mutmut reported overlapping outcome IDs", engine_version=engine_version)
+    return ids, None
+
+
+def _collect_range_results(root: str, line_ranges: list[dict], engine_version: str, run_exit_code: int) -> tuple[dict[str, list[str]] | None, dict | None]:
+    cache = Path(root) / ".mutmut-cache"
+    try:
+        connection = sqlite3.connect(f"file:{cache.resolve()}?mode=ro", uri=True)
+        rows = connection.execute(
+            "SELECT Mutant.id, SourceFile.filename, Line.line_number, Mutant.status "
+            "FROM Mutant JOIN Line ON Mutant.line = Line.id "
+            "JOIN SourceFile ON Line.sourcefile = SourceFile.id"
+        ).fetchall()
+        connection.close()
+    except sqlite3.Error as exc:
+        return None, _error(
+            "tool_error", f"Cannot read mutmut range results: {exc}",
+            engine_version=engine_version, run_exit_code=run_exit_code,
+        )
+    allowed = {(item["file"], line) for item in line_ranges for line in range(item["start"], item["end"] + 1)}
+    ids = {state: [] for state in _STATES}
+    for mutant_id, filename, line, status in rows:
+        if (filename, line) not in allowed:
+            continue
+        state = _CACHE_STATES.get(status)
+        if state is None:
+            return None, _error("unknown", f"mutmut reported unknown status {status}", engine_version=engine_version)
+        ids[state].append(str(mutant_id))
+    return ids, None
+
+
+def _run_mutmut(root: str, files: list[str], tests: list[str], timeout: int, line_ranges: list[dict] | None = None) -> dict:
     """Run mutmut 2.5.1 and reconstruct each outcome from verified ID output."""
+    if not tests:
+        return _error("unknown", "Mutation execution requires at least one targeted test")
     try:
         version = _run(["mutmut", "version"], root, 30)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -122,12 +274,21 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
         )
 
     started = time.monotonic()
+    patch_path: str | None = None
     try:
+        if line_ranges:
+            with tempfile.NamedTemporaryFile("w", suffix=".patch", dir=root, delete=False) as patch:
+                patch.write(_patch_for_ranges(root, line_ranges))
+                patch_path = patch.name
+        argv = [
+            "mutmut", "run", "--paths-to-mutate=" + ",".join(files),
+            "--runner", "python -m pytest -x --assert=plain " + shlex.join(tests),
+            "--no-progress", "--simple-output",
+        ]
+        if patch_path:
+            argv.extend(["--use-patch-file", patch_path])
         run = _run(
-            [
-                "mutmut", "run", "--paths-to-mutate=" + ",".join(files),
-                "--runner", _TEST_RUNNER, "--no-progress", "--simple-output",
-            ],
+            argv,
             root,
             timeout,
         )
@@ -135,6 +296,9 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
         return _error("tool_error", f"Mutation run timed out after {timeout}s", engine_version=actual)
     except OSError as exc:
         return _error("tool_error", f"Cannot execute mutmut: {exc}", engine_version=actual)
+    finally:
+        if patch_path:
+            Path(patch_path).unlink(missing_ok=True)
 
     # mutmut 2.x uses bits 2/4/8 for survivor/timeout/suspicious outcomes.
     if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
@@ -145,42 +309,22 @@ def _run_mutmut(root: str, files: list[str], timeout: int) -> dict:
             run_exit_code=run.returncode,
             stderr=_bounded(run.stderr or run.stdout),
         )
-    try:
-        results = _run(["mutmut", "results"], root, 30)
-        if results.returncode:
-            return _error(
-                "tool_error",
-                "mutmut results failed",
-                engine_version=actual,
-                run_exit_code=run.returncode,
-                results_exit_code=results.returncode,
-                stderr=_bounded(results.stderr or results.stdout),
-            )
-        ids: dict[str, list[str]] = {}
-        for state in _STATES:
-            result_ids = _run(["mutmut", "result-ids", state], root, 30)
-            if result_ids.returncode:
-                return _error(
-                    "tool_error",
-                    f"mutmut result-ids {state} failed",
-                    engine_version=actual,
-                    result_ids_exit_code=result_ids.returncode,
-                    stderr=_bounded(result_ids.stderr or result_ids.stdout),
-                )
-            ids[state] = _parse_result_ids(result_ids.stdout)
-    except ValueError as exc:
-        return _error("unknown", str(exc), engine_version=actual, run_exit_code=run.returncode)
-    except subprocess.TimeoutExpired:
-        return _error("tool_error", "mutmut result collection timed out", engine_version=actual)
-    except OSError as exc:
-        return _error("tool_error", f"Cannot read mutmut results: {exc}", engine_version=actual)
+    ids, error = (
+        _collect_range_results(root, line_ranges, actual, run.returncode)
+        if line_ranges else _collect_results(root, actual, run.returncode)
+    )
+    if error:
+        return error
+    assert ids is not None
 
     return {
         "status": "completed",
         "engine_version": actual,
         "test_runner": _TEST_RUNNER,
+        "tests_run": tests,
+        "line_ranges": line_ranges or [],
         "run_exit_code": run.returncode,
-        "results_exit_code": results.returncode,
+        "results_exit_code": 0,
         **{state: len(ids[state]) for state in _STATES},
         "survivors": ids["survived"][:20],
         "stderr": _bounded(run.stderr),
@@ -223,9 +367,15 @@ def aggregate_shards(
             return _error("unknown", f"Shard {index} has an invalid revision")
         if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
             return _error("unknown", f"Shard {index} has no tested files")
+        expected_tests = sorted({test for tests in _mapped_tests(root, report["files_tested"]).values() for test in tests})
+        if report.get("tests_run") != expected_tests or not expected_tests:
+            return _error("unknown", f"Shard {index} has an invalid test mapping")
         counts = [report.get(state) for state in _STATES]
         if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts):
             return _error("unknown", f"Shard {index} has invalid outcomes")
+        ranges = report.get("line_ranges")
+        if not isinstance(ranges, list) or not ranges:
+            return _error("unknown", f"Shard {index} has no source ranges")
         duration = report.get("duration_ms")
         if not isinstance(duration, int) or isinstance(duration, bool) or duration < 0:
             return _error("unknown", f"Shard {index} has invalid duration")
@@ -238,11 +388,20 @@ def aggregate_shards(
         path for path in _get_all_py_files(root, paths)
         if not any(path.startswith(item) for item in excluded)
     ]
-    tested = [path for report in reports for path in report.get("files_tested", [])]
-    if len(tested) != len(set(tested)):
-        return _error("unknown", "Shard file scopes overlap")
-    if sorted(tested) != expected:
+    tested = sorted({path for report in reports for path in report.get("files_tested", [])})
+    if tested != expected:
         return _error("unknown", "Shard file scope does not match full mutation scope")
+    expected_lines = {(file, line) for file in expected for line in range(1, len((Path(root) / file).read_text(encoding="utf-8").splitlines()) + 1)}
+    tested_lines: list[tuple[str, int]] = []
+    for report in reports:
+        for item in report["line_ranges"]:
+            if not isinstance(item, dict) or set(item) != {"file", "start", "end"}:
+                return _error("unknown", "Shard source ranges are malformed")
+            if item["file"] not in report["files_tested"] or not isinstance(item["start"], int) or not isinstance(item["end"], int):
+                return _error("unknown", "Shard source ranges are malformed")
+            tested_lines.extend((item["file"], line) for line in range(item["start"], item["end"] + 1))
+    if len(tested_lines) != len(set(tested_lines)) or set(tested_lines) != expected_lines:
+        return _error("unknown", "Shard source ranges do not exactly cover full mutation scope")
     try:
         revision = _run(["git", "rev-parse", "HEAD"], root, 10)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -264,6 +423,8 @@ def aggregate_shards(
         "deleted_files": [],
         "engine_version": first["engine_version"],
         "test_runner": first["test_runner"],
+        "tests_run": sorted({test for report in reports for test in report["tests_run"]}),
+        "line_ranges": sorted((item for report in reports for item in report["line_ranges"]), key=lambda item: (item["file"], item["start"])),
         "shard_count": shard_count,
         **counts,
         "survivors": survivors,
@@ -297,6 +458,11 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
             return {"status": "unstable", "errors": [f"report {index} has an unsupported test runner"]}
         if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
             return {"status": "unstable", "errors": [f"report {index} has no tested files"]}
+        tests_run = report.get("tests_run")
+        if not isinstance(tests_run, list) or not tests_run or tests_run != sorted(set(tests_run)):
+            return {"status": "unstable", "errors": [f"report {index} has invalid targeted tests"]}
+        if not isinstance(report.get("line_ranges"), list) or not report["line_ranges"]:
+            return {"status": "unstable", "errors": [f"report {index} has no source ranges"]}
         counts = [report.get(state) for state in _STATES]
         if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts):
             return {"status": "unstable", "errors": [f"report {index} has invalid outcomes"]}
@@ -310,7 +476,7 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
     first = reports[0]
     if any(report["revision"] != first["revision"] for report in reports[1:]):
         return {"status": "unstable", "errors": ["report revisions differ"]}
-    identity = ("engine_version", "test_runner", "files_tested")
+    identity = ("engine_version", "test_runner", "files_tested", "tests_run", "line_ranges")
     if any(any(report[key] != first[key] for key in identity) for report in reports[1:]):
         return {"status": "unstable", "errors": ["report execution scopes differ"]}
     outcomes = (*_STATES, "score")
@@ -373,11 +539,13 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     if selection["status"] != "completed":
         return {**selection, "files_tested": [], "deleted_files": selection.get("deleted", []), "rerun_command": rerun}
     files = [path for path in selection["files"] if not any(path.startswith(item) for item in excluded)]
+    line_ranges: list[dict] | None = None
     if shard_index is not None or shard_count is not None:
         if not all_files or not isinstance(shard_index, int) or not isinstance(shard_count, int):
             return _error("unknown", "Sharding requires --all, --shard-index, and --shard-count")
         try:
-            files = _shard_files(root, files, shard_index, shard_count)
+            line_ranges = _shard_ranges(root, files, shard_index, shard_count)
+            files = sorted({item["file"] for item in line_ranges})
         except (OSError, ValueError) as exc:
             return _error("unknown", "Cannot choose mutation partition: " + str(exc))
     common = {
@@ -396,11 +564,18 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
             "status": "not_applicable", "message": "No existing implementation files changed",
             "score": None, "passed": True, **common,
         }
-    result = _run_mutmut(root, files, timeout)
+    mapping = _mapped_tests(root, files)
+    unmapped = [file for file, tests in mapping.items() if not tests]
+    if unmapped:
+        return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped), **common)
+    tests = sorted({test for mapped in mapping.values() for test in mapped})
+    result = _run_mutmut(root, files, tests, timeout, line_ranges)
     if result["status"] != "completed":
         return {**result, **common}
     score = compute_score(*(result[state] for state in _STATES[:5]))
     if score is None:
+        if line_ranges:
+            return {**result, "score": None, "threshold": threshold, "passed": True, **common}
         evidence = {key: value for key, value in result.items() if key != "status"}
         return _error("unknown", "mutmut reported zero scored mutants", **evidence, **common)
     return {**result, "score": round(score, 1), "threshold": threshold, "passed": score >= threshold, **common}

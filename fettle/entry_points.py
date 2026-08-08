@@ -39,7 +39,7 @@ def check_entry_points(cwd: str) -> list[CheckFinding]:
 
 def _verify_entry_point(root: Path, name: str, spec: str) -> CheckFinding | None:
     """Verify a single entry point spec like 'myapp.cli:main'."""
-    if ":" not in spec:
+    if spec.count(":") != 1:
         return CheckFinding(
             checker="entry-points",
             severity=FindingSeverity.ERROR,
