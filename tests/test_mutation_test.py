@@ -1,6 +1,7 @@
 """P34 mutation evidence integrity contracts."""
 
 import json
+import importlib.metadata
 from pathlib import Path
 import subprocess
 import sqlite3
@@ -9,6 +10,11 @@ from unittest.mock import patch
 import pytest
 
 from fettle.mutation_test import (
+    build_mutation_cache_identity,
+    collect_mutation_dependency_identities,
+    restore_mutation_native_cache,
+    save_mutation_native_cache,
+    mutation_cache_reusable,
     _shard_files,
     _shard_ranges,
     _patch_for_ranges,
@@ -308,6 +314,7 @@ def test_completed_report_includes_policy_and_scope_identity_digests():
         monkeypatch.setattr("fettle.mutation_test._has_mutmut", lambda: True)
         monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: selection)
         monkeypatch.setattr("fettle.mutation_test._mapped_tests", lambda *args: {"src/app.py": ["tests/test_app.py"]})
+        monkeypatch.setattr("fettle.mutation_test._runtime_cache_identity", lambda *args: None)
         monkeypatch.setattr("fettle.mutation_test._run_mutmut", lambda *args, **kwargs: engine)
         monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
         monkeypatch.setattr(Path, "read_bytes", lambda self: b"source")
@@ -316,6 +323,309 @@ def test_completed_report_includes_policy_and_scope_identity_digests():
     assert all(len(result[field]) == 64 for field in (
         "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest"
     ))
+
+
+def test_mutation_cache_identity_invalidates_source_test_mapping_config_and_fixture(tmp_path):
+    for path, content in {
+        "src/app.py": "value = 1\n",
+        "tests/test_app.py": "import src.app\n",
+        "tests/conftest.py": "TOKEN = 1\n",
+        "tests/fixtures/input.json": "{}\n",
+        "pyproject.toml": "[tool.pytest.ini_options]\n",
+        "uv.lock": "version = 1\n",
+    }.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    mapping = {"src/app.py": ["tests/test_app.py"]}
+    config = {"mode": "advisory", "test_mappings": mapping}
+    dependencies = [{"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64}]
+
+    original = build_mutation_cache_identity(
+        str(tmp_path), ["src/app.py"], mapping, config, dependencies=dependencies,
+        environment={"python": "3.12", "platform": "test"},
+    )
+    assert mutation_cache_reusable({"identity": original}, original) is True
+
+    changes = [
+        ("src/app.py", "value = 2\n", mapping, config),
+        ("tests/test_app.py", "assert False\n", mapping, config),
+        ("tests/fixtures/input.json", "{\"changed\": true}\n", mapping, config),
+        ("uv.lock", "version = 2\n", mapping, config),
+        (None, None, {"src/app.py": ["tests/test_app.py", "tests/conftest.py"]}, config),
+        (None, None, mapping, {**config, "mode": "enforce"}),
+    ]
+    for path, content, changed_mapping, changed_config in changes:
+        if path:
+            target = tmp_path / path
+            before = target.read_text()
+            target.write_text(content)
+        changed = build_mutation_cache_identity(
+            str(tmp_path), ["src/app.py"], changed_mapping, changed_config,
+            dependencies=dependencies, environment={"python": "3.12", "platform": "test"},
+        )
+        assert mutation_cache_reusable({"identity": original}, changed) is False
+        if path:
+            target.write_text(before)
+
+
+def test_mutation_cache_identity_invalidates_dependency_engine_python_and_platform(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("value = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    mapping = {"src/app.py": ["tests/test_app.py"]}
+    dependencies = [{"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64}]
+    environment = {"python": "3.12", "platform": "linux-x86_64"}
+    original = build_mutation_cache_identity(
+        str(tmp_path), ["src/app.py"], mapping, {}, dependencies=dependencies,
+        environment=environment,
+    )
+
+    variants = [
+        {"dependencies": [{**dependencies[0], "version": "9.2.0"}]},
+        {"dependencies": [{**dependencies[0], "record_digest": "b" * 64}]},
+        {"dependencies": [{**dependencies[0], "direct_url_digest": "c" * 64}]},
+        {"dependencies": [{
+            "name": "pytest", "version": "9.1.1", "editable_source_digest": "d" * 64,
+        }]},
+        {"engine_version": "2.5.2"},
+        {"environment": {**environment, "python": "3.13"}},
+        {"environment": {**environment, "platform": "macos-arm64"}},
+    ]
+    for override in variants:
+        kwargs = {
+            "dependencies": dependencies,
+            "environment": environment,
+            **override,
+        }
+        changed = build_mutation_cache_identity(
+            str(tmp_path), ["src/app.py"], mapping, {}, **kwargs,
+        )
+        assert mutation_cache_reusable({"identity": original}, changed) is False
+
+
+def test_mutation_cache_identity_fails_closed_for_unknown_inputs(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("value = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    mapping = {"src/app.py": ["tests/test_app.py"]}
+
+    with pytest.raises(ValueError, match="dependency identity"):
+        build_mutation_cache_identity(
+            str(tmp_path), ["src/app.py"], mapping, {},
+            dependencies=[{"name": "pytest", "version": "9.1.1"}],
+            environment={"python": "3.12", "platform": "test"},
+        )
+    with pytest.raises(ValueError, match="dependency identity"):
+        build_mutation_cache_identity(
+            str(tmp_path), ["src/app.py"], mapping, {},
+            dependencies=[{
+                "name": "pytest", "version": "9.1.1", "direct_url_digest": "a" * 64,
+            }],
+            environment={"python": "3.12", "platform": "test"},
+        )
+    with pytest.raises(ValueError, match="watched file"):
+        build_mutation_cache_identity(
+            str(tmp_path), ["src/app.py"], {"src/app.py": ["tests/missing.py"]}, {},
+            dependencies=[{"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64}],
+            environment={"python": "3.12", "platform": "test"},
+        )
+    assert mutation_cache_reusable({}, {"schema_version": "1", "digest": "a" * 64}) is False
+    assert mutation_cache_reusable({"identity": "malformed"}, {"schema_version": "1", "digest": "a" * 64}) is False
+
+
+def _mutation_distribution(tmp_path, direct_url=None):
+    site = tmp_path / "site"
+    dist_info = site / "example-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text("Metadata-Version: 2.1\nName: example\nVersion: 1.0\n")
+    (dist_info / "RECORD").write_text("example/__init__.py,sha256=abc,3\nexample-1.0.dist-info/RECORD,,\n")
+    if direct_url is not None:
+        (dist_info / "direct_url.json").write_text(json.dumps(direct_url))
+    return importlib.metadata.Distribution.at(dist_info)
+
+
+def test_dependency_identity_collects_wheel_record_and_direct_url(tmp_path):
+    plain = collect_mutation_dependency_identities([_mutation_distribution(tmp_path / "plain")])
+    direct = collect_mutation_dependency_identities([_mutation_distribution(
+        tmp_path / "direct", {"url": "https://example.invalid/example.whl"},
+    )])
+
+    assert plain == [{
+        "name": "example", "version": "1.0", "record_digest": plain[0]["record_digest"],
+    }]
+    assert len(plain[0]["record_digest"]) == 64
+    assert direct[0]["record_digest"] == plain[0]["record_digest"]
+    assert len(direct[0]["direct_url_digest"]) == 64
+
+
+def test_dependency_identity_collects_editable_source_and_invalidates_changes(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "module.py").write_text("VALUE = 1\n")
+    dist = _mutation_distribution(tmp_path / "editable", {
+        "url": source.resolve().as_uri(), "dir_info": {"editable": True},
+    })
+
+    first = collect_mutation_dependency_identities([dist])
+    (source / "module.py").write_text("VALUE = 2\n")
+    second = collect_mutation_dependency_identities([dist])
+
+    assert set(first[0]) == {"name", "version", "editable_source_digest", "direct_url_digest"}
+    assert first[0]["editable_source_digest"] != second[0]["editable_source_digest"]
+
+
+def test_dependency_identity_rejects_missing_record_and_unreadable_editable_source(tmp_path):
+    wheel = _mutation_distribution(tmp_path / "wheel")
+    Path(wheel._path, "RECORD").unlink()
+    with pytest.raises(ValueError, match="RECORD"):
+        collect_mutation_dependency_identities([wheel])
+
+    missing = tmp_path / "missing"
+    editable = _mutation_distribution(tmp_path / "editable", {
+        "url": missing.resolve().as_uri(), "dir_info": {"editable": True},
+    })
+    with pytest.raises(ValueError, match="editable source"):
+        collect_mutation_dependency_identities([editable])
+
+    remote = _mutation_distribution(tmp_path / "remote", {
+        "url": "https://example.invalid/source", "dir_info": {"editable": True},
+    })
+    with pytest.raises(ValueError, match="editable source"):
+        collect_mutation_dependency_identities([remote])
+
+
+def test_native_cache_round_trip_requires_exact_identity(tmp_path):
+    native = tmp_path / ".mutmut-cache"
+    native.write_bytes(b"sqlite evidence")
+    identity = {"schema_version": "1", "digest": "a" * 64, "inputs": {}}
+    identity["digest"] = __import__("hashlib").sha256(b"{}").hexdigest()
+
+    assert save_mutation_native_cache(str(tmp_path), identity) is True
+    native.unlink()
+    assert restore_mutation_native_cache(str(tmp_path), identity) is True
+    assert native.read_bytes() == b"sqlite evidence"
+
+    native.unlink()
+    changed = {**identity, "digest": "b" * 64}
+    assert restore_mutation_native_cache(str(tmp_path), changed) is False
+    assert not native.exists()
+
+
+def test_native_cache_rejects_malformed_or_symlinked_entries(tmp_path):
+    identity = {"schema_version": "1", "digest": "a" * 64, "inputs": {}}
+    identity["digest"] = __import__("hashlib").sha256(b"{}").hexdigest()
+    cache_dir = tmp_path / ".fettle/mutation-cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "identity.json").write_text("not json")
+    (cache_dir / "mutmut-cache.sqlite").write_bytes(b"bad")
+
+    assert restore_mutation_native_cache(str(tmp_path), identity) is False
+    assert not (tmp_path / ".mutmut-cache").exists()
+
+    (cache_dir / "identity.json").write_text(json.dumps({"identity": identity}))
+    (cache_dir / "mutmut-cache.sqlite").unlink()
+    target = tmp_path / "outside"
+    target.write_bytes(b"outside")
+    (cache_dir / "mutmut-cache.sqlite").symlink_to(target)
+    assert restore_mutation_native_cache(str(tmp_path), identity) is False
+
+
+def test_native_cache_rejects_mixed_identity_and_sqlite_writes(tmp_path):
+    identity = {"schema_version": "1", "digest": "a" * 64, "inputs": {}}
+    identity["digest"] = __import__("hashlib").sha256(b"{}").hexdigest()
+    native = tmp_path / ".mutmut-cache"
+    native.write_bytes(b"first")
+    assert save_mutation_native_cache(str(tmp_path), identity) is True
+    cached_native = tmp_path / ".fettle/mutation-cache/mutmut-cache.sqlite"
+    cached_native.write_bytes(b"interrupted replacement")
+
+    native.unlink()
+    assert restore_mutation_native_cache(str(tmp_path), identity) is False
+    assert not native.exists()
+
+
+def test_full_mutation_bypasses_native_cache_restore(monkeypatch):
+    selection = {"status": "completed", "merge_base": None, "files": [] , "deleted": []}
+    monkeypatch.setattr("fettle.mutation_test._has_mutmut", lambda: True)
+    monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
+    monkeypatch.setattr("fettle.mutation_test._get_all_py_files", lambda *args: selection["files"])
+    restore = monkeypatch.setattr("fettle.mutation_test.restore_mutation_native_cache", lambda *args: pytest.fail("restored"))
+
+    result = run_mutation_test(".", {"paths": ["src/"], "all": True})
+
+    assert restore is None
+    assert result["status"] == "not_applicable"
+
+
+def test_changed_mutation_restores_and_refreshes_exact_native_cache(monkeypatch, tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("value = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    selection = {"status": "completed", "merge_base": "base", "files": ["src/app.py"], "deleted": []}
+    identity = {"schema_version": "1", "digest": "a" * 64, "inputs": {}}
+    engine = {
+        "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
+        "tests_run": ["tests/test_app.py"], "line_ranges": [], "run_exit_code": 0,
+        "results_exit_code": 0, "killed": 1, "survived": 0, "timeout": 0,
+        "suspicious": 0, "untested": 0, "skipped": 0, "non_killed": [],
+        "survivor_preview": [], "survivors": [], "stderr": "", "duration_ms": 1,
+    }
+    monkeypatch.setattr("fettle.mutation_test._has_mutmut", lambda: True)
+    monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: selection)
+    monkeypatch.setattr("fettle.mutation_test._runtime_cache_identity", lambda *args: identity)
+    restore_calls = []
+    save_calls = []
+    monkeypatch.setattr(
+        "fettle.mutation_test.restore_mutation_native_cache",
+        lambda root, value: restore_calls.append((root, value)) or True,
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.save_mutation_native_cache",
+        lambda root, value: save_calls.append((root, value)) or True,
+    )
+    monkeypatch.setattr("fettle.mutation_test._run_mutmut", lambda *args, **kwargs: engine)
+
+    result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
+
+    assert result["status"] == "completed"
+    assert result["cache_reused"] is True
+    assert restore_calls == [(str(tmp_path), identity)]
+    assert save_calls == [(str(tmp_path), identity)]
+
+
+def test_unknown_cache_identity_executes_without_restore_or_save(monkeypatch, tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("value = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    engine = {
+        "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
+        "tests_run": ["tests/test_app.py"], "line_ranges": [], "run_exit_code": 0,
+        "results_exit_code": 0, "killed": 1, "survived": 0, "timeout": 0,
+        "suspicious": 0, "untested": 0, "skipped": 0, "non_killed": [],
+        "survivor_preview": [], "survivors": [], "stderr": "", "duration_ms": 1,
+    }
+    monkeypatch.setattr("fettle.mutation_test._has_mutmut", lambda: True)
+    monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "base", "files": ["src/app.py"], "deleted": [],
+    })
+    monkeypatch.setattr("fettle.mutation_test._runtime_cache_identity", lambda *args: None)
+    monkeypatch.setattr(
+        "fettle.mutation_test.restore_mutation_native_cache", lambda *args: pytest.fail("restored"),
+    )
+    monkeypatch.setattr("fettle.mutation_test.save_mutation_native_cache", lambda *args: pytest.fail("saved"))
+    monkeypatch.setattr("fettle.mutation_test._run_mutmut", lambda *args, **kwargs: engine)
+
+    result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
+
+    assert result["status"] == "completed"
+    assert result["cache_reused"] is False
 
 
 def test_human_report_uses_bounded_survivor_preview():

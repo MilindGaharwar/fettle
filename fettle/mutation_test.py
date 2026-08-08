@@ -5,18 +5,22 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 import unicodedata
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -33,6 +37,12 @@ _STABILITY_RUNTIME_MS = 35 * 60 * 1000
 _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
 _MAX_SHOW_BYTES = 50 * 1024 * 1024
 _PARTITION_SCHEMA_VERSION = "1"
+_MUTATION_CACHE_SCHEMA_VERSION = "1"
+_MUTATION_WATCH_NAMES = (
+    ".fettle.toml", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini",
+    "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "requirements-dev.txt",
+)
+_MUTATION_CACHE_DIR = Path(".fettle/mutation-cache")
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -317,6 +327,235 @@ def _fingerprint_digest(identity: str) -> str:
 def _canonical_digest(value: object) -> str:
     content = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(content.encode()).hexdigest()
+
+
+def build_mutation_cache_identity(
+    root: str,
+    files: list[str],
+    mapping: dict[str, list[str]],
+    config: dict,
+    *,
+    dependencies: list[dict],
+    environment: dict[str, str],
+    engine_version: str = MUTMUT_VERSION,
+) -> dict:
+    """Build an exact content identity; incomplete inputs are never cacheable."""
+    root_path = Path(root)
+    if set(environment) != {"python", "platform"} or any(
+        not isinstance(value, str) or not value for value in environment.values()
+    ):
+        raise ValueError("mutation cache environment identity is incomplete")
+    normalized_dependencies = []
+    for dependency in dependencies:
+        if not isinstance(dependency, dict):
+            raise ValueError("mutation cache dependency identity is incomplete")
+        digest_fields = ("record_digest", "direct_url_digest", "editable_source_digest")
+        present_digests = {key: dependency[key] for key in digest_fields if key in dependency}
+        if (
+            not isinstance(dependency.get("name"), str) or not dependency["name"]
+            or not isinstance(dependency.get("version"), str) or not dependency["version"]
+            or not present_digests
+            or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                   for value in present_digests.values())
+            or not ({"record_digest", "editable_source_digest"} & present_digests.keys())
+            or {"record_digest", "editable_source_digest"} <= present_digests.keys()
+        ):
+            raise ValueError("mutation cache dependency identity is incomplete")
+        normalized_dependencies.append(dependency)
+
+    watched = set(files)
+    watched.update(test for tests in mapping.values() for test in tests)
+    watched.update(name for name in _MUTATION_WATCH_NAMES if (root_path / name).is_file())
+    tests_path = root_path / "tests"
+    if tests_path.is_dir():
+        watched.update(path.relative_to(root_path).as_posix() for path in tests_path.rglob("conftest.py"))
+        fixtures_path = tests_path / "fixtures"
+        if fixtures_path.is_dir():
+            watched.update(path.relative_to(root_path).as_posix() for path in fixtures_path.rglob("*") if path.is_file())
+
+    file_digests = {}
+    for relative in sorted(watched):
+        try:
+            canonical = _canonical_path(relative)
+            path = root_path / canonical
+            if not path.is_file() or not path.resolve().is_relative_to(root_path.resolve()):
+                raise OSError("not a repository file")
+            file_digests[canonical] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError(f"mutation cache watched file is unreadable: {relative}") from exc
+
+    payload = {
+        "engine": {"name": "mutmut", "version": engine_version},
+        "environment": environment,
+        "files": file_digests,
+        "mapping": mapping,
+        "config": config,
+        "dependencies": sorted(normalized_dependencies, key=lambda item: (item["name"].casefold(), item["version"])),
+    }
+    return {
+        "schema_version": _MUTATION_CACHE_SCHEMA_VERSION,
+        "digest": _canonical_digest(payload),
+        "inputs": payload,
+    }
+
+
+def _source_tree_digest(root: Path) -> str:
+    if not root.is_dir():
+        raise ValueError(f"mutation cache editable source is unreadable: {root}")
+    ignored = {
+        ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
+        "__pycache__", ".mutmut-cache",
+    }
+    files = sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and not any(part in ignored for part in path.relative_to(root).parts)
+    )
+    try:
+        return _canonical_digest([
+            [path.relative_to(root).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest()]
+            for path in files
+        ])
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"mutation cache editable source is unreadable: {root}") from exc
+
+
+def collect_mutation_dependency_identities(
+    distributions: list[importlib.metadata.Distribution],
+) -> list[dict]:
+    """Collect installed wheel or editable source identities without guessing."""
+    identities = []
+    for distribution in distributions:
+        name, version = distribution.metadata.get("Name"), distribution.version
+        if not name or not version:
+            raise ValueError("mutation cache dependency metadata is incomplete")
+        direct_url_text = distribution.read_text("direct_url.json")
+        identity = {"name": name, "version": version}
+        if direct_url_text is not None:
+            try:
+                direct_url = json.loads(direct_url_text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"mutation cache direct URL metadata is invalid for {name}") from exc
+            identity["direct_url_digest"] = hashlib.sha256(direct_url_text.encode()).hexdigest()
+        else:
+            direct_url = None
+        if isinstance(direct_url, dict) and direct_url.get("dir_info", {}).get("editable") is True:
+            parsed = urlparse(str(direct_url.get("url", "")))
+            if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+                raise ValueError(f"mutation cache editable source is unreadable for {name}")
+            identity["editable_source_digest"] = _source_tree_digest(Path(unquote(parsed.path)))
+        else:
+            record = distribution.read_text("RECORD")
+            if record is None:
+                raise ValueError(f"mutation cache dependency {name} has no RECORD")
+            identity["record_digest"] = hashlib.sha256(record.encode()).hexdigest()
+        identities.append(identity)
+    return sorted(identities, key=lambda item: (item["name"].casefold(), item["version"]))
+
+
+def mutation_cache_reusable(cache_entry: dict, current_identity: dict) -> bool:
+    """Allow reuse only when both identity envelopes are valid and exactly equal."""
+    if not isinstance(cache_entry, dict) or not isinstance(current_identity, dict):
+        return False
+    cached = cache_entry.get("identity")
+    for identity in (cached, current_identity):
+        if (
+            not isinstance(identity, dict)
+            or set(identity) != {"schema_version", "digest", "inputs"}
+            or identity["schema_version"] != _MUTATION_CACHE_SCHEMA_VERSION
+            or not isinstance(identity["inputs"], dict)
+            or identity["digest"] != _canonical_digest(identity["inputs"])
+        ):
+            return False
+    return cached == current_identity
+
+
+def _read_regular_file(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("cache entry is not a regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            return handle.read()
+    finally:
+        os.close(descriptor)
+
+
+def restore_mutation_native_cache(root: str, current_identity: dict) -> bool:
+    """Restore mutmut's native cache only from an exact, regular-file entry."""
+    root_path = Path(root)
+    cache_dir = root_path / _MUTATION_CACHE_DIR
+    identity_path = cache_dir / "identity.json"
+    native_path = cache_dir / "mutmut-cache.sqlite"
+    try:
+        entry = json.loads(_read_regular_file(identity_path).decode("utf-8"))
+        if not mutation_cache_reusable(entry, current_identity):
+            return False
+        data = _read_regular_file(native_path)
+        if entry.get("native_digest") != hashlib.sha256(data).hexdigest():
+            return False
+        fd, temporary = tempfile.mkstemp(dir=str(root_path), prefix=".mutmut-cache.")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, root_path / ".mutmut-cache")
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
+def save_mutation_native_cache(root: str, identity: dict) -> bool:
+    """Atomically retain native mutmut state after successful execution."""
+    if not mutation_cache_reusable({"identity": identity}, identity):
+        return False
+    root_path = Path(root)
+    native_path = root_path / ".mutmut-cache"
+    cache_dir = root_path / _MUTATION_CACHE_DIR
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        data = _read_regular_file(native_path)
+        metadata = {
+            "identity": identity,
+            "native_digest": hashlib.sha256(data).hexdigest(),
+        }
+        for target, content in (
+            (cache_dir / "mutmut-cache.sqlite", data),
+            (cache_dir / "identity.json", (json.dumps(metadata, sort_keys=True) + "\n").encode()),
+        ):
+            fd, temporary = tempfile.mkstemp(dir=str(cache_dir), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, target)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+    except OSError:
+        return False
+    return True
+
+
+def _runtime_cache_identity(
+    root: str,
+    files: list[str],
+    mapping: dict[str, list[str]],
+    cfg: dict,
+) -> dict | None:
+    try:
+        dependencies = collect_mutation_dependency_identities(list(importlib.metadata.distributions()))
+        return build_mutation_cache_identity(
+            root, files, mapping, cfg, dependencies=dependencies,
+            environment={"python": platform.python_version(), "platform": platform.platform()},
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def _revision(root: str) -> str:
@@ -1059,12 +1298,19 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
             for file in files
         ]),
     }
+    cache_identity = None if all_files or line_ranges else _runtime_cache_identity(root, files, mapping, cfg)
+    cache_reused = bool(
+        cache_identity is not None and restore_mutation_native_cache(root, cache_identity)
+    )
     result = (
         _run_shard_modules(root, mapping, line_ranges, timeout)
         if line_ranges else _run_mutmut(root, files, tests, timeout, test_mapping=mapping)
     )
     if result["status"] != "completed":
         return {**result, **common}
+    if cache_identity is not None:
+        save_mutation_native_cache(root, cache_identity)
+    result["cache_reused"] = cache_reused
     policy = evaluate_policy(result, cfg)
     if policy["score"] is None:
         if line_ranges:

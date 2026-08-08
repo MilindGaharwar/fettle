@@ -326,6 +326,8 @@ def compare_report(
     overrides: list[OverrideRecord] | tuple[OverrideRecord, ...] = (),
     classifications: list[dict] | None = None,
     now: datetime | None = None,
+    max_findings_per_line: int = 1,
+    max_findings_per_file: int = 7,
 ) -> dict:
     try:
         _validate_report_schema(report)
@@ -356,10 +358,25 @@ def compare_report(
         if disposition == "new" and select_override(overrides, context, now=evaluation_time).status == "overridden":
             disposition = "waived"
         compared.append({**record, "disposition": disposition})
+    preview: list[dict] = []
+    line_counts: dict[tuple[str, int], int] = {}
+    file_counts: dict[str, int] = {}
+    for record in sorted(compared, key=lambda item: (item["file"], item["line"], item["fingerprint"])):
+        line_key = (record["file"], record["line"])
+        if (
+            record["disposition"] != "new"
+            or line_counts.get(line_key, 0) >= max_findings_per_line
+            or file_counts.get(record["file"], 0) >= max_findings_per_file
+        ):
+            continue
+        preview.append(record)
+        line_counts[line_key] = line_counts.get(line_key, 0) + 1
+        file_counts[record["file"]] = file_counts.get(record["file"], 0) + 1
     raw_counts = {state: report[state] for state in _STATES}
     return {
         "status": "completed",
         "records": compared,
+        "finding_preview": preview,
         "resolved": sorted(baseline_survivors - current_survivors),
         "raw_counts": raw_counts,
         "score": report.get("score"),

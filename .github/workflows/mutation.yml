@@ -28,10 +28,23 @@ jobs:
         run: >-
           python -m pip install --quiet -e ".[all]"
           pytest==9.1.1 pytest-testmon==2.2.0 mutmut==2.5.1 whatthepatch==1.0.7
+      - name: Restore non-authoritative mutation cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .fettle/mutation-cache
+          key: mutation-native-${{ runner.os }}-py312-${{ github.sha }}
+          restore-keys: |
+            mutation-native-${{ runner.os }}-py312-
       - name: Changed-scope mutation evidence
         run: >-
           fettle mutation run --changed --base origin/${{ github.base_ref }}
           --json --output mutation-report.json
+      - name: Save non-authoritative mutation cache
+        if: always() && hashFiles('.fettle/mutation-cache/identity.json') != ''
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .fettle/mutation-cache
+          key: mutation-native-${{ runner.os }}-py312-${{ github.sha }}
       - name: Mutation summary
         if: always() && hashFiles('mutation-report.json') != ''
         run: >-

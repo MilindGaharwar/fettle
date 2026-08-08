@@ -158,6 +158,29 @@ def test_compare_labels_new_existing_resolved_and_waived_without_changing_counts
     assert result["raw_counts"]["survived"] == 1
 
 
+def test_compare_bounds_actionable_preview_without_truncating_records():
+    baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
+    records = [
+        {**_record(f"{index:064x}", str(index), file="src/a.py"), "line": 2 if index < 3 else index}
+        for index in range(1, 11)
+    ] + [
+        {**_record(f"{index:064x}", str(index), file="src/b.py"), "line": index}
+        for index in range(11, 14)
+    ]
+    current = _report(
+        selection="changed", files_tested=["src/a.py", "src/b.py"],
+        survived=len(records), killed=0, score=0.0, non_killed=records,
+    )
+
+    result = compare_report(current, baseline, max_findings_per_line=1, max_findings_per_file=7)
+
+    assert len(result["records"]) == 13
+    assert len(result["finding_preview"]) == 10
+    assert sum(item["file"] == "src/a.py" for item in result["finding_preview"]) == 7
+    assert sum(item["line"] == 2 for item in result["finding_preview"]) == 1
+    assert result["passed"] is False
+
+
 def test_compare_rejects_partial_unknown_identity_without_a_pass():
     baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
     unknown = _record("f" * 64, "2")

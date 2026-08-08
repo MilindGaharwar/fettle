@@ -401,14 +401,14 @@ are named before implementation files to preserve the repository's TDD policy.
 - [ ] Add minimum-scope tests below, at, and above
   `minimum_scored_mutants`; tiny scopes still enforce new actionable survivors
   while suppressing only the volatile changed-scope score decision.
-- [ ] Add cache reuse tests covering source, covering-test, mapping, dependency,
+- [x] Add cache reuse tests covering source, covering-test, mapping, dependency,
   fixture/configuration, engine, Python, and platform invalidation; unknown
   dependencies force execution rather than reuse.
-- [ ] Exercise installed wheel and editable dependencies separately: changed
+- [x] Exercise installed wheel and editable dependencies separately: changed
   version, `RECORD`, direct URL, or editable source digest invalidates reuse;
   missing or unreadable identity fails closed instead of trusting lockfile-only
   equivalence.
-- [ ] Limit PR findings to one actionable mutant per line and seven per file by
+- [x] Limit PR findings to one actionable mutant per line and seven per file by
   default while retaining complete machine-readable evidence.
 - [x] Keep full runs scheduled/manual; verify full mutation is not added to the
   normal blocking CI critical path and periodically bypasses incremental reuse.

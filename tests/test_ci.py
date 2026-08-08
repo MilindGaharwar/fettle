@@ -241,6 +241,18 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "if: always()" in workflow
 
 
+def test_changed_mutation_workflow_transports_non_authoritative_native_cache():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "actions/cache/restore@" in workflow
+    assert "actions/cache/save@" in workflow
+    assert "path: .fettle/mutation-cache" in workflow
+    assert "restore-keys:" in workflow
+    assert "fettle mutation run --changed" in workflow
+    assert workflow.index("actions/cache/restore@") < workflow.index("fettle mutation run --changed")
+    assert workflow.index("fettle mutation run --changed") < workflow.index("actions/cache/save@")
+
+
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
     from fettle.mutation_test import load_partition_manifest, write_partition_manifests
 
