@@ -352,6 +352,37 @@ def test_mutation_run_writes_atomic_output(monkeypatch, capsys, tmp_path):
     assert list(output.parent.glob("*.tmp")) == []
 
 
+def test_mutation_run_replaces_timeout_placeholder_with_normalized_error(monkeypatch, capsys, tmp_path):
+    output = tmp_path / "mutation.json"
+    output.write_text('{"status":"tool_error","partial":true}')
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    from fettle.cli import main
+    config = {
+        "enabled": True, "mode": "advisory", "paths": ["src/"], "exclude": [],
+        "base": "origin/main", "timeout_s": 60, "full_timeout_s": 120,
+        "score_target": 80.0, "test_mappings": {}, "chunk_lines": {},
+    }
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": config}),
+        patch("fettle.mutation_test.run_mutation_test", return_value={
+            "schema_version": "2", "status": "completed", "passed": True,
+        }),
+        patch("fettle.mutation_baseline.load_baseline", side_effect=ValueError("invalid baseline")),
+        patch("sys.argv", [
+            "fettle", "mutation", "run", "--changed", "--json", "--output", str(output),
+        ]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert json.loads(output.read_text()) == {
+        "status": "unknown", "passed": False, "message": "invalid baseline",
+    }
+
+
 def test_mutation_advisory_reports_new_survivor_without_blocking(monkeypatch, capsys, tmp_path):
     baseline = {"schema_version": "1"}
     report = {"schema_version": "2", "status": "completed", "passed": True, "score": 90.0}

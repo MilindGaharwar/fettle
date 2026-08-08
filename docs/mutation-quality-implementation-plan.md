@@ -394,11 +394,11 @@ are named before implementation files to preserve the repository's TDD policy.
 - [x] Make aggregate evidence integrity blocking even while score policy is
   advisory. Do not use `continue-on-error` on the validator that decides
   whether evidence is usable.
-- [ ] Publish a concise GitHub job summary with status, delta, counts, new
+- [x] Publish a concise GitHub job summary with status, delta, counts, new
   survivors, and artifact link; verify it never calls `tool_error` successful.
-- [ ] Add changed-scope comparison against the committed baseline; preserve a
+- [x] Add changed-scope comparison against the committed baseline; preserve a
   maximum 12-minute PR lane and upload partial fail-closed evidence on timeout.
-- [ ] Add minimum-scope tests below, at, and above
+- [x] Add minimum-scope tests below, at, and above
   `minimum_scored_mutants`; tiny scopes still enforce new actionable survivors
   while suppressing only the volatile changed-scope score decision.
 - [x] Add cache reuse tests covering source, covering-test, mapping, dependency,

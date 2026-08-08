@@ -156,6 +156,8 @@ def test_compare_labels_new_existing_resolved_and_waived_without_changing_counts
     assert [item["disposition"] for item in result["records"]] == ["waived"]
     assert result["resolved"] == ["a" * 64]
     assert result["raw_counts"]["survived"] == 1
+    assert result["baseline_score"] == 90.0
+    assert result["score_delta"] == 0.0
 
 
 def test_compare_bounds_actionable_preview_without_truncating_records():
@@ -192,6 +194,20 @@ def test_compare_rejects_partial_unknown_identity_without_a_pass():
     )
 
     assert result["status"] == "unknown"
+    assert result["passed"] is False
+
+
+def test_tiny_scope_new_actionable_survivor_still_fails_comparison():
+    baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
+    new = _record("f" * 64, "2")
+    current = _report(
+        selection="changed", killed=1, survived=1, score=50.0, non_killed=[new],
+        score_eligible=False,
+    )
+
+    result = compare_report(current, baseline)
+
+    assert result["records"][0]["disposition"] == "new"
     assert result["passed"] is False
 
 

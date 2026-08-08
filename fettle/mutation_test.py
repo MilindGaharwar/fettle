@@ -329,6 +329,52 @@ def _canonical_digest(value: object) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _write_json_atomic(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def write_timeout_evidence(path: Path, timeout_s: int) -> None:
+    _write_json_atomic(path, _error(
+        "tool_error", f"Mutation execution exceeded its {timeout_s}s deadline", partial=True,
+    ))
+
+
+def format_github_summary(report: dict, artifact_name: str, artifact_url: str) -> str:
+    comparison = report.get("comparison") if isinstance(report.get("comparison"), dict) else {}
+    records = comparison.get("records", [])
+    new_survivors = sum(
+        record.get("disposition") == "new"
+        for record in records if isinstance(records, list) and isinstance(record, dict)
+    )
+    delta = comparison.get("score_delta")
+    delta_text = "n/a" if delta is None else f"{delta:+.1f}"
+    lines = [
+        "## Mutation evidence", "",
+        f"Status: **{report.get('status', 'unknown')}**  ",
+        f"Evidence: **{'usable' if report.get('status') == 'completed' else 'unusable'}**  ",
+        f"Score: **{report.get('score', 'n/a')}**  ",
+        f"Delta: **{delta_text}**  ",
+        f"Killed: **{report.get('killed', 0)}**  ",
+        f"Survived: **{report.get('survived', 0)}**  ",
+        f"New survivors: **{new_survivors}**  ",
+        f"Artifact: [{artifact_name}]({artifact_url})",
+    ]
+    if report.get("message"):
+        lines.extend(["", f"Message: {report['message']}"])
+    return "\n".join(lines) + "\n"
+
+
 def build_mutation_cache_identity(
     root: str,
     files: list[str],
@@ -1355,11 +1401,31 @@ def main() -> int:
     parser.add_argument("--manifest", help="Digest-bound full-run partition manifest")
     parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
+    parser.add_argument("--initialize-timeout-report", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--github-summary", metavar="REPORT", help=argparse.SUPPRESS)
+    parser.add_argument("--artifact-name", help=argparse.SUPPRESS)
+    parser.add_argument("--artifact-url", help=argparse.SUPPRESS)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     from fettle.config import load_config
 
     mutation = load_config(args.root)["mutation"]
+    if args.initialize_timeout_report:
+        write_timeout_evidence(Path(args.initialize_timeout_report), args.timeout or 720)
+        return 0
+    if args.github_summary:
+        try:
+            report = json.loads(Path(args.github_summary).read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("mutation summary report must be a JSON object")
+            summary = format_github_summary(
+                report, args.artifact_name or "mutation-evidence", args.artifact_url or "#",
+            )
+            Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary, encoding="utf-8")
+        except (KeyError, OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Cannot write mutation summary: {exc}", file=sys.stderr)
+            return 2
+        return 0
     if args.prepare_manifests:
         try:
             paths = write_partition_manifests(args.root, mutation, Path(args.prepare_manifests))

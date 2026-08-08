@@ -380,5 +380,7 @@ def compare_report(
         "resolved": sorted(baseline_survivors - current_survivors),
         "raw_counts": raw_counts,
         "score": report.get("score"),
+        "baseline_score": baseline["score"],
+        "score_delta": round(report["score"] - baseline["score"], 1) if report.get("score") is not None else None,
         "passed": not any(record["disposition"] == "new" for record in compared),
     }

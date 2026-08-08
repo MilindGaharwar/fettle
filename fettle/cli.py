@@ -455,10 +455,10 @@ def cmd_mutation(args: argparse.Namespace) -> None:
                     "comparison": comparison,
                     "passed": result.get("passed", False) and (comparison["passed"] or not enforce_survivors),
                 }
-        if getattr(args, "output", None):
-            _write_json_atomic(Path(args.output), result)
     except ValueError as exc:
         result = {"status": "unknown", "passed": False, "message": str(exc)}
+    if getattr(args, "output", None):
+        _write_json_atomic(Path(args.output), result)
 
     print(json.dumps(result, indent=2) if args.json else _render_mutation(result), end="\n" if args.json else "")
     sys.exit(_mutation_exit(result))

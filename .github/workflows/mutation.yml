@@ -35,7 +35,12 @@ jobs:
           key: mutation-native-${{ runner.os }}-py312-${{ github.sha }}
           restore-keys: |
             mutation-native-${{ runner.os }}-py312-
+      - name: Initialize fail-closed timeout evidence
+        run: >-
+          python -m fettle.mutation_test
+          --initialize-timeout-report mutation-report.json --timeout 600
       - name: Changed-scope mutation evidence
+        timeout-minutes: 10
         run: >-
           fettle mutation run --changed --base origin/${{ github.base_ref }}
           --json --output mutation-report.json
@@ -48,9 +53,9 @@ jobs:
       - name: Mutation summary
         if: always() && hashFiles('mutation-report.json') != ''
         run: >-
-          python -c "import json,os,pathlib; r=json.load(open('mutation-report.json'));
-          pathlib.Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Mutation evidence\n\nStatus: **%s**  \nScore: **%s**  \nKilled: **%s**  \nSurvived: **%s**\n'
-          % (r.get('status'), r.get('score'), r.get('killed', 0), r.get('survived', 0)))"
+          python -m fettle.mutation_test --github-summary mutation-report.json
+          --artifact-name mutation-evidence-${{ github.run_id }}
+          --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
       - name: Retain mutation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -35,6 +35,8 @@ from fettle.mutation_test import (
     evaluate_policy,
     compute_score,
     format_report,
+    format_github_summary,
+    write_timeout_evidence,
     main,
     run_mutation_test,
 )
@@ -110,6 +112,24 @@ def test_policy_suppresses_only_tiny_scope_score_decision():
     assert result["score_eligible"] is False
     assert result["passed"] is True
     assert "minimum" in result["reasons"][0]
+
+
+@pytest.mark.parametrize("decided,score_eligible,passed", [(3, True, False), (4, True, False)])
+def test_policy_applies_score_at_and_above_minimum_scope(decided, score_eligible, passed):
+    result = evaluate_policy(
+        {
+            "killed": 1, "survived": decided - 1, "timeout": 0,
+            "suspicious": 0, "untested": 0,
+        },
+        {
+            "mode": "enforce", "score_target": 80, "minimum_scored_mutants": 3,
+            "max_untested": 0, "max_mutant_timeouts": 0, "max_suspicious_mutants": 0,
+        },
+    )
+
+    assert result["score_eligible"] is score_eligible
+    assert result["passed"] is passed
+    assert "below target" in result["reasons"][0]
 
 
 @pytest.mark.parametrize("bad", ["12,45", "mutant-12", "12\n45", "12  45 extra"])
@@ -644,6 +664,56 @@ def test_human_report_uses_bounded_survivor_preview():
 
     assert "src/a.py:3 a == b -> a != b" in output
     assert "fingerprint-99" not in output
+
+
+def test_github_summary_includes_delta_new_survivors_and_artifact_link():
+    report = {
+        **_stable_report(),
+        "comparison": {
+            "baseline_score": 85.0,
+            "score_delta": 3.9,
+            "finding_preview": [{"file": "src/a.py", "line": 3}],
+            "records": [
+                {"disposition": "new"}, {"disposition": "existing"},
+            ],
+        },
+    }
+
+    summary = format_github_summary(
+        report, "mutation-evidence-42", "https://github.test/acme/repo/actions/runs/42#artifacts",
+    )
+
+    assert "Status: **completed**" in summary
+    assert "Delta: **+3.9**" in summary
+    assert "New survivors: **1**" in summary
+    assert "[mutation-evidence-42]" in summary
+
+
+def test_github_summary_never_calls_tool_error_successful():
+    summary = format_github_summary(
+        {"status": "tool_error", "passed": True, "message": "worker timed out"},
+        "evidence", "https://example.invalid/#artifacts",
+    )
+
+    assert "Evidence: **unusable**" in summary
+    assert "successful" not in summary.lower()
+    assert "worker timed out" in summary
+
+
+def test_timeout_evidence_is_atomic_fail_closed_json(tmp_path):
+    path = tmp_path / "mutation-report.json"
+
+    write_timeout_evidence(path, 720)
+    report = json.loads(path.read_text())
+
+    assert report == {
+        "status": "tool_error",
+        "message": "Mutation execution exceeded its 720s deadline",
+        "score": None,
+        "passed": False,
+        "partial": True,
+    }
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_changed_selection_uses_merge_base_and_handles_renames_and_deletes(tmp_path):

@@ -253,6 +253,18 @@ def test_changed_mutation_workflow_transports_non_authoritative_native_cache():
     assert workflow.index("fettle mutation run --changed") < workflow.index("actions/cache/save@")
 
 
+def test_changed_mutation_workflow_preseeds_timeout_evidence_and_truthful_summary():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "--initialize-timeout-report mutation-report.json" in workflow
+    assert "--initialize-timeout-report mutation-report.json --timeout 600" in workflow
+    assert "name: Changed-scope mutation evidence\n        timeout-minutes: 10" in workflow
+    assert workflow.index("--initialize-timeout-report") < workflow.index("fettle mutation run --changed")
+    assert "--github-summary mutation-report.json" in workflow
+    assert "mutation-evidence-${{ github.run_id }}" in workflow
+    assert "if-no-files-found: error" in workflow
+
+
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
     from fettle.mutation_test import load_partition_manifest, write_partition_manifests
 
