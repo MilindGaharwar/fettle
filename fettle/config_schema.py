@@ -38,7 +38,18 @@ SCHEMA_VERSION = 1
 #: Dict paths whose keys are user-defined by design.
 OPEN_DICT_PATHS = frozenset({
     "gates.tdd.path_mappings",
+    "mutation.test_mappings",
+    "mutation.chunk_lines",
 })
+
+OPTIONAL_TYPES: dict[str, type] = {
+    "mutation.max_mutant_timeouts": int,
+    "mutation.max_suspicious_mutants": int,
+}
+
+VALUE_ENUMS: dict[str, frozenset[str]] = {
+    "mutation.engine": frozenset({"mutmut"}),
+}
 
 _MODE_VALUES = {"advisory", "soft", "enforce", "silent", "strict",
                 "none", "marker", "manifest", "commit", "off"}
@@ -69,6 +80,7 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.provenance.mode": frozenset({"none", "marker", "manifest", "commit"}),
     "gates.worklog.mode": frozenset({"advisory", "enforce"}),
     "gates.worklog.scope": frozenset({"daily", "session"}),
+    "mutation.mode": frozenset({"advisory", "enforce"}),
 }
 
 #: WP4 — numeric bounds: (min, max), None = unbounded on that side.
@@ -101,6 +113,18 @@ RANGES: dict[str, tuple[float | None, float | None]] = {
     "gates.verify.timeout_s": (1, 3600),
     "gates.ci.timeout_s": (1, 7200),
     "gates.ci.poll_s": (1, 300),
+    "mutation.timeout_s": (1, None),
+    "mutation.full_timeout_s": (1, None),
+    "mutation.score_target": (0, 100),
+    "mutation.minimum_scored_mutants": (0, None),
+    "mutation.max_new_actionable_survivors": (0, None),
+    "mutation.max_untested": (0, None),
+    "mutation.max_mutant_timeouts": (0, None),
+    "mutation.max_suspicious_mutants": (0, None),
+    "mutation.max_findings_per_line": (1, None),
+    "mutation.max_findings_per_file": (1, None),
+    "mutation.default_chunk_lines": (1, None),
+    "mutation.full_shards": (1, None),
 }
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -167,6 +191,37 @@ def _dep_complexity_enforce_bool(cfg: dict[str, Any]) -> str | None:
     return None
 
 
+def _dep_mutation_enforcement(cfg: dict[str, Any]) -> str | None:
+    mutation = cfg["mutation"]
+    if mutation["mode"] != "enforce":
+        return None
+    if not mutation["enabled"]:
+        return "'mutation.mode' = 'enforce' requires 'mutation.enabled' = true"
+    missing = [
+        key for key in ("max_mutant_timeouts", "max_suspicious_mutants")
+        if mutation[key] is None
+    ]
+    if missing:
+        return ("'mutation.mode' = 'enforce' requires explicit calibrated budgets: "
+                + ", ".join(f"'mutation.{key}'" for key in missing))
+    return None
+
+
+def _dep_mutation_mappings(cfg: dict[str, Any]) -> str | None:
+    mutation = cfg["mutation"]
+    if mutation["engine"] != "mutmut":
+        return "'mutation.engine' supports only 'mutmut'"
+    for path, tests in mutation["test_mappings"].items():
+        if not isinstance(path, str) or not isinstance(tests, list) or not tests or not all(
+            isinstance(test, str) and test for test in tests
+        ):
+            return "'mutation.test_mappings' values must be non-empty arrays of paths"
+    for path, lines in mutation["chunk_lines"].items():
+        if not isinstance(path, str) or not isinstance(lines, int) or isinstance(lines, bool) or lines < 1:
+            return "'mutation.chunk_lines' values must be positive integers"
+    return None
+
+
 #: WP4 — cross-field rules: (trigger_path, check(merged_cfg) -> msg|None, severity).
 #: severity "error" = config would misbehave; "warning" = feature is inert or
 #: an unusual-but-coherent policy.
@@ -178,6 +233,8 @@ DEPENDENCIES: tuple[tuple[str, Any, str], ...] = (
     ("gates.tdd.enabled", _dep_tdd_roots, "warning"),
     ("gates.docs.mode", _dep_docs_soft_alias, "warning"),
     ("gates.complexity.enforce", _dep_complexity_enforce_bool, "warning"),
+    ("mutation.mode", _dep_mutation_enforcement, "error"),
+    ("mutation.test_mappings", _dep_mutation_mappings, "error"),
 )
 
 
@@ -242,6 +299,17 @@ def _walk(user: dict[str, Any], defaults: dict[str, Any], path: str,
             )
             continue
         default = defaults[key]
+        if default is None and key_path in OPTIONAL_TYPES:
+            expected = OPTIONAL_TYPES[key_path]
+            if value is not None and (not isinstance(value, expected) or isinstance(value, bool)):
+                errors.append(
+                    f"'{key_path}' must be {_type_name(expected())} or null "
+                    f"(got {_type_name(value)}: {value!r})"
+                )
+                continue
+            if value is not None:
+                _validate_range(key_path, value, errors)
+            continue
         if isinstance(default, dict):
             if not isinstance(value, dict):
                 errors.append(
@@ -267,18 +335,32 @@ def _walk(user: dict[str, Any], defaults: dict[str, Any], path: str,
                     f"as another mode"
                 )
             continue
+        if key_path in VALUE_ENUMS and isinstance(value, str):
+            allowed = VALUE_ENUMS[key_path]
+            if value not in allowed:
+                errors.append(
+                    f"'{key_path}' value {value!r} is unsupported "
+                    f"({', '.join(sorted(allowed))})"
+                )
+            continue
         if key == "mode" and isinstance(value, str) and value not in _MODE_VALUES:
             warnings.append(
                 f"'{key_path}' value {value!r} is not a known mode "
                 f"({', '.join(sorted(_MODE_VALUES))})"
             )
             continue
-        if key_path in RANGES and isinstance(value, (int, float)) and not isinstance(value, bool):
-            lo, hi = RANGES[key_path]
-            if (lo is not None and value < lo) or (hi is not None and value > hi):
-                bound = (f">= {lo}" if hi is None else f"<= {hi}" if lo is None
-                         else f"between {lo} and {hi}")
-                errors.append(f"'{key_path}' must be {bound} (got {value!r})")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            _validate_range(key_path, value, errors)
+
+
+def _validate_range(path: str, value: int | float, errors: list[str]) -> None:
+    if path not in RANGES:
+        return
+    lo, hi = RANGES[path]
+    if (lo is not None and value < lo) or (hi is not None and value > hi):
+        bound = (f">= {lo}" if hi is None else f"<= {hi}" if lo is None
+                 else f"between {lo} and {hi}")
+        errors.append(f"'{path}' must be {bound} (got {value!r})")
 
 
 def generate_json_schema(defaults: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -298,6 +380,14 @@ def generate_json_schema(defaults: dict[str, Any] | None = None) -> dict[str, An
 
 
 def _node_schema(value: Any, path: str) -> dict[str, Any]:
+    if value is None and path in OPTIONAL_TYPES:
+        expected = OPTIONAL_TYPES[path]
+        schema: dict[str, Any] = {
+            "type": ["integer" if expected is int else _type_name(expected()), "null"],
+            "default": None,
+        }
+        _apply_range(schema, path)
+        return schema
     if isinstance(value, dict):
         if path in OPEN_DICT_PATHS:
             return {"type": "object", "additionalProperties": True}
@@ -323,6 +413,8 @@ def _node_schema(value: Any, path: str) -> dict[str, Any]:
         schema: dict[str, Any] = {"type": "string", "default": value}
         if path in MODE_ENUMS:
             schema["enum"] = sorted(MODE_ENUMS[path])
+        elif path in VALUE_ENUMS:
+            schema["enum"] = sorted(VALUE_ENUMS[path])
         elif path.endswith(".mode"):
             schema["enum"] = sorted(_MODE_VALUES)
         return schema

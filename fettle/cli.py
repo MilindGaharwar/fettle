@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
@@ -314,6 +315,151 @@ def cmd_baseline(args: argparse.Namespace) -> None:
         }
         baseline_path.write_text(json.dumps(baseline, indent=2))
         print(f"✓ Baseline updated: {len(findings)} finding(s)")
+
+
+def _mutation_exit(report: dict) -> int:
+    if report.get("status") in {"tool_error", "unknown", "not_configured", "stale"}:
+        return 2
+    return 0 if report.get("passed", False) or report.get("status") == "not_applicable" else 1
+
+
+def _read_mutation_report(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read mutation report {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"mutation report {path} must be a JSON object")
+    return value
+
+
+def _write_json_atomic(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _render_mutation(report: dict) -> str:
+    status = report.get("status", "unknown")
+    lines = [f"Mutation status: {status}"]
+    if report.get("message"):
+        lines.append(str(report["message"]))
+    if report.get("score") is not None:
+        lines.append(f"Score: {report['score']}%")
+    records = report.get("records", report.get("survivor_preview", []))
+    for record in records[:20] if isinstance(records, list) else []:
+        lines.append(
+            f"{record.get('file', '?')}:{record.get('line', '?')} "
+            f"{record.get('before', '?')} -> {record.get('after', '?')} "
+            f"[{record.get('disposition', record.get('state', 'unknown'))}]"
+        )
+        if record.get("rerun_command"):
+            lines.append(f"  Rerun: {record['rerun_command']}")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_mutation(args: argparse.Namespace) -> None:
+    """Run, inspect, and establish strict mutation evidence."""
+    from fettle.config import load_config
+    from fettle.mutation_baseline import (
+        baseline_digest,
+        compare_report,
+        establish_baseline,
+        load_baseline,
+        load_classifications,
+        save_baseline,
+    )
+    from fettle.paths import find_repo_root
+
+    root = find_repo_root()
+    if root is None:
+        result = {"status": "not_configured", "passed": False, "message": "not inside a Fettle repository"}
+        print(json.dumps(result, indent=2) if args.json else _render_mutation(result), end="\n" if args.json else "")
+        sys.exit(2)
+    root = Path(root)
+    action = args.mutation_action
+    try:
+        if action == "show":
+            report = _read_mutation_report(Path(args.report))
+            record = next(
+                (item for item in report.get("non_killed", []) if item.get("fingerprint") == args.fingerprint),
+                None,
+            )
+            if record is None:
+                raise ValueError(f"mutation fingerprint {args.fingerprint} was not found")
+            result = {"status": "completed", "passed": True, "records": [record]}
+        elif action == "baseline":
+            reports = [_read_mutation_report(Path(path)) for path in args.reports]
+            mutation = load_config(str(root))["mutation"]
+            previous = load_baseline(root / ".fettle" / "mutation-baseline.json")
+            baseline = establish_baseline(
+                reports, args.run_id, floor=args.floor,
+                target=mutation.get("score_target", args.floor),
+                previous=previous,
+            )
+            result = {"status": "completed", "passed": True, "baseline": baseline}
+            if args.baseline_action == "establish":
+                digest = save_baseline(
+                    root / ".fettle" / "mutation-baseline.json", baseline,
+                    expected_digest=baseline_digest(previous) if previous is not None else None,
+                )
+                result["baseline_digest"] = digest
+        else:
+            report_path = Path(args.report) if getattr(args, "report", None) else None
+            if action == "run":
+                mutation = load_config(str(root))["mutation"]
+                if not mutation.get("enabled", False):
+                    result = {
+                        "status": "not_configured", "passed": False,
+                        "message": "Mutation testing is disabled; set [mutation] enabled = true",
+                    }
+                else:
+                    from fettle.mutation_test import run_mutation_test
+                    result = run_mutation_test(str(root), {
+                        **mutation, "all": args.all,
+                        "base": args.base or mutation.get("base", "origin/main"),
+                        "shard_index": args.shard_index, "shard_count": args.shard_count,
+                        "manifest": args.manifest,
+                        "timeout_s": mutation.get("full_timeout_s") if args.all else mutation.get("timeout_s"),
+                    })
+            else:
+                if report_path is None:
+                    raise ValueError("mutation status requires --report")
+                result = _read_mutation_report(report_path)
+            baseline = load_baseline(root / ".fettle" / "mutation-baseline.json")
+            if baseline is not None and result.get("status") == "completed" and result.get("schema_version") == "2":
+                from fettle.overrides import load_override_ledger
+                ledger = load_override_ledger(root)
+                if ledger.invalid:
+                    raise ValueError("mutation override ledger is invalid: " + "; ".join(ledger.invalid))
+                classifications = load_classifications(
+                    root / ".fettle" / "mutation-classifications.json", root=root,
+                )
+                comparison = compare_report(
+                    result, baseline, overrides=ledger.records, classifications=classifications,
+                )
+                enforce_survivors = load_config(str(root))["mutation"].get("mode") == "enforce"
+                result = {
+                    **result,
+                    "comparison": comparison,
+                    "passed": result.get("passed", False) and (comparison["passed"] or not enforce_survivors),
+                }
+        if getattr(args, "output", None):
+            _write_json_atomic(Path(args.output), result)
+    except ValueError as exc:
+        result = {"status": "unknown", "passed": False, "message": str(exc)}
+
+    print(json.dumps(result, indent=2) if args.json else _render_mutation(result), end="\n" if args.json else "")
+    sys.exit(_mutation_exit(result))
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -1310,6 +1456,38 @@ def main() -> None:
     p_baseline = subparsers.add_parser("baseline", help="Manage violation baselines")
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")
 
+    p_mutation = subparsers.add_parser("mutation", help="Run and inspect Python mutation evidence")
+    mutation_sub = p_mutation.add_subparsers(dest="mutation_action", required=True)
+    p_mutation_run = mutation_sub.add_parser("run", help="Run changed or full mutation evidence")
+    mutation_scope = p_mutation_run.add_mutually_exclusive_group(required=True)
+    mutation_scope.add_argument("--changed", action="store_true", help="Mutate changed implementation files")
+    mutation_scope.add_argument("--all", action="store_true", help="Mutate all configured implementation files")
+    p_mutation_run.add_argument("--base", help="Changed-scope comparison base")
+    p_mutation_run.add_argument("--shard-index", type=int, help=argparse.SUPPRESS)
+    p_mutation_run.add_argument("--shard-count", type=int, help=argparse.SUPPRESS)
+    p_mutation_run.add_argument("--manifest", help=argparse.SUPPRESS)
+    p_mutation_run.add_argument("--json", action="store_true", help="JSON output")
+    p_mutation_run.add_argument("--output", help="Atomically retain JSON evidence at this path")
+    p_mutation_status = mutation_sub.add_parser("status", help="Evaluate a retained mutation report")
+    p_mutation_status.add_argument("--report", required=True, help="Retained schema-v2 report")
+    p_mutation_status.add_argument("--json", action="store_true", help="JSON output")
+    p_mutation_status.add_argument("--output", help="Atomically retain the evaluated report")
+    p_mutation_show = mutation_sub.add_parser("show", help="Show one canonical mutant")
+    p_mutation_show.add_argument("fingerprint", help="Canonical mutant fingerprint")
+    p_mutation_show.add_argument("--report", required=True, help="Retained schema-v2 report")
+    p_mutation_show.add_argument("--json", action="store_true", help="JSON output")
+    p_mutation_baseline = mutation_sub.add_parser("baseline", help="Check or establish an accepted baseline")
+    mutation_baseline_sub = p_mutation_baseline.add_subparsers(dest="baseline_action", required=True)
+    for action, help_text in (
+        ("check", "Validate that reports can establish one baseline"),
+        ("establish", "Validate reports and atomically save the accepted baseline"),
+    ):
+        command = mutation_baseline_sub.add_parser(action, help=help_text)
+        command.add_argument("reports", nargs=2, help="Two independent full schema-v2 reports")
+        command.add_argument("--run-id", action="append", required=True, help="Independent CI run ID (twice)")
+        command.add_argument("--floor", type=float, required=True, help="Accepted repository score floor")
+        command.add_argument("--json", action="store_true", help="JSON output")
+
     p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
     p_doctor.add_argument("--fix", action="store_true",
                           help="Apply mechanical fixes only (wire declared pre-commit hooks)")
@@ -1637,6 +1815,7 @@ def main() -> None:
         "config": cmd_config,
         "explain": cmd_explain,
         "baseline": cmd_baseline,
+        "mutation": cmd_mutation,
         "doctor": cmd_doctor,
         "integrations": cmd_integrations,
         "init": cmd_init,

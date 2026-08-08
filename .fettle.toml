@@ -32,6 +32,29 @@ exclude = [
     "docs/fettle-v14-multiagent-plan.md",
 ]
 
+[mutation]
+enabled = true
+mode = "advisory"
+paths = ["fettle/"]
+exclude = ["tests/", "migrations/"]
+base = "origin/main"
+timeout_s = 600
+full_timeout_s = 1800
+default_chunk_lines = 60
+full_shards = 240
+
+[mutation.test_mappings]
+"fettle/__main__.py" = ["tests/test_cli.py"]
+"fettle/agents/claude_code.py" = ["tests/test_agents.py"]
+"fettle/agents/codex.py" = ["tests/test_agents.py"]
+"fettle/agents/gemini.py" = ["tests/test_agents.py"]
+"fettle/agents/opencode.py" = ["tests/test_agents.py"]
+"fettle/runners/_subprocess.py" = ["tests/test_runners.py"]
+"fettle/uat/__init__.py" = ["tests/test_uat_surfaces.py"]
+
+[mutation.chunk_lines]
+"fettle/quality_scan.py" = 20
+
 [boundary]
 # These tests intentionally embed synthetic detector inputs. Keep exclusions
 # exact so all other test and production files remain boundary-scanned.

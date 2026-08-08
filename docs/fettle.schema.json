@@ -1213,6 +1213,129 @@
       },
       "additionalProperties": false
     },
+    "mutation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "mode": {
+          "type": "string",
+          "default": "advisory",
+          "enum": [
+            "advisory",
+            "enforce"
+          ]
+        },
+        "engine": {
+          "type": "string",
+          "default": "mutmut",
+          "enum": [
+            "mutmut"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "src/"
+          ]
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "tests/",
+            "migrations/"
+          ]
+        },
+        "base": {
+          "type": "string",
+          "default": "origin/main"
+        },
+        "timeout_s": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 1
+        },
+        "full_timeout_s": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 1
+        },
+        "score_target": {
+          "type": "number",
+          "default": 80.0,
+          "minimum": 0,
+          "maximum": 100
+        },
+        "minimum_scored_mutants": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 0
+        },
+        "max_new_actionable_survivors": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0
+        },
+        "max_untested": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0
+        },
+        "max_mutant_timeouts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 0
+        },
+        "max_suspicious_mutants": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 0
+        },
+        "max_findings_per_line": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1
+        },
+        "max_findings_per_file": {
+          "type": "integer",
+          "default": 7,
+          "minimum": 1
+        },
+        "default_chunk_lines": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1
+        },
+        "full_shards": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1
+        },
+        "test_mappings": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "chunk_lines": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
     "integrations": {
       "type": "object",
       "properties": {

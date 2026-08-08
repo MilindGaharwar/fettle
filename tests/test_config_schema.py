@@ -17,6 +17,7 @@ sys.path.insert(0, PLUGIN_DIR)
 
 from fettle.config_schema import (  # noqa: E402
     MODE_ENUMS,
+    OPEN_DICT_PATHS,
     RANGES,
     generate_json_schema,
     validate_config,
@@ -79,6 +80,80 @@ class TestValidate:
         errors, _ = validate_config({"gates": {"lint": {"mode": "yolo"}}})
         assert any("gates.lint.mode" in e for e in errors)
 
+    def test_mutation_defaults_are_disabled_and_advisory(self) -> None:
+        mutation = DEFAULTS["mutation"]
+
+        assert mutation["enabled"] is False
+        assert mutation["mode"] == "advisory"
+        assert mutation["max_mutant_timeouts"] is None
+        assert mutation["max_suspicious_mutants"] is None
+        assert mutation["full_shards"] == 1
+
+    def test_mutation_mapping_tables_allow_project_paths(self) -> None:
+        config = {"mutation": {
+            "test_mappings": {"src/shared.py": ["tests/test_shared.py"]},
+            "chunk_lines": {"src/slow.py": 20},
+        }}
+
+        errors, warnings = validate_config(config)
+
+        assert errors == [] and warnings == []
+        assert "mutation.test_mappings" in OPEN_DICT_PATHS
+        assert "mutation.chunk_lines" in OPEN_DICT_PATHS
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("mode", "silent"),
+            ("score_target", 101),
+            ("timeout_s", 0),
+            ("full_timeout_s", 0),
+            ("minimum_scored_mutants", -1),
+            ("max_new_actionable_survivors", -1),
+            ("max_untested", -1),
+            ("max_mutant_timeouts", -1),
+            ("max_suspicious_mutants", -1),
+            ("max_findings_per_line", 0),
+            ("max_findings_per_file", 0),
+            ("default_chunk_lines", 0),
+            ("full_shards", 0),
+        ],
+    )
+    def test_invalid_mutation_setting_errors(self, field, value) -> None:
+        errors, _ = validate_config({"mutation": {field: value}})
+
+        assert any(f"mutation.{field}" in error for error in errors)
+
+    def test_unsupported_mutation_engine_errors(self) -> None:
+        errors, _ = validate_config({"mutation": {"engine": "other"}})
+
+        assert any("mutation.engine" in error for error in errors)
+        engine = generate_json_schema()["properties"]["mutation"]["properties"]["engine"]
+        assert engine["enum"] == ["mutmut"]
+
+    def test_optional_mutation_budgets_reject_non_integer_values(self) -> None:
+        errors, _ = validate_config({"mutation": {"max_mutant_timeouts": "none"}})
+
+        assert any("mutation.max_mutant_timeouts" in error for error in errors)
+
+    def test_mutation_enforcement_requires_enabled_and_explicit_budgets(self) -> None:
+        disabled, _ = validate_config({"mutation": {"mode": "enforce"}})
+        missing_budget, _ = validate_config({"mutation": {
+            "enabled": True,
+            "mode": "enforce",
+            "max_mutant_timeouts": 0,
+        }})
+        valid, warnings = validate_config({"mutation": {
+            "enabled": True,
+            "mode": "enforce",
+            "max_mutant_timeouts": 0,
+            "max_suspicious_mutants": 0,
+        }})
+
+        assert any("enabled" in error for error in disabled)
+        assert any("max_suspicious_mutants" in error for error in missing_budget)
+        assert valid == [] and warnings == []
+
 
 def _mode_paths(node: dict, prefix: str = ""):
     for key, value in node.items():
@@ -136,6 +211,8 @@ class TestDependencyModel:
     def test_ranges_paths_exist_and_defaults_in_range(self) -> None:
         for path, (lo, hi) in RANGES.items():
             default = _get(DEFAULTS, path)
+            if default is None:
+                continue
             assert isinstance(default, (int, float)), path
             if lo is not None:
                 assert default >= lo, path
@@ -240,6 +317,13 @@ class TestSchemaGeneration:
         threshold = (schema["properties"]["gates"]["properties"]["coverage"]
                      ["properties"]["threshold"])
         assert threshold["minimum"] == 0 and threshold["maximum"] == 100
+
+    def test_mutation_optional_budgets_are_nullable_non_negative_in_schema(self) -> None:
+        mutation = generate_json_schema()["properties"]["mutation"]["properties"]
+
+        assert mutation["max_mutant_timeouts"]["type"] == ["integer", "null"]
+        assert mutation["max_mutant_timeouts"]["minimum"] == 0
+        assert mutation["max_suspicious_mutants"]["type"] == ["integer", "null"]
 
     def test_published_schema_is_current(self) -> None:
         """docs/fettle.schema.json must match the generator (anti-drift gate).

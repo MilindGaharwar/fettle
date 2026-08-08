@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "engine_id": "41",
+      "state": "survived",
+      "diff": "--- src/calculator.py\n+++ src/calculator.py\n@@ -1,3 +1,3 @@\n def eligible_for_discount(total: int) -> bool:\n-    return total >= 100\n+    return total > 100\n \n"
+    },
+    {
+      "engine_id": "42",
+      "state": "suspicious",
+      "diff": "--- src/calculator.py\n+++ src/calculator.py\n@@ -1,3 +1,3 @@\n def eligible_for_discount(total: int) -> bool:\n-    return total >= 100\n+    return total >= 101\n \n"
+    }
+  ]
+}

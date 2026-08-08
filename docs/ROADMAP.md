@@ -20,7 +20,7 @@ or partial form and remain subject to the graduation triggers below. See the
 | Graduated | Scanner and CI result integrity (P33) | Required scanner failures are canonical non-pass outcomes and cannot become clean CI results |
 | Graduated | Canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
 | Graduated | Change-integrity contracts and adversarial corpus (P44) | Immutable source, graph, provider, traversal, freshness, closure, and obligation records have deterministic identities and executable adversarial fixtures |
-| In progress | Mutation evidence integrity (P34) | Changed and full advisory lanes retain trustworthy evidence across three stable CI runs before a baseline is established |
+| In progress | Mutation evidence integrity and quality ratchet (P34) | Changed and full advisory lanes retain trustworthy evidence with measured reproducibility and reviewer-confirmed actionability; then Fettle dogfoods zero new actionable survivors and a monotonic full-score baseline per the [mutation quality plan](mutation-quality-implementation-plan.md) |
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
 | In progress | Authorship separation (P52) | Role-based edit enforcement is implemented; TLA+ role invariants, adversarial path coverage, and an evidenced multi-agent flow remain before graduation |
 | Next | Seeded-defect controls, independent red/green evidence, expanded evals, and traceability | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |

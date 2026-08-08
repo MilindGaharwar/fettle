@@ -322,6 +322,28 @@ DEFAULTS: dict[str, Any] = {
     # `enabled` is honored ONLY from the digest-pinned org policy ([extends]);
     # setting it in a repo's .fettle.toml is ignored and surfaced.
     "telemetry": {"enabled": False, "endpoint": ""},
+    "mutation": {
+        "enabled": False,
+        "mode": "advisory",
+        "engine": "mutmut",
+        "paths": ["src/"],
+        "exclude": ["tests/", "migrations/"],
+        "base": "origin/main",
+        "timeout_s": 600,
+        "full_timeout_s": 1800,
+        "score_target": 80.0,
+        "minimum_scored_mutants": 10,
+        "max_new_actionable_survivors": 0,
+        "max_untested": 0,
+        "max_mutant_timeouts": None,
+        "max_suspicious_mutants": None,
+        "max_findings_per_line": 1,
+        "max_findings_per_file": 7,
+        "default_chunk_lines": 60,
+        "full_shards": 1,
+        "test_mappings": {},
+        "chunk_lines": {},
+    },
     # WP-14b: external tool adapters, run via `fettle integrations`. All
     # default OFF; tokens come from env vars (never from config). The keys
     # mirror exactly what each adapter reads.

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import json
 from unittest.mock import patch
 
 import pytest
@@ -288,3 +289,162 @@ def test_cli_version_matches_pyproject():
     from fettle.cli import _version
     with open(os.path.join(_REPO_ROOT, "pyproject.toml"), "rb") as fh:
         assert _version() == tomllib.load(fh)["project"]["version"]
+
+
+def _run_mutation_cli(monkeypatch, capsys, tmp_path, argv, report):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    config = {
+        "enabled": True, "mode": "advisory", "paths": ["src/"], "exclude": [],
+        "base": "origin/main", "timeout_s": 60, "full_timeout_s": 120,
+        "score_target": 80.0, "test_mappings": {}, "chunk_lines": {},
+    }
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": config}),
+        patch("fettle.mutation_test.run_mutation_test", return_value=report),
+        patch("sys.argv", ["fettle", "mutation", *argv]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    return exc_info.value.code, capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    "report,expected",
+    [
+        ({"status": "completed", "passed": True, "score": 90.0}, 0),
+        ({"status": "completed", "passed": False, "score": 50.0}, 1),
+        ({"status": "tool_error", "passed": False, "score": None, "message": "missing mutmut"}, 2),
+    ],
+)
+def test_mutation_run_json_exit_codes_match_decision(monkeypatch, capsys, tmp_path, report, expected):
+    code, captured = _run_mutation_cli(monkeypatch, capsys, tmp_path, ["run", "--changed", "--json"], report)
+    assert code == expected
+    assert json.loads(captured.out)["status"] == report["status"]
+
+
+def test_mutation_disabled_has_first_time_state(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": {"enabled": False}}),
+        patch("sys.argv", ["fettle", "mutation", "run", "--changed", "--json"]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    assert exc_info.value.code == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "not_configured"
+
+
+def test_mutation_run_writes_atomic_output(monkeypatch, capsys, tmp_path):
+    output = tmp_path / "reports" / "mutation.json"
+    code, _ = _run_mutation_cli(
+        monkeypatch, capsys, tmp_path,
+        ["run", "--changed", "--json", "--output", str(output)],
+        {"status": "completed", "passed": True, "score": 90.0},
+    )
+    assert code == 0
+    assert json.loads(output.read_text())["score"] == 90.0
+    assert list(output.parent.glob("*.tmp")) == []
+
+
+def test_mutation_advisory_reports_new_survivor_without_blocking(monkeypatch, capsys, tmp_path):
+    baseline = {"schema_version": "1"}
+    report = {"schema_version": "2", "status": "completed", "passed": True, "score": 90.0}
+    comparison = {"status": "completed", "passed": False, "records": [{"disposition": "new"}]}
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    config = {
+        "enabled": True, "mode": "advisory", "paths": ["src/"], "exclude": [],
+        "base": "origin/main", "timeout_s": 60, "full_timeout_s": 120,
+        "score_target": 80.0, "test_mappings": {}, "chunk_lines": {},
+    }
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": config}),
+        patch("fettle.mutation_test.run_mutation_test", return_value=report),
+        patch("fettle.mutation_baseline.load_baseline", return_value=baseline),
+        patch("fettle.mutation_baseline.load_classifications", return_value=[]),
+        patch("fettle.mutation_baseline.compare_report", return_value=comparison),
+        patch("fettle.overrides.load_override_ledger") as ledger,
+        patch("sys.argv", ["fettle", "mutation", "run", "--changed", "--json"]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        ledger.return_value.records = ()
+        ledger.return_value.invalid = ()
+        main()
+    assert exc_info.value.code == 0
+    assert json.loads(capsys.readouterr().out)["comparison"]["passed"] is False
+
+
+def test_mutation_show_finds_canonical_record(monkeypatch, capsys, tmp_path):
+    (tmp_path / ".git").mkdir()
+    report = tmp_path / "mutation.json"
+    report.write_text(json.dumps({"schema_version": "2", "non_killed": [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "line": 2,
+        "before": "x == 1", "after": "x != 1", "mapped_tests": ["tests/test_a.py"],
+        "rerun_command": "mutmut run 1", "state": "survived",
+    }]}))
+    monkeypatch.chdir(tmp_path)
+    from fettle.cli import main
+    with patch("sys.argv", ["fettle", "mutation", "show", "a" * 64, "--report", str(report)]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    assert "src/a.py:2" in capsys.readouterr().out
+
+
+def test_mutation_baseline_establish_delegates_and_saves(monkeypatch, capsys, tmp_path):
+    reports = [tmp_path / "one.json", tmp_path / "two.json"]
+    for path in reports:
+        path.write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    baseline = {"schema_version": "1"}
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": {"score_target": 80.0}}),
+        patch("fettle.mutation_baseline.establish_baseline", return_value=baseline) as establish,
+        patch("fettle.mutation_baseline.save_baseline", return_value="d" * 64) as save,
+        patch("sys.argv", [
+            "fettle", "mutation", "baseline", "establish", *(str(path) for path in reports),
+            "--run-id", "one", "--run-id", "two", "--floor", "70", "--json",
+        ]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    assert exc_info.value.code == 0
+    assert establish.call_args.kwargs["floor"] == 70.0
+    assert save.call_args.args[0] == tmp_path / ".fettle" / "mutation-baseline.json"
+    assert json.loads(capsys.readouterr().out)["baseline_digest"] == "d" * 64
+
+
+def test_mutation_baseline_update_uses_existing_digest(monkeypatch, capsys, tmp_path):
+    reports = [tmp_path / "one.json", tmp_path / "two.json"]
+    for path in reports:
+        path.write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    previous = {"schema_version": "1", "floor": 70.0}
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": {"score_target": 80.0}}),
+        patch("fettle.mutation_baseline.load_baseline", return_value=previous),
+        patch("fettle.mutation_baseline.baseline_digest", return_value="c" * 64),
+        patch("fettle.mutation_baseline.establish_baseline", return_value=previous),
+        patch("fettle.mutation_baseline.save_baseline", return_value="d" * 64) as save,
+        patch("sys.argv", [
+            "fettle", "mutation", "baseline", "establish", *(str(path) for path in reports),
+            "--run-id", "one", "--run-id", "two", "--floor", "70", "--json",
+        ]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    assert exc_info.value.code == 0
+    assert save.call_args.kwargs["expected_digest"] == "c" * 64
+    capsys.readouterr()

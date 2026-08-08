@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 MUTMUT_VERSION = "2.5.1"
@@ -29,17 +31,8 @@ _CACHE_STATES = {
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
 _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
-_SHARD_LINES = 60
-_SHARD_LINES_BY_FILE = {"fettle/quality_scan.py": 20}
-_SHARED_TESTS = {
-    "fettle/__main__.py": ["tests/test_cli.py"],
-    "fettle/agents/claude_code.py": ["tests/test_agents.py"],
-    "fettle/agents/codex.py": ["tests/test_agents.py"],
-    "fettle/agents/gemini.py": ["tests/test_agents.py"],
-    "fettle/agents/opencode.py": ["tests/test_agents.py"],
-    "fettle/runners/_subprocess.py": ["tests/test_runners.py"],
-    "fettle/uat/__init__.py": ["tests/test_uat_surfaces.py"],
-}
+_MAX_SHOW_BYTES = 50 * 1024 * 1024
+_PARTITION_SCHEMA_VERSION = "1"
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -113,11 +106,19 @@ def _shard_files(root: str, files: list[str], index: int, count: int) -> list[st
     return sorted(shards[index])
 
 
-def _shard_ranges(root: str, files: list[str], index: int, count: int) -> list[dict]:
+def _shard_ranges(
+    root: str,
+    files: list[str],
+    index: int,
+    count: int,
+    default_chunk_lines: int = 60,
+    chunk_lines: dict[str, int] | None = None,
+    test_mappings: dict[str, list[str]] | None = None,
+) -> list[dict]:
     """Partition source lines exactly once, balancing mapped-test execution cost."""
     if count < 1 or not 0 <= index < count:
         raise ValueError("shard index must be within shard count")
-    mapping = _mapped_tests(root, files)
+    mapping = _mapped_tests(root, files, test_mappings)
     test_weights = {
         file: max(1, sum((Path(root) / test).stat().st_size for test in tests))
         for file, tests in mapping.items()
@@ -125,7 +126,7 @@ def _shard_ranges(root: str, files: list[str], index: int, count: int) -> list[d
     chunks: list[tuple[dict, int]] = []
     for file in files:
         line_count = len((Path(root) / file).read_text(encoding="utf-8").splitlines())
-        chunk_size = _SHARD_LINES_BY_FILE.get(file, _SHARD_LINES)
+        chunk_size = (chunk_lines or {}).get(file, default_chunk_lines)
         for start in range(1, line_count + 1, chunk_size):
             chunk = {"file": file, "start": start, "end": min(start + chunk_size - 1, line_count)}
             chunks.append((chunk, (chunk["end"] - chunk["start"] + 1) * test_weights[file]))
@@ -156,7 +157,11 @@ def _patch_for_ranges(root: str, ranges: list[dict]) -> str:
     return "\n".join(sections) + "\n"
 
 
-def _mapped_tests(root: str, files: list[str]) -> dict[str, list[str]]:
+def _mapped_tests(
+    root: str,
+    files: list[str],
+    test_mappings: dict[str, list[str]] | None = None,
+) -> dict[str, list[str]]:
     """Map each production module to convention and direct-import tests."""
     root_path = Path(root)
     test_paths = sorted((root_path / "tests").glob("test_*.py"))
@@ -181,7 +186,7 @@ def _mapped_tests(root: str, files: list[str]) -> dict[str, list[str]]:
         module = file.removesuffix(".py").replace("/", ".")
         if module.endswith(".__init__"):
             module = module.removesuffix(".__init__")
-        matches = set(imports.get(module, set())) | set(_SHARED_TESTS.get(file, []))
+        matches = set(imports.get(module, set())) | set((test_mappings or {}).get(file, []))
         stem = Path(file).stem
         if stem not in {"__init__", "__main__"}:
             candidate = root_path / "tests" / f"test_{stem}.py"
@@ -202,6 +207,340 @@ def _parse_result_ids(output: str) -> list[str]:
     if not re.fullmatch(r"\d+(?: \d+)*", output):
         raise ValueError("unrecognized mutmut result-ids output")
     return output.split()
+
+
+def _canonical_path(path: str) -> str:
+    path = unicodedata.normalize("NFC", path.replace("\\", "/"))
+    if path.startswith("/") or re.match(r"^[A-Za-z]:/", path) or any(part == ".." for part in path.split("/")):
+        raise ValueError("mutation path is outside the repository")
+    path = path.removeprefix("a/").removeprefix("b/")
+    if not path or path.startswith("/"):
+        raise ValueError("mutation path is invalid")
+    return path
+
+
+def _parse_mutation_diff(diff: str, expected_file: str | None = None) -> tuple[str, list[str], list[str]]:
+    lines = diff.splitlines()
+    if len(lines) < 4 or not lines[0].startswith("--- ") or not lines[1].startswith("+++ "):
+        raise ValueError("mutation detail is not a unified diff")
+    old_file = _canonical_path(lines[0][4:].split("\t", 1)[0])
+    new_file = _canonical_path(lines[1][4:].split("\t", 1)[0])
+    if old_file != new_file or (expected_file is not None and old_file != _canonical_path(expected_file)):
+        raise ValueError("mutation detail path does not match its source file")
+    hunks = [index for index, line in enumerate(lines) if line.startswith("@@ ")]
+    if len(hunks) != 1 or hunks[0] != 2 or not re.fullmatch(r"@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@.*", lines[2]):
+        raise ValueError("mutation detail must contain exactly one valid hunk")
+    removed = [line[1:] for line in lines[3:] if line.startswith("-")]
+    added = [line[1:] for line in lines[3:] if line.startswith("+")]
+    if not removed or not added or any(line and line[0] not in " +-\\" for line in lines[3:]):
+        raise ValueError("mutation detail has no replacement")
+    return old_file, removed, added
+
+
+def _parse_show_all(output: str, expected_ids: set[str], max_bytes: int = _MAX_SHOW_BYTES) -> dict[str, str]:
+    if len(output.encode("utf-8")) > max_bytes:
+        raise ValueError("mutmut show output is too large")
+    markers = list(re.finditer(r"(?m)^# mutant (\d+)\s*$", output))
+    records: dict[str, str] = {}
+    for index, marker in enumerate(markers):
+        engine_id = marker.group(1)
+        if engine_id in records:
+            raise ValueError(f"duplicate mutation detail for engine ID {engine_id}")
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(output)
+        records[engine_id] = output[marker.end():end].strip("\n") + "\n"
+    found = set(records)
+    if found != expected_ids:
+        missing = sorted(expected_ids - found, key=int)
+        extra = sorted(found - expected_ids, key=int)
+        detail = f"missing={missing}, unexpected={extra}"
+        raise ValueError("mutation details are missing or unexpected: " + detail)
+    return records
+
+
+def _find_replacement(source: str, removed: list[str], added: list[str]) -> tuple[str, int]:
+    source_lines = source.splitlines()
+    matches = [
+        index for index in range(len(source_lines) - len(removed) + 1)
+        if source_lines[index:index + len(removed)] == removed
+    ]
+    if len(matches) != 1:
+        raise ValueError("mutation replacement cannot be located uniquely")
+    index = matches[0]
+    mutated = source_lines[:index] + added + source_lines[index + len(removed):]
+    return "\n".join(mutated) + ("\n" if source.endswith("\n") else ""), index + 1
+
+
+def _enclosing_symbol(tree: ast.AST, line: int) -> ast.AST:
+    candidates = [
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node.lineno <= line <= getattr(node, "end_lineno", node.lineno)
+    ]
+    return min(candidates, key=lambda node: getattr(node, "end_lineno", node.lineno) - node.lineno) if candidates else tree
+
+
+def _symbol_name(node: ast.AST) -> str:
+    return unicodedata.normalize("NFC", getattr(node, "name", "<module>"))
+
+
+def _ast_difference(before: ast.AST, after: ast.AST, path: tuple[str, ...] = ()) -> tuple[ast.AST, ast.AST, tuple[str, ...]]:
+    if type(before) is not type(after):
+        return before, after, path
+    differences: list[tuple[ast.AST, ast.AST, tuple[str, ...]]] = []
+    for field in before._fields:
+        old_value, new_value = getattr(before, field), getattr(after, field)
+        if isinstance(old_value, ast.AST) and isinstance(new_value, ast.AST):
+            if ast.dump(old_value, include_attributes=False) != ast.dump(new_value, include_attributes=False):
+                differences.append(_ast_difference(old_value, new_value, (*path, field)))
+        elif isinstance(old_value, list) and isinstance(new_value, list) and len(old_value) == len(new_value):
+            for old_item, new_item in zip(old_value, new_value, strict=True):
+                if isinstance(old_item, ast.AST) and isinstance(new_item, ast.AST):
+                    if ast.dump(old_item, include_attributes=False) != ast.dump(new_item, include_attributes=False):
+                        anchor = f"{field}:{type(old_item).__name__}"
+                        differences.append(_ast_difference(old_item, new_item, (*path, anchor)))
+                elif old_item != new_item:
+                    return before, after, path
+        elif old_value != new_value:
+            return before, after, path
+    if len(differences) != 1:
+        return before, after, path
+    old_node, new_node, child_path = differences[0]
+    if isinstance(old_node, (ast.operator, ast.unaryop, ast.boolop, ast.cmpop)):
+        return before, after, path
+    return old_node, new_node, child_path
+
+
+def _fingerprint_digest(identity: str) -> str:
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _canonical_digest(value: object) -> str:
+    content = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _revision(root: str) -> str:
+    result = _run(["git", "rev-parse", "HEAD"], root, 10)
+    revision = result.stdout.strip()
+    if result.returncode or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("cannot resolve tested revision")
+    return revision
+
+
+def load_partition_manifest(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot parse mutation partition manifest {path}: {exc}") from exc
+    required = {"schema_version", "revision", "shard_index", "shard_count", "files", "ranges", "digest"}
+    if not isinstance(value, dict) or set(value) != required or value.get("schema_version") != _PARTITION_SCHEMA_VERSION:
+        raise ValueError("mutation partition manifest has an unsupported schema")
+    payload = {key: value[key] for key in required - {"digest"}}
+    if value["digest"] != _canonical_digest(payload):
+        raise ValueError("mutation partition manifest digest does not match content")
+    if (
+        not re.fullmatch(r"[0-9a-f]{40}", str(value["revision"]))
+        or not isinstance(value["shard_index"], int) or isinstance(value["shard_index"], bool)
+        or not isinstance(value["shard_count"], int) or isinstance(value["shard_count"], bool)
+        or value["shard_count"] < 1 or not 0 <= value["shard_index"] < value["shard_count"]
+        or not isinstance(value["files"], list) or value["files"] != sorted(set(value["files"]))
+        or not isinstance(value["ranges"], list)
+    ):
+        raise ValueError("mutation partition manifest contains invalid identity")
+    if value["files"] != sorted({item.get("file") for item in value["ranges"] if isinstance(item, dict)}):
+        raise ValueError("mutation partition manifest files do not match ranges")
+    return value
+
+
+def write_partition_manifests(root: str, cfg: dict, output_dir: Path) -> list[Path]:
+    files = [
+        path for path in _get_all_py_files(root, cfg.get("paths", ["src/"]))
+        if not any(path.startswith(item) for item in cfg.get("exclude", ["tests/", "migrations/"]))
+    ]
+    count = int(cfg.get("full_shards", 1))
+    if count < 1 or count > 256:
+        raise ValueError("mutation full_shards must be between 1 and 256")
+    revision = _revision(root)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for index in range(count):
+        ranges = _shard_ranges(
+            root, files, index, count, int(cfg.get("default_chunk_lines", 60)),
+            cfg.get("chunk_lines", {}), cfg.get("test_mappings", {}),
+        )
+        payload = {
+            "schema_version": _PARTITION_SCHEMA_VERSION,
+            "revision": revision,
+            "shard_index": index,
+            "shard_count": count,
+            "files": sorted({item["file"] for item in ranges}),
+            "ranges": ranges,
+        }
+        path = output_dir / f"partition-{index}.json"
+        content = {**payload, "digest": _canonical_digest(payload)}
+        path.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        paths.append(path)
+    return paths
+
+
+def _canonical_mutant(
+    root: str,
+    file: str,
+    source: str,
+    diff: str,
+    engine_id: str,
+    state: str,
+    mapped_tests: list[str],
+) -> dict:
+    del root
+    canonical_file, removed, added = _parse_mutation_diff(diff, file)
+    normalized_source = unicodedata.normalize("NFC", source)
+    normalized_removed = [unicodedata.normalize("NFC", line) for line in removed]
+    normalized_added = [unicodedata.normalize("NFC", line) for line in added]
+    mutated_source, line = _find_replacement(normalized_source, normalized_removed, normalized_added)
+    try:
+        before_tree, after_tree = ast.parse(normalized_source), ast.parse(mutated_source)
+    except SyntaxError as exc:
+        raise ValueError("mutation detail does not produce valid Python") from exc
+    before_symbol = _enclosing_symbol(before_tree, line)
+    after_symbol = _enclosing_symbol(after_tree, line)
+    if _symbol_name(before_symbol) != _symbol_name(after_symbol):
+        raise ValueError("mutation changes its structural anchor")
+    old_node, new_node, structural_path = _ast_difference(before_symbol, after_symbol)
+    if ast.dump(old_node, include_attributes=False) == ast.dump(new_node, include_attributes=False):
+        raise ValueError("mutation detail has no structural AST change")
+    before = unicodedata.normalize("NFC", ast.unparse(old_node))
+    after = unicodedata.normalize("NFC", ast.unparse(new_node))
+    operator = f"{type(old_node).__name__}->{type(new_node).__name__}"
+    if type(old_node) is type(new_node):
+        operator = type(old_node).__name__
+    identity = json.dumps(
+        ["v1", canonical_file, _symbol_name(before_symbol), structural_path, operator,
+         ast.dump(old_node, include_attributes=False), ast.dump(new_node, include_attributes=False)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return {
+        "fingerprint_version": "1",
+        "fingerprint": _fingerprint_digest(identity),
+        "source_context_digest": _canonical_digest(
+            [canonical_file, _symbol_name(before_symbol), ast.dump(before_symbol, include_attributes=False)]
+        ),
+        "engine_id": engine_id,
+        "state": state,
+        "file": canonical_file,
+        "line": line,
+        "symbol": _symbol_name(before_symbol),
+        "operator": operator,
+        "before": before,
+        "after": after,
+        "mapped_tests": sorted(set(mapped_tests)),
+        "rerun_command": shlex.join(["mutmut", "run", engine_id]),
+    }
+
+
+def _collect_mutant_records(
+    root: str,
+    ids: dict[str, list[str]],
+    mapped_tests: list[str] | dict[str, list[str]],
+    expected_files: list[str] | None = None,
+) -> tuple[list[dict] | None, dict | None]:
+    states = {engine_id: state for state in _STATES[1:] for engine_id in ids[state]}
+    if not states:
+        return [], None
+    selected_files = {_canonical_path(item) for item in expected_files} if expected_files is not None else None
+    try:
+        shown = _run(["mutmut", "show", "all"], root, 120)
+        if shown.returncode:
+            return None, _error("tool_error", "mutmut show all failed", stderr=_bounded(shown.stderr or shown.stdout))
+        details = _parse_show_all(shown.stdout, set(states))
+        records = []
+        for engine_id in sorted(states, key=int):
+            file, _, _ = _parse_mutation_diff(details[engine_id])
+            if selected_files is not None and file not in selected_files:
+                raise ValueError(f"mutation detail is outside selected scope: {file}")
+            source = (Path(root) / file).read_text(encoding="utf-8")
+            tests = mapped_tests.get(file, []) if isinstance(mapped_tests, dict) else mapped_tests
+            if not tests:
+                raise ValueError(f"mutation detail has no mapped tests for {file}")
+            records.append(_canonical_mutant(root, file, source, details[engine_id], engine_id, states[engine_id], tests))
+    except subprocess.TimeoutExpired:
+        return None, _error("tool_error", "mutmut detail collection timed out")
+    except (OSError, UnicodeError, ValueError) as exc:
+        return None, _error("unknown", f"Cannot construct canonical mutant evidence: {exc}")
+    fingerprints = [record["fingerprint"] for record in records]
+    if len(fingerprints) != len(set(fingerprints)):
+        return None, _error("unknown", "Canonical mutant fingerprint is duplicated or collided")
+    return records, None
+
+
+def _validate_report_schema(report: dict) -> None:
+    if report.get("schema_version") == "1":
+        raise ValueError("schema version 1 mutation evidence is read-only and cannot be compared")
+    if report.get("schema_version") != "2":
+        raise ValueError("unsupported mutation report schema")
+    records = report.get("non_killed")
+    if not isinstance(records, list):
+        raise ValueError("schema v2 requires complete non-killed records")
+    counts = [report.get(state) for state in _STATES]
+    if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts):
+        raise ValueError("schema v2 contains invalid outcome counts")
+    expected = sum(report[state] for state in _STATES[1:])
+    required = {
+        "fingerprint", "source_context_digest", "engine_id", "state", "file", "line",
+        "operator", "before", "after", "mapped_tests", "rerun_command",
+    }
+    if len(records) != expected or any(not isinstance(record, dict) or not required <= set(record) for record in records):
+        raise ValueError("schema v2 requires complete non-killed records")
+    if any(
+        not isinstance(record["state"], str)
+        or record["state"] not in _STATES[1:]
+        or not isinstance(record["fingerprint"], str)
+        or not re.fullmatch(r"[0-9a-f]{64}", record["fingerprint"])
+        or not isinstance(record["source_context_digest"], str)
+        or not re.fullmatch(r"[0-9a-f]{64}", record["source_context_digest"])
+        or not isinstance(record["engine_id"], str)
+        or not isinstance(record["mapped_tests"], list)
+        or any(not isinstance(test, str) for test in record["mapped_tests"])
+        or not isinstance(record["line"], int)
+        or isinstance(record["line"], bool)
+        or record["line"] < 1
+        or any(not isinstance(record[field], str) or not record[field] for field in ("file", "operator", "before", "after", "rerun_command"))
+        for record in records
+    ):
+        raise ValueError("schema v2 contains malformed non-killed records")
+    for state in _STATES[1:]:
+        if sum(record["state"] == state for record in records) != report.get(state, 0):
+            raise ValueError("schema v2 non-killed record outcomes do not match counts")
+    engine_ids = [record["engine_id"] for record in records]
+    if len(engine_ids) != len(set(engine_ids)) or any(not re.fullmatch(r"\d+", item) for item in engine_ids):
+        raise ValueError("schema v2 requires unique numeric engine IDs")
+    if any(not record["mapped_tests"] or record["mapped_tests"] != sorted(set(record["mapped_tests"])) for record in records):
+        raise ValueError("schema v2 requires mapped tests for every non-killed record")
+    fingerprints = [record["fingerprint"] for record in records]
+    if len(fingerprints) != len(set(fingerprints)):
+        raise ValueError("schema v2 requires unique mutant fingerprints")
+
+
+def _rerun_mutant(root: str, record: dict, current_ids: dict[str, list[str]], timeout: int) -> dict:
+    engine_id, state = record.get("engine_id"), record.get("state")
+    occurrences = sum(ids.count(engine_id) for ids in current_ids.values()) if isinstance(engine_id, str) else 0
+    if not isinstance(engine_id, str) or not re.fullmatch(r"\d+", engine_id) or engine_id not in current_ids.get(state, []) or occurrences != 1:
+        return _error("unknown", "Selected mutant engine ID is missing, stale, or ambiguous")
+    try:
+        result = _run(["mutmut", "run", engine_id], root, timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _error("tool_error", f"Cannot rerun selected mutant: {exc}")
+    if result.returncode < 0 or result.returncode & 1 or result.returncode & ~15:
+        return _error("unknown", "Selected mutant rerun outcome changed", rerun_exit_code=result.returncode)
+    rerun_ids, error = _collect_results(root, MUTMUT_VERSION, result.returncode)
+    if error:
+        return error
+    assert rerun_ids is not None
+    observed = [outcome for outcome in _STATES if engine_id in rerun_ids[outcome]]
+    if observed != [state]:
+        return _error("unknown", "Selected mutant rerun outcome changed", expected_state=state, observed_states=observed)
+    return {"status": "completed", "passed": False, "state": state, "engine_id": engine_id}
 
 
 def _collect_results(root: str, engine_version: str, run_exit_code: int) -> tuple[dict[str, list[str]] | None, dict | None]:
@@ -262,7 +601,14 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     return ids, None
 
 
-def _run_mutmut(root: str, files: list[str], tests: list[str], timeout: int, line_ranges: list[dict] | None = None) -> dict:
+def _run_mutmut(
+    root: str,
+    files: list[str],
+    tests: list[str],
+    timeout: int,
+    line_ranges: list[dict] | None = None,
+    test_mapping: dict[str, list[str]] | None = None,
+) -> dict:
     """Run mutmut 2.5.1 and reconstruct each outcome from verified ID output."""
     if not tests:
         return _error("unknown", "Mutation execution requires at least one targeted test")
@@ -324,6 +670,10 @@ def _run_mutmut(root: str, files: list[str], tests: list[str], timeout: int, lin
     if error:
         return error
     assert ids is not None
+    records, error = _collect_mutant_records(root, ids, test_mapping or tests, files)
+    if error:
+        return {**error, "engine_version": actual, "run_exit_code": run.returncode}
+    assert records is not None
 
     return {
         "status": "completed",
@@ -334,7 +684,9 @@ def _run_mutmut(root: str, files: list[str], tests: list[str], timeout: int, lin
         "run_exit_code": run.returncode,
         "results_exit_code": 0,
         **{state: len(ids[state]) for state in _STATES},
-        "survivors": ids["survived"][:20],
+        "non_killed": records,
+        "survivor_preview": [record for record in records if record["state"] == "survived"][:20],
+        "survivors": [record["fingerprint"] for record in records if record["state"] == "survived"],
         "stderr": _bounded(run.stderr),
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
@@ -349,7 +701,7 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
         if remaining < 1:
             return _error("tool_error", f"Mutation shard timed out after {timeout}s")
         ranges = [item for item in line_ranges if item["file"] == file]
-        result = _run_mutmut(root, [file], mapping[file], remaining, ranges)
+        result = _run_mutmut(root, [file], mapping[file], remaining, ranges, {file: mapping[file]})
         if result["status"] != "completed":
             return result
         results.append(result)
@@ -363,15 +715,58 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
         "run_exit_code": 0,
         "results_exit_code": 0,
         **counts,
-        "survivors": [item for result in results for item in result.get("survivors", [])][:20],
+        "non_killed": [item for result in results for item in result.get("non_killed", [])],
+        "survivor_preview": [item for result in results for item in result.get("survivor_preview", [])][:20],
+        "survivors": [item for result in results for item in result.get("survivors", [])],
         "stderr": "\n".join(result.get("stderr", "") for result in results if result.get("stderr")),
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
 
 
 def compute_score(killed: int, survived: int, timeout: int, suspicious: int, untested: int) -> float | None:
-    total = killed + survived + timeout + suspicious + untested
+    del timeout, suspicious, untested
+    total = killed + survived
     return None if total == 0 else killed / total * 100
+
+
+def evaluate_policy(report: dict, cfg: dict) -> dict:
+    """Evaluate raw mutation outcomes without converting evidence debt into test failures."""
+    mode = cfg.get("mode", "advisory")
+    score = compute_score(*(report[state] for state in _STATES[:5]))
+    violations: list[str] = []
+    debt: list[str] = []
+    checks = (
+        ("untested", "max_untested", 0, "untested"),
+        ("timeout", "max_mutant_timeouts", None, "timeout"),
+        ("suspicious", "max_suspicious_mutants", None, "suspicious"),
+    )
+    for state, key, default, label in checks:
+        budget = cfg.get(key, default)
+        count = report[state]
+        if budget is None:
+            if count:
+                debt.append(f"{label} outcome budget is uncalibrated ({count} observed)")
+        elif count > budget:
+            violations.append(f"{label} budget exceeded: {count} > {budget}")
+    target = float(cfg.get("score_target", 70))
+    decided = report["killed"] + report["survived"]
+    minimum = int(cfg.get("minimum_scored_mutants", 0))
+    score_eligible = decided >= minimum
+    if score is None:
+        violations.append("no decided mutants were reported")
+    elif not score_eligible:
+        debt.append(f"mutation score decision suppressed below minimum: {decided} < {minimum}")
+    elif score < target:
+        violations.append(f"mutation score below target: {score:.1f} < {target:.1f}")
+    reasons = [*violations, *debt]
+    return {
+        "mode": mode,
+        "score": None if score is None else round(score, 1),
+        "score_eligible": score_eligible,
+        "eligible": not violations and not debt,
+        "passed": mode != "enforce" or not violations,
+        "reasons": reasons,
+    }
 
 
 def aggregate_shards(
@@ -381,6 +776,7 @@ def aggregate_shards(
     excluded: list[str],
     shard_count: int,
     threshold: float,
+    test_mappings: dict[str, list[str]] | None = None,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -394,17 +790,25 @@ def aggregate_shards(
     for index, report in enumerate(reports):
         if report.get("status") != "completed":
             return _error("tool_error", f"Shard {index} is not completed")
-        if report.get("schema_version") != "1" or report.get("selection") != "shard":
+        if report.get("schema_version") != "2" or report.get("selection") != "shard":
             return _error("unknown", f"Shard {index} has unsupported evidence")
+        if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
+            return _error("unknown", f"Shard {index} has no tested files")
+        try:
+            _validate_report_schema(report)
+        except ValueError as exc:
+            return _error("unknown", f"Shard {index} has invalid evidence: {exc}")
         if report.get("shard_count") != shard_count:
             return _error("unknown", f"Shard {index} has inconsistent shard count")
         if report.get("engine_version") != MUTMUT_VERSION or report.get("test_runner") != _TEST_RUNNER:
             return _error("unknown", f"Shard {index} has unsupported execution identity")
         if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
             return _error("unknown", f"Shard {index} has an invalid revision")
-        if not isinstance(report.get("files_tested"), list) or not report["files_tested"]:
-            return _error("unknown", f"Shard {index} has no tested files")
-        expected_tests = sorted({test for tests in _mapped_tests(root, report["files_tested"]).values() for test in tests})
+        expected_tests = sorted({
+            test
+            for tests in _mapped_tests(root, report["files_tested"], test_mappings).values()
+            for test in tests
+        })
         if report.get("tests_run") != expected_tests or not expected_tests:
             return _error("unknown", f"Shard {index} has an invalid test mapping")
         counts = [report.get(state) for state in _STATES]
@@ -449,9 +853,13 @@ def aggregate_shards(
     score = compute_score(*(counts[state] for state in _STATES[:5]))
     if score is None:
         return _error("unknown", "Aggregated shards reported zero scored mutants")
-    survivors = [item for report in reports for item in report.get("survivors", [])][:20]
+    records = [item for report in reports for item in report["non_killed"]]
+    fingerprints = [record["fingerprint"] for record in records]
+    if len(fingerprints) != len(set(fingerprints)):
+        return _error("unknown", "Aggregated mutant fingerprints are duplicated or collided")
+    survivors = [record["fingerprint"] for record in records if record["state"] == "survived"]
     return {
-        "schema_version": "1",
+        "schema_version": "2",
         "status": "completed",
         "revision": first["revision"],
         "merge_base": None,
@@ -464,6 +872,8 @@ def aggregate_shards(
         "line_ranges": sorted((item for report in reports for item in report["line_ranges"]), key=lambda item: (item["file"], item["start"])),
         "shard_count": shard_count,
         **counts,
+        "non_killed": records,
+        "survivor_preview": [record for record in records if record["state"] == "survived"][:20],
         "survivors": survivors,
         "score": round(score, 1),
         "threshold": threshold,
@@ -483,8 +893,12 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
     for index, report in enumerate(reports, start=1):
         if report.get("status") != "completed":
             return {"status": "unstable", "errors": [f"report {index} is not completed"]}
-        if report.get("schema_version") != "1":
+        if report.get("schema_version") != "2":
             return {"status": "unstable", "errors": [f"report {index} has an unsupported schema"]}
+        try:
+            _validate_report_schema(report)
+        except ValueError as exc:
+            return {"status": "unstable", "errors": [f"report {index} has invalid evidence: {exc}"]}
         if report.get("selection") != "all":
             return {"status": "unstable", "errors": [f"report {index} is not a full mutation run"]}
         if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
@@ -519,15 +933,19 @@ def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) ->
     outcomes = (*_STATES, "score")
     if any(any(report[key] != first[key] for key in outcomes) for report in reports[1:]):
         return {"status": "unstable", "errors": ["report outcomes differ"]}
+    canonical = sorted((record["fingerprint"], record["state"]) for record in first["non_killed"])
+    if any(sorted((record["fingerprint"], record["state"]) for record in report["non_killed"]) != canonical for report in reports[1:]):
+        return {"status": "unstable", "errors": ["report canonical mutant outcomes differ"]}
 
     return {
         "status": "stable",
         "baseline": {
-            "schema_version": "1",
+            "schema_version": "2",
             "revision": first["revision"],
             "engine_version": first["engine_version"],
             "test_runner": first["test_runner"],
             "files_tested": first["files_tested"],
+            "non_killed": first["non_killed"],
             **{key: first[key] for key in outcomes},
             "run_ids": run_ids or [],
             "max_duration_ms": max(report["duration_ms"] for report in reports),
@@ -548,11 +966,21 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     paths = cfg.get("paths", ["src/"])
     excluded = cfg.get("exclude", ["tests/", "migrations/"])
     timeout = int(cfg.get("timeout_s", 600))
-    threshold = float(cfg.get("threshold", 70))
+    threshold = float(cfg.get("score_target", cfg.get("threshold", 70)))
     base = str(cfg.get("base", "origin/main"))
     all_files = bool(cfg.get("all", False))
     shard_index = cfg.get("shard_index")
     shard_count = cfg.get("shard_count")
+    test_mappings = cfg.get("test_mappings", {})
+    default_chunk_lines = int(cfg.get("default_chunk_lines", 60))
+    chunk_lines = cfg.get("chunk_lines", {})
+    manifest = load_partition_manifest(Path(cfg["manifest"])) if cfg.get("manifest") else None
+    if manifest is not None:
+        if manifest["shard_count"] != cfg.get("full_shards", manifest["shard_count"]):
+            return _error("unknown", "Mutation partition manifest shard count does not match configuration")
+        all_files = True
+        shard_index = manifest["shard_index"]
+        shard_count = manifest["shard_count"]
     rerun = _rerun(root, paths, timeout, threshold, base, all_files)
     if not _has_mutmut():
         return _error(
@@ -568,6 +996,8 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     revision = revision_result.stdout.strip()
     if revision_result.returncode or not re.fullmatch(r"[0-9a-f]{40}", revision):
         return _error("unknown", "Cannot resolve tested revision", rerun_command=rerun)
+    if manifest is not None and manifest["revision"] != revision:
+        return _error("unknown", "Mutation partition manifest revision is stale", rerun_command=rerun)
 
     selection = (
         {"status": "completed", "merge_base": None, "files": _get_all_py_files(root, paths), "deleted": []}
@@ -581,12 +1011,17 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
         if not all_files or not isinstance(shard_index, int) or not isinstance(shard_count, int):
             return _error("unknown", "Sharding requires --all, --shard-index, and --shard-count")
         try:
-            line_ranges = _shard_ranges(root, files, shard_index, shard_count)
+            line_ranges = _shard_ranges(
+                root, files, shard_index, shard_count,
+                default_chunk_lines, chunk_lines, test_mappings,
+            )
             files = sorted({item["file"] for item in line_ranges})
+            if manifest is not None and (manifest["files"] != files or manifest["ranges"] != line_ranges):
+                return _error("unknown", "Mutation partition manifest does not match recomputed scope")
         except (OSError, ValueError) as exc:
             return _error("unknown", "Cannot choose mutation partition: " + str(exc))
     common = {
-        "schema_version": "1",
+        "schema_version": "2",
         "revision": revision,
         "merge_base": selection["merge_base"],
         "selection": "shard" if shard_index is not None else ("all" if all_files else "changed"),
@@ -601,24 +1036,42 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
             "status": "not_applicable", "message": "No existing implementation files changed",
             "score": None, "passed": True, **common,
         }
-    mapping = _mapped_tests(root, files)
+    mapping = _mapped_tests(root, files, test_mappings)
     unmapped = [file for file, tests in mapping.items() if not tests]
     if unmapped:
         return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped), **common)
     tests = sorted({test for mapped in mapping.values() for test in mapped})
+    source_scope = {
+        file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
+        for file in files
+    }
+    evidence_identity = {
+        "policy_digest": _canonical_digest({
+            key: cfg.get(key) for key in (
+                "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
+                "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
+            )
+        }),
+        "source_scope_digest": _canonical_digest(source_scope),
+        "test_mapping_digest": _canonical_digest(mapping),
+        "line_range_digest": _canonical_digest(line_ranges or [
+            {"file": file, "start": 1, "end": len((Path(root) / file).read_text(encoding="utf-8").splitlines())}
+            for file in files
+        ]),
+    }
     result = (
         _run_shard_modules(root, mapping, line_ranges, timeout)
-        if line_ranges else _run_mutmut(root, files, tests, timeout)
+        if line_ranges else _run_mutmut(root, files, tests, timeout, test_mapping=mapping)
     )
     if result["status"] != "completed":
         return {**result, **common}
-    score = compute_score(*(result[state] for state in _STATES[:5]))
-    if score is None:
+    policy = evaluate_policy(result, cfg)
+    if policy["score"] is None:
         if line_ranges:
-            return {**result, "score": None, "threshold": threshold, "passed": True, **common}
+            return {**result, **policy, **evidence_identity, "threshold": threshold, "passed": True, **common}
         evidence = {key: value for key, value in result.items() if key != "status"}
         return _error("unknown", "mutmut reported zero scored mutants", **evidence, **common)
-    return {**result, "score": round(score, 1), "threshold": threshold, "passed": score >= threshold, **common}
+    return {**result, **policy, **evidence_identity, "threshold": threshold, **common}
 
 
 def format_report(report: dict) -> str:
@@ -632,8 +1085,12 @@ def format_report(report: dict) -> str:
             *[f"**{state.title()}:** {report[state]}" for state in _STATES],
             f"**Threshold:** {report['threshold']}%",
         ])
-        if report["survivors"]:
-            lines.extend(["", "## Surviving Mutants", *[f"- {item}" for item in report["survivors"]]])
+        preview = report.get("survivor_preview", [])
+        if preview:
+            lines.extend([
+                "", "## Surviving Mutants",
+                *[f"- {item['file']}:{item['line']} {item['before']} -> {item['after']} (`{item['rerun_command']}`)" for item in preview],
+            ])
     if report.get("rerun_command"):
         lines.extend(["", f"**Rerun:** `{report['rerun_command']}`"])
     return "\n".join(lines) + "\n"
@@ -642,17 +1099,39 @@ def format_report(report: dict) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle mutation testing")
     parser.add_argument("--root", default=".")
-    parser.add_argument("--paths", default="src/")
-    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--paths")
+    parser.add_argument("--base")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--timeout", type=int, default=600)
-    parser.add_argument("--threshold", type=float, default=70)
+    parser.add_argument("--timeout", type=int)
+    parser.add_argument("--threshold", type=float)
     parser.add_argument("--shard-index", type=int)
     parser.add_argument("--shard-count", type=int)
+    parser.add_argument("--manifest", help="Digest-bound full-run partition manifest")
+    parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    paths = args.paths.split(",")
+    from fettle.config import load_config
+
+    mutation = load_config(args.root)["mutation"]
+    if args.prepare_manifests:
+        try:
+            paths = write_partition_manifests(args.root, mutation, Path(args.prepare_manifests))
+            report = {
+                "status": "completed", "passed": True, "shard_count": len(paths),
+                "matrix": {"shard": list(range(len(paths)))},
+            }
+        except (OSError, ValueError) as exc:
+            report = _error("unknown", f"Cannot prepare mutation manifests: {exc}")
+        print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0 if report["status"] == "completed" else 2
+    paths = args.paths.split(",") if args.paths else mutation["paths"]
+    excluded = mutation["exclude"]
+    threshold = args.threshold if args.threshold is not None else mutation["score_target"]
+    timeout = args.timeout if args.timeout is not None else (
+        mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
+    )
+    base = args.base or mutation["base"]
     if args.aggregate:
         if args.shard_count is None or args.shard_count < 1:
             report = _error("unknown", "--aggregate requires a positive --shard-count")
@@ -663,12 +1142,17 @@ def main() -> int:
             except (OSError, json.JSONDecodeError) as exc:
                 report = _error("unknown", f"Cannot read shard reports: {exc}")
             else:
-                report = aggregate_shards(args.root, reports, paths, ["tests/", "migrations/"], args.shard_count, args.threshold)
+                report = aggregate_shards(
+                    args.root, reports, paths, excluded, args.shard_count, threshold,
+                    mutation["test_mappings"],
+                )
     else:
         report = run_mutation_test(args.root, {
-            "paths": paths, "base": args.base, "all": args.all,
-            "timeout_s": args.timeout, "threshold": args.threshold,
+            **mutation,
+            "paths": paths, "exclude": excluded, "base": base, "all": args.all,
+            "timeout_s": timeout, "score_target": threshold,
             "shard_index": args.shard_index, "shard_count": args.shard_count,
+            "manifest": args.manifest,
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))

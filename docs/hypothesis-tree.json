@@ -3,10 +3,10 @@
     "objective": "Complete full mutation evidence within 35 minutes without weakening mutation scope",
     "metric": "successful full-run duration_ms <= 2100000 with valid nonzero outcomes",
     "created": "2026-08-07",
-    "best_score": null,
-    "best_node": null,
+    "best_score": 1792060,
+    "best_node": "2",
     "total_nodes": 4,
-    "merged_nodes": 0,
+    "merged_nodes": 1,
     "pruned_nodes": 1,
     "convergence_counter": 1
   },
@@ -15,7 +15,7 @@
       "id": "ROOT",
       "parent": null,
       "hypothesis": "Complete full mutation evidence within 35 minutes without weakening mutation scope",
-      "status": "active",
+      "status": "done",
       "children": [
         "1",
         "2",
@@ -48,27 +48,32 @@
       "id": "2",
       "parent": "ROOT",
       "hypothesis": "Shard the complete production file set into independently bounded reports and aggregate outcomes; falsified if aggregation cannot prove complete, non-overlapping scope",
-      "status": "running",
+      "status": "merged",
       "children": [],
       "evidence": {
         "diagnostic_run_id": "31197332468",
-        "held_out_run_id": "31209029718",
-        "revision": "bbfcdb42fed3f2e3fc956f8a8d63b9f500c83344",
-        "result": "tool_error",
-        "message": "Eleven retained shards timed out after 1800s; shard 8 exited 143 before artifact upload; aggregation rejected the incomplete set",
-        "candidate_shard_count": 48
+        "failed_held_out_run_id": "31209029718",
+        "successful_held_out_run_id": "31246843926",
+        "revision": "e3706df3ca4f788482e6e58388eb5cbfab23e6a7",
+        "result": "completed",
+        "duration_ms": 1792060,
+        "shard_count": 240,
+        "module_count": 154,
+        "source_line_count": 30441,
+        "untested": 0,
+        "message": "All shards completed and aggregation proved exact non-overlapping production scope"
       },
-      "insight": "File-byte balancing preserves deterministic coverage but does not estimate mutant runtime; refine to 48 independently bounded partitions while retaining exact fail-closed aggregation.",
+      "insight": "Test-cost-weighted line partitions plus measured hotspot chunking can bound full mutation without weakening scope; aggregate report integrity, not job color, is the acceptance authority.",
       "constraints": []
     },
     "3": {
       "id": "3",
       "parent": "ROOT",
       "hypothesis": "Use coverage contexts to select tests per mutant with full-suite survivor confirmation; falsified if contexts are incomplete or runtime remains above 2,100,000 ms",
-      "status": "pending",
+      "status": "cancelled",
       "children": [],
       "evidence": null,
-      "insight": null,
+      "insight": "The objective was met without adding coverage-context selection complexity.",
       "constraints": []
     }
   }

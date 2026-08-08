@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import json
+from pathlib import Path
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(PLUGIN_DIR))
@@ -224,3 +226,82 @@ def test_integration_run_ci_end_to_end():
     assert ci.run_ci(clean)["ok"] is True
     leaky = _git_repo({"bad.py": f'p = "/Users/someone/other/x.py"\nk = "{SYNTH_AWS}"\n'})
     assert ci.run_ci(leaky)["ok"] is False
+
+
+def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "timeout-minutes: 12" in workflow
+    assert "prepare:" in workflow
+    assert "fromJSON(needs.prepare.outputs.matrix)" in workflow
+    assert "--manifest" in workflow
+    assert "shard: [0, 1," not in workflow
+    assert "--paths fettle/" not in workflow
+    assert "--shard-count 240" not in workflow
+    assert "if: always()" in workflow
+
+
+def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
+    from fettle.mutation_test import load_partition_manifest, write_partition_manifests
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/a.py").write_text("x = 1\n")
+    (tmp_path / "tests/test_a.py").write_text("import src.a\n")
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    paths = write_partition_manifests(
+        str(tmp_path), {"paths": ["src/"], "full_shards": 1, "default_chunk_lines": 60},
+        tmp_path / "manifests",
+    )
+    manifest = load_partition_manifest(paths[0])
+    assert manifest["ranges"] == [{"file": "src/a.py", "start": 1, "end": 1}]
+
+    value = json.loads(paths[0].read_text())
+    value["ranges"][0]["end"] = 2
+    paths[0].write_text(json.dumps(value))
+    try:
+        load_partition_manifest(paths[0])
+    except ValueError as exc:
+        assert "digest" in str(exc)
+    else:
+        raise AssertionError("tampered manifest was accepted")
+
+
+def test_partition_manifest_must_match_configured_shard_count(tmp_path, monkeypatch):
+    from fettle.mutation_test import run_mutation_test, write_partition_manifests
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/a.py").write_text("x = 1\n")
+    (tmp_path / "tests/test_a.py").write_text("import src.a\n")
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    manifest = write_partition_manifests(
+        str(tmp_path), {"paths": ["src/"], "full_shards": 1}, tmp_path / "manifests",
+    )[0]
+
+    result = run_mutation_test(str(tmp_path), {
+        "paths": ["src/"], "all": True, "full_shards": 2, "manifest": str(manifest),
+    })
+
+    assert result["status"] == "unknown"
+    assert "shard count" in result["message"]
+
+
+def test_partition_manifest_files_must_match_ranges(tmp_path):
+    from fettle.mutation_test import load_partition_manifest
+
+    payload = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/b.py", "start": 1, "end": 1}],
+    }
+    from fettle.mutation_test import _canonical_digest
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({**payload, "digest": _canonical_digest(payload)}))
+
+    try:
+        load_partition_manifest(path)
+    except ValueError as exc:
+        assert "files" in str(exc)
+    else:
+        raise AssertionError("inconsistent manifest was accepted")

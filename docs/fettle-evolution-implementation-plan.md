@@ -326,8 +326,9 @@ Implementation slices:
    actionable survivor identifiers and files.
 6. Run changed-module mutation as advisory with a ten-minute hard bound. Run
    full mutation nightly with retained artifacts.
-7. Establish a baseline only after three stable runs, then ratchet without
-   allowing a lower score unless P35 records an override.
+7. Establish a baseline only after independent full runs satisfy the measured
+   reproducibility contract, then ratchet without allowing a lower score unless
+   P35 records an override.
 
 Acceptance:
 
@@ -350,8 +351,8 @@ a seeded surviving-mutant fixture, and advisory changed/full CI lanes are
 implemented. Retained runs `31183880854`, `31183880954`, and `31183881105`
 are invalid: every report is `tool_error` because the mutation environment
 omitted the PyYAML test dependency. The workflow now installs the development
-dependencies, and a strict evaluator requires three equivalent successful full
-runs before establishing the baseline and ratchet. Replacement runs
+dependencies, and a strict evaluator requires reproducible successful full runs
+before establishing the baseline and ratchet. Replacement runs
 `31186179762`, `31186179925`, and `31186180110` also remain invalid because the
 baseline test suite requires Semgrep, which the development extra omitted. The
 workflow now installs all runtime tools. P34 has not graduated.
@@ -377,6 +378,14 @@ balancing is still too coarse: all eleven retained workers reached the
 and the aggregator correctly rejected the incomplete set. The next bounded
 experiment uses 48 deterministic partitions without changing scope, timeout,
 or aggregation integrity.
+
+Runtime note 2026-08-08: revision `e3706df` uses 240 test-cost-weighted line
+partitions and 20-line chunks for the measured `fettle/quality_scan.py` hotspot.
+Run `31246843926` completed all workers and aggregation in 1,792,060 ms, covering
+154 production modules and 30,441 source lines exactly once with zero untested
+mutants. Its 43.3 percent diagnostic score is not yet a baseline; canonical
+survivor identity must be implemented before independent calibration runs by the
+[mutation quality plan](mutation-quality-implementation-plan.md).
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 
@@ -1943,8 +1952,9 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
-- P33–P43 status: P33 and P35 are complete; P34 is implemented but awaits three stable
-  retained CI runs; P43 has two of five planned models but has not met its
+- P33–P43 status: P33 and P35 are complete; P34 has one accepted full retained
+  CI run but awaits measured reproducibility and actionability evidence; P43 has
+  two of five planned models but has not met its
   completion contract; P36–P42 remain proposed or evidence-gated.
   UX/BDD additions are recorded in `docs/polyglot-governance.ux-spec.md`.
 - P44–P51 status: P44 is complete. Architecture, UX/BDD, and implementation
