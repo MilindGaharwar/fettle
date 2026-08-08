@@ -30,6 +30,7 @@ _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + 
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
 _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
 _SHARD_LINES = 60
+_SHARD_LINES_BY_FILE = {"fettle/quality_scan.py": 20}
 _SHARED_TESTS = {
     "fettle/__main__.py": ["tests/test_cli.py"],
     "fettle/agents/claude_code.py": ["tests/test_agents.py"],
@@ -124,8 +125,9 @@ def _shard_ranges(root: str, files: list[str], index: int, count: int) -> list[d
     chunks: list[tuple[dict, int]] = []
     for file in files:
         line_count = len((Path(root) / file).read_text(encoding="utf-8").splitlines())
-        for start in range(1, line_count + 1, _SHARD_LINES):
-            chunk = {"file": file, "start": start, "end": min(start + _SHARD_LINES - 1, line_count)}
+        chunk_size = _SHARD_LINES_BY_FILE.get(file, _SHARD_LINES)
+        for start in range(1, line_count + 1, chunk_size):
+            chunk = {"file": file, "start": start, "end": min(start + chunk_size - 1, line_count)}
             chunks.append((chunk, (chunk["end"] - chunk["start"] + 1) * test_weights[file]))
     if len(chunks) < count:
         raise ValueError("shard count exceeds source range count")

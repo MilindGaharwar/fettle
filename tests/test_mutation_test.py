@@ -96,6 +96,21 @@ def test_line_ranges_split_large_files_and_cover_every_line_once(tmp_path):
     assert {file for file, _ in covered} == {"src/a.py", "src/b.py"}
 
 
+def test_line_ranges_use_smaller_chunks_for_measured_hot_module(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/quality_scan.py").write_text("\n".join(["x = 1"] * 61))
+    (tmp_path / "tests/test_quality_scan.py").write_text("import fettle.quality_scan\n")
+
+    ranges = [item for index in range(4) for item in _shard_ranges(
+        str(tmp_path), ["fettle/quality_scan.py"], index, 4
+    )]
+
+    assert [(item["start"], item["end"]) for item in sorted(ranges, key=lambda item: item["start"])] == [
+        (1, 20), (21, 40), (41, 60), (61, 61)
+    ]
+
+
 def test_patch_for_ranges_marks_only_selected_lines_as_added(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src/a.py").write_text("one\ntwo\nthree\n")
