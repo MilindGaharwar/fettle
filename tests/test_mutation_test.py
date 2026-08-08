@@ -17,6 +17,7 @@ from fettle.mutation_test import (
     _parse_result_ids,
     _collect_range_results,
     _run_mutmut,
+    _run_shard_modules,
     evaluate_stability,
     compute_score,
     main,
@@ -189,6 +190,32 @@ def test_engine_rejects_empty_tests_without_running_mutmut():
 
     assert result["status"] == "unknown"
     run.assert_not_called()
+
+
+def test_shard_runs_each_module_with_only_its_mapped_tests():
+    ranges = [
+        {"file": "src/a.py", "start": 1, "end": 10},
+        {"file": "src/b.py", "start": 1, "end": 5},
+    ]
+    engine = {
+        "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
+        "run_exit_code": 2, "results_exit_code": 0, "killed": 2, "survived": 1,
+        "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
+        "survivors": ["3"], "stderr": "", "duration_ms": 10,
+    }
+    with (
+        patch("fettle.mutation_test._run_mutmut", side_effect=[engine, engine]) as run,
+        patch("fettle.mutation_test.time.monotonic", side_effect=[10.0, 11.0, 12.0, 13.0]),
+    ):
+        result = _run_shard_modules(
+            ".", {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]}, ranges, 600
+        )
+
+    assert run.call_args_list[0].args == (".", ["src/a.py"], ["tests/test_a.py"], 599, [ranges[0]])
+    assert run.call_args_list[1].args == (".", ["src/b.py"], ["tests/test_b.py"], 598, [ranges[1]])
+    assert result["killed"] == 4
+    assert result["survived"] == 2
+    assert result["tests_run"] == ["tests/test_a.py", "tests/test_b.py"]
 
 
 def test_fatal_run_exit_is_bounded_tool_error():

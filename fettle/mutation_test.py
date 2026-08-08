@@ -29,7 +29,7 @@ _CACHE_STATES = {
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
 _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
-_SHARD_LINES = 125
+_SHARD_LINES = 60
 _SHARED_TESTS = {
     "fettle/__main__.py": ["tests/test_cli.py"],
     "fettle/agents/claude_code.py": ["tests/test_agents.py"],
@@ -113,22 +113,28 @@ def _shard_files(root: str, files: list[str], index: int, count: int) -> list[st
 
 
 def _shard_ranges(root: str, files: list[str], index: int, count: int) -> list[dict]:
-    """Partition source lines exactly once, splitting modules too large for one worker."""
+    """Partition source lines exactly once, balancing mapped-test execution cost."""
     if count < 1 or not 0 <= index < count:
         raise ValueError("shard index must be within shard count")
-    chunks: list[dict] = []
+    mapping = _mapped_tests(root, files)
+    test_weights = {
+        file: max(1, sum((Path(root) / test).stat().st_size for test in tests))
+        for file, tests in mapping.items()
+    }
+    chunks: list[tuple[dict, int]] = []
     for file in files:
         line_count = len((Path(root) / file).read_text(encoding="utf-8").splitlines())
         for start in range(1, line_count + 1, _SHARD_LINES):
-            chunks.append({"file": file, "start": start, "end": min(start + _SHARD_LINES - 1, line_count)})
+            chunk = {"file": file, "start": start, "end": min(start + _SHARD_LINES - 1, line_count)}
+            chunks.append((chunk, (chunk["end"] - chunk["start"] + 1) * test_weights[file]))
     if len(chunks) < count:
         raise ValueError("shard count exceeds source range count")
     shards: list[list[dict]] = [[] for _ in range(count)]
-    sizes = [0] * count
-    for chunk in sorted(chunks, key=lambda item: (-(item["end"] - item["start"] + 1), item["file"], item["start"])):
-        target = min(range(count), key=lambda item: (sizes[item], item))
+    weights = [0] * count
+    for chunk, weight in sorted(chunks, key=lambda item: (-item[1], item[0]["file"], item[0]["start"])):
+        target = min(range(count), key=lambda item: (weights[item], item))
         shards[target].append(chunk)
-        sizes[target] += chunk["end"] - chunk["start"] + 1
+        weights[target] += weight
     return sorted(shards[index], key=lambda item: (item["file"], item["start"]))
 
 
@@ -328,6 +334,35 @@ def _run_mutmut(root: str, files: list[str], tests: list[str], timeout: int, lin
         **{state: len(ids[state]) for state in _STATES},
         "survivors": ids["survived"][:20],
         "stderr": _bounded(run.stderr),
+        "duration_ms": round((time.monotonic() - started) * 1000),
+    }
+
+
+def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: list[dict], timeout: int) -> dict:
+    """Run each module with only its mapped tests, within one shard deadline."""
+    started = time.monotonic()
+    results: list[dict] = []
+    for file in sorted(mapping):
+        remaining = timeout - int(time.monotonic() - started)
+        if remaining < 1:
+            return _error("tool_error", f"Mutation shard timed out after {timeout}s")
+        ranges = [item for item in line_ranges if item["file"] == file]
+        result = _run_mutmut(root, [file], mapping[file], remaining, ranges)
+        if result["status"] != "completed":
+            return result
+        results.append(result)
+    counts = {state: sum(result[state] for result in results) for state in _STATES}
+    return {
+        "status": "completed",
+        "engine_version": MUTMUT_VERSION,
+        "test_runner": _TEST_RUNNER,
+        "tests_run": sorted({test for tests in mapping.values() for test in tests}),
+        "line_ranges": line_ranges,
+        "run_exit_code": 0,
+        "results_exit_code": 0,
+        **counts,
+        "survivors": [item for result in results for item in result.get("survivors", [])][:20],
+        "stderr": "\n".join(result.get("stderr", "") for result in results if result.get("stderr")),
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
 
@@ -569,7 +604,10 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     if unmapped:
         return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped), **common)
     tests = sorted({test for mapped in mapping.values() for test in mapped})
-    result = _run_mutmut(root, files, tests, timeout, line_ranges)
+    result = (
+        _run_shard_modules(root, mapping, line_ranges, timeout)
+        if line_ranges else _run_mutmut(root, files, tests, timeout)
+    )
     if result["status"] != "completed":
         return {**result, **common}
     score = compute_score(*(result[state] for state in _STATES[:5]))
