@@ -1194,6 +1194,29 @@ def test_preflight_selects_complete_configured_scope(tmp_path):
         str(tmp_path), ["src/app.py"], ["tests/test_app.py"],
         {"src/app.py": ["tests/test_app.py"]}, 90,
     )
+    assert not (tmp_path / ".mutmut-cache").exists()
+
+
+def test_preflight_clears_native_cache_before_generation(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("VALUE = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    cache = tmp_path / ".mutmut-cache"
+    cache.write_text("stale")
+    with (
+        patch("fettle.mutation_test._has_mutmut", return_value=True),
+        patch("fettle.mutation_test._preflight_mutmut", return_value={
+            "status": "completed", "passed": True,
+        }) as preflight,
+    ):
+        result = run_mutation_preflight(str(tmp_path), {
+            "paths": ["src/"], "test_mappings": {"src/app.py": ["tests/test_app.py"]},
+        })
+
+    assert result["status"] == "completed"
+    assert not cache.exists()
+    preflight.assert_called_once()
 
 
 def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):

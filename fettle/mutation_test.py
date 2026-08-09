@@ -1577,6 +1577,10 @@ def run_mutation_preflight(root: str, cfg: dict) -> dict:
             "tool_error",
             f"mutmut not found. Install: python -m pip install mutmut=={MUTMUT_VERSION}",
         )
+    try:
+        (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
+    except OSError as exc:
+        return _error("tool_error", f"Cannot clear native mutation cache: {exc}")
     files = [
         path for path in _get_all_py_files(root, paths)
         if not any(path.startswith(item) for item in excluded)
