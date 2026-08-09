@@ -22,6 +22,7 @@ from fettle.mutation_test import (
     aggregate_shards,
     _get_all_py_files,
     _get_changed_py_files,
+    _find_replacement,
     _parse_result_ids,
     _collect_range_results,
     _canonical_mutant,
@@ -173,6 +174,26 @@ def test_canonical_identity_distinguishes_transformations_on_one_line(tmp_path):
     assert mutants[1]["after"] == "101"
 
 
+def test_canonical_identity_handles_mutmut_diff_that_is_not_parseable_python(tmp_path):
+    source = 'def translate(payload):\n    payload = {**payload, "tool_name": "Bash"}\n    return payload\n'
+    diff = (
+        "--- src/adapter.py\n+++ src/adapter.py\n@@ -1,3 +1,3 @@\n"
+        " def translate(payload):\n"
+        '-    payload = {**payload, "tool_name": "Bash"}\n'
+        '+    payload = {*payload, "tool_name": "Bash"}\n'
+        "     return payload\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/adapter.py", source, diff, "15", "survived", []
+    )
+
+    assert mutant["symbol"] == "translate"
+    assert mutant["operator"] == "textual"
+    assert mutant["before"] == 'payload = {**payload, "tool_name": "Bash"}'
+    assert mutant["after"] == 'payload = {*payload, "tool_name": "Bash"}'
+
+
 @pytest.mark.parametrize(
     "diff",
     [
@@ -258,18 +279,58 @@ def test_collect_records_rejects_detail_outside_selected_scope(tmp_path):
     assert "selected scope" in error["message"]
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "def eligible_for_discount(total):\n    return total > 100\n",
-        "def eligible_for_discount(total):\n    return total >= 100\n    return total >= 100\n",
-    ],
-)
-def test_canonical_identity_rejects_missing_or_ambiguous_source_match(tmp_path, source):
+def test_canonical_identity_rejects_missing_source_match(tmp_path):
     diff = json.loads((FIXTURES / "mutmut-show.json").read_text())["records"][0]["diff"]
 
     with pytest.raises(ValueError, match="located uniquely"):
-        _canonical_mutant(str(tmp_path), "src/calculator.py", source, diff, "1", "survived", [])
+        _canonical_mutant(
+            str(tmp_path), "src/calculator.py",
+            "def eligible_for_discount(total):\n    return total > 100\n",
+            diff, "1", "survived", [],
+        )
+
+
+def test_replacement_rejects_ambiguous_matches_after_hunk_disambiguation():
+    with pytest.raises(ValueError, match="located uniquely"):
+        _find_replacement("value\nother\nvalue\n", ["value"], ["changed"], preferred_line=2)
+
+
+def test_canonical_identity_uses_hunk_location_to_disambiguate_repeated_text(tmp_path):
+    source = "def first():\n    return None\n\ndef second():\n    return None\n"
+    diff = (
+        "--- src/repeated.py\n+++ src/repeated.py\n@@ -4,2 +4,2 @@\n"
+        " def second():\n-    return None\n+    return 1\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/repeated.py", source, diff, "1", "survived", []
+    )
+
+    assert mutant["symbol"] == "second"
+    assert mutant["line"] == 5
+
+
+def test_canonical_identity_distinguishes_repeated_identical_ast_nodes(tmp_path):
+    source = 'def values():\n    return {"first", "second", "third"}\n'
+    first_diff = (
+        "--- src/repeated.py\n+++ src/repeated.py\n@@ -1,2 +1,2 @@\n"
+        " def values():\n-    return {\"first\", \"second\", \"third\"}\n"
+        "+    return {\"XXfirstXX\", \"second\", \"third\"}\n"
+    )
+    second_diff = (
+        "--- src/repeated.py\n+++ src/repeated.py\n@@ -1,2 +1,2 @@\n"
+        " def values():\n-    return {\"first\", \"second\", \"third\"}\n"
+        "+    return {\"first\", \"XXsecondXX\", \"third\"}\n"
+    )
+
+    first = _canonical_mutant(
+        str(tmp_path), "src/repeated.py", source, first_diff, "1", "survived", []
+    )
+    second = _canonical_mutant(
+        str(tmp_path), "src/repeated.py", source, second_diff, "2", "survived", []
+    )
+
+    assert first["fingerprint"] != second["fingerprint"]
 
 
 def test_canonical_identity_normalizes_path_and_unicode(tmp_path):
@@ -567,16 +628,18 @@ def test_native_cache_rejects_mixed_identity_and_sqlite_writes(tmp_path):
     assert not native.exists()
 
 
-def test_full_mutation_bypasses_native_cache_restore(monkeypatch):
+def test_full_mutation_bypasses_and_removes_native_cache(monkeypatch, tmp_path):
+    (tmp_path / ".mutmut-cache").write_bytes(b"stale")
     selection = {"status": "completed", "merge_base": None, "files": [] , "deleted": []}
     monkeypatch.setattr("fettle.mutation_test._has_mutmut", lambda: True)
     monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
     monkeypatch.setattr("fettle.mutation_test._get_all_py_files", lambda *args: selection["files"])
     restore = monkeypatch.setattr("fettle.mutation_test.restore_mutation_native_cache", lambda *args: pytest.fail("restored"))
 
-    result = run_mutation_test(".", {"paths": ["src/"], "all": True})
+    result = run_mutation_test(str(tmp_path), {"paths": ["src/"], "all": True})
 
     assert restore is None
+    assert not (tmp_path / ".mutmut-cache").exists()
     assert result["status"] == "not_applicable"
 
 
@@ -923,7 +986,7 @@ def test_engine_rejects_empty_tests_without_running_mutmut():
     run.assert_not_called()
 
 
-def test_shard_runs_each_module_with_only_its_mapped_tests():
+def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
     ranges = [
         {"file": "src/a.py", "start": 1, "end": 10},
         {"file": "src/b.py", "start": 1, "end": 5},
@@ -934,19 +997,27 @@ def test_shard_runs_each_module_with_only_its_mapped_tests():
         "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
         "survivors": ["3"], "stderr": "", "duration_ms": 10,
     }
+    native = tmp_path / ".mutmut-cache"
+    native.write_bytes(b"stale")
+
+    def run_module(*_args):
+        assert not native.exists()
+        native.write_bytes(b"module state")
+        return engine
+
     with (
-        patch("fettle.mutation_test._run_mutmut", side_effect=[engine, engine]) as run,
+        patch("fettle.mutation_test._run_mutmut", side_effect=run_module) as run,
         patch("fettle.mutation_test.time.monotonic", side_effect=[10.0, 11.0, 12.0, 13.0]),
     ):
         result = _run_shard_modules(
-            ".", {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]}, ranges, 600
+            str(tmp_path), {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]}, ranges, 600
         )
 
     assert run.call_args_list[0].args == (
-        ".", ["src/a.py"], ["tests/test_a.py"], 599, [ranges[0]], {"src/a.py": ["tests/test_a.py"]},
+        str(tmp_path), ["src/a.py"], ["tests/test_a.py"], 599, [ranges[0]], {"src/a.py": ["tests/test_a.py"]},
     )
     assert run.call_args_list[1].args == (
-        ".", ["src/b.py"], ["tests/test_b.py"], 598, [ranges[1]], {"src/b.py": ["tests/test_b.py"]},
+        str(tmp_path), ["src/b.py"], ["tests/test_b.py"], 598, [ranges[1]], {"src/b.py": ["tests/test_b.py"]},
     )
     assert result["killed"] == 4
     assert result["survived"] == 2

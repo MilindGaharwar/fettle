@@ -267,12 +267,20 @@ def _parse_show_all(output: str, expected_ids: set[str], max_bytes: int = _MAX_S
     return records
 
 
-def _find_replacement(source: str, removed: list[str], added: list[str]) -> tuple[str, int]:
+def _find_replacement(
+    source: str,
+    removed: list[str],
+    added: list[str],
+    preferred_line: int | None = None,
+) -> tuple[str, int]:
     source_lines = source.splitlines()
     matches = [
         index for index in range(len(source_lines) - len(removed) + 1)
         if source_lines[index:index + len(removed)] == removed
     ]
+    if len(matches) > 1 and preferred_line is not None:
+        distance = min(abs(index + 1 - preferred_line) for index in matches)
+        matches = [index for index in matches if abs(index + 1 - preferred_line) == distance]
     if len(matches) != 1:
         raise ValueError("mutation replacement cannot be located uniquely")
     index = matches[0]
@@ -682,11 +690,46 @@ def _canonical_mutant(
     normalized_source = unicodedata.normalize("NFC", source)
     normalized_removed = [unicodedata.normalize("NFC", line) for line in removed]
     normalized_added = [unicodedata.normalize("NFC", line) for line in added]
-    mutated_source, line = _find_replacement(normalized_source, normalized_removed, normalized_added)
+    hunk = re.match(r"@@ -(\d+)", diff.splitlines()[2])
+    mutated_source, line = _find_replacement(
+        normalized_source, normalized_removed, normalized_added,
+        int(hunk.group(1)) if hunk else None,
+    )
     try:
-        before_tree, after_tree = ast.parse(normalized_source), ast.parse(mutated_source)
+        before_tree = ast.parse(normalized_source)
+        after_tree = ast.parse(mutated_source)
     except SyntaxError as exc:
-        raise ValueError("mutation detail does not produce valid Python") from exc
+        if not (
+            len(normalized_removed) == len(normalized_added) == 1
+            and normalized_removed[0].count("{**") == 1
+            and normalized_added[0] == normalized_removed[0].replace("{**", "{*", 1)
+        ):
+            raise ValueError("mutation detail does not produce valid Python") from exc
+        before_symbol = _enclosing_symbol(before_tree, line)
+        before = normalized_removed[0].strip()
+        after = normalized_added[0].strip()
+        identity = json.dumps(
+            ["v1", canonical_file, _symbol_name(before_symbol), ["textual"], "textual", before, after],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return {
+            "fingerprint_version": "1",
+            "fingerprint": _fingerprint_digest(identity),
+            "source_context_digest": _canonical_digest(
+                [canonical_file, _symbol_name(before_symbol), ast.dump(before_symbol, include_attributes=False)]
+            ),
+            "engine_id": engine_id,
+            "state": state,
+            "file": canonical_file,
+            "line": line,
+            "symbol": _symbol_name(before_symbol),
+            "operator": "textual",
+            "before": before,
+            "after": after,
+            "mapped_tests": sorted(set(mapped_tests)),
+            "rerun_command": shlex.join(["mutmut", "run", engine_id]),
+        }
     before_symbol = _enclosing_symbol(before_tree, line)
     after_symbol = _enclosing_symbol(after_tree, line)
     if _symbol_name(before_symbol) != _symbol_name(after_symbol):
@@ -699,9 +742,23 @@ def _canonical_mutant(
     operator = f"{type(old_node).__name__}->{type(new_node).__name__}"
     if type(old_node) is type(new_node):
         operator = type(old_node).__name__
+    old_dump = ast.dump(old_node, include_attributes=False)
+    occurrences = sorted(
+        (
+            (node.lineno, node.col_offset)
+            for node in ast.walk(before_symbol)
+            if hasattr(node, "lineno") and ast.dump(node, include_attributes=False) == old_dump
+        ),
+    )
+    occurrence = occurrences.index((old_node.lineno, old_node.col_offset)) if len(occurrences) > 1 else None
+    identity_parts = [
+        "v1", canonical_file, _symbol_name(before_symbol), structural_path, operator,
+        old_dump, ast.dump(new_node, include_attributes=False),
+    ]
+    if occurrence is not None:
+        identity_parts.append(occurrence)
     identity = json.dumps(
-        ["v1", canonical_file, _symbol_name(before_symbol), structural_path, operator,
-         ast.dump(old_node, include_attributes=False), ast.dump(new_node, include_attributes=False)],
+        identity_parts,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -985,6 +1042,10 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
         remaining = timeout - int(time.monotonic() - started)
         if remaining < 1:
             return _error("tool_error", f"Mutation shard timed out after {timeout}s")
+        try:
+            (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
+        except OSError as exc:
+            return _error("tool_error", f"Cannot isolate mutation module cache: {exc}")
         ranges = [item for item in line_ranges if item["file"] == file]
         result = _run_mutmut(root, [file], mapping[file], remaining, ranges, {file: mapping[file]})
         if result["status"] != "completed":
@@ -1283,6 +1344,11 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
         return _error("unknown", "Cannot resolve tested revision", rerun_command=rerun)
     if manifest is not None and manifest["revision"] != revision:
         return _error("unknown", "Mutation partition manifest revision is stale", rerun_command=rerun)
+    if all_files:
+        try:
+            (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
+        except OSError as exc:
+            return _error("tool_error", f"Cannot clear native mutation cache: {exc}", rerun_command=rerun)
 
     selection = (
         {"status": "completed", "merge_base": None, "files": _get_all_py_files(root, paths), "deleted": []}
