@@ -1016,6 +1016,7 @@ def _preflight_mutmut(
     tests: list[str],
     test_mapping: dict[str, list[str]],
     timeout: int,
+    line_ranges: list[dict] | None = None,
 ) -> dict:
     """Generate and canonicalize mutmut's complete detail corpus without project tests."""
     if not files or not tests:
@@ -1034,21 +1035,34 @@ def _preflight_mutmut(
             version_exit_code=version.returncode,
             stderr=_bounded(version.stderr),
         )
+    patch_path: str | None = None
     try:
-        run = _run([
+        argv = [
             "mutmut", "run", "--paths-to-mutate=" + ",".join(files),
             "--runner", "python -c pass", "--no-progress", "--simple-output",
-        ], root, timeout)
+        ]
+        if line_ranges:
+            with tempfile.NamedTemporaryFile("w", suffix=".patch", dir=root, delete=False) as patch:
+                patch.write(_patch_for_ranges(root, line_ranges))
+                patch_path = patch.name
+            argv.extend(["--use-patch-file", patch_path])
+        run = _run(argv, root, timeout)
     except subprocess.TimeoutExpired:
         return _error("tool_error", f"Mutation preflight timed out after {timeout}s", engine_version=actual)
     except OSError as exc:
         return _error("tool_error", f"Cannot execute mutmut preflight: {exc}", engine_version=actual)
+    finally:
+        if patch_path:
+            Path(patch_path).unlink(missing_ok=True)
     if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
         return _error(
             "tool_error", "mutmut preflight generation failed", engine_version=actual,
             run_exit_code=run.returncode, stderr=_bounded(run.stderr or run.stdout),
         )
-    ids, error = _collect_results(root, actual, run.returncode)
+    ids, error = (
+        _collect_range_results(root, line_ranges, actual, run.returncode)
+        if line_ranges else _collect_results(root, actual, run.returncode)
+    )
     if error:
         return error
     assert ids is not None
@@ -1074,6 +1088,7 @@ def _preflight_mutmut(
         "collisions": 0,
         "files": sorted(files),
         "fingerprints": sorted(fingerprints),
+        **({"line_ranges": line_ranges} if line_ranges else {}),
     }
 
 
@@ -1260,6 +1275,7 @@ def aggregate_shards(
     shard_count: int,
     threshold: float,
     test_mappings: dict[str, list[str]] | None = None,
+    policy_config: dict | None = None,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -1336,11 +1352,34 @@ def aggregate_shards(
     score = compute_score(*(counts[state] for state in _STATES[:5]))
     if score is None:
         return _error("unknown", "Aggregated shards reported zero scored mutants")
-    records = [item for report in reports for item in report["non_killed"]]
+    records = [{**item} for report in reports for item in report["non_killed"]]
     fingerprints = [record["fingerprint"] for record in records]
     if len(fingerprints) != len(set(fingerprints)):
         return _error("unknown", "Aggregated mutant fingerprints are duplicated or collided")
+    for engine_id, record in enumerate(records, start=1):
+        record["engine_id"] = str(engine_id)
+        record["rerun_command"] = shlex.join(["mutmut", "run", str(engine_id)])
     survivors = [record["fingerprint"] for record in records if record["state"] == "survived"]
+    mapping = _mapped_tests(root, expected, test_mappings)
+    line_ranges = sorted(
+        (item for report in reports for item in report["line_ranges"]),
+        key=lambda item: (item["file"], item["start"]),
+    )
+    policy = policy_config or {"score_target": threshold}
+    evidence_identity = {
+        "policy_digest": _canonical_digest({
+            key: policy.get(key) for key in (
+                "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
+                "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
+            )
+        }),
+        "source_scope_digest": _canonical_digest({
+            file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
+            for file in expected
+        }),
+        "test_mapping_digest": _canonical_digest(mapping),
+        "line_range_digest": _canonical_digest(line_ranges),
+    }
     return {
         "schema_version": "2",
         "status": "completed",
@@ -1352,8 +1391,9 @@ def aggregate_shards(
         "engine_version": first["engine_version"],
         "test_runner": first["test_runner"],
         "tests_run": sorted({test for report in reports for test in report["tests_run"]}),
-        "line_ranges": sorted((item for report in reports for item in report["line_ranges"]), key=lambda item: (item["file"], item["start"])),
+        "line_ranges": line_ranges,
         "shard_count": shard_count,
+        **evidence_identity,
         **counts,
         "non_killed": records,
         "survivor_preview": [record for record in records if record["state"] == "survived"][:20],
@@ -1363,6 +1403,58 @@ def aggregate_shards(
         "passed": score >= threshold,
         "duration_ms": max(report["duration_ms"] for report in reports),
         "total_duration_ms": sum(report["duration_ms"] for report in reports),
+    }
+
+
+def aggregate_preflight_shards(
+    root: str,
+    reports: list[dict],
+    paths: list[str],
+    excluded: list[str],
+    shard_count: int,
+) -> dict:
+    """Accept a preflight corpus only when bounded shards exactly cover it once."""
+    if len(reports) != shard_count:
+        return _error("unknown", f"Preflight aggregation requires exactly {shard_count} shard reports")
+    reports = sorted(reports, key=lambda report: report.get("shard_index", -1))
+    if [report.get("shard_index") for report in reports] != list(range(shard_count)):
+        return _error("unknown", "Preflight shard indexes are incomplete or duplicated")
+    fingerprints: list[str] = []
+    tested_lines: list[tuple[str, int]] = []
+    for index, report in enumerate(reports):
+        if report.get("status") != "completed" or report.get("passed") is not True:
+            return _error("tool_error", f"Preflight shard {index} is not completed")
+        if report.get("engine_version") != MUTMUT_VERSION or report.get("shard_count") != shard_count:
+            return _error("unknown", f"Preflight shard {index} has inconsistent execution identity")
+        if report.get("generated") != report.get("canonicalized"):
+            return _error("unknown", f"Preflight shard {index} does not reconcile generated details")
+        shard_fingerprints = report.get("fingerprints")
+        ranges = report.get("line_ranges")
+        if not isinstance(shard_fingerprints, list) or not isinstance(ranges, list) or not ranges:
+            return _error("unknown", f"Preflight shard {index} has incomplete evidence")
+        fingerprints.extend(shard_fingerprints)
+        for item in ranges:
+            if not isinstance(item, dict) or set(item) != {"file", "start", "end"}:
+                return _error("unknown", f"Preflight shard {index} has malformed ranges")
+            tested_lines.extend((item["file"], line) for line in range(item["start"], item["end"] + 1))
+    expected_files = [
+        path for path in _get_all_py_files(root, paths)
+        if not any(path.startswith(item) for item in excluded)
+    ]
+    expected_lines = {
+        (file, line)
+        for file in expected_files
+        for line in range(1, len((Path(root) / file).read_text(encoding="utf-8").splitlines()) + 1)
+    }
+    if len(tested_lines) != len(set(tested_lines)) or set(tested_lines) != expected_lines:
+        return _error("unknown", "Preflight shards do not exactly cover full mutation scope")
+    if len(fingerprints) != len(set(fingerprints)):
+        return _error("unknown", "Preflight shards contain duplicate or colliding fingerprints")
+    generated = sum(report["generated"] for report in reports)
+    return {
+        "status": "completed", "passed": True, "engine_version": MUTMUT_VERSION,
+        "shard_count": shard_count, "generated": generated, "canonicalized": generated,
+        "collisions": 0, "files": expected_files, "fingerprints": sorted(fingerprints),
     }
 
 
@@ -1581,10 +1673,18 @@ def run_mutation_preflight(root: str, cfg: dict) -> dict:
         (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
     except OSError as exc:
         return _error("tool_error", f"Cannot clear native mutation cache: {exc}")
+    manifest = load_partition_manifest(Path(cfg["manifest"])) if cfg.get("manifest") else None
     files = [
         path for path in _get_all_py_files(root, paths)
         if not any(path.startswith(item) for item in excluded)
     ]
+    line_ranges = None
+    if manifest is not None:
+        revision = _revision(root)
+        if manifest["revision"] != revision:
+            return _error("unknown", "Mutation preflight partition manifest revision is stale")
+        files = manifest["files"]
+        line_ranges = manifest["ranges"]
     if not files:
         return _error("unknown", "Mutation preflight found no configured implementation files")
     mapping = _mapped_tests(root, files, cfg.get("test_mappings", {}))
@@ -1592,7 +1692,11 @@ def run_mutation_preflight(root: str, cfg: dict) -> dict:
     if unmapped:
         return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped))
     tests = sorted({test for mapped in mapping.values() for test in mapped})
-    return _preflight_mutmut(root, files, tests, mapping, int(cfg.get("full_timeout_s", 2100)))
+    args = (root, files, tests, mapping, int(cfg.get("full_timeout_s", 2100)))
+    result = _preflight_mutmut(*args, line_ranges) if line_ranges else _preflight_mutmut(*args)
+    if manifest is not None:
+        result.update({"shard_index": manifest["shard_index"], "shard_count": manifest["shard_count"]})
+    return result
 
 
 def format_report(report: dict) -> str:
@@ -1630,6 +1734,8 @@ def main() -> int:
     parser.add_argument("--manifest", help="Digest-bound full-run partition manifest")
     parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
+    parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
+    parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
     parser.add_argument("--initialize-timeout-report", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--github-summary", metavar="REPORT", help=argparse.SUPPRESS)
     parser.add_argument("--artifact-name", help=argparse.SUPPRESS)
@@ -1673,7 +1779,20 @@ def main() -> int:
         mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
     )
     base = args.base or mutation["base"]
-    if args.aggregate:
+    if args.preflight_manifest:
+        report = run_mutation_preflight(args.root, {**mutation, "manifest": args.preflight_manifest})
+    elif args.aggregate_preflight:
+        if args.shard_count is None or args.shard_count < 1:
+            report = _error("unknown", "--aggregate-preflight requires a positive --shard-count")
+        else:
+            report_paths = sorted(Path(args.aggregate_preflight).rglob("mutation-preflight.json"))
+            try:
+                reports = [json.loads(path.read_text()) for path in report_paths]
+            except (OSError, json.JSONDecodeError) as exc:
+                report = _error("unknown", f"Cannot read preflight shard reports: {exc}")
+            else:
+                report = aggregate_preflight_shards(args.root, reports, paths, excluded, args.shard_count)
+    elif args.aggregate:
         if args.shard_count is None or args.shard_count < 1:
             report = _error("unknown", "--aggregate requires a positive --shard-count")
         else:
@@ -1685,7 +1804,7 @@ def main() -> int:
             else:
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
-                    mutation["test_mappings"],
+                    mutation["test_mappings"], mutation,
                 )
     else:
         report = run_mutation_test(args.root, {

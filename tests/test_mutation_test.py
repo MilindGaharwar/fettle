@@ -2,6 +2,7 @@
 
 import json
 import importlib.metadata
+import re
 from pathlib import Path
 import subprocess
 import sqlite3
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from fettle.mutation_baseline import establish_baseline
 from fettle.mutation_test import (
     build_mutation_cache_identity,
     collect_mutation_dependency_identities,
@@ -32,6 +34,7 @@ from fettle.mutation_test import (
     _rerun_mutant,
     _run_mutmut,
     _preflight_mutmut,
+    aggregate_preflight_shards,
     _run_shard_modules,
     evaluate_stability,
     evaluate_policy,
@@ -1151,6 +1154,54 @@ def test_preflight_generates_and_canonicalizes_without_project_test_runner():
     assert "pytest" not in command
 
 
+def test_preflight_partition_uses_patch_and_range_results(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.py").write_text("x = 1\ny = 2\n")
+    ranges = [{"file": "src/app.py", "start": 1, "end": 2}]
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids["survived"] = ["1"]
+    records = [{"engine_id": "1", "fingerprint": "a" * 64}]
+    with (
+        patch("fettle.mutation_test._run", side_effect=[_proc(out="mutmut version 2.5.1\n"), _proc(2)]) as run,
+        patch("fettle.mutation_test._collect_range_results", return_value=(ids, None)) as collect,
+        patch("fettle.mutation_test._collect_mutant_records", return_value=(records, None)),
+    ):
+        result = _preflight_mutmut(
+            str(tmp_path), ["src/app.py"], ["tests/test_app.py"],
+            {"src/app.py": ["tests/test_app.py"]}, 600, ranges,
+        )
+
+    assert result["line_ranges"] == ranges
+    assert "--use-patch-file" in run.call_args_list[1].args[0]
+    collect.assert_called_once_with(str(tmp_path), ranges, "2.5.1", 2)
+
+
+def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.py").write_text("x = 1\ny = 2\n")
+    base = {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "shard_count": 2, "generated": 1, "canonicalized": 1,
+    }
+    reports = [
+        {**base, "shard_index": 0, "line_ranges": [{"file": "src/app.py", "start": 1, "end": 1}], "fingerprints": ["a" * 64]},
+        {**base, "shard_index": 1, "line_ranges": [{"file": "src/app.py", "start": 2, "end": 2}], "fingerprints": ["b" * 64]},
+    ]
+
+    result = aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)
+    assert result["status"] == "completed"
+    assert result["generated"] == result["canonicalized"] == 2
+
+    reports[1]["fingerprints"] = ["a" * 64]
+    assert aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)["status"] == "unknown"
+
+    reports[1]["fingerprints"] = ["b" * 64]
+    reports[1]["line_ranges"] = [{"file": "src/app.py", "start": 1, "end": 1}]
+    result = aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)
+    assert result["status"] == "unknown"
+    assert "exactly cover" in result["message"]
+
+
 def test_preflight_rejects_empty_or_incomplete_corpus():
     with patch("fettle.mutation_test._run") as run:
         result = _preflight_mutmut(".", [], [], {}, 600)
@@ -1487,6 +1538,36 @@ def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):
     assert result["score"] == 88.9
     assert result["duration_ms"] == 1001
     assert result["total_duration_ms"] == 2001
+    assert all(re.fullmatch(r"[0-9a-f]{64}", result[field]) for field in (
+        "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest",
+    ))
+    assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2", "3", "4"]
+    _validate_report_schema(result)
+
+
+def test_aggregate_shards_produces_baseline_compatible_identity(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [
+        _shard_report(0, ["fettle/a.py"], untested=0, non_killed=[_shard_report(0, ["fettle/a.py"])["non_killed"][0]]),
+        _shard_report(1, ["fettle/b.py"], untested=0, non_killed=[_shard_report(1, ["fettle/b.py"])["non_killed"][0]]),
+    ]
+    reports[1]["non_killed"][0]["engine_id"] = reports[0]["non_killed"][0]["engine_id"]
+    policy = {"mode": "advisory", "score_target": 70, "max_untested": 0}
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70, policy_config=policy,
+        )
+
+    baseline = establish_baseline([result, {**result, "duration_ms": 1002}], ["run-1", "run-2"], floor=70)
+    assert baseline["policy_digest"] == result["policy_digest"]
+    assert baseline["survived"] == 2
+    assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2"]
 
 
 def test_aggregate_shards_uses_configured_test_mappings(tmp_path):

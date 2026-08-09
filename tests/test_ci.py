@@ -269,11 +269,16 @@ def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "preflight:" in workflow
-    assert "fettle mutation preflight --all --json --output mutation-preflight.json" in workflow
-    assert "name: mutation-preflight-${{ github.run_id }}" in workflow
-    assert "needs: preflight" in workflow
-    assert workflow.index("fettle mutation preflight") < workflow.index("Prepare digest-bound partitions")
-    assert workflow.index("Prepare digest-bound partitions") < workflow.index("Full mutation shard evidence")
+    assert "--preflight-manifest" in workflow
+    assert "name: mutation-preflight-${{ github.run_id }}-${{ matrix.shard }}" in workflow
+    assert "needs: [prepare, preflight]" in workflow
+    assert workflow.index("Prepare digest-bound partitions") < workflow.index("Bounded mutation-detail preflight")
+    assert workflow.index("Aggregate complete mutation-detail corpus") < workflow.index("Full mutation shard evidence")
+    assert "type: choice" in workflow
+    assert "- preflight" in workflow and "- replay" in workflow and "- calibration" in workflow
+    assert "python -m pip install" not in workflow
+    assert "uv run --no-sync" in workflow
+    assert "merge-multiple: true" not in workflow
 
 
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
