@@ -423,6 +423,22 @@ def test_canonical_identity_uses_hunk_location_to_disambiguate_repeated_text(tmp
     assert mutant["line"] == 5
 
 
+def test_canonical_identity_ignores_paired_synthetic_eof_blank(tmp_path):
+    source = "def apply(schema, hi):\n    schema[\"maximum\"] = hi\n"
+    diff = (
+        "--- src/schema.py\n+++ src/schema.py\n@@ -1,2 +1,2 @@\n"
+        " def apply(schema, hi):\n-    schema[\"maximum\"] = hi\n-\n"
+        "+    schema[\"XXmaximumXX\"] = hi\n+\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/schema.py", source, diff, "1", "survived", ["tests/test_schema.py"],
+    )
+
+    assert mutant["before"] == "'maximum'"
+    assert mutant["after"] == "'XXmaximumXX'"
+
+
 def test_canonical_identity_accounts_for_context_before_repeated_change(tmp_path):
     source = (
         "def values(items):\n"
@@ -1221,6 +1237,27 @@ def test_preflight_rejects_empty_or_incomplete_corpus():
         )
     assert result["status"] == "unknown"
     assert "no mutants" in result["message"]
+
+
+def test_bounded_preflight_accepts_exactly_covered_range_without_mutants(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.py").write_text("VALUE = 1\n")
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ranges = [{"file": "src/app.py", "start": 1, "end": 1}]
+    with (
+        patch("fettle.mutation_test._run", side_effect=[
+            _proc(out="mutmut version 2.5.1\n"), _proc(),
+        ]),
+        patch("fettle.mutation_test._collect_range_results", return_value=(ids, None)),
+    ):
+        result = _preflight_mutmut(
+            str(tmp_path), ["src/app.py"], ["tests/test_app.py"],
+            {"src/app.py": ["tests/test_app.py"]}, 600, ranges,
+        )
+
+    assert result["status"] == "completed"
+    assert result["generated"] == result["canonicalized"] == 0
+    assert result["fingerprints"] == []
 
 
 def test_preflight_selects_complete_configured_scope(tmp_path):

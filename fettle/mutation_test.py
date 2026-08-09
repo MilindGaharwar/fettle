@@ -710,6 +710,9 @@ def _canonical_mutant(
     normalized_source = unicodedata.normalize("NFC", source)
     normalized_removed = [unicodedata.normalize("NFC", line) for line in removed]
     normalized_added = [unicodedata.normalize("NFC", line) for line in added]
+    if normalized_source.endswith("\n") and normalized_removed[-1:] == [""] and normalized_added[-1:] == [""]:
+        normalized_removed.pop()
+        normalized_added.pop()
     diff_lines = diff.splitlines()
     hunk = re.match(r"@@ -(\d+)", diff_lines[2])
     context_before = next(
@@ -1068,6 +1071,12 @@ def _preflight_mutmut(
     assert ids is not None
     generated = sum(len(state_ids) for state_ids in ids.values())
     if generated == 0:
+        if line_ranges:
+            return {
+                "status": "completed", "passed": True, "engine_version": actual,
+                "generated": 0, "canonicalized": 0, "collisions": 0,
+                "files": sorted(files), "fingerprints": [], "line_ranges": line_ranges,
+            }
         return _error("unknown", "Mutation preflight generated no mutants", engine_version=actual)
     records, error = _collect_mutant_records(root, ids, test_mapping, files)
     if error:
