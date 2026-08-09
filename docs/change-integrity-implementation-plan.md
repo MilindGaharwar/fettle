@@ -66,6 +66,10 @@ only after their independent graduation evidence exists.
    provider contract, source handshake, and completeness policy say otherwise.
 10. SQLite is not part of the initial implementation. It is admitted only by
     the measured gate in P51.
+11. `codebase-memory-mcp` remains an operator-run advisory experiment. The
+    [v0.9.0 evaluation](advisory-code-intelligence-evaluation.md) does not admit
+    it as a provider: default coverage was incomplete and results lacked the
+    exact dirty source/configuration binding needed for authority.
 
 ## 3. Decisions And Tradeoffs
 

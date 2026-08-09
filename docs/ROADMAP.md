@@ -23,6 +23,7 @@ or partial form and remain subject to the graduation triggers below. See the
 | In progress | Mutation evidence integrity and quality ratchet (P34) | Changed and full advisory lanes retain trustworthy evidence with measured reproducibility and reviewer-confirmed actionability; then Fettle dogfoods zero new actionable survivors and a monotonic full-score baseline per the [mutation quality plan](mutation-quality-implementation-plan.md) |
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
 | In progress | Authorship separation (P52) | Role-based edit enforcement is implemented; TLA+ role invariants, adversarial path coverage, and an evidenced multi-agent flow remain before graduation |
+| Proposed, priority | First-class portable evidence (P66-P71) | Consequential results bind producer, source, policy, scope, completeness, freshness, and occurrence; producers graduate independently with measured cost per verified change |
 | Next | Seeded-defect controls, independent red/green evidence, expanded evals, and traceability | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |
 | Scheduled | State consistency contracts (P53-P61) | P53-P54 contract authoring targets the next minor; execution follows only after contract validation, and later surfaces graduate independently without treating tool failure or intentional snapshots as defects |
 | Proposed | Runtime change-integrity snapshots, ephemeral graph, and advisory impact (P45-P48) | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
@@ -37,6 +38,11 @@ The proposed hypergraph program is detailed in the
 [UX specification](change-integrity.ux-spec.md), and
 [implementation plan](change-integrity-implementation-plan.md). Runtime work is
 not authorized by those planning documents.
+
+External code intelligence and memory remain advisory inputs. The completed
+[`codebase-memory-mcp` evaluation](advisory-code-intelligence-evaluation.md)
+found useful local retrieval but insufficient source/configuration identity and
+completeness for provider or evidence authority. No agent integration is planned.
 
 The scheduled state-divergence program is defined in the
 [state consistency UX specification](state-consistency.ux-spec.md) and
@@ -76,4 +82,7 @@ P43 can graduate.
 - Trust before reach: correctness and visible failure precede new distribution.
 - Evidence before enforcement: a gate graduates only after noise is measured.
 - Repository artifacts remain portable and inspectable.
+- Authority comes from explicit policy and independently valid evidence, never
+  model confidence, inferred memory, or an unbound graph result.
+- Optimize cost per verified software change, not token reduction in isolation.
 - Hooks improve the session; CI remains an independent assurance boundary.

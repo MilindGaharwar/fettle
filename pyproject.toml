@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finefettle"
 version = "1.9.0"
-description = "Quality governance and evidence for AI coding sessions across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
+description = "Assurance and evidence for AI coding agents across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
 readme = "README.md"
 license = "MIT"
 authors = [{name = "Milind Gaharwar"}]

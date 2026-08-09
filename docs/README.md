@@ -1,7 +1,8 @@
 # Fettle Documentation
 
-Fettle is easiest to understand as a feedback and evidence layer around AI
-coding. Start with the outcome you need rather than reading every subsystem.
+Fettle is the assurance layer between an AI coding agent's authority, actions,
+evidence, and independent verification. Start with the outcome you need rather
+than reading every subsystem.
 
 ## Choose Your Path
 
@@ -37,6 +38,8 @@ coding. Start with the outcome you need rather than reading every subsystem.
   trusted-operator live experiments.
 - [Roadmap](ROADMAP.md): shipped baseline, active trust work, and graduation
   triggers.
+- [Advisory code-intelligence evaluation](advisory-code-intelligence-evaluation.md):
+  bounded `codebase-memory-mcp` benchmark, limitations, and no-integration decision.
 - [Changelog](../CHANGELOG.md): behavior shipped in each release.
 - [Contributing](../CONTRIBUTING.md): setup and evidence expected from changes.
 - [Security policy](../SECURITY.md): supported releases, private reporting, and
@@ -96,6 +99,7 @@ are not all descriptions of shipped runtime behavior:
 - [Change-integrity architecture](change-integrity-architecture.md)
 - [Change-integrity UX contract](change-integrity.ux-spec.md)
 - [Change-integrity implementation plan](change-integrity-implementation-plan.md)
+- [Advisory code-intelligence evaluation](advisory-code-intelligence-evaluation.md)
 - [TLA+ formal verification](tla-plus-formal-verification.md)
 
 `docs/archive/` and `docs/engagement/` preserve decisions, audits, and work

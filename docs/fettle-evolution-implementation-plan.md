@@ -3,7 +3,7 @@
 Status: APPROVED for completed activities; P33, P35, and P44 complete; P34,
 P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed,
 blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning
-follow-through
+follow-through; P66-P71 prioritize first-class evidence-contract convergence
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -29,26 +29,23 @@ boundary.
 
 ### Product Position
 
-Fettle remains the portable governance layer between agents and engineering
-evidence:
+Fettle is the portable assurance layer between agent authority, software action,
+engineering evidence, and independent verification:
 
 ```text
-agent / orchestrator / editor
-            |
-            v
-Fettle lifecycle policy and evidence contract
-            |
-            +-- repository-native analyzers
-            +-- tests, build, coverage, and CI
-            +-- optional MCP and LSP query surfaces
-            +-- external execution sandbox
-            |
-            v
-developer repair + portable audit evidence
+agent -> authority -> action -> evidence -> verification
+             |             Fettle             |
+             +-- policy and decision provenance
+             +-- explicit degraded states
+             +-- portable evidence contracts
+             +-- independent CI boundary
 ```
 
 Fettle does not become a general agent orchestrator, proprietary static
-analyzer, IDE suite, hosted control plane, or operating-system sandbox.
+analyzer, semantic memory/database, IDE suite, hosted control plane, or
+operating-system sandbox. It records observable decision inputs and outcomes,
+not private model chain-of-thought. Model confidence, inferred memory, and
+advisory graph output never grant authority.
 
 ## 2. Assumptions
 
@@ -64,6 +61,9 @@ analyzer, IDE suite, hosted control plane, or operating-system sandbox.
    migration; no flag-day dispatcher rewrite is acceptable.
 8. Implementation remains additive until parity tests permit removal of an old
    path; unrelated worktree changes must not be overwritten or reverted.
+9. Product value is measured as cost per verified software change, including
+   repair success, assurance latency, tool/model cost, and visible indeterminate
+   outcomes; token reduction alone is not a success criterion.
 
 ## 3. Decisions And Tradeoffs
 
@@ -173,6 +173,12 @@ and are planning ranges, not commitments.
 | P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Planned |
 | P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
 | P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
+| P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Proposed |
+| P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Proposed |
+| P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Proposed |
+| P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Proposed |
+| P70 | Run advisory evidence migration and graduate producers independently | after P69, P2 | P37, P69 | 30 qualifying runs | Evidence-gated |
+| P71 | Connect canonical evidence to change-integrity and evaluate persistence | after P45-P50 as applicable, P3 | P45, P49, P70 | 5-10 days | Evidence-gated |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
@@ -194,6 +200,20 @@ overrides, and P41 or an approved successor is required for durable graph-bound
 attestations. Existing semantic, topology, claim, and verification behavior
 remains authoritative until each consumer passes its own shadow graduation.
 P51 may close with a no-go decision; SQLite is not an assumed deliverable.
+
+P66-P71 form the first-class evidence convergence program. They do not replace
+P6/P8 evidence references, P41 durable governance evidence, provider fact sets,
+mutation reports, or P44-P51 graph contracts. They define the portable envelope
+and validity rules those surfaces share. P66-P68 are the priority path because
+new graph-bound or cross-process authority must not depend on loosely structured
+evidence dictionaries. P69 migrates each producer without reducing its stronger
+domain-specific report. P70 measures compatibility and operational value before
+enforcement. P71 references accepted artifacts from the evidence plane and may
+close with no persistent evidence store.
+P66 is the first package eligible for proposal acceptance; P67-P71 remain
+unauthorized until their package-specific UX, impact, security, migration, and
+test contracts are reviewed. `immediate` denotes priority, not implementation
+authorization or work already in progress.
 
 P53-P61 form the state-consistency program. P53-P54 establish explicit
 ownership, mutation, canonical-read, observer, comparator, and consistency-model
@@ -517,6 +537,303 @@ staged model without a false-clean path.
 
 P65 is recurring and never marked complete globally. Each release records its
 monitoring window, new fixtures, upgrade review, and any recalibration trigger.
+
+#### P66-P71: First-Class Evidence Contract Convergence
+
+##### Program User Story
+
+As a developer or platform engineer relying on Fettle, I want every consequential
+assurance result to identify what was observed, by which producer, against which
+source and policy, with what completeness and freshness, so that an evidence
+reference can be validated independently rather than trusted as an opaque string.
+
+##### Program Boundary And Decisions
+
+- Evidence becomes a first-class portable contract, not a mandatory service or
+  central registry.
+- A canonical artifact is an immutable observation envelope. Findings, policy
+  decisions, overrides, statistics, and compliance summaries remain separate
+  domain objects that may reference or aggregate artifacts.
+- Content identity and execution occurrence are distinct. Full SHA-256 identifies
+  canonical content; a separate run/observation ID identifies one execution.
+- Result state, completeness, trust class, freshness, and policy disposition are
+  orthogonal. No single confidence score or evidence lattice replaces them.
+- Freshness is evaluated against requested source, policy, scope, and producer
+  identities. A generic TTL is not sufficient proof of applicability.
+- Specialized reports may be stronger than the common envelope. Mutation,
+  graph, CI, UAT, and integration schemas are referenced or wrapped without
+  discarding their domain-specific invariants.
+- Git and retained portable artifacts remain authoritative. Persistence is an
+  optional measured optimization, never required for bootstrap or recovery.
+- Existing persisted schemas receive explicit readers or migrations where
+  concrete compatibility is required; legacy data is never silently reinterpreted.
+
+```text
+P6/P8 references + P33 non-pass + P44 contracts
+                       |
+                       v
+               P66 contract freeze
+                       |
+                       v
+            P67 kernel + verify pilot
+                       |
+                       v
+              P68 CI/trace/explain
+                       |
+                       v
+               P69 producer migration
+                       |
+                       v
+                P70 advisory proof
+                       |
+                       v
+          P71 graph references/persistence gate
+```
+
+P41 may consume P67's accepted artifact contract after P38 and P41 receive their
+own authorization. It is not a prerequisite for P68, and P68 does not implement
+P41's durable attestation substrate.
+
+##### P66: Inventory And Freeze The Portable Contract (P0)
+
+Goal: establish one vocabulary and compatibility boundary before changing any
+authoritative producer.
+
+1. [ ] Inventory every evidence producer, reference, reader, persistence format,
+   schema version, identity rule, retention rule, and authority decision. Cover
+   trace, findings, dispatcher, verify, CI, coverage, UAT, integrations,
+   mutation, overrides, ratchet, compliance, provider facts, and graph records.
+2. [ ] Classify each representation as primary observation, reference,
+   domain-specific report, attestation, diagnostic, aggregate statistic, or
+   policy disposition. Record current and target ownership; do not force
+   aggregates into the artifact contract.
+3. [ ] Define `EvidenceArtifact` schema v1 with schema version, artifact/content
+   digest, evidence kind, producer identity/version, result state, completeness,
+   trust class, source snapshot/revision, policy digest, scope digest,
+   observation/run ID, observed time, bounded payload, and optional parent
+   references.
+4. [ ] Define `EvidenceReference` v2 as the additive successor to the current
+   `evidence_id`/`kind` reference, with full artifact digest, kind, schema
+   version, and only the expected bindings needed by a consumer to detect a
+   mismatched artifact. Keep the current representation readable only under the
+   explicit compatibility rules in step 7.
+5. [ ] Specify canonical UTF-8 JSON, Unicode/path normalization, deterministic
+   ordering, full SHA-256 identity, digest exclusions, maximum sizes, and
+   unknown-field/version behavior.
+6. [ ] Define validity outcomes for missing, malformed, unsupported, tampered,
+   incomplete, stale, wrong-source, wrong-policy, wrong-scope, wrong-producer,
+   and unavailable referenced artifacts. Consequential consumers map all such
+   cases to canonical non-pass outcomes.
+7. [ ] Define the compatibility matrix for trace schema v1/v2, existing
+   verification and CI stamps, findings with bare evidence IDs, overrides,
+   mutation schema v2, and provider fact sets. Name read-only, migrate, reject,
+   and expiry behavior explicitly.
+8. [ ] Rename planned meanings, not persisted fields: `ratchet.Evidence` becomes
+   `RuleEvidenceStats`, and `ControlEvidence` becomes
+   `ControlCoverageSummary` when their implementation package executes.
+9. [ ] Write adversarial fixtures before runtime implementation for digest
+   collision injection, tampering, duplicate IDs, replay under another revision,
+   policy/scope mismatch, partial evidence, unknown producer/version, oversized
+   payload, absolute-path leakage, Unicode ambiguity, and embedded secrets.
+
+Primary files:
+
+- `docs/evidence-artifact-contract.md` (new)
+- `fettle/finding.py`
+- `fettle/trace.py`
+- `fettle/provider_contract.py`
+- `fettle/graph_types.py`
+- `tests/fixtures/evidence/` (new)
+
+P66 completion evidence: reviewed producer/consumer matrix, accepted schema and
+compatibility contract, canonical examples, threat model, and executable
+adversarial fixtures. No authoritative runtime behavior changes in P66.
+
+##### P67: Canonical Evidence Kernel And Verification Pilot (P0)
+
+Goal: prove the contract on one bounded, consequential path before broad
+migration.
+
+10. [ ] Add a zero-runtime-dependency `fettle/evidence.py` containing immutable
+    artifact/reference types, canonical serialization, full-digest calculation,
+    construction, parsing, and validation. Keep it independent of graph and
+    persistence modules.
+11. [ ] Separate artifact content digest from observation/run identity. Prove
+    equal content across independent runs has equal content identity but distinct
+    occurrence identity, and that neither can substitute for the other.
+12. [ ] Centralize bounded payload validation, redaction, repository-relative
+    path normalization, secret filtering, and safe diagnostic rendering. Reject
+    unsupported values instead of stringifying arbitrary objects into authority.
+13. [ ] Add explicit binding validation for requested source, policy, scope,
+    producer, schema, and freshness. Return typed validity reasons and one safe
+    recovery action without embedding source bodies or secrets.
+14. [ ] Extend `EvidenceReference` additively and implement the P66 compatibility
+    matrix for legacy readers: read-only, migrate, reject, and expiry paths each
+    receive executable tests and rollback behavior. Preserve existing host wire
+    formats until dispatcher/agent conformance tests authorize a version change.
+15. [ ] Pilot canonical artifacts in `fettle verify`: bind the exact source
+    state, effective policy, affected workspace/scope, runner identity, command
+    outcome, and run occurrence to the verification stamp.
+16. [ ] Prove verification evidence cannot authorize another revision, dirty
+    state, policy, workspace, producer version, or expired/invalidated request.
+17. [ ] Preserve concise human output while retaining the complete bounded
+    artifact in machine-readable output; interruption or write failure cannot
+    leave a parseable success artifact.
+
+Primary files:
+
+- `fettle/evidence.py` (new)
+- `fettle/finding.py`
+- `fettle/verify_gate.py`
+- `tests/test_evidence.py` (new)
+- `tests/test_finding.py`
+- `tests/test_verify_gate.py`
+
+P67 completion evidence: cross-process deterministic artifact tests, adversarial
+binding tests, installed-CLI verification UAT, legacy-stamp compatibility tests,
+and no regression in hook or verification latency budgets.
+
+##### P68: CI, Trace, And Inspection Binding (P0)
+
+Goal: make canonical evidence independently inspectable at the authority
+boundary without treating a local trace as an attestation.
+
+18. [ ] Bind CI artifacts to the exact checked-out revision or merge candidate,
+    effective policy, selected scope, producer/toolchain, result state,
+    completeness, and run identity. Recomputed CI evidence remains independent
+    from local verification evidence.
+19. [ ] Reject local or prior-run references when source, policy, scope,
+    producer, or run expectations do not match; prove a copied evidence ID cannot
+    authorize a different candidate.
+20. [ ] Update trace schema additively to retain canonical artifacts or portable
+    references with explicit availability. Preserve bounded redaction, rotation,
+    tolerant legacy reads, and visible append failures.
+21. [ ] Extend `fettle explain` and reports to show producer, covered scope,
+    source/policy binding, result, completeness, freshness, and the exact reason
+    evidence was accepted or rejected. Human and JSON decisions must match.
+22. [ ] Publish the canonical attestation integration point for P41. When P41 is
+    separately authorized after P38, it owns durable commit-linked implementation
+    and binds signatures or platform attestations to artifact digest plus
+    immutable candidate identity rather than defining a competing evidence
+    schema.
+23. [ ] Add replay and cross-boundary tests proving local pass, stale pass,
+    missing analyzer, malformed artifact, trace loss, CI tool failure, and policy
+    change cannot manufacture accepted evidence.
+
+Primary files:
+
+- `fettle/ci_gate.py`
+- `fettle/ci.py`
+- `fettle/trace.py`
+- `fettle/explain.py`
+- `fettle/report.py`
+- P41 attestation implementation files when authorized
+- `tests/test_ci_gate.py`
+- `tests/test_trace.py`
+- `tests/test_explain.py`
+- `tests/test_report.py`
+
+P68 completion evidence: independent local/CI mismatch fixtures, retained CI
+artifacts, JSON/human parity, legacy trace replay, and zero false-clean results.
+
+##### P69: Producer Migration And Override Integrity (P1)
+
+Goal: converge assurance producers incrementally without flattening stronger
+domain contracts or changing policy unexpectedly.
+
+24. [ ] Migrate coverage and UAT evidence first; retain their domain payloads,
+    output states, recovery guidance, and existing acceptance semantics.
+25. [ ] Migrate integration and adapter evidence; map provider trust,
+    completeness, determinism, applicability, and tool identity explicitly.
+26. [ ] Integrate mutation by referencing its complete schema-v2 report and
+    calibration identities. Never replace mutant fingerprints, shard manifests,
+    outcome counts, or reproducibility checks with a generic payload.
+27. [ ] Bind state-consistency evidence to the canonical envelope when P53-P60
+    execute, while preserving canonical-read, observer, cleanup, and consistency
+    semantics as domain records.
+28. [ ] Strengthen overrides so accepted evidence matches revision/source,
+    policy, scope, surface, check, validity period, and expected artifact kind.
+    Missing resolution is non-pass where an override is authoritative, but no
+    global evidence database is required.
+29. [ ] Rename `ratchet.Evidence` and `ControlEvidence`; link aggregates to their
+    source window/digests where reproducibility is required, without pretending
+    each aggregate is a primary observation.
+30. [ ] Add per-producer compatibility and rollback switches. Existing producers
+    remain authoritative until their canonical path passes parity and review.
+31. [ ] Document producer-specific payload schemas, retention, invalidation,
+    recovery, and any stronger guarantees layered above the common artifact.
+
+Primary files:
+
+- `fettle/coverage_gate.py`
+- `fettle/uat/`
+- `fettle/integration_base.py`
+- `fettle/adapters/`
+- `fettle/mutation_test.py`
+- `fettle/mutation_baseline.py`
+- `fettle/overrides.py`
+- `fettle/ratchet.py`
+- `fettle/compliance.py`
+
+P69 completion evidence: producer contract matrices, old/new parity fixtures,
+wrong-binding override rejection, migration rollback tests, and complete
+domain-specific reports reachable from each canonical reference.
+
+##### P70: Advisory Migration And Independent Graduation (P2)
+
+Goal: prove the common contract improves integrity and operability without
+creating unacceptable latency, incompatibility, or false rejection.
+
+32. [ ] Run old and canonical evidence paths in shadow mode for at least 30
+    qualifying runs per producer class; compare decisions, bindings, artifact
+    availability, size, and runtime.
+33. [ ] Track malformed legacy artifacts, missing references, source/policy/scope
+    mismatches, stale evidence, tool errors, redaction events, trace write loss,
+    false rejection, and false-clean prevention without collecting source,
+    prompts, secrets, or absolute paths.
+34. [ ] Establish explicit per-producer latency and size budgets from baseline
+    measurements. Do not let artifact construction consume interactive hook
+    budgets or make full reports unusably large.
+35. [ ] Graduate verification, CI, coverage/UAT, integrations, mutation, and
+    future producers independently. Require zero evidence-integrity false passes,
+    reviewed compatibility evidence, bounded overhead, and tested rollback.
+36. [ ] Publish evidence-quality measures: complete artifact rate,
+    stale/mismatch rejection, visible tool-error rate, accepted reuse rate,
+    repair path success, and incremental cost per verified change.
+37. [ ] Remove a legacy writer only after every maintained reader and external
+    consumer has migrated or completed its documented compatibility window.
+
+P70 completion evidence: retained shadow reports, reviewed discrepancy ledger,
+per-producer graduation records, latency/size profiles, and an explicit retain,
+migrate, or reject decision for every legacy schema.
+
+##### P71: Evidence Plane Integration And Persistence Decision (P3)
+
+Goal: make the change-integrity evidence plane consume accepted artifacts
+without turning the graph or a database into a bootstrap dependency.
+
+38. [ ] Represent accepted evidence artifacts as immutable references from graph
+    nodes, provider fact sets, obligation resolutions, and attestations; do not
+    define a second graph-specific evidence identity.
+39. [ ] Bind graph-dependent actions to source snapshot, policy, provider
+    manifest, traversal rules, graph digest, and canonical evidence artifact.
+40. [ ] Prove graph construction failure, cache loss, missing artifacts, and
+    stale references cannot authorize an action; `doctor`, diagnosis, deletion,
+    and rebuild remain graph- and store-independent.
+41. [ ] Measure lookup volume, artifact size, recomputation cost, retention, and
+    replay needs using P70 data before proposing a content-addressed evidence
+    store.
+42. [ ] If persistence is admitted, treat it as an untrusted derived store with
+    digest validation, atomic writes, bounded queries, corruption recovery,
+    privacy controls, and portable export. Otherwise close P71 with a reviewed
+    no-go and continue using retained files/references.
+43. [ ] Align any evidence-store decision with P51 so Fettle does not create
+    independent graph and evidence databases with overlapping lifecycle and
+    recovery responsibilities.
+
+P71 completion evidence: graph/reference parity tests, recovery drills,
+measured persistence admission record, and either an accepted minimal store or
+a documented no-go. P71 does not authorize a hosted evidence service.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 

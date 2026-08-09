@@ -319,6 +319,12 @@ dependent traversal `unknown` or `tool_error`.
 | UAT verdicts and attestations | `semantic.py`, UAT modules | Evidence facts, bound to their recorded context |
 | Graphify | optional `graphify-out/graph.json` | External enrichment; never silently authoritative |
 | `kgraph` | optional external process | External enrichment; source-digest handshake required for enforcement use |
+| `codebase-memory-mcp` | evaluated local external process | Advisory search only; v0.9.0 omitted required inputs and lacked exact dirty source/configuration binding |
+
+The retained evaluation and re-admission criteria are documented in
+[advisory-code-intelligence-evaluation.md](advisory-code-intelligence-evaluation.md).
+External graph or memory output informs investigation; it does not become
+evidence, policy, or authority merely because retrieval is fast or confident.
 
 ## 8. Traversal and Obligation Rules
 

@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h3 align="center">Quality governance for AI coding sessions</h3>
+<h3 align="center">Assurance for autonomous software engineering</h3>
 
 <p align="center"><b>Give agents useful feedback while the code and intent are still in the same conversation.</b></p>
 
@@ -27,17 +27,19 @@
 > **fettle** *(v.)* — a foundry term for trimming and cleaning a rough casting.
 
 AI agents can make many related edits before a commit hook, CI job, or reviewer
-responds. Fettle moves selected engineering checks into the agent lifecycle so
-the finding arrives where it is cheapest to act on: the session that created it.
+responds. Fettle is the assurance layer between agent intent and software change:
+it constrains authority, observes actions, and binds verification evidence while
+the finding is still cheapest to act on.
 
 ```text
-agent tool call -> Fettle policy + checks -> actionable finding -> repair in context
-                         |
-                         +-> bounded trace and verification evidence
+agent -> authority -> action -> evidence -> independent verification
+              Fettle policy and assurance boundary
 ```
 
-Fettle does not replace tests, review, CI, or a sandbox. It connects those
-boundaries to AI-assisted development and makes degraded evidence visible.
+Fettle does not replace tests, review, CI, an orchestrator, or a sandbox. It
+connects those boundaries to AI-assisted development, records decision
+provenance without collecting hidden reasoning, and makes degraded evidence
+visible.
 
 ## Start in Two Minutes
 
