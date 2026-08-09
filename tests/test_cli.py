@@ -352,6 +352,31 @@ def test_mutation_run_writes_atomic_output(monkeypatch, capsys, tmp_path):
     assert list(output.parent.glob("*.tmp")) == []
 
 
+def test_mutation_preflight_reports_readiness_and_writes_output(monkeypatch, capsys, tmp_path):
+    output = tmp_path / "preflight.json"
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    config = {"enabled": True, "paths": ["src/"], "exclude": [], "test_mappings": {}}
+    report = {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "generated": 12, "canonicalized": 12, "collisions": 0,
+    }
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": config}),
+        patch("fettle.mutation_test.run_mutation_preflight", return_value=report) as preflight,
+        patch("sys.argv", ["fettle", "mutation", "preflight", "--all", "--json", "--output", str(output)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 0
+    preflight.assert_called_once_with(str(tmp_path), config)
+    assert json.loads(output.read_text()) == report
+    assert json.loads(capsys.readouterr().out) == report
+
+
 def test_mutation_run_replaces_timeout_placeholder_with_normalized_error(monkeypatch, capsys, tmp_path):
     output = tmp_path / "mutation.json"
     output.write_text('{"status":"tool_error","partial":true}')

@@ -41,6 +41,7 @@ from fettle.mutation_test import (
     write_timeout_evidence,
     main,
     run_mutation_test,
+    run_mutation_preflight,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
@@ -1169,6 +1170,30 @@ def test_preflight_rejects_empty_or_incomplete_corpus():
         )
     assert result["status"] == "unknown"
     assert "no mutants" in result["message"]
+
+
+def test_preflight_selects_complete_configured_scope(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("def value():\n    return 1\n")
+    (tmp_path / "src/generated.py").write_text("VALUE = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("from src.app import value\n")
+    config = {
+        "paths": ["src/"], "exclude": ["src/generated.py"], "full_timeout_s": 90,
+        "test_mappings": {"src/app.py": ["tests/test_app.py"]},
+    }
+    expected = {"status": "completed", "passed": True, "generated": 1}
+    with (
+        patch("fettle.mutation_test._has_mutmut", return_value=True),
+        patch("fettle.mutation_test._preflight_mutmut", return_value=expected) as preflight,
+    ):
+        result = run_mutation_preflight(str(tmp_path), config)
+
+    assert result == expected
+    preflight.assert_called_once_with(
+        str(tmp_path), ["src/app.py"], ["tests/test_app.py"],
+        {"src/app.py": ["tests/test_app.py"]}, 90,
+    )
 
 
 def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):

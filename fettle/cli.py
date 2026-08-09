@@ -355,6 +355,10 @@ def _render_mutation(report: dict) -> str:
         lines.append(str(report["message"]))
     if report.get("score") is not None:
         lines.append(f"Score: {report['score']}%")
+    if report.get("generated") is not None:
+        lines.append(f"Generated details: {report['generated']}")
+        lines.append(f"Canonicalized details: {report.get('canonicalized', 0)}")
+        lines.append(f"Fingerprint collisions: {report.get('collisions', 0)}")
     records = report.get("records", report.get("survivor_preview", []))
     for record in records[:20] if isinstance(records, list) else []:
         lines.append(
@@ -415,7 +419,7 @@ def cmd_mutation(args: argparse.Namespace) -> None:
                 result["baseline_digest"] = digest
         else:
             report_path = Path(args.report) if getattr(args, "report", None) else None
-            if action == "run":
+            if action in {"run", "preflight"}:
                 mutation = load_config(str(root))["mutation"]
                 if not mutation.get("enabled", False):
                     result = {
@@ -423,14 +427,18 @@ def cmd_mutation(args: argparse.Namespace) -> None:
                         "message": "Mutation testing is disabled; set [mutation] enabled = true",
                     }
                 else:
-                    from fettle.mutation_test import run_mutation_test
-                    result = run_mutation_test(str(root), {
-                        **mutation, "all": args.all,
-                        "base": args.base or mutation.get("base", "origin/main"),
-                        "shard_index": args.shard_index, "shard_count": args.shard_count,
-                        "manifest": args.manifest,
-                        "timeout_s": mutation.get("full_timeout_s") if args.all else mutation.get("timeout_s"),
-                    })
+                    if action == "preflight":
+                        from fettle.mutation_test import run_mutation_preflight
+                        result = run_mutation_preflight(str(root), mutation)
+                    else:
+                        from fettle.mutation_test import run_mutation_test
+                        result = run_mutation_test(str(root), {
+                            **mutation, "all": args.all,
+                            "base": args.base or mutation.get("base", "origin/main"),
+                            "shard_index": args.shard_index, "shard_count": args.shard_count,
+                            "manifest": args.manifest,
+                            "timeout_s": mutation.get("full_timeout_s") if args.all else mutation.get("timeout_s"),
+                        })
             else:
                 if report_path is None:
                     raise ValueError("mutation status requires --report")
@@ -1470,6 +1478,12 @@ def main() -> None:
     p_mutation_run.add_argument("--manifest", help=argparse.SUPPRESS)
     p_mutation_run.add_argument("--json", action="store_true", help="JSON output")
     p_mutation_run.add_argument("--output", help="Atomically retain JSON evidence at this path")
+    p_mutation_preflight = mutation_sub.add_parser(
+        "preflight", help="Validate the complete mutation-detail corpus without project tests",
+    )
+    p_mutation_preflight.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
+    p_mutation_preflight.add_argument("--json", action="store_true", help="JSON output")
+    p_mutation_preflight.add_argument("--output", help="Atomically retain JSON readiness evidence")
     p_mutation_status = mutation_sub.add_parser("status", help="Evaluate a retained mutation report")
     p_mutation_status.add_argument("--report", required=True, help="Retained schema-v2 report")
     p_mutation_status.add_argument("--json", action="store_true", help="JSON output")

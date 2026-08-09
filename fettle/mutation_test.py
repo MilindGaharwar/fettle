@@ -1569,6 +1569,28 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     return {**result, **policy, **evidence_identity, "threshold": threshold, **common}
 
 
+def run_mutation_preflight(root: str, cfg: dict) -> dict:
+    paths = cfg.get("paths", ["src/"])
+    excluded = cfg.get("exclude", ["tests/", "migrations/"])
+    if not _has_mutmut():
+        return _error(
+            "tool_error",
+            f"mutmut not found. Install: python -m pip install mutmut=={MUTMUT_VERSION}",
+        )
+    files = [
+        path for path in _get_all_py_files(root, paths)
+        if not any(path.startswith(item) for item in excluded)
+    ]
+    if not files:
+        return _error("unknown", "Mutation preflight found no configured implementation files")
+    mapping = _mapped_tests(root, files, cfg.get("test_mappings", {}))
+    unmapped = [file for file, tests in mapping.items() if not tests]
+    if unmapped:
+        return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped))
+    tests = sorted({test for mapped in mapping.values() for test in mapped})
+    return _preflight_mutmut(root, files, tests, mapping, int(cfg.get("full_timeout_s", 2100)))
+
+
 def format_report(report: dict) -> str:
     lines = ["# Mutation Test Report", "", f"**Status:** {report['status']}"]
     if report.get("message"):
