@@ -856,7 +856,23 @@ def _collect_mutant_records(
             tests = mapped_tests.get(file, []) if isinstance(mapped_tests, dict) else mapped_tests
             if not tests:
                 raise ValueError(f"mutation detail has no mapped tests for {file}")
-            records.append(_canonical_mutant(root, file, source, details[engine_id], engine_id, states[engine_id], tests))
+            try:
+                record = _canonical_mutant(
+                    root, file, source, details[engine_id], engine_id, states[engine_id], tests,
+                )
+            except ValueError as exc:
+                return None, _error(
+                    "unknown",
+                    f"Cannot construct canonical mutant evidence: {exc}",
+                    diagnostics=[{
+                        "engine_id": engine_id,
+                        "file": file,
+                        "stage": "canonicalization",
+                        "reason": str(exc),
+                        "raw_diff": _bounded(details[engine_id]),
+                    }],
+                )
+            records.append(record)
     except subprocess.TimeoutExpired:
         return None, _error("tool_error", "mutmut detail collection timed out")
     except (OSError, UnicodeError, ValueError) as exc:

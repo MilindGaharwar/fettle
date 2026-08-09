@@ -363,6 +363,30 @@ def test_collect_records_rejects_detail_outside_selected_scope(tmp_path):
     assert "selected scope" in error["message"]
 
 
+def test_collect_records_retains_bounded_canonicalization_diagnostic(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/calculator.py").write_text("def calculate():\n    return 2\n")
+    fixture = json.loads((FIXTURES / "mutmut-show.json").read_text())["records"][0]
+    output = f"# mutant {fixture['engine_id']}\n{fixture['diff']}"
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids["survived"] = [fixture["engine_id"]]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out=output)):
+        records, error = _collect_mutant_records(
+            str(tmp_path), ids, ["tests/test_calculator.py"]
+        )
+
+    assert records is None
+    assert error["diagnostics"] == [{
+        "engine_id": fixture["engine_id"],
+        "file": "src/calculator.py",
+        "stage": "canonicalization",
+        "reason": "mutation replacement cannot be located uniquely",
+        "raw_diff": fixture["diff"].strip(),
+    }]
+    assert str(tmp_path) not in json.dumps(error)
+
+
 def test_canonical_identity_rejects_missing_source_match(tmp_path):
     diff = json.loads((FIXTURES / "mutmut-show.json").read_text())["records"][0]["diff"]
 
