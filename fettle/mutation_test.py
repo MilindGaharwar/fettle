@@ -1010,6 +1010,73 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     return ids, None
 
 
+def _preflight_mutmut(
+    root: str,
+    files: list[str],
+    tests: list[str],
+    test_mapping: dict[str, list[str]],
+    timeout: int,
+) -> dict:
+    """Generate and canonicalize mutmut's complete detail corpus without project tests."""
+    if not files or not tests:
+        return _error("unknown", "Mutation preflight requires source files and targeted tests")
+    try:
+        version = _run(["mutmut", "version"], root, 30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _error("tool_error", f"Cannot check mutmut version: {exc}")
+    match = re.fullmatch(r"\s*mutmut version (\d+\.\d+\.\d+)\s*", version.stdout)
+    actual = match.group(1) if match else "unrecognized"
+    if version.returncode or actual != MUTMUT_VERSION:
+        return _error(
+            "tool_error",
+            f"Unsupported mutmut version {actual}; install mutmut=={MUTMUT_VERSION}",
+            engine_version=actual,
+            version_exit_code=version.returncode,
+            stderr=_bounded(version.stderr),
+        )
+    try:
+        run = _run([
+            "mutmut", "run", "--paths-to-mutate=" + ",".join(files),
+            "--runner", "python -c pass", "--no-progress", "--simple-output",
+        ], root, timeout)
+    except subprocess.TimeoutExpired:
+        return _error("tool_error", f"Mutation preflight timed out after {timeout}s", engine_version=actual)
+    except OSError as exc:
+        return _error("tool_error", f"Cannot execute mutmut preflight: {exc}", engine_version=actual)
+    if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
+        return _error(
+            "tool_error", "mutmut preflight generation failed", engine_version=actual,
+            run_exit_code=run.returncode, stderr=_bounded(run.stderr or run.stdout),
+        )
+    ids, error = _collect_results(root, actual, run.returncode)
+    if error:
+        return error
+    assert ids is not None
+    generated = sum(len(state_ids) for state_ids in ids.values())
+    if generated == 0:
+        return _error("unknown", "Mutation preflight generated no mutants", engine_version=actual)
+    records, error = _collect_mutant_records(root, ids, test_mapping, files)
+    if error:
+        return {**error, "engine_version": actual, "generated": generated}
+    assert records is not None
+    fingerprints = [record["fingerprint"] for record in records]
+    if len(records) != generated or len(fingerprints) != len(set(fingerprints)):
+        return _error(
+            "unknown", "Mutation preflight corpus is incomplete or contains collisions",
+            engine_version=actual, generated=generated, canonicalized=len(records),
+        )
+    return {
+        "status": "completed",
+        "passed": True,
+        "engine_version": actual,
+        "generated": generated,
+        "canonicalized": len(records),
+        "collisions": 0,
+        "files": sorted(files),
+        "fingerprints": sorted(fingerprints),
+    }
+
+
 def _run_mutmut(
     root: str,
     files: list[str],

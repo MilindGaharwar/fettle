@@ -31,6 +31,7 @@ from fettle.mutation_test import (
     _validate_report_schema,
     _rerun_mutant,
     _run_mutmut,
+    _preflight_mutmut,
     _run_shard_modules,
     evaluate_stability,
     evaluate_policy,
@@ -1115,6 +1116,59 @@ def test_engine_rejects_empty_tests_without_running_mutmut():
 
     assert result["status"] == "unknown"
     run.assert_not_called()
+
+
+def test_preflight_generates_and_canonicalizes_without_project_test_runner():
+    ids = {
+        "killed": [], "survived": ["1", "2"], "timeout": [],
+        "suspicious": [], "untested": [], "skipped": [],
+    }
+    records = [
+        {"engine_id": "1", "fingerprint": "a" * 64},
+        {"engine_id": "2", "fingerprint": "b" * 64},
+    ]
+    with (
+        patch("fettle.mutation_test._run", side_effect=[
+            _proc(out="mutmut version 2.5.1\n"), _proc(2),
+        ]) as run,
+        patch("fettle.mutation_test._collect_results", return_value=(ids, None)),
+        patch("fettle.mutation_test._collect_mutant_records", return_value=(records, None)),
+    ):
+        result = _preflight_mutmut(
+            ".", ["src/app.py"], ["tests/test_app.py"],
+            {"src/app.py": ["tests/test_app.py"]}, 600,
+        )
+
+    assert result == {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "generated": 2, "canonicalized": 2, "collisions": 0,
+        "files": ["src/app.py"], "fingerprints": ["a" * 64, "b" * 64],
+    }
+    command = run.call_args_list[1].args[0]
+    assert command[:2] == ["mutmut", "run"]
+    assert command[command.index("--runner") + 1] == "python -c pass"
+    assert "pytest" not in command
+
+
+def test_preflight_rejects_empty_or_incomplete_corpus():
+    with patch("fettle.mutation_test._run") as run:
+        result = _preflight_mutmut(".", [], [], {}, 600)
+    assert result["status"] == "unknown"
+    run.assert_not_called()
+
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    with (
+        patch("fettle.mutation_test._run", side_effect=[
+            _proc(out="mutmut version 2.5.1\n"), _proc(),
+        ]),
+        patch("fettle.mutation_test._collect_results", return_value=(ids, None)),
+    ):
+        result = _preflight_mutmut(
+            ".", ["src/app.py"], ["tests/test_app.py"],
+            {"src/app.py": ["tests/test_app.py"]}, 600,
+        )
+    assert result["status"] == "unknown"
+    assert "no mutants" in result["message"]
 
 
 def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
