@@ -1,6 +1,9 @@
 # Fettle Evolution Implementation Plan
 
-Status: APPROVED for completed activities; P33, P35, and P44 complete; P34, P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed, blocked, or evidence-gated
+Status: APPROVED for completed activities; P33, P35, and P44 complete; P34,
+P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed,
+blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning
+follow-through
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -166,6 +169,10 @@ and are planning ranges, not commitments.
 | P59 | Add advisory duplicate-state and invalidation heuristics | unscheduled | P53, measured corpus | 5-8 days | Evidence-gated |
 | P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | Blocked on P35 -> P38 |
 | P61 | Pilot state-consistency contracts and decide per-surface graduation | after P57-P60 as applicable | P55-P60 evidence | 30 qualifying runs | Evidence-gated |
+| P62 | Complete authoritative mutation calibration and baseline | immediate, P0 | P34 implemented preflight slice | 2 full runs plus replay | In progress |
+| P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Planned |
+| P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
+| P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
 
 The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P9
 → P10 → P11 → P14. P4–P5 run alongside the result-contract work; P18–P21 may
@@ -386,6 +393,130 @@ Run `31246843926` completed all workers and aggregation in 1,792,060 ms, coverin
 mutants. Its 43.3 percent diagnostic score is not yet a baseline; canonical
 survivor identity must be implemented before independent calibration runs by the
 [mutation quality plan](mutation-quality-implementation-plan.md).
+
+Runtime note 2026-08-09: canonical replacement, insertion-only, deletion-only,
+multiline, repeated-source, and invalid-Python handling is implemented. Bounded
+per-mutant diagnostics, fresh-cache corpus preflight, the public
+`fettle mutation preflight` command, retained preflight evidence, and the CI
+fan-out gate are committed. Full live preflight, archived-range replay,
+authoritative calibration, and baseline establishment remain open and are owned
+by P62-P65 below. P34 retains ownership of mutation selection, canonicalization,
+execution, and CI evidence infrastructure; its implemented preflight slice
+satisfies P62's code dependency. P62 owns live proof, replay, calibration, and
+baseline acceptance, so P34 remains in progress without blocking P62's first
+step.
+
+#### P62-P65: Mutation Learning Follow-Through Registry
+
+This registry is part of the authoritative activity plan. The detailed mutation
+contract remains in
+[mutation-quality-implementation-plan.md](mutation-quality-implementation-plan.md),
+but no item below may be omitted when that plan is executed or archived.
+Numbering is global to preserve the requested 36-step follow-through; explicit
+activity-table dependencies, not numbering alone, control cross-priority gates.
+
+Priority means:
+
+- **P0:** blocks authoritative mutation evidence and baseline establishment.
+- **P1:** required to make the learning durable and usable in the next minor.
+- **P2:** automates the methodology and extends it safely across Fettle.
+- **P3:** recurring measurement and maintenance after graduation.
+
+##### P62: Authoritative Calibration And Baseline (P0)
+
+Execute strictly in order. A failed step returns to the cheapest preceding
+falsifying check; it never authorizes skipping ahead.
+
+1. [ ] Run the pinned CI mutation preflight.
+2. [ ] Verify retained preflight evidence reconciles generated and canonicalized
+   counts with zero collisions and zero rejected details.
+3. [ ] Replay historical failing shards/ranges 46, 62, 63, and 239.
+4. [ ] For every failure, add an adversarial fixture first, fix the generic
+   contract, and rerun fixtures, corpus preflight, and narrow replay.
+5. [ ] Run one complete held-out authoritative calibration.
+6. [ ] Launch the second calibration only after the first is authoritative.
+7. [ ] Compare revision, scope, identities, outcomes, policy/configuration
+   digests, invalidation inputs, and runtime across both reports.
+8. [ ] Establish the baseline only when both reports satisfy the reproducibility
+   contract and contain zero untested mutants.
+
+P62 completion evidence: retained preflight and replay artifacts, two accepted
+independent report IDs for one revision, comparison output, and the reviewed
+baseline digest.
+
+##### P63: Durable Learning And Developer Experience (P1)
+
+9. [ ] Create `docs/mutation-quality-playbook.md` documenting the validation
+   funnel, evidence invariants, cache isolation, exit semantics, and recovery.
+10. [ ] Link the playbook from `README.md`, mutation documentation, and CLI help;
+    execute every copied command in a temporary project.
+11. [ ] Add concise mutation invariants to repository-local agent instructions:
+    full runs are held-out verification; use fixtures -> preflight -> narrow
+    replay -> full run; distrust engine IDs and unverified caches; calibrate
+    sequentially.
+12. [ ] Store the reusable evidence-integrity lessons in the persistent knowledge
+    wiki and link back to this plan when the connection is useful.
+13. [ ] Update WP3.5 completion state and hypothesis records with implementation
+    and retained-run evidence.
+14. [ ] Add every historical mutation failure to the permanent adversarial
+    fixture corpus; shard numbers remain provenance, never runtime logic.
+15. [ ] Add mutation readiness to `fettle doctor`.
+16. [ ] Make human preflight output show scope, engine, generated,
+    canonicalized, rejected, collisions, and one next action.
+17. [ ] Preserve complete bounded diagnostics in JSON artifacts without secrets
+    or absolute paths.
+18. [ ] Document and test exit 0 as success, exit 1 as valid policy failure, and
+    exit 2 as configuration, tool, or evidence-integrity failure.
+19. [ ] Add setup and troubleshooting examples for missing mutmut, unsupported
+    versions, unmapped tests, stale caches, parser drift, and collisions.
+20. [ ] Manually validate first-time, success, empty, error, and recovery CLI
+    flows using the installed executable in a clean sample repository.
+
+P63 completion evidence: linked playbook, automatic agent instruction surface,
+doctor and CLI acceptance output, adversarial corpus, and manual UAT record.
+
+##### P64: Automated Methodology And Fettle-Wide Adoption (P2)
+
+21. [ ] Add a Fettle rule that detects full mutation workflows without a
+    successful preflight dependency.
+22. [ ] Detect unpinned mutation tools and missing retained preflight artifacts.
+23. [ ] Detect parallel authoritative calibration runs and require sequential
+    confirmation.
+24. [ ] Require adversarial regression tests whenever canonicalization behavior
+    changes.
+25. [ ] Bind preflight artifacts to revision, policy, source scope, test mapping,
+    engine, and manifest digest.
+26. [ ] Verify every full worker consumes preflight and manifest evidence with
+    those exact identities.
+27. [ ] Apply the staged readiness -> execution -> policy model to other
+    expensive Fettle providers, starting from measured failure risk.
+28. [ ] Keep readiness, execution outcomes, and policy decisions separate in
+    every migrated provider contract and output.
+29. [ ] Treat provider caches as untrusted optimizations; require complete cache
+    identity validation before reuse.
+30. [ ] Standardize bounded diagnostics across providers: stage, subject,
+    reason, evidence, and one recovery action.
+31. [ ] Add narrow historical replay suites before expensive end-to-end checks
+    for each migrated provider.
+
+P64 completion evidence: rule fixtures, workflow violations detected in CI,
+identity-bound worker tests, and at least one additional provider proving the
+staged model without a false-clean path.
+
+##### P65: Measurement And Ongoing Operations (P3)
+
+32. [ ] Monitor preflight duration and failure categories without collecting
+    source content or secrets.
+33. [ ] Track parser drift and accepted vocabulary by pinned mutmut version.
+34. [ ] Promote every production mutation failure into a permanent regression
+    fixture before closing the incident.
+35. [ ] Review the playbook, invariants, fixtures, and identity contract during
+    every mutation-engine upgrade.
+36. [ ] Recalibrate only when engine, scope, policy, mapping, or canonical
+    identity semantics change; otherwise retain the accepted baseline.
+
+P65 is recurring and never marked complete globally. Each release records its
+monitoring window, new fixtures, upgrade review, and any recalibration trigger.
 
 #### P35: Seeded-Defect And Recorded-Override Contract
 

@@ -346,42 +346,44 @@ are named before implementation files to preserve the repository's TDD policy.
 This package incorporates the calibration learning: expensive outcome runs are
 held-out verification, not discovery tools for engine output grammar.
 
-- [ ] Add fixture-first contracts in `tests/fixtures/mutation/` and
+- [x] Add fixture-first contracts in `tests/fixtures/mutation/` and
   `tests/test_mutation_test.py` for validated single-hunk replacement,
   insertion-only, deletion-only, multiline, repeated-source, and syntactically
   invalid mutated-Python details. Verify malformed paths, multiple hunks,
   ambiguous source anchors, empty changes, duplicate IDs, and collisions still
   fail closed.
-- [ ] Replace mutation-shape special cases in `fettle/mutation_test.py` with one
+- [x] Replace mutation-shape special cases in `fettle/mutation_test.py` with one
   canonical textual fallback. Require the original source to parse; allow the
   mutated source to be syntactically invalid when the exact validated diff can
   be anchored uniquely. Include normalized removed and added text, enclosing
   symbol, structural/occurrence anchor, and file in identity; never fall back to
   file and line alone.
-- [ ] Retain bounded canonicalization diagnostics for every rejected detail:
+- [x] Retain bounded canonicalization diagnostics for every rejected detail:
   engine ID, file, source range when known, failed stage, reason, and raw diff.
   Verify human output gives one recovery action while JSON preserves complete
   bounded diagnostics without secrets or absolute paths.
-- [ ] Add an engine-generation preflight in `fettle/mutation_test.py` that
+- [x] Add an engine-generation preflight in `fettle/mutation_test.py` that
   generates the complete configured mutation-detail corpus without running the
   mutant-by-test matrix, canonicalizes every detail, and checks count
   reconciliation and fingerprint uniqueness.
-- [ ] Expose `fettle mutation preflight [--all] [--json] [--output PATH]` through
+- [x] Expose `fettle mutation preflight [--all] [--json] [--output PATH]` through
   `fettle/cli.py`; add exit-code and output-state tests in `tests/test_cli.py`.
   A complete unique corpus exits 0; unsupported, missing, duplicate, ambiguous,
   or colliding evidence exits 2.
-- [ ] Add a CI preflight job before full shard fan-out in
+- [x] Add a CI preflight job before full shard fan-out in
   `.github/workflows/mutation.yml`. Full workers must not start unless preflight
   succeeds for the same revision, policy, source scope, engine, and manifest
   digest. Retain its report on success and failure.
-- [ ] Seed a permanent adversarial corpus from every observed calibration
-  failure, including archived shards 46, 62, 63, 239 and cache-isolation cases.
-  Historical shard numbers remain test provenance only and never enter generic
+- [x] Seed permanent adversarial fixtures for every captured native detail shape
+  and cache-isolation failure; historical shard numbers do not enter generic
   runtime logic.
-- [ ] Verify the funnel in order: focused unit fixtures; complete generated
-  detail corpus; archived failing shard replays; full tests, Ruff, Actionlint,
-  and Fettle scan. Do not dispatch another complete calibration before all
-  preflight gates pass.
+- [ ] Replay archived shards 46, 62, 63, and 239 against the permanent corpus and
+  retain each shard number only as test provenance.
+- [x] Verify the implemented preflight stages with focused unit fixtures, the
+  generated-detail corpus contract, full tests, Ruff, Actionlint, and Fettle
+  scan.
+- [ ] Complete the funnel with archived failing-shard replays before dispatching
+  another calibration; do not bypass any preceding preflight gate.
 
 ### WP4: Baseline And Comparison
 
