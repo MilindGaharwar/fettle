@@ -1,0 +1,11 @@
+{
+  "artifact_digest": "sha256:1e1b29c71fb14b98258848743b5a0d2eef4f0e16012488e7ad8a3819ee80cfba",
+  "kind": "fettle.verify",
+  "schema_version": "1",
+  "expected": {
+    "source_snapshot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "scope_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "producer_id": "fettle.verify"
+  }
+}

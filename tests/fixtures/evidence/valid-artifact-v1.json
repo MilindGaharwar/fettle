@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "artifact_digest": "sha256:1e1b29c71fb14b98258848743b5a0d2eef4f0e16012488e7ad8a3819ee80cfba",
+  "kind": "fettle.verify",
+  "producer": {
+    "id": "fettle.verify",
+    "version": "1.9.0",
+    "implementation_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "result_state": "pass",
+  "completeness": "complete",
+  "trust_class": "authoritative",
+  "source": {
+    "snapshot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": "638520dce7f2526078c50a5e208b00a45b961789"
+  },
+  "policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "scope_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "observation_id": "verify-run-123",
+  "observed_at": "2026-08-09T06:00:00Z",
+  "payload": {
+    "command": ["python", "-m", "pytest"],
+    "exit_code": 0
+  }
+}

@@ -23,4 +23,5 @@
   - **3** [CANCELLED]: Use coverage contexts to select tests per mutant with full-suite survivor confirmation; the objective was met without adding this complexity
   - **4** [PRUNED]: Use paired full calibration runs to discover remaining engine-detail grammar; falsified if deterministic parser defects invalidate both runs after expensive shard execution
     - Evidence: Runs `31293693197` and `31293694402` exposed a nested mutation test deleting mutmut's live cache; runs `31295617487` and `31295618462` then exposed deletion-only and invalid-Python canonicalization gaps after shard execution.
+    - Evidence: A clean local preflight at revision `638520dce7f2526078c50a5e208b00a45b961789` failed closed after its configured 1,800-second bound on 2026-08-09. No replay or calibration was authorized from that result.
     - Insight: Full runs are held-out outcome verification, not efficient mutation-vocabulary discovery. Generate and canonicalize the complete engine-detail corpus first, replay narrow historical failures, and launch the second calibration only after the first is authoritative.

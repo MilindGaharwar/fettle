@@ -1,0 +1,135 @@
+{
+  "schema_version": "1",
+  "contract": "docs/evidence-artifact-contract.md",
+  "base_fixture": "valid-artifact-v1.json",
+  "execution_mode": "isolated_with_base_registered",
+  "expected_context": "base_artifact_bindings",
+  "cases": [
+    {
+      "id": "digest-collision-injection",
+      "operation": {"op": "collide", "path": "/payload/exit_code", "value": 1},
+      "expected_validity": "digest_collision",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "content-tampering",
+      "operation": {"op": "replace", "path": "/payload/exit_code", "value": 1},
+      "expected_validity": "tampered",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "duplicate-observation-id",
+      "operation": {"op": "duplicate_observation", "path": "/payload/exit_code", "value": 1},
+      "expected_validity": "duplicate_id",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "replay-another-revision",
+      "operation": {"op": "replace", "path": "/source/revision", "value": "0000000000000000000000000000000000000000"},
+      "expected_validity": "wrong_source",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "policy-mismatch",
+      "operation": {"op": "replace", "path": "/policy_digest", "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+      "expected_validity": "wrong_policy",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "scope-mismatch",
+      "operation": {"op": "replace", "path": "/scope_digest", "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+      "expected_validity": "wrong_scope",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "partial-evidence",
+      "operation": {"op": "replace", "path": "/completeness", "value": "partial"},
+      "expected_validity": "incomplete",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "unknown-producer-version",
+      "operation": {"op": "replace", "path": "/producer/version", "value": "999.0.0"},
+      "expected_validity": "unsupported",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "producer-implementation-mismatch",
+      "operation": {"op": "replace", "path": "/producer/implementation_digest", "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+      "expected_validity": "wrong_producer",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "unknown-top-level-field",
+      "operation": {"op": "add", "path": "/unexpected_authority", "value": true},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "oversized-payload",
+      "operation": {"op": "generate_string", "path": "/payload/output", "byte_count": 786433},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "absolute-path-leakage",
+      "operation": {"op": "add", "path": "/payload/path", "value": "/Users/example/project/secret.py"},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "unicode-key-ambiguity",
+      "operation": {"op": "add_nfc_duplicate_keys", "path": "/payload", "keys": ["café", "café"], "values": [1, 2]},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "embedded-secret",
+      "operation": {"op": "add", "path": "/payload/output", "value": "token=fixture-secret-value"},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "byte-order-mark",
+      "operation": {"op": "prefix_bytes", "encoding": "utf8_bom"},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "noncanonical-key-order",
+      "operation": {"op": "reverse_top_level_keys"},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "floating-point-number",
+      "operation": {"op": "replace", "path": "/payload/exit_code", "value": 1.5},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "oversized-string",
+      "operation": {"op": "generate_string", "path": "/payload/output", "byte_count": 65537},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "excessive-nesting",
+      "operation": {"op": "generate_nesting", "path": "/payload/nested", "depth": 33},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "excessive-object-keys",
+      "operation": {"op": "generate_object", "path": "/payload/object", "key_count": 4097},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    },
+    {
+      "id": "excessive-array-items",
+      "operation": {"op": "generate_array", "path": "/payload/items", "item_count": 10001},
+      "expected_validity": "malformed",
+      "expected_result_state": "unknown"
+    }
+  ]
+}

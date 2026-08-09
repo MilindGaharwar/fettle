@@ -173,7 +173,7 @@ and are planning ranges, not commitments.
 | P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Planned |
 | P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
 | P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
-| P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Proposed |
+| P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Complete |
 | P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Proposed |
 | P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Proposed |
 | P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Proposed |
@@ -648,6 +648,13 @@ Primary files:
 P66 completion evidence: reviewed producer/consumer matrix, accepted schema and
 compatibility contract, canonical examples, threat model, and executable
 adversarial fixtures. No authoritative runtime behavior changes in P66.
+
+Status 2026-08-09: complete. The portable contract, producer/consumer inventory,
+compatibility matrix, canonical artifact/reference examples, validity mapping,
+threat model, and machine-readable adversarial corpus are frozen in
+`docs/evidence-artifact-contract.md` and `tests/fixtures/evidence/`. P66 changed
+no runtime writer, reader, host wire format, or authority decision; P67 remains
+separately gated.
 
 ##### P67: Canonical Evidence Kernel And Verification Pilot (P0)
 
