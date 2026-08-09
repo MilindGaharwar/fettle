@@ -265,6 +265,17 @@ def test_changed_mutation_workflow_preseeds_timeout_evidence_and_truthful_summar
     assert "if-no-files-found: error" in workflow
 
 
+def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "preflight:" in workflow
+    assert "fettle mutation preflight --all --json --output mutation-preflight.json" in workflow
+    assert "name: mutation-preflight-${{ github.run_id }}" in workflow
+    assert "needs: preflight" in workflow
+    assert workflow.index("fettle mutation preflight") < workflow.index("Prepare digest-bound partitions")
+    assert workflow.index("Prepare digest-bound partitions") < workflow.index("Full mutation shard evidence")
+
+
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
     from fettle.mutation_test import load_partition_manifest, write_partition_manifests
 
