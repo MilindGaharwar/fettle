@@ -1110,7 +1110,7 @@ def test_zero_mutants_is_unknown_not_perfect():
     assert result["passed"] is False
 
 
-def test_zero_mutant_line_shard_is_completed_for_aggregate_coverage():
+def test_zero_mutant_line_shard_is_completed_for_aggregate_coverage(tmp_path):
     engine = {
         "status": "completed", "engine_version": "2.5.1", "run_exit_code": 0, "results_exit_code": 0,
         "test_runner": "python -m pytest -x --assert=plain {mapped_tests}", "tests_run": ["tests/test_app.py"],
@@ -1125,10 +1125,14 @@ def test_zero_mutant_line_shard_is_completed_for_aggregate_coverage():
         patch("fettle.mutation_test._shard_ranges", return_value=engine["line_ranges"]),
         patch("fettle.mutation_test._mapped_tests", return_value={"src/app.py": engine["tests_run"]}),
         patch("fettle.mutation_test._run_mutmut", return_value=engine),
+        patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40)),
         patch("pathlib.Path.read_bytes", return_value=b"source"),
         patch("pathlib.Path.read_text", return_value="x = 1\n"),
     ):
-        result = run_mutation_test(".", {"paths": ["src/"], "all": True, "shard_index": 0, "shard_count": 1})
+        result = run_mutation_test(
+            str(tmp_path),
+            {"paths": ["src/"], "all": True, "shard_index": 0, "shard_count": 1},
+        )
 
     assert result["status"] == "completed"
     assert result["score"] is None
