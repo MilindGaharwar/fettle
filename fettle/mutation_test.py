@@ -317,8 +317,17 @@ def _enclosing_symbol(tree: ast.AST, line: int) -> ast.AST:
     return min(candidates, key=lambda node: getattr(node, "end_lineno", node.lineno) - node.lineno) if candidates else tree
 
 
-def _symbol_name(node: ast.AST) -> str:
-    return unicodedata.normalize("NFC", getattr(node, "name", "<module>"))
+def _symbol_name(tree: ast.AST, node: ast.AST) -> str:
+    if node is tree:
+        return "<module>"
+    parents = [
+        candidate for candidate in ast.walk(tree)
+        if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and candidate.lineno <= node.lineno
+        and getattr(candidate, "end_lineno", candidate.lineno) >= getattr(node, "end_lineno", node.lineno)
+    ]
+    parents.sort(key=lambda candidate: (candidate.lineno, -getattr(candidate, "end_lineno", candidate.lineno)))
+    return ".".join(unicodedata.normalize("NFC", candidate.name) for candidate in parents)
 
 
 def _ast_difference(before: ast.AST, after: ast.AST, path: tuple[str, ...] = ()) -> tuple[ast.AST, ast.AST, tuple[str, ...]]:
@@ -737,6 +746,7 @@ def _canonical_mutant(
 
     def textual_record() -> dict:
         before_symbol = _enclosing_symbol(before_tree, line)
+        symbol = _symbol_name(before_tree, before_symbol)
         before = "\n".join(normalized_removed).strip()
         after = "\n".join(normalized_added).strip()
         context = [
@@ -754,23 +764,23 @@ def _canonical_mutant(
         occurrence = occurrences.index(line - symbol_start) if line - symbol_start in occurrences else None
         identity = json.dumps(
             [
-                "v1", canonical_file, _symbol_name(before_symbol), ["textual"], "textual",
+                "v2", canonical_file, symbol, ["textual"], "textual",
                 before, after, context, occurrence,
             ],
             ensure_ascii=False,
             separators=(",", ":"),
         )
         return {
-            "fingerprint_version": "1",
+            "fingerprint_version": "2",
             "fingerprint": _fingerprint_digest(identity),
             "source_context_digest": _canonical_digest(
-                [canonical_file, _symbol_name(before_symbol), ast.dump(before_symbol, include_attributes=False)]
+                [canonical_file, symbol, ast.dump(before_symbol, include_attributes=False)]
             ),
             "engine_id": engine_id,
             "state": state,
             "file": canonical_file,
             "line": line,
-            "symbol": _symbol_name(before_symbol),
+            "symbol": symbol,
             "operator": "textual",
             "before": before,
             "after": after,
@@ -786,7 +796,8 @@ def _canonical_mutant(
         return textual_record()
     before_symbol = _enclosing_symbol(before_tree, line)
     after_symbol = _enclosing_symbol(after_tree, line)
-    if _symbol_name(before_symbol) != _symbol_name(after_symbol):
+    symbol = _symbol_name(before_tree, before_symbol)
+    if symbol != _symbol_name(after_tree, after_symbol):
         raise ValueError("mutation changes its structural anchor")
     old_node, new_node, structural_path = _ast_difference(before_symbol, after_symbol)
     if ast.dump(old_node, include_attributes=False) == ast.dump(new_node, include_attributes=False):
@@ -806,7 +817,7 @@ def _canonical_mutant(
     )
     occurrence = occurrences.index((old_node.lineno, old_node.col_offset)) if len(occurrences) > 1 else None
     identity_parts = [
-        "v1", canonical_file, _symbol_name(before_symbol), structural_path, operator,
+        "v2", canonical_file, symbol, structural_path, operator,
         old_dump, ast.dump(new_node, include_attributes=False),
     ]
     if occurrence is not None:
@@ -817,16 +828,16 @@ def _canonical_mutant(
         separators=(",", ":"),
     )
     return {
-        "fingerprint_version": "1",
+        "fingerprint_version": "2",
         "fingerprint": _fingerprint_digest(identity),
         "source_context_digest": _canonical_digest(
-            [canonical_file, _symbol_name(before_symbol), ast.dump(before_symbol, include_attributes=False)]
+            [canonical_file, symbol, ast.dump(before_symbol, include_attributes=False)]
         ),
         "engine_id": engine_id,
         "state": state,
         "file": canonical_file,
         "line": line,
-        "symbol": _symbol_name(before_symbol),
+        "symbol": symbol,
         "operator": operator,
         "before": before,
         "after": after,

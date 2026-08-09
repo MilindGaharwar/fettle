@@ -179,6 +179,36 @@ def test_canonical_identity_distinguishes_transformations_on_one_line(tmp_path):
     assert mutants[1]["after"] == "101"
 
 
+def test_canonical_identity_distinguishes_same_method_name_in_different_classes(tmp_path):
+    source = (
+        "class First:\n"
+        "    def create(self):\n"
+        "        return {'schema_version': 1}\n\n"
+        "class Second:\n"
+        "    def create(self):\n"
+        "        return {'schema_version': 1}\n"
+    )
+    first_diff = (
+        "--- src/models.py\n+++ src/models.py\n@@ -2,2 +2,2 @@\n"
+        "     def create(self):\n"
+        "-        return {'schema_version': 1}\n"
+        "+        return {'XXschema_versionXX': 1}\n"
+    )
+    second_diff = first_diff.replace("@@ -2,2 +2,2 @@", "@@ -6,2 +6,2 @@")
+
+    first = _canonical_mutant(
+        str(tmp_path), "src/models.py", source, first_diff, "1", "survived", [],
+    )
+    second = _canonical_mutant(
+        str(tmp_path), "src/models.py", source, second_diff, "2", "survived", [],
+    )
+
+    assert first["symbol"] == "First.create"
+    assert second["symbol"] == "Second.create"
+    assert first["fingerprint_version"] == second["fingerprint_version"] == "2"
+    assert first["fingerprint"] != second["fingerprint"]
+
+
 def test_canonical_identity_handles_mutmut_diff_that_is_not_parseable_python(tmp_path):
     source = 'def translate(payload):\n    payload = {**payload, "tool_name": "Bash"}\n    return payload\n'
     diff = (
