@@ -10,6 +10,11 @@ When I maintain a repository, I want mutation quality to improve from an
 honest baseline without allowing regressions, so a target score cannot be met
 by hiding tool failures, silently excluding mutants, or inherited weak tests.
 
+When I configure mutation testing for a project, I want Fettle to validate the
+engine's complete mutation-detail vocabulary before an expensive run, so parser
+drift and unsupported mutation shapes fail quickly with enough evidence to fix
+them.
+
 ## Personas Affected
 
 - New user: needs one documented command, useful defaults, and an explanation
@@ -24,6 +29,7 @@ by hiding tool failures, silently excluding mutants, or inherited weak tests.
 | Phase | User action | Sees | Desired feeling | Failure prevented |
 |---|---|---|---|---|
 | Configure | Enables `[mutation]` and validates config | Effective paths, test mappings, limits, and policy | Confident | Silent inert configuration |
+| Preflight | Runs `fettle mutation preflight` locally or in CI | Scope, generated-detail count, canonicalized count, and bounded failures | Ready | Full runs used to discover parser defects |
 | Develop | Runs `fettle mutation run --changed` or opens a PR | Progress followed by killed and surviving changes | Informed | Coverage mistaken for assertion quality |
 | Repair | Opens a survivor and runs its rerun command | File, line, mutation, tests, and expected next action | In control | Opaque mutant IDs |
 | Decide | Adds an assertion or records a temporary override | New survivor removed or explicitly waived | Accountable | Permanent unreviewed suppression |
@@ -73,6 +79,8 @@ seconds, excluding mutation execution time.
 ## Information Architecture
 
 - Entry point: `fettle mutation`.
+- Readiness check: `fettle mutation preflight`, which generates and validates
+  canonical identities without executing every mutant against tests.
 - Common action: `fettle mutation run --changed`.
 - Full evidence: `fettle mutation run --all`, with CI-only shard options kept
   under advanced help.
@@ -97,6 +105,11 @@ seconds, excluding mutation execution time.
 Default output shows status, score, delta, counts, new survivors, and next
 action. `--verbose` shows complete existing-survivor and execution-scope data.
 Raw engine output and full survivor records live in the retained JSON artifact.
+
+Preflight's default output shows scope, engine identity, generated details,
+canonicalized details, collisions, and the next action. Bounded rejected native
+diffs and stage diagnostics are retained in JSON rather than flooding the
+terminal.
 
 ## Policy Semantics
 
@@ -169,6 +182,21 @@ execution uses a different revision
 When Fettle evaluates the report
 Then it returns `tool_error` or `unknown`, score `null`, and exit code 2.
 
+### Scenario: Mutation vocabulary preflight succeeds
+
+Given a configured project and the pinned mutation engine
+When a maintainer runs `fettle mutation preflight`
+Then Fettle generates mutation details without executing the full mutant test
+matrix, canonicalizes every detail uniquely, reports readiness, and exits 0.
+
+### Scenario: Mutation vocabulary preflight rejects parser drift
+
+Given the engine emits an insertion, deletion, replacement, invalid-Python, or
+otherwise unsupported mutation detail
+When a maintainer runs `fettle mutation preflight`
+Then Fettle exits 2 and retains the native mutant ID, file, bounded raw diff,
+failed canonicalization stage, and recovery action without launching a full run.
+
 ### Scenario: Baseline establishment
 
 Given independently executed complete full reports from one revision satisfy
@@ -213,6 +241,8 @@ policy disposition, and Fettle requests renewed review evidence.
   action, or the report is not eligible for enforcement.
 - Tool and evidence errors are distinguishable from test-quality violations.
 - The common changed-scope command requires no shard knowledge.
+- A maintainer can prove canonicalization readiness without paying full mutation
+  execution cost, and a rejected detail identifies the exact failed stage.
 - No accepted result depends on GitHub's advisory job color.
 - Seeded weak assertions are detected in both human and JSON output.
 - Reviewer feedback distinguishes actionable findings from equivalent or

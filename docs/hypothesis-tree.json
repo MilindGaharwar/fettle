@@ -5,9 +5,9 @@
     "created": "2026-08-07",
     "best_score": 1792060,
     "best_node": "2",
-    "total_nodes": 4,
+    "total_nodes": 5,
     "merged_nodes": 1,
-    "pruned_nodes": 1,
+    "pruned_nodes": 2,
     "convergence_counter": 1
   },
   "tree": {
@@ -19,7 +19,8 @@
       "children": [
         "1",
         "2",
-        "3"
+        "3",
+        "4"
       ],
       "evidence": null,
       "insight": null,
@@ -75,6 +76,24 @@
       "evidence": null,
       "insight": "The objective was met without adding coverage-context selection complexity.",
       "constraints": []
+    },
+    "4": {
+      "id": "4",
+      "parent": "ROOT",
+      "hypothesis": "Use paired full calibration runs to discover remaining engine-detail grammar; falsified if deterministic parser defects invalidate both runs after expensive shard execution",
+      "status": "pruned",
+      "children": [],
+      "evidence": {
+        "cache_failure_runs": [31293693197, 31293694402],
+        "canonicalization_failure_runs": [31295617487, 31295618462],
+        "result": "invalid",
+        "message": "Deterministic cache and canonicalization defects invalidated paired runs after expensive fan-out"
+      },
+      "insight": "Full runs are held-out outcome verification, not efficient mutation-vocabulary discovery. Generate and canonicalize the complete engine-detail corpus first, replay narrow historical failures, and launch the second calibration only after the first is authoritative.",
+      "constraints": [
+        "Do not launch paired full calibrations before complete mutation-detail preflight passes.",
+        "Launch the second calibration only after the first is authoritative."
+      ]
     }
   }
 }

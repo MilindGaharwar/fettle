@@ -242,8 +242,8 @@ def _parse_mutation_diff(diff: str, expected_file: str | None = None) -> tuple[s
         raise ValueError("mutation detail must contain exactly one valid hunk")
     removed = [line[1:] for line in lines[3:] if line.startswith("-")]
     added = [line[1:] for line in lines[3:] if line.startswith("+")]
-    if not removed or not added or any(line and line[0] not in " +-\\" for line in lines[3:]):
-        raise ValueError("mutation detail has no replacement")
+    if (not removed and not added) or any(line and line[0] not in " +-\\" for line in lines[3:]):
+        raise ValueError("mutation detail has no change")
     return old_file, removed, added
 
 
@@ -282,6 +282,29 @@ def _find_replacement(
         raise ValueError("mutation replacement cannot be located uniquely")
     index = matches[0]
     mutated = source_lines[:index] + added + source_lines[index + len(removed):]
+    return "\n".join(mutated) + ("\n" if source.endswith("\n") else ""), index + 1
+
+
+def _find_insertion(source: str, diff: str, added: list[str], preferred_line: int) -> tuple[str, int]:
+    source_lines = source.splitlines()
+    body = diff.splitlines()[3:]
+    old_hunk = [line[1:] for line in body if line.startswith((" ", "-"))]
+    insertion_offset = sum(line.startswith((" ", "-")) for line in body[:next(
+        index for index, line in enumerate(body) if line.startswith("+")
+    )])
+    if not old_hunk:
+        raise ValueError("mutation insertion cannot be anchored uniquely")
+    matches = [
+        index for index in range(len(source_lines) - len(old_hunk) + 1)
+        if source_lines[index:index + len(old_hunk)] == old_hunk
+    ]
+    if len(matches) > 1:
+        distance = min(abs(index + 1 - preferred_line) for index in matches)
+        matches = [index for index in matches if abs(index + 1 - preferred_line) == distance]
+    if len(matches) != 1:
+        raise ValueError("mutation insertion cannot be anchored uniquely")
+    index = matches[0] + insertion_offset
+    mutated = source_lines[:index] + added + source_lines[index:]
     return "\n".join(mutated) + ("\n" if source.endswith("\n") else ""), index + 1
 
 
@@ -690,28 +713,47 @@ def _canonical_mutant(
     diff_lines = diff.splitlines()
     hunk = re.match(r"@@ -(\d+)", diff_lines[2])
     context_before = next(
-        (index for index, value in enumerate(diff_lines[3:]) if value.startswith("-")),
+        (index for index, value in enumerate(diff_lines[3:]) if value.startswith(("-", "+"))),
         0,
     )
-    mutated_source, line = _find_replacement(
-        normalized_source, normalized_removed, normalized_added,
-        int(hunk.group(1)) + context_before if hunk else None,
-    )
+    preferred_line = int(hunk.group(1)) + context_before if hunk else None
+    if normalized_removed:
+        mutated_source, line = _find_replacement(
+            normalized_source, normalized_removed, normalized_added, preferred_line,
+        )
+    elif preferred_line is not None:
+        mutated_source, line = _find_insertion(
+            normalized_source, diff, normalized_added, preferred_line,
+        )
+    else:
+        raise ValueError("mutation insertion cannot be anchored uniquely")
     try:
         before_tree = ast.parse(normalized_source)
-        after_tree = ast.parse(mutated_source)
     except SyntaxError as exc:
-        if not (
-            len(normalized_removed) == len(normalized_added) == 1
-            and normalized_removed[0].count("**") == 1
-            and normalized_added[0] == normalized_removed[0].replace("**", "*", 1)
-        ):
-            raise ValueError("mutation detail does not produce valid Python") from exc
+        raise ValueError("mutation source is not valid Python") from exc
+
+    def textual_record() -> dict:
         before_symbol = _enclosing_symbol(before_tree, line)
-        before = normalized_removed[0].strip()
-        after = normalized_added[0].strip()
+        before = "\n".join(normalized_removed).strip()
+        after = "\n".join(normalized_added).strip()
+        context = [
+            unicodedata.normalize("NFC", value[1:])
+            for value in diff_lines[3:] if value.startswith(" ")
+        ]
+        symbol_start = getattr(before_symbol, "lineno", 1)
+        symbol_end = getattr(before_symbol, "end_lineno", len(normalized_source.splitlines()))
+        symbol_lines = normalized_source.splitlines()[symbol_start - 1:symbol_end]
+        anchor = normalized_removed or context
+        occurrences = [
+            index for index in range(len(symbol_lines) - len(anchor) + 1)
+            if symbol_lines[index:index + len(anchor)] == anchor
+        ]
+        occurrence = occurrences.index(line - symbol_start) if line - symbol_start in occurrences else None
         identity = json.dumps(
-            ["v1", canonical_file, _symbol_name(before_symbol), ["textual"], "textual", before, after],
+            [
+                "v1", canonical_file, _symbol_name(before_symbol), ["textual"], "textual",
+                before, after, context, occurrence,
+            ],
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -732,6 +774,13 @@ def _canonical_mutant(
             "mapped_tests": sorted(set(mapped_tests)),
             "rerun_command": shlex.join(["mutmut", "run", engine_id]),
         }
+
+    if not normalized_removed or not normalized_added:
+        return textual_record()
+    try:
+        after_tree = ast.parse(mutated_source)
+    except SyntaxError:
+        return textual_record()
     before_symbol = _enclosing_symbol(before_tree, line)
     after_symbol = _enclosing_symbol(after_tree, line)
     if _symbol_name(before_symbol) != _symbol_name(after_symbol):

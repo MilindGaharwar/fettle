@@ -2,7 +2,7 @@
 
 **Metric:** successful full-run duration_ms <= 2100000 with valid nonzero outcomes
 **Best Score:** 1792060 ms (node 2)
-**Nodes:** 4 total | 1 merged | 1 pruned
+**Nodes:** 5 total | 1 merged | 2 pruned
 **Created:** 2026-08-07
 
 ---
@@ -21,3 +21,6 @@
     - Evidence: Run `31246843926` at revision `e3706df3ca4f788482e6e58388eb5cbfab23e6a7` completed all 240 shards and aggregated 154 modules and 30,441 source lines exactly once with zero untested mutants in 1,792,060 ms.
     - Insight: Test-cost-weighted line partitions plus measured hotspot chunking can bound full mutation without weakening scope; aggregate report integrity, not job color, is the acceptance authority.
   - **3** [CANCELLED]: Use coverage contexts to select tests per mutant with full-suite survivor confirmation; the objective was met without adding this complexity
+  - **4** [PRUNED]: Use paired full calibration runs to discover remaining engine-detail grammar; falsified if deterministic parser defects invalidate both runs after expensive shard execution
+    - Evidence: Runs `31293693197` and `31293694402` exposed a nested mutation test deleting mutmut's live cache; runs `31295617487` and `31295618462` then exposed deletion-only and invalid-Python canonicalization gaps after shard execution.
+    - Insight: Full runs are held-out outcome verification, not efficient mutation-vocabulary discovery. Generate and canonicalize the complete engine-detail corpus first, replay narrow historical failures, and launch the second calibration only after the first is authoritative.

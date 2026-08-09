@@ -215,6 +215,67 @@ def test_canonical_identity_handles_multiline_mapping_unpack_display(tmp_path):
     assert mutant["after"] == "*finding,"
 
 
+def test_canonical_identity_handles_deletion_only_diff(tmp_path):
+    source = "def normalize(value):\n    value = value.strip()\n    return value\n"
+    diff = (
+        "--- src/normalize.py\n+++ src/normalize.py\n@@ -1,3 +1,2 @@\n"
+        " def normalize(value):\n"
+        "-    value = value.strip()\n"
+        "     return value\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/normalize.py", source, diff, "46", "survived", []
+    )
+
+    assert mutant["symbol"] == "normalize"
+    assert mutant["before"] == "value = value.strip()"
+    assert mutant["after"] == ""
+
+
+def test_canonical_identity_handles_context_anchored_insertion_only_diff(tmp_path):
+    source = "def normalize(value):\n    return value\n"
+    diff = (
+        "--- src/normalize.py\n+++ src/normalize.py\n@@ -1,2 +1,3 @@\n"
+        " def normalize(value):\n"
+        "+    value = value.strip()\n"
+        "     return value\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/normalize.py", source, diff, "62", "survived", []
+    )
+
+    assert mutant["symbol"] == "normalize"
+    assert mutant["before"] == ""
+    assert mutant["after"] == "value = value.strip()"
+
+
+def test_canonical_identity_uses_textual_fallback_for_arbitrary_invalid_python(tmp_path):
+    source = "def enabled(value):\n    return value is not None\n"
+    diff = (
+        "--- src/policy.py\n+++ src/policy.py\n@@ -1,2 +1,2 @@\n"
+        " def enabled(value):\n"
+        "-    return value is not None\n"
+        "+    return value is not\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/policy.py", source, diff, "63", "survived", []
+    )
+
+    assert mutant["operator"] == "textual"
+    assert mutant["before"] == "return value is not None"
+    assert mutant["after"] == "return value is not"
+
+
+def test_canonical_identity_rejects_unanchored_insertion(tmp_path):
+    diff = "--- src/a.py\n+++ src/a.py\n@@ -1,0 +1 @@\n+x = 1\n"
+
+    with pytest.raises(ValueError, match="anchored uniquely"):
+        _canonical_mutant(str(tmp_path), "src/a.py", "", diff, "1", "survived", [])
+
+
 @pytest.mark.parametrize(
     "diff",
     [

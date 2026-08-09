@@ -253,6 +253,7 @@ Expose the existing module through the main CLI:
 ```text
 fettle mutation run --changed [--json] [--output PATH]
 fettle mutation run --all [advanced shard options]
+fettle mutation preflight [--all] [--json] [--output PATH]
 fettle mutation status [--report PATH] [--json]
 fettle mutation show FINGERPRINT
 fettle mutation baseline check REPORT...
@@ -265,6 +266,13 @@ Exit codes remain consistent with Fettle:
 - 1: trustworthy evidence found a quality-policy violation;
 - 2: configuration, tool, identity, orchestration timeout, or evidence-integrity
   failure.
+
+`mutation preflight` generates the pinned engine's mutation-detail corpus and
+proves that every detail has a unique canonical identity without executing the
+full mutant-by-test matrix. It is provider-neutral and project-generic: project
+paths, mappings, chunking, and engine identity come from validated configuration.
+Fettle-specific shard numbers and historical failing ranges are regression data,
+not production defaults.
 
 ## Work Packages
 
@@ -332,6 +340,48 @@ are named before implementation files to preserve the repository's TDD policy.
   mutant.
 - [x] Add schema-v1 rejection or explicit read-only migration behavior; do not
   silently compare v1 IDs with v2 fingerprints.
+
+### WP3.5: Mutation Vocabulary Preflight
+
+This package incorporates the calibration learning: expensive outcome runs are
+held-out verification, not discovery tools for engine output grammar.
+
+- [ ] Add fixture-first contracts in `tests/fixtures/mutation/` and
+  `tests/test_mutation_test.py` for validated single-hunk replacement,
+  insertion-only, deletion-only, multiline, repeated-source, and syntactically
+  invalid mutated-Python details. Verify malformed paths, multiple hunks,
+  ambiguous source anchors, empty changes, duplicate IDs, and collisions still
+  fail closed.
+- [ ] Replace mutation-shape special cases in `fettle/mutation_test.py` with one
+  canonical textual fallback. Require the original source to parse; allow the
+  mutated source to be syntactically invalid when the exact validated diff can
+  be anchored uniquely. Include normalized removed and added text, enclosing
+  symbol, structural/occurrence anchor, and file in identity; never fall back to
+  file and line alone.
+- [ ] Retain bounded canonicalization diagnostics for every rejected detail:
+  engine ID, file, source range when known, failed stage, reason, and raw diff.
+  Verify human output gives one recovery action while JSON preserves complete
+  bounded diagnostics without secrets or absolute paths.
+- [ ] Add an engine-generation preflight in `fettle/mutation_test.py` that
+  generates the complete configured mutation-detail corpus without running the
+  mutant-by-test matrix, canonicalizes every detail, and checks count
+  reconciliation and fingerprint uniqueness.
+- [ ] Expose `fettle mutation preflight [--all] [--json] [--output PATH]` through
+  `fettle/cli.py`; add exit-code and output-state tests in `tests/test_cli.py`.
+  A complete unique corpus exits 0; unsupported, missing, duplicate, ambiguous,
+  or colliding evidence exits 2.
+- [ ] Add a CI preflight job before full shard fan-out in
+  `.github/workflows/mutation.yml`. Full workers must not start unless preflight
+  succeeds for the same revision, policy, source scope, engine, and manifest
+  digest. Retain its report on success and failure.
+- [ ] Seed a permanent adversarial corpus from every observed calibration
+  failure, including archived shards 46, 62, 63, 239 and cache-isolation cases.
+  Historical shard numbers remain test provenance only and never enter generic
+  runtime logic.
+- [ ] Verify the funnel in order: focused unit fixtures; complete generated
+  detail corpus; archived failing shard replays; full tests, Ruff, Actionlint,
+  and Fettle scan. Do not dispatch another complete calibration before all
+  preflight gates pass.
 
 ### WP4: Baseline And Comparison
 
@@ -415,12 +465,20 @@ are named before implementation files to preserve the repository's TDD policy.
 
 ### WP7: Fettle Dogfood Graduation
 
-- [ ] After schema-v2 canonical evidence exists, dispatch two independent full
-  reports for one revision. Compare identities, outcomes, scope, invalidation
-  inputs, and runtime; use another run only to diagnose a mismatch, never to
-  outvote it.
-- [ ] If a run is invalid, record the exact module/range duration in
-  `docs/hypothesis-tree.md`; adjust only measured chunk configuration and rerun.
+- [ ] After schema-v2 canonical evidence and WP3.5 preflight pass, replay the
+  archived failing ranges independently. Require zero canonicalization errors,
+  zero fingerprint collisions, zero unmapped tests, and zero cache leakage.
+- [ ] Dispatch one full report for the pinned revision. Treat it as held-out
+  validation: if invalid, retain diagnostics, update the adversarial corpus,
+  return to preflight, and do not dispatch a second run.
+- [ ] Only after the first report is authoritative, dispatch the second
+  independent report for the exact same revision. Compare identities, outcomes,
+  scope, invalidation inputs, and runtime; use another run only to diagnose a
+  mismatch, never to outvote it.
+- [ ] If a run is invalid, record the exact stage, native detail shape,
+  module/range duration, and reusable insight in `docs/hypothesis-tree.md`;
+  adjust only measured canonicalization or chunk configuration and rerun the
+  narrowest falsifying check first.
 - [ ] Establish `.fettle/mutation-baseline.json` only after the measured
   calibration contract accepts independent full reports on one commit; review
   the generated diff before commit.
@@ -495,6 +553,12 @@ not replace tests for subprocess, SQLite, workflow, or Git behavior.
 
 Functional:
 
+- `fettle mutation preflight` canonicalizes 100 percent of generated details
+  with zero collisions before full execution is eligible to start.
+- Replacement, insertion-only, deletion-only, multiline, repeated-source, and
+  invalid-Python mutations receive deterministic identities or precise bounded
+  rejection evidence; malformed or ambiguous details never receive guessed
+  identities.
 - Independent complete full runs establish one baseline only when the measured
   calibration contract passes; any unexplained mismatch refuses establishment.
 - Changed code with a seeded weak assertion produces a canonical new survivor.
@@ -510,6 +574,10 @@ Functional:
 
 Operational:
 
+- Full CI fan-out is gated by a successful preflight bound to the same revision,
+  engine, policy, source scope, and manifest digest.
+- Calibration runs are sequential: the second is not launched until the first
+  is authoritative.
 - At least 95 percent of Fettle changed-scope runs complete within 12 minutes.
 - Every full worker completes within 35 minutes.
 - Full mutation remains outside normal blocking PR critical path.
@@ -534,6 +602,10 @@ Product:
   harmed. Tool and evidence failures remain non-pass.
 - Stop and redesign canonical identity if equivalent runs or unrelated line
   movement produce different fingerprints; do not add fuzzy matching.
+- Stop launching full calibration pairs when preflight is incomplete or a full
+  run reveals a new detail grammar. Capture the detail as a fixture, repair the
+  generic contract, and rerun the narrow validation funnel before another full
+  run.
 - Stop increasing the floor if teams respond by deleting valuable assertions,
   excluding meaningful source, broadening skips, or writing implementation-
   coupled tests solely to kill mutants.
