@@ -258,13 +258,10 @@ def _parse_show_all(output: str, expected_ids: set[str], max_bytes: int = _MAX_S
             raise ValueError(f"duplicate mutation detail for engine ID {engine_id}")
         end = markers[index + 1].start() if index + 1 < len(markers) else len(output)
         records[engine_id] = output[marker.end():end].strip("\n") + "\n"
-    found = set(records)
-    if found != expected_ids:
-        missing = sorted(expected_ids - found, key=int)
-        extra = sorted(found - expected_ids, key=int)
-        detail = f"missing={missing}, unexpected={extra}"
-        raise ValueError("mutation details are missing or unexpected: " + detail)
-    return records
+    missing = sorted(expected_ids - set(records), key=int)
+    if missing:
+        raise ValueError(f"mutation details are missing: {missing}")
+    return {engine_id: records[engine_id] for engine_id in expected_ids}
 
 
 def _find_replacement(
@@ -690,10 +687,15 @@ def _canonical_mutant(
     normalized_source = unicodedata.normalize("NFC", source)
     normalized_removed = [unicodedata.normalize("NFC", line) for line in removed]
     normalized_added = [unicodedata.normalize("NFC", line) for line in added]
-    hunk = re.match(r"@@ -(\d+)", diff.splitlines()[2])
+    diff_lines = diff.splitlines()
+    hunk = re.match(r"@@ -(\d+)", diff_lines[2])
+    context_before = next(
+        (index for index, value in enumerate(diff_lines[3:]) if value.startswith("-")),
+        0,
+    )
     mutated_source, line = _find_replacement(
         normalized_source, normalized_removed, normalized_added,
-        int(hunk.group(1)) if hunk else None,
+        int(hunk.group(1)) + context_before if hunk else None,
     )
     try:
         before_tree = ast.parse(normalized_source)
@@ -701,8 +703,8 @@ def _canonical_mutant(
     except SyntaxError as exc:
         if not (
             len(normalized_removed) == len(normalized_added) == 1
-            and normalized_removed[0].count("{**") == 1
-            and normalized_added[0] == normalized_removed[0].replace("{**", "{*", 1)
+            and normalized_removed[0].count("**") == 1
+            and normalized_added[0] == normalized_removed[0].replace("**", "*", 1)
         ):
             raise ValueError("mutation detail does not produce valid Python") from exc
         before_symbol = _enclosing_symbol(before_tree, line)
@@ -1052,6 +1054,9 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
             return result
         results.append(result)
     counts = {state: sum(result[state] for result in results) for state in _STATES}
+    records = [item for result in results for item in result.get("non_killed", [])]
+    for engine_id, record in enumerate(records, start=1):
+        record["engine_id"] = str(engine_id)
     return {
         "status": "completed",
         "engine_version": MUTMUT_VERSION,
@@ -1061,7 +1066,7 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
         "run_exit_code": 0,
         "results_exit_code": 0,
         **counts,
-        "non_killed": [item for result in results for item in result.get("non_killed", [])],
+        "non_killed": records,
         "survivor_preview": [item for result in results for item in result.get("survivor_preview", [])][:20],
         "survivors": [item for result in results for item in result.get("survivors", [])],
         "stderr": "\n".join(result.get("stderr", "") for result in results if result.get("stderr")),

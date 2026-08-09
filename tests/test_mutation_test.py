@@ -194,6 +194,27 @@ def test_canonical_identity_handles_mutmut_diff_that_is_not_parseable_python(tmp
     assert mutant["after"] == 'payload = {*payload, "tool_name": "Bash"}'
 
 
+def test_canonical_identity_handles_multiline_mapping_unpack_display(tmp_path):
+    source = "def merge(finding):\n    return {\n        **finding,\n        'status': 'new',\n    }\n"
+    diff = (
+        "--- src/adapter.py\n+++ src/adapter.py\n@@ -1,5 +1,5 @@\n"
+        " def merge(finding):\n"
+        "     return {\n"
+        "-        **finding,\n"
+        "+        *finding,\n"
+        "         'status': 'new',\n"
+        "     }\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/adapter.py", source, diff, "15", "survived", []
+    )
+
+    assert mutant["operator"] == "textual"
+    assert mutant["before"] == "**finding,"
+    assert mutant["after"] == "*finding,"
+
+
 @pytest.mark.parametrize(
     "diff",
     [
@@ -209,7 +230,7 @@ def test_malformed_mutation_details_fail_closed(tmp_path, diff):
         _canonical_mutant(str(tmp_path), "src/a.py", "x\n", diff, "1", "survived", [])
 
 
-def test_show_all_parser_rejects_duplicate_missing_and_oversized_records():
+def test_show_all_parser_selects_expected_records_and_rejects_incomplete_output():
     diff = "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-x\n+y\n"
     with pytest.raises(ValueError, match="duplicate"):
         _parse_show_all(f"# mutant 1\n{diff}# mutant 1\n{diff}", {"1"})
@@ -217,6 +238,8 @@ def test_show_all_parser_rejects_duplicate_missing_and_oversized_records():
         _parse_show_all(f"# mutant 1\n{diff}", {"1", "2"})
     with pytest.raises(ValueError, match="large"):
         _parse_show_all("x" * 100, set(), max_bytes=10)
+
+    assert _parse_show_all(f"# mutant 1\n{diff}# mutant 2\n{diff}", {"2"}) == {"2": diff}
 
 
 def test_collect_records_is_complete_and_rejects_fingerprint_collision(tmp_path):
@@ -308,6 +331,29 @@ def test_canonical_identity_uses_hunk_location_to_disambiguate_repeated_text(tmp
 
     assert mutant["symbol"] == "second"
     assert mutant["line"] == 5
+
+
+def test_canonical_identity_accounts_for_context_before_repeated_change(tmp_path):
+    source = (
+        "def values(items):\n"
+        "    first = [item for item in items if item > 0]\n"
+        "    padding = None\n"
+        "    second = [item for item in items if item > 0]\n"
+        "    return first, second\n"
+    )
+    diff = (
+        "--- src/repeated.py\n+++ src/repeated.py\n@@ -3,3 +3,3 @@\n"
+        "     padding = None\n"
+        "-    second = [item for item in items if item > 0]\n"
+        "+    second = [item for item in items if item >= 0]\n"
+        "     return first, second\n"
+    )
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/repeated.py", source, diff, "1", "survived", []
+    )
+
+    assert mutant["line"] == 4
 
 
 def test_canonical_identity_distinguishes_repeated_identical_ast_nodes(tmp_path):
@@ -995,7 +1041,10 @@ def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
         "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
         "run_exit_code": 2, "results_exit_code": 0, "killed": 2, "survived": 1,
         "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
-        "survivors": ["3"], "stderr": "", "duration_ms": 10,
+        "survivors": ["fingerprint"], "stderr": "", "duration_ms": 10,
+        "non_killed": [{
+            "engine_id": "3", "fingerprint": "fingerprint", "rerun_command": "mutmut run 3",
+        }],
     }
     native = tmp_path / ".mutmut-cache"
     native.write_bytes(b"stale")
@@ -1003,7 +1052,7 @@ def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
     def run_module(*_args):
         assert not native.exists()
         native.write_bytes(b"module state")
-        return engine
+        return {**engine, "non_killed": [dict(record) for record in engine["non_killed"]]}
 
     with (
         patch("fettle.mutation_test._run_mutmut", side_effect=run_module) as run,
@@ -1022,6 +1071,8 @@ def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
     assert result["killed"] == 4
     assert result["survived"] == 2
     assert result["tests_run"] == ["tests/test_a.py", "tests/test_b.py"]
+    assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2"]
+    assert [record["rerun_command"] for record in result["non_killed"]] == ["mutmut run 3"] * 2
 
 
 def test_fatal_run_exit_is_bounded_tool_error():
