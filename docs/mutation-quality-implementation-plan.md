@@ -608,6 +608,11 @@ Product:
   run reveals a new detail grammar. Capture the detail as a fixture, repair the
   generic contract, and rerun the narrow validation funnel before another full
   run.
+- Reuse one retained preflight and manifest set for replay and both calibration
+  runs. Execution dispatches must provide its run ID and fail closed unless the
+  aggregate and every manifest match the current commit and configured shard
+  topology. Scheduled runs produce preflight evidence only; they do not launch
+  full mutation workers implicitly.
 - Stop increasing the floor if teams respond by deleting valuable assertions,
   excluding meaningful source, broadening skips, or writing implementation-
   coupled tests solely to kill mutants.

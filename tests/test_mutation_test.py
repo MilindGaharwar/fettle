@@ -1282,8 +1282,10 @@ def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp
         {**base, "shard_index": 1, "line_ranges": [{"file": "src/app.py", "start": 2, "end": 2}], "fingerprints": ["b" * 64]},
     ]
 
-    result = aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)
     assert result["status"] == "completed"
+    assert result["revision"] == "a" * 40
     assert result["generated"] == result["canonicalized"] == 2
 
     reports[1]["fingerprints"] = ["a" * 64]

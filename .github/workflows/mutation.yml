@@ -20,6 +20,18 @@ on:
           - preflight
           - replay
           - calibration
+      preflight_run_id:
+        description: "Successful preflight run on this commit (required for replay/calibration)"
+        required: false
+        type: string
+
+concurrency:
+  group: mutation-authoritative-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   changed:
@@ -80,9 +92,9 @@ jobs:
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.prepare.outputs.matrix }}
-      execution_matrix: ${{ steps.prepare.outputs.execution_matrix }}
-      shard_count: ${{ steps.prepare.outputs.shard_count }}
+      matrix: ${{ steps.prepare.outputs.matrix || steps.reuse.outputs.matrix }}
+      execution_matrix: ${{ steps.prepare.outputs.execution_matrix || steps.reuse.outputs.execution_matrix }}
+      shard_count: ${{ steps.prepare.outputs.shard_count || steps.reuse.outputs.shard_count }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -94,14 +106,48 @@ jobs:
       - run: uv venv --python 3.12 && uv pip install --quiet -e .
       - name: Validate effective configuration
         run: uv run --no-sync fettle config --validate
+      - name: Require retained preflight run
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        env:
+          PREFLIGHT_RUN_ID: ${{ github.event.inputs.preflight_run_id }}
+        run: test -n "$PREFLIGHT_RUN_ID" && test "$PREFLIGHT_RUN_ID" -eq "$PREFLIGHT_RUN_ID"
+      - name: Download retained partition manifests
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutation-manifests-${{ github.event.inputs.preflight_run_id }}
+          path: mutation-manifests
+          run-id: ${{ github.event.inputs.preflight_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download retained preflight aggregate
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutation-preflight-${{ github.event.inputs.preflight_run_id }}
+          path: retained-preflight
+          run-id: ${{ github.event.inputs.preflight_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare digest-bound partitions
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight'
         id: prepare
         run: |
           uv run --no-sync python -m fettle.mutation_test --root . --prepare-manifests mutation-manifests --json > prepare.json
           {
             echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare.json"))["matrix"], separators=(",", ":")))')"
-            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'calibration' }}' uv run --no-sync python -c 'import glob,json,os; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); print(json.dumps({"shard": replay if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
+            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'preflight' }}' uv run --no-sync python -c 'import glob,json,os; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); print(json.dumps({"shard": replay if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare.json"))["shard_count"])')"
+          } >> "$GITHUB_OUTPUT"
+      - name: Verify retained SHA-bound preflight
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        id: reuse
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+        run: |
+          uv run --no-sync python -c 'import glob,json,os; from fettle.mutation_test import load_partition_manifest; paths=glob.glob("mutation-manifests/partition-*.json"); manifests=[load_partition_manifest(__import__("pathlib").Path(path)) for path in paths]; aggregate=json.load(open("retained-preflight/mutation-preflight.json")); shard_count=len(manifests); assert shard_count and sorted(item["shard_index"] for item in manifests)==list(range(shard_count)), "retained manifests are incomplete"; assert all(item["revision"]==os.environ["GITHUB_SHA"] and item["shard_count"]==shard_count for item in manifests), "retained manifests do not match this commit and topology"; assert aggregate.get("status")=="completed" and aggregate.get("passed") is True, "retained preflight is not successful"; assert aggregate["revision"]==os.environ["GITHUB_SHA"], "retained preflight does not match this commit"; assert aggregate["shard_count"]==shard_count, "retained preflight shard count differs"; assert aggregate["generated"]==aggregate["canonicalized"], "retained preflight details do not reconcile"; assert aggregate["collisions"]==0, "retained preflight contains collisions"; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"]==file and item["start"]<=end and item["end"]>=start for file,start,end in archived)}); outputs={"matrix":{"shard":list(range(shard_count))},"execution_matrix":{"shard":replay if os.environ["MODE"]=="replay" else list(range(shard_count))},"shard_count":shard_count}; open("reuse-outputs.json","w").write(json.dumps(outputs))'
+          {
+            echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("reuse-outputs.json"))["matrix"], separators=(",", ":")))')"
+            echo "execution_matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("reuse-outputs.json"))["execution_matrix"], separators=(",", ":")))')"
+            echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("reuse-outputs.json"))["shard_count"])')"
           } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -110,7 +156,7 @@ jobs:
           if-no-files-found: error
 
   preflight:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight'
     needs: prepare
     name: mutation (detail preflight ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -146,7 +192,7 @@ jobs:
           if-no-files-found: error
 
   preflight-aggregate:
-    if: github.event_name != 'pull_request' && always()
+    if: (github.event_name == 'schedule' || github.event.inputs.mode == 'preflight') && always()
     needs: [prepare, preflight]
     name: mutation (complete detail corpus)
     runs-on: ubuntu-latest
@@ -175,8 +221,8 @@ jobs:
           if-no-files-found: error
 
   full-shard:
-    if: github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event.inputs.mode != 'preflight')
-    needs: [prepare, preflight-aggregate]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+    needs: prepare
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -211,7 +257,7 @@ jobs:
           if-no-files-found: error
 
   aggregate:
-    if: github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event.inputs.mode == 'calibration') && always()
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && always()
     name: mutation (full aggregate, advisory)
     needs: [prepare, full-shard]
     runs-on: ubuntu-latest

@@ -273,7 +273,6 @@ def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     assert "name: mutation-preflight-${{ github.run_id }}-${{ matrix.shard }}" in workflow
     assert "needs: [prepare, preflight]" in workflow
     assert workflow.index("Prepare digest-bound partitions") < workflow.index("Bounded mutation-detail preflight")
-    assert workflow.index("Aggregate complete mutation-detail corpus") < workflow.index("Full mutation shard evidence")
     assert "type: choice" in workflow
     assert "- preflight" in workflow and "- replay" in workflow and "- calibration" in workflow
     assert "[46,62,63,239]" not in workflow
@@ -282,6 +281,40 @@ def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     assert "python -m pip install" not in workflow
     assert "uv run --no-sync" in workflow
     assert "merge-multiple: true" not in workflow
+
+
+def test_mutation_execution_reuses_explicit_sha_bound_preflight():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "preflight_run_id:" in workflow
+    assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 2
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 2
+    assert "permissions:\n  actions: read\n  contents: read" in workflow
+    assert 'aggregate["revision"]==os.environ["GITHUB_SHA"]' in workflow
+    assert 'item["revision"]==os.environ["GITHUB_SHA"]' in workflow
+    assert 'aggregate["shard_count"]==shard_count' in workflow
+    assert 'aggregate["generated"]==aggregate["canonicalized"]' in workflow
+    assert 'aggregate["collisions"]==0' in workflow
+
+
+def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_only():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "github.event.inputs.mode == 'preflight'" in workflow
+    assert "github.event_name == 'schedule' || github.event.inputs.mode != 'preflight'" not in workflow
+    assert "needs: [prepare, preflight-aggregate]" not in workflow
+    assert "full-shard:\n    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'\n    needs: prepare" in workflow
+    assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
+    assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow
+    assert "github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow
+
+
+def test_authoritative_mutation_runs_are_serialized_without_cancelling_evidence():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "concurrency:" in workflow
+    assert "mutation-authoritative" in workflow
+    assert "cancel-in-progress: false" in workflow
 
 
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):

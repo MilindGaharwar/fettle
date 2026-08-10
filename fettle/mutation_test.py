@@ -1484,6 +1484,7 @@ def aggregate_preflight_shards(
     generated = sum(report["generated"] for report in reports)
     return {
         "status": "completed", "passed": True, "engine_version": MUTMUT_VERSION,
+        "revision": _revision(root),
         "shard_count": shard_count, "generated": generated, "canonicalized": generated,
         "collisions": 0, "files": expected_files, "fingerprints": sorted(fingerprints),
     }
