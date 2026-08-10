@@ -276,6 +276,9 @@ def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     assert workflow.index("Aggregate complete mutation-detail corpus") < workflow.index("Full mutation shard evidence")
     assert "type: choice" in workflow
     assert "- preflight" in workflow and "- replay" in workflow and "- calibration" in workflow
+    assert "[46,62,63,239]" not in workflow
+    assert 'archived=(("fettle/mutation_test.py",121,180)' in workflow
+    assert 'item["start"] <= end and item["end"] >= start' in workflow
     assert "python -m pip install" not in workflow
     assert "uv run --no-sync" in workflow
     assert "merge-multiple: true" not in workflow

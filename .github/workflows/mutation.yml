@@ -100,7 +100,7 @@ jobs:
           uv run --no-sync python -m fettle.mutation_test --root . --prepare-manifests mutation-manifests --json > prepare.json
           {
             echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare.json"))["matrix"], separators=(",", ":")))')"
-            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'calibration' }}' uv run --no-sync python -c 'import json,os; print(json.dumps({"shard": [46,62,63,239] if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
+            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'calibration' }}' uv run --no-sync python -c 'import glob,json,os; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); print(json.dumps({"shard": replay if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare.json"))["shard_count"])')"
           } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
