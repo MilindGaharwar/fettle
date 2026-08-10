@@ -1189,6 +1189,20 @@ def test_line_ranges_use_supplied_chunk_configuration(tmp_path):
     ]
 
 
+def test_line_ranges_distribute_same_file_chunks_before_reusing_shards(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/slow.py").write_text("\n".join(["x = 1"] * 50))
+    (tmp_path / "tests/test_slow.py").write_text("import src.slow\n")
+
+    shards = [_shard_ranges(
+        str(tmp_path), ["src/slow.py"], index, 4,
+        default_chunk_lines=10,
+    ) for index in range(4)]
+
+    assert sorted(len(shard) for shard in shards) == [1, 1, 1, 2]
+
+
 def test_patch_for_ranges_marks_only_selected_lines_as_added(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src/a.py").write_text("one\ntwo\nthree\n")
@@ -1504,7 +1518,10 @@ def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
 
     with (
         patch("fettle.mutation_test._run_mutmut", side_effect=run_module) as run,
-        patch("fettle.mutation_test.time.monotonic", side_effect=[10.0, 11.0, 12.0, 13.0]),
+        patch(
+            "fettle.mutation_test.time.monotonic",
+            side_effect=[10.0, 11.0, 11.0, 11.5, 12.0, 12.0, 13.0, 14.0],
+        ),
     ):
         result = _run_shard_modules(
             str(tmp_path), {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]}, ranges, 600
@@ -1521,6 +1538,49 @@ def test_shard_runs_each_module_with_only_its_mapped_tests(tmp_path):
     assert result["tests_run"] == ["tests/test_a.py", "tests/test_b.py"]
     assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2"]
     assert [record["rerun_command"] for record in result["non_killed"]] == ["mutmut run 3"] * 2
+    assert result["duration_ms"] == 4000
+    assert result["module_runs"] == [
+        {
+            "file": "src/a.py", "line_ranges": [ranges[0]], "tests_run": ["tests/test_a.py"],
+            "timeout_s": 599, "duration_ms": 500, "status": "completed", "mutants": 3,
+        },
+        {
+            "file": "src/b.py", "line_ranges": [ranges[1]], "tests_run": ["tests/test_b.py"],
+            "timeout_s": 598, "duration_ms": 1000, "status": "completed", "mutants": 3,
+        },
+    ]
+
+
+def test_shard_failure_retains_completed_and_failed_module_timing(tmp_path):
+    ranges = [
+        {"file": "src/a.py", "start": 1, "end": 10},
+        {"file": "src/b.py", "start": 1, "end": 5},
+    ]
+    completed = {
+        "status": "completed", "duration_ms": 10,
+        **{state: 0 for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")},
+    }
+    failed = {"status": "tool_error", "message": "Mutation run timed out after 598s"}
+
+    with (
+        patch("fettle.mutation_test._run_mutmut", side_effect=[completed, failed]),
+        patch(
+            "fettle.mutation_test.time.monotonic",
+            side_effect=[10.0, 11.0, 11.0, 11.5, 12.0, 12.0, 610.0, 610.0],
+        ),
+    ):
+        result = _run_shard_modules(
+            str(tmp_path), {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]}, ranges, 600
+        )
+
+    assert result["status"] == "tool_error"
+    assert result["duration_ms"] == 600000
+    assert result["module_runs"][0]["status"] == "completed"
+    assert result["module_runs"][1] == {
+        "file": "src/b.py", "line_ranges": [ranges[1]], "tests_run": ["tests/test_b.py"],
+        "timeout_s": 598, "duration_ms": 598000, "status": "tool_error",
+        "message": "Mutation run timed out after 598s",
+    }
 
 
 def test_fatal_run_exit_is_bounded_tool_error():

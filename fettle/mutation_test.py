@@ -144,10 +144,12 @@ def _shard_ranges(
         raise ValueError("shard count exceeds source range count")
     shards: list[list[dict]] = [[] for _ in range(count)]
     weights = [0] * count
+    file_chunks = [{file: 0 for file in files} for _ in range(count)]
     for chunk, weight in sorted(chunks, key=lambda item: (-item[1], item[0]["file"], item[0]["start"])):
-        target = min(range(count), key=lambda item: (weights[item], item))
+        target = min(range(count), key=lambda item: (file_chunks[item][chunk["file"]], weights[item], item))
         shards[target].append(chunk)
         weights[target] += weight
+        file_chunks[target][chunk["file"]] += 1
     return sorted(shards[index], key=lambda item: (item["file"], item["start"]))
 
 
@@ -1287,18 +1289,43 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
     """Run each module with only its mapped tests, within one shard deadline."""
     started = time.monotonic()
     results: list[dict] = []
+    module_runs: list[dict] = []
     for file in sorted(mapping):
         remaining = timeout - int(time.monotonic() - started)
         if remaining < 1:
-            return _error("tool_error", f"Mutation shard timed out after {timeout}s")
+            return _error(
+                "tool_error", f"Mutation shard timed out after {timeout}s",
+                duration_ms=round((time.monotonic() - started) * 1000), module_runs=module_runs,
+            )
         try:
             (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
         except OSError as exc:
-            return _error("tool_error", f"Cannot isolate mutation module cache: {exc}")
+            return _error(
+                "tool_error", f"Cannot isolate mutation module cache: {exc}",
+                duration_ms=round((time.monotonic() - started) * 1000), module_runs=module_runs,
+            )
         ranges = [item for item in line_ranges if item["file"] == file]
+        module_started = time.monotonic()
         result = _run_mutmut(root, [file], mapping[file], remaining, ranges, {file: mapping[file]})
+        module_run = {
+            "file": file,
+            "line_ranges": ranges,
+            "tests_run": mapping[file],
+            "timeout_s": remaining,
+            "duration_ms": round((time.monotonic() - module_started) * 1000),
+            "status": result["status"],
+        }
+        if result["status"] == "completed":
+            module_run["mutants"] = sum(result[state] for state in _STATES)
+        elif result.get("message"):
+            module_run["message"] = result["message"]
+        module_runs.append(module_run)
         if result["status"] != "completed":
-            return result
+            return {
+                **result,
+                "duration_ms": round((time.monotonic() - started) * 1000),
+                "module_runs": module_runs,
+            }
         results.append(result)
     counts = {state: sum(result[state] for result in results) for state in _STATES}
     records = [item for result in results for item in result.get("non_killed", [])]
@@ -1318,6 +1345,7 @@ def _run_shard_modules(root: str, mapping: dict[str, list[str]], line_ranges: li
         "survivors": [item for result in results for item in result.get("survivors", [])],
         "stderr": "\n".join(result.get("stderr", "") for result in results if result.get("stderr")),
         "duration_ms": round((time.monotonic() - started) * 1000),
+        "module_runs": module_runs,
     }
 
 
