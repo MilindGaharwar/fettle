@@ -58,6 +58,7 @@ full_shards = 256
 "fettle/mutation_test.py" = 5
 "fettle/quality_scan.py" = 10
 "fettle/ratchet.py" = 20
+"fettle/tool_runner.py" = 20
 
 [boundary]
 # These tests intentionally embed synthetic detector inputs. Keep exclusions

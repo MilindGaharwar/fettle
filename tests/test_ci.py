@@ -318,6 +318,7 @@ def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
     assert '"fettle/init_cmd.py" = 20' in config
     assert '"fettle/mutation_test.py" = 5' in config
     assert '"fettle/ratchet.py" = 20' in config
+    assert '"fettle/tool_runner.py" = 20' in config
 
 
 def test_authoritative_mutation_runs_are_serialized_without_cancelling_evidence():

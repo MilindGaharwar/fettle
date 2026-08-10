@@ -2,7 +2,7 @@
 
 **Metric:** successful full-run duration_ms <= 2100000 with valid nonzero outcomes
 **Best Score:** 1792060 ms (node 2)
-**Nodes:** 5 total | 1 merged | 2 pruned
+**Nodes:** 6 total | 2 merged | 2 pruned
 **Created:** 2026-08-07
 
 ---
@@ -35,6 +35,11 @@
     - Insight: Replay exposes expensive co-located ranges beyond the archived target ranges. Apply the same measured 20-line split only to `coverage_gate.py` and `ratchet.py`; do not raise the 256-shard topology or 1,800-second authority bound.
     - Evidence: Replay `31388226445` on `31d3dec` proved both 20-line splits, then failed only on shards 102, 103, and 242. Each timed out in `mutation_test.py` after earlier sorted modules consumed about 330 seconds; their manifests co-located two or three five-line ranges from that file. A two-line experiment still co-located up to 14 lines and expanded replay from 40 to 72 shards.
     - Insight: A per-file chunk override limits each range, not aggregate same-file work per shard. Preserve the measured five-line chunks and test whether same-file anti-affinity can distribute 385 chunks across 256 workers without raising topology or timeout.
-  - **5** [ACTIVE]: Preserve ordered per-module timing and outcome telemetry in every full shard report; falsified if a replay failure still cannot identify the exact module cost and completed predecessor costs
+  - **5** [MERGED]: Preserve ordered per-module timing and outcome telemetry in every full shard report; falsified if a replay failure still cannot identify the exact module cost and completed predecessor costs
     - Informed by: Three capacity corrections required indirect attribution from sorted manifests and remaining timeout, while line and test-byte weights repeatedly underpredicted runtime.
     - Expected improvement: The next replay yields direct costs for every executed module and enough evidence to accept anti-affinity or replace static balancing without another diagnostic run.
+    - Evidence: Replay `31397998822` on `16aead2` completed 40 of 41 selected shards. Shard 158 telemetry showed both five-line `mutation_test.py` ranges completed in 565 seconds, while `tool_runner.py:61-106` exhausted its remaining 1,125-second allocation after 675 seconds of predecessor work.
+    - Insight: Ordered module telemetry distinguishes a successful balancing correction from a newly exposed hotspot; use the measured module cost rather than attributing failure to co-located ranges or changing global capacity.
+  - **6** [ACTIVE]: Split `tool_runner.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
+    - Informed by: Node 5 directly measured more than 1,125 seconds for the 46-line `tool_runner.py:61-106` range, while the anti-affined `mutation_test.py` predecessors completed within their allocated budget.
+    - Expected improvement: Reduce each `tool_runner.py` execution to at most 44% of the failed range, leaving capacity for sorted predecessor modules without changing scope, 256-shard topology, or the authoritative timeout.
