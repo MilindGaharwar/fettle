@@ -41,7 +41,7 @@ base = "origin/main"
 timeout_s = 600
 full_timeout_s = 1800
 default_chunk_lines = 60
-full_shards = 240
+full_shards = 256
 
 [mutation.test_mappings]
 "fettle/__main__.py" = ["tests/test_cli.py"]
@@ -53,8 +53,8 @@ full_shards = 240
 "fettle/uat/__init__.py" = ["tests/test_uat_surfaces.py"]
 
 [mutation.chunk_lines]
-"fettle/mutation_test.py" = 10
-"fettle/quality_scan.py" = 20
+"fettle/mutation_test.py" = 5
+"fettle/quality_scan.py" = 10
 
 [boundary]
 # These tests intentionally embed synthetic detector inputs. Keep exclusions
