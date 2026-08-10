@@ -53,9 +53,11 @@ full_shards = 256
 "fettle/uat/__init__.py" = ["tests/test_uat_surfaces.py"]
 
 [mutation.chunk_lines]
+"fettle/coverage_gate.py" = 20
 "fettle/init_cmd.py" = 20
 "fettle/mutation_test.py" = 5
 "fettle/quality_scan.py" = 10
+"fettle/ratchet.py" = 20
 
 [boundary]
 # These tests intentionally embed synthetic detector inputs. Keep exclusions
