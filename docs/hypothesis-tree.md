@@ -2,7 +2,7 @@
 
 **Metric:** successful full-run duration_ms <= 2100000 with valid nonzero outcomes
 **Best Score:** 1792060 ms (node 2)
-**Nodes:** 6 total | 2 merged | 2 pruned
+**Nodes:** 7 total | 3 merged | 2 pruned
 **Created:** 2026-08-07
 
 ---
@@ -40,6 +40,11 @@
     - Expected improvement: The next replay yields direct costs for every executed module and enough evidence to accept anti-affinity or replace static balancing without another diagnostic run.
     - Evidence: Replay `31397998822` on `16aead2` completed 40 of 41 selected shards. Shard 158 telemetry showed both five-line `mutation_test.py` ranges completed in 565 seconds, while `tool_runner.py:61-106` exhausted its remaining 1,125-second allocation after 675 seconds of predecessor work.
     - Insight: Ordered module telemetry distinguishes a successful balancing correction from a newly exposed hotspot; use the measured module cost rather than attributing failure to co-located ranges or changing global capacity.
-  - **6** [ACTIVE]: Split `tool_runner.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
+  - **6** [MERGED]: Split `tool_runner.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
     - Informed by: Node 5 directly measured more than 1,125 seconds for the 46-line `tool_runner.py:61-106` range, while the anti-affined `mutation_test.py` predecessors completed within their allocated budget.
     - Expected improvement: Reduce each `tool_runner.py` execution to at most 44% of the failed range, leaving capacity for sorted predecessor modules without changing scope, 256-shard topology, or the authoritative timeout.
+    - Evidence: Replay `31406002381` on `ba45518` completed former failing shard 158 in 486 seconds and all six disjoint `tool_runner.py` ranges were bounded to at most 20 lines.
+    - Insight: A measured per-file split can remove a hotspot without changing global capacity; evaluate any subsequent failure independently rather than widening the successful correction.
+  - **7** [ACTIVE]: Split `ci.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
+    - Informed by: Replay `31406002381` failed only on shard 202. Ordered telemetry measured `bench.py:1-60` completing in 794 seconds, then `ci.py:61-120` exhausting the remaining 1,006 seconds.
+    - Expected improvement: Reduce each `ci.py` execution to at most one third of the failed range while leaving the measured-complete `bench.py` range unchanged and preserving scope, topology, and timeout.

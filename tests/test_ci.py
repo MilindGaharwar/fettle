@@ -314,6 +314,7 @@ def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
 
     assert "full_timeout_s = 1800" in config
     assert "full_shards = 256" in config
+    assert '"fettle/ci.py" = 20' in config
     assert '"fettle/coverage_gate.py" = 20' in config
     assert '"fettle/init_cmd.py" = 20' in config
     assert '"fettle/mutation_test.py" = 5' in config
