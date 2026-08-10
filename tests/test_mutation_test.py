@@ -250,6 +250,99 @@ def test_canonical_identity_handles_multiline_mapping_unpack_display(tmp_path):
     assert mutant["after"] == "*finding,"
 
 
+def test_canonical_identity_handles_one_mutation_spanning_multiple_hunks(tmp_path):
+    source = '''def render(rule_id):
+    yaml_content = f"""rules:
+  - id: {rule_id}
+    generated: now
+"""
+    return yaml_content
+'''
+    diff = '''--- src/render.py
++++ src/render.py
+@@ -1,4 +1,4 @@
+ def render(rule_id):
+-    yaml_content = f"""rules:
++    yaml_content = f"""XXrules:
+   - id: {rule_id}
+     generated: now
+@@ -3,4 +3,4 @@
+   - id: {rule_id}
+     generated: now
+-"""
++XX"""
+     return yaml_content
+'''
+
+    mutant = _canonical_mutant(
+        str(tmp_path), "src/render.py", source, diff, "89", "survived", [],
+    )
+
+    assert mutant["operator"] == "JoinedStr"
+    assert mutant["before"].startswith("f'rules:")
+    assert mutant["after"].startswith("f'XXrules:")
+
+
+def test_canonical_identity_rejects_multi_hunk_context_that_does_not_match_source(tmp_path):
+    source = "first = 1\nsecond = 2\n"
+    diff = (
+        "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-first = 1\n+first = 0\n"
+        "@@ -2 +2 @@\n-wrong = 2\n+second = 3\n"
+    )
+
+    with pytest.raises(ValueError, match="does not match source"):
+        _canonical_mutant(str(tmp_path), "src/a.py", source, diff, "1", "survived", [])
+
+
+def test_canonical_identity_rejects_multi_hunk_header_count_mismatch(tmp_path):
+    diff = (
+        "--- src/a.py\n+++ src/a.py\n@@ -1,2 +1 @@\n-x = 1\n+x = 2\n"
+        "@@ -2 +2 @@\n-y = 1\n+y = 2\n"
+    )
+
+    with pytest.raises(ValueError, match="hunk size"):
+        _canonical_mutant(str(tmp_path), "src/a.py", "x = 1\ny = 1\n", diff, "1", "survived", [])
+
+
+@pytest.mark.parametrize(
+    "diff,message",
+    [
+        (
+            "--- src/a.py\n+++ src/a.py\n@@ -0 +0 @@\n-x = 1\n+x = 2\n"
+            "@@ -1 +1 @@\n-x = 1\n+x = 3\n",
+            "start is invalid",
+        ),
+        (
+            "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+            "@@ -1 +1 @@\n-x = 1\n+x = 2\n",
+            "duplicate edits",
+        ),
+        (
+            "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+            "@@ -3,0 +3 @@\n+y = 1\n",
+            "outside source",
+        ),
+    ],
+)
+def test_canonical_identity_rejects_invalid_multi_hunk_positions(tmp_path, diff, message):
+    with pytest.raises(ValueError, match=message):
+        _canonical_mutant(str(tmp_path), "src/a.py", "x = 1\n", diff, "1", "survived", [])
+
+
+def test_canonical_identity_normalizes_multi_hunk_unicode(tmp_path):
+    source = "first = 'é'\nsecond = 'é'\n"
+    diff = (
+        "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-first = 'e\u0301'\n+first = 'a'\n"
+        "@@ -2 +2 @@\n-second = 'e\u0301'\n+second = 'a'\n"
+    )
+
+    mutant = _canonical_mutant(str(tmp_path), "src/a.py", source, diff, "1", "survived", [])
+
+    assert mutant["operator"] == "Module"
+    assert "e\u0301" not in mutant["before"]
+    assert mutant["before"] == "first = 'é'\nsecond = 'é'"
+
+
 def test_canonical_identity_handles_deletion_only_diff(tmp_path):
     source = "def normalize(value):\n    value = value.strip()\n    return value\n"
     diff = (

@@ -229,6 +229,36 @@ def _canonical_path(path: str) -> str:
     return path
 
 
+def _mutation_hunks(lines: list[str]) -> list[dict]:
+    indexes = [index for index, line in enumerate(lines) if line.startswith("@@ ")]
+    if not indexes or indexes[0] != 2:
+        raise ValueError("mutation detail must contain valid hunks")
+    hunks = []
+    for position, index in enumerate(indexes):
+        match = re.fullmatch(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@.*", lines[index])
+        if not match:
+            raise ValueError("mutation detail must contain valid hunks")
+        body = lines[index + 1:indexes[position + 1] if position + 1 < len(indexes) else len(lines)]
+        if any(line and line[0] not in " +-\\" for line in body):
+            raise ValueError("mutation detail contains malformed hunk lines")
+        old = [unicodedata.normalize("NFC", line[1:]) for line in body if line.startswith((" ", "-"))]
+        new = [unicodedata.normalize("NFC", line[1:]) for line in body if line.startswith((" ", "+"))]
+        old_count = int(match.group(2) or 1)
+        new_count = int(match.group(4) or 1)
+        synthetic_eof_blank = (
+            old[-1:] == new[-1:] == [""]
+            and len(old) == old_count + 1
+            and len(new) == new_count + 1
+        )
+        if (len(old) != old_count or len(new) != new_count) and not synthetic_eof_blank:
+            raise ValueError("mutation detail hunk size does not match its header")
+        old_start = int(match.group(1))
+        if old and old_start < 1:
+            raise ValueError("mutation detail hunk start is invalid")
+        hunks.append({"old_start": old_start, "old": old, "new": new})
+    return hunks
+
+
 def _parse_mutation_diff(diff: str, expected_file: str | None = None) -> tuple[str, list[str], list[str]]:
     lines = diff.splitlines()
     if len(lines) < 4 or not lines[0].startswith("--- ") or not lines[1].startswith("+++ "):
@@ -237,14 +267,51 @@ def _parse_mutation_diff(diff: str, expected_file: str | None = None) -> tuple[s
     new_file = _canonical_path(lines[1][4:].split("\t", 1)[0])
     if old_file != new_file or (expected_file is not None and old_file != _canonical_path(expected_file)):
         raise ValueError("mutation detail path does not match its source file")
-    hunks = [index for index, line in enumerate(lines) if line.startswith("@@ ")]
-    if len(hunks) != 1 or hunks[0] != 2 or not re.fullmatch(r"@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@.*", lines[2]):
-        raise ValueError("mutation detail must contain exactly one valid hunk")
+    _mutation_hunks(lines)
     removed = [line[1:] for line in lines[3:] if line.startswith("-")]
     added = [line[1:] for line in lines[3:] if line.startswith("+")]
-    if (not removed and not added) or any(line and line[0] not in " +-\\" for line in lines[3:]):
+    if not removed and not added:
         raise ValueError("mutation detail has no change")
     return old_file, removed, added
+
+
+def _apply_multi_hunk_diff(source: str, diff: str) -> tuple[str, int]:
+    source_lines = source.splitlines()
+    edits: list[tuple[int, list[str], list[str]]] = []
+    for hunk in _mutation_hunks(diff.splitlines()):
+        old, new = hunk["old"], hunk["new"]
+        start = hunk["old_start"] - 1 if old else hunk["old_start"]
+        if start > len(source_lines) or start + len(old) > len(source_lines):
+            raise ValueError("mutation hunk is outside source")
+        if source_lines[start:start + len(old)] != old:
+            raise ValueError("mutation hunk does not match source")
+        prefix = 0
+        while prefix < min(len(old), len(new)) and old[prefix] == new[prefix]:
+            prefix += 1
+        suffix = 0
+        while (
+            suffix < min(len(old) - prefix, len(new) - prefix)
+            and old[len(old) - suffix - 1] == new[len(new) - suffix - 1]
+        ):
+            suffix += 1
+        removed = old[prefix:len(old) - suffix if suffix else None]
+        added = new[prefix:len(new) - suffix if suffix else None]
+        edit = (start + prefix, removed, added)
+        if removed or added:
+            edits.append(edit)
+    canonical_edits = [(start, tuple(old), tuple(new)) for start, old, new in edits]
+    if len(canonical_edits) != len(set(canonical_edits)):
+        raise ValueError("mutation hunks contain duplicate edits")
+    ordered = sorted(canonical_edits)
+    for previous, current in zip(ordered, ordered[1:]):
+        if previous[0] + len(previous[1]) > current[0]:
+            raise ValueError("mutation hunks contain conflicting edits")
+    for start, old, new in reversed(ordered):
+        source_lines[start:start + len(old)] = new
+    if not ordered:
+        raise ValueError("mutation detail has no change")
+    mutated = "\n".join(source_lines) + ("\n" if source.endswith("\n") else "")
+    return mutated, ordered[0][0] + 1
 
 
 def _parse_show_all(output: str, expected_ids: set[str], max_bytes: int = _MAX_SHOW_BYTES) -> dict[str, str]:
@@ -735,7 +802,9 @@ def _canonical_mutant(
         0,
     )
     preferred_line = int(hunk.group(1)) + context_before if hunk else None
-    if normalized_removed:
+    if len(_mutation_hunks(diff_lines)) > 1:
+        mutated_source, line = _apply_multi_hunk_diff(normalized_source, diff)
+    elif normalized_removed:
         mutated_source, line = _find_replacement(
             normalized_source, normalized_removed, normalized_added, preferred_line,
         )
