@@ -57,6 +57,7 @@ full_shards = 256
 "fettle/coverage_gate.py" = 20
 "fettle/init_cmd.py" = 20
 "fettle/mutation_test.py" = 5
+"fettle/post_edit.py" = 20
 "fettle/quality_scan.py" = 10
 "fettle/ratchet.py" = 20
 "fettle/tool_runner.py" = 20

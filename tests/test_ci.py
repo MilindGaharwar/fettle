@@ -318,6 +318,7 @@ def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
     assert '"fettle/coverage_gate.py" = 20' in config
     assert '"fettle/init_cmd.py" = 20' in config
     assert '"fettle/mutation_test.py" = 5' in config
+    assert '"fettle/post_edit.py" = 20' in config
     assert '"fettle/ratchet.py" = 20' in config
     assert '"fettle/tool_runner.py" = 20' in config
 
