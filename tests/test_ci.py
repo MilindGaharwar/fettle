@@ -309,6 +309,14 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert "github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow
 
 
+def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
+    config = (Path(PLUGIN_DIR) / ".fettle.toml").read_text()
+
+    assert "full_timeout_s = 1800" in config
+    assert "full_shards = 256" in config
+    assert '"fettle/init_cmd.py" = 20' in config
+
+
 def test_authoritative_mutation_runs_are_serialized_without_cancelling_evidence():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 

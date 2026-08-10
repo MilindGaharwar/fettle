@@ -53,6 +53,7 @@ full_shards = 256
 "fettle/uat/__init__.py" = ["tests/test_uat_surfaces.py"]
 
 [mutation.chunk_lines]
+"fettle/init_cmd.py" = 20
 "fettle/mutation_test.py" = 5
 "fettle/quality_scan.py" = 10
 
