@@ -55,12 +55,17 @@ full_shards = 256
 [mutation.chunk_lines]
 "fettle/ci.py" = 20
 "fettle/coverage_gate.py" = 20
+"fettle/doctor.py" = 20
 "fettle/init_cmd.py" = 20
 "fettle/mutation_test.py" = 5
 "fettle/post_edit.py" = 20
-"fettle/quality_scan.py" = 10
+"fettle/project_rules.py" = 10
+"fettle/quality_scan.py" = 5
 "fettle/ratchet.py" = 20
-"fettle/tool_runner.py" = 20
+"fettle/result.py" = 20
+"fettle/security_review.py" = 20
+"fettle/semgrep_util.py" = 5
+"fettle/tool_runner.py" = 10
 
 [boundary]
 # These tests intentionally embed synthetic detector inputs. Keep exclusions

@@ -2,7 +2,7 @@
 
 **Metric:** successful full-run duration_ms <= 2100000 with valid nonzero outcomes
 **Best Score:** 1792060 ms (node 2)
-**Nodes:** 7 total | 3 merged | 2 pruned
+**Nodes:** 8 total | 3 merged | 2 pruned
 **Created:** 2026-08-07
 
 ---
@@ -45,6 +45,11 @@
     - Expected improvement: Reduce each `tool_runner.py` execution to at most 44% of the failed range, leaving capacity for sorted predecessor modules without changing scope, 256-shard topology, or the authoritative timeout.
     - Evidence: Replay `31406002381` on `ba45518` completed former failing shard 158 in 486 seconds and all six disjoint `tool_runner.py` ranges were bounded to at most 20 lines.
     - Insight: A measured per-file split can remove a hotspot without changing global capacity; evaluate any subsequent failure independently rather than widening the successful correction.
-  - **7** [ACTIVE]: Split `ci.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
+  - **7** [PRUNED]: Split `ci.py` into 20-line chunks; falsified if replay still times out or any resulting range cannot fit its shard's 1,800-second bound
     - Informed by: Replay `31406002381` failed only on shard 202. Ordered telemetry measured `bench.py:1-60` completing in 794 seconds, then `ci.py:61-120` exhausting the remaining 1,006 seconds.
     - Expected improvement: Reduce each `ci.py` execution to at most one third of the failed range while leaving the measured-complete `bench.py` range unchanged and preserving scope, topology, and timeout.
+    - Evidence: Replay `31418846787` on `15fb0ce` succeeded after the `ci.py` and `post_edit.py` corrections, but calibration `31422666777` failed on thirteen retained shard reports, one artifact upload, and one aggregate rejection.
+    - Insight: Narrow replay proves historical ranges but does not establish calibration-wide capacity. Full calibration telemetry must drive a bounded corpus-wide correction before independent baseline runs can begin.
+  - **8** [ACTIVE]: Split calibration-measured hotspots while preserving 256 shards and the 1,800-second worker bound; falsified if a resulting authoritative run still times out or retained evidence is incomplete
+    - Informed by: Calibration `31422666777` directly measured both 60-line `result.py` ranges exhausting 1,349-1,527 seconds; 10-line `quality_scan.py` ranges reaching 1,484 seconds; 60-line `doctor.py` ranges reaching 1,157 seconds; `project_rules.py:61-85` exhausting 1,602 seconds; and 15-60-line `semgrep_util.py` ranges exhausting 1,238-1,364 seconds. Successful but unsafe co-located ranges measured `security_review.py` at 596-692 seconds and 20-line `tool_runner.py` at 422-949 seconds.
+    - Expected improvement: Bound `result.py`, `doctor.py`, and `security_review.py` to 20 lines; `project_rules.py` and `tool_runner.py` to 10; and `quality_scan.py` and `semgrep_util.py` to 5, leaving capacity for sorted peer modules without changing mutation scope, topology, or timeout.
