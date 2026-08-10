@@ -338,6 +338,22 @@ def test_show_all_parser_selects_expected_records_and_rejects_incomplete_output(
     assert _parse_show_all(f"# mutant 1\n{diff}# mutant 2\n{diff}", {"2"}) == {"2": diff}
 
 
+def test_show_all_parser_excludes_mutmut_summary_trailer():
+    diff = "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    output = f"# mutant 1\n{diff}\nUntested/skipped (1)\n\n---- src/a.py (1) ----\n\n# mutant 2\n\n"
+
+    assert _parse_show_all(output, {"1", "2"}) == {"1": diff, "2": "\n"}
+
+
+def test_show_all_parser_preserves_diff_context_resembling_summary_heading():
+    diff = (
+        "--- src/a.py\n+++ src/a.py\n@@ -1,2 +1,2 @@\n"
+        " Untested/skipped (1)\n-x\n+y\n"
+    )
+
+    assert _parse_show_all(f"# mutant 1\n{diff}", {"1"}) == {"1": diff}
+
+
 def test_collect_records_is_complete_and_rejects_fingerprint_collision(tmp_path):
     (tmp_path / "src").mkdir()
     source = "def eligible_for_discount(total: int) -> bool:\n    return total >= 100\n"
@@ -377,6 +393,38 @@ def test_collect_records_includes_skipped_mutants(tmp_path):
 
     assert error is None
     assert records is not None and records[0]["state"] == "skipped"
+
+
+@pytest.mark.parametrize("state", ["untested", "skipped"])
+def test_collect_records_excludes_empty_unreproducible_engine_mutant(tmp_path, state):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/a.py").write_text("x = 1\n")
+    ids = {name: [] for name in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids[state] = ["1"]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="# mutant 1\n\n")):
+        records, error = _collect_mutant_records(
+            str(tmp_path), ids, {"src/a.py": ["tests/test_a.py"]}, ["src/a.py"]
+        )
+
+    assert error is None
+    assert records == []
+    assert ids[state] == []
+
+
+def test_collect_records_rejects_empty_scored_engine_mutant(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/a.py").write_text("x = 1\n")
+    ids = {name: [] for name in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids["survived"] = ["1"]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="# mutant 1\n\n")):
+        records, error = _collect_mutant_records(
+            str(tmp_path), ids, {"src/a.py": ["tests/test_a.py"]}, ["src/a.py"]
+        )
+
+    assert records is None
+    assert error["status"] == "unknown"
 
 
 def test_collect_records_rejects_detail_outside_selected_scope(tmp_path):

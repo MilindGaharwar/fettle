@@ -257,7 +257,13 @@ def _parse_show_all(output: str, expected_ids: set[str], max_bytes: int = _MAX_S
         if engine_id in records:
             raise ValueError(f"duplicate mutation detail for engine ID {engine_id}")
         end = markers[index + 1].start() if index + 1 < len(markers) else len(output)
-        records[engine_id] = output[marker.end():end].strip("\n") + "\n"
+        detail = output[marker.end():end].strip("\n")
+        summary = re.search(
+            r"(?m)^(?:Timed out .*|Suspicious .*|Survived .*|Untested/skipped) \(\d+\)\n\n"
+            r"---- [^\n]+ \(\d+\) ----$",
+            detail,
+        )
+        records[engine_id] = detail[:summary.start()].strip("\n") + "\n" if summary else detail + "\n"
     missing = sorted(expected_ids - set(records), key=int)
     if missing:
         raise ValueError(f"mutation details are missing: {missing}")
@@ -861,6 +867,10 @@ def _collect_mutant_records(
         if shown.returncode:
             return None, _error("tool_error", "mutmut show all failed", stderr=_bounded(shown.stderr or shown.stdout))
         details = _parse_show_all(shown.stdout, set(states))
+        for engine_id, state in list(states.items()):
+            if state in {"untested", "skipped"} and not details[engine_id].strip():
+                ids[state].remove(engine_id)
+                del states[engine_id]
         records = []
         for engine_id in sorted(states, key=int):
             file, _, _ = _parse_mutation_diff(details[engine_id])
@@ -1093,6 +1103,7 @@ def _preflight_mutmut(
     if error:
         return {**error, "engine_version": actual, "generated": generated}
     assert records is not None
+    generated = sum(len(state_ids) for state_ids in ids.values())
     fingerprints = [record["fingerprint"] for record in records]
     if len(records) != generated or len(fingerprints) != len(set(fingerprints)):
         return _error(
