@@ -819,7 +819,14 @@ def build_mutation_cache_identity(
         watched.update(path.relative_to(root_path).as_posix() for path in tests_path.rglob("conftest.py"))
         fixtures_path = tests_path / "fixtures"
         if fixtures_path.is_dir():
-            watched.update(path.relative_to(root_path).as_posix() for path in fixtures_path.rglob("*") if path.is_file())
+            ignored_fixture_parts = {".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv", "__pycache__"}
+            watched.update(
+                path.relative_to(root_path).as_posix()
+                for path in fixtures_path.rglob("*")
+                if path.is_file()
+                and not path.is_symlink()
+                and not any(part in ignored_fixture_parts for part in path.relative_to(fixtures_path).parts)
+            )
 
     file_digests = {}
     for relative in sorted(watched):
@@ -894,9 +901,13 @@ def collect_mutation_dependency_identities(
             identity["editable_source_digest"] = _source_tree_digest(Path(unquote(parsed.path)))
         else:
             record = distribution.read_text("RECORD")
-            if record is None:
+            metadata_path = Path(str(getattr(distribution, "_path", "")))
+            if record is None and metadata_path.name.endswith(".egg-info"):
+                identity["editable_source_digest"] = _source_tree_digest(metadata_path.parent)
+            elif record is None:
                 raise ValueError(f"mutation cache dependency {name} has no RECORD")
-            identity["record_digest"] = hashlib.sha256(record.encode()).hexdigest()
+            else:
+                identity["record_digest"] = hashlib.sha256(record.encode()).hexdigest()
         identities.append(identity)
     return sorted(identities, key=lambda item: (item["name"].casefold(), item["version"]))
 

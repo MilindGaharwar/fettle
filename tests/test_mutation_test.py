@@ -800,6 +800,31 @@ def test_mutation_cache_identity_invalidates_source_test_mapping_config_and_fixt
             target.write_text(before)
 
 
+def test_mutation_cache_identity_ignores_generated_fixture_state(tmp_path):
+    for path, content in {
+        "src/app.py": "value = 1\n",
+        "tests/test_app.py": "import src.app\n",
+        "tests/fixtures/input.json": "{}\n",
+        "tests/fixtures/example/.venv/state": "generated\n",
+        "tests/fixtures/example/__pycache__/module.pyc": "generated\n",
+    }.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    mapping = {"src/app.py": ["tests/test_app.py"]}
+    kwargs = {
+        "dependencies": [{"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64}],
+        "environment": {"python": "3.12", "platform": "test"},
+    }
+
+    original = build_mutation_cache_identity(str(tmp_path), ["src/app.py"], mapping, {}, **kwargs)
+    (tmp_path / "tests/fixtures/example/.venv/state").write_text("changed\n")
+    (tmp_path / "tests/fixtures/example/__pycache__/module.pyc").write_text("changed\n")
+    changed = build_mutation_cache_identity(str(tmp_path), ["src/app.py"], mapping, {}, **kwargs)
+
+    assert changed == original
+
+
 def test_mutation_cache_identity_invalidates_dependency_engine_python_and_platform(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "tests").mkdir()
@@ -905,6 +930,24 @@ def test_dependency_identity_collects_editable_source_and_invalidates_changes(tm
     second = collect_mutation_dependency_identities([dist])
 
     assert set(first[0]) == {"name", "version", "editable_source_digest", "direct_url_digest"}
+    assert first[0]["editable_source_digest"] != second[0]["editable_source_digest"]
+
+
+def test_dependency_identity_collects_legacy_editable_egg_info_source(tmp_path):
+    dist = _mutation_distribution(tmp_path / "legacy")
+    metadata = Path(dist._path)
+    source = metadata.parent
+    (source / "module.py").write_text("VALUE = 1\n")
+    egg_info = metadata.with_name("example.egg-info")
+    metadata.rename(egg_info)
+    Path(egg_info, "RECORD").unlink()
+    dist = importlib.metadata.Distribution.at(egg_info)
+
+    first = collect_mutation_dependency_identities([dist])
+    (source / "module.py").write_text("VALUE = 2\n")
+    second = collect_mutation_dependency_identities([dist])
+
+    assert set(first[0]) == {"name", "version", "editable_source_digest"}
     assert first[0]["editable_source_digest"] != second[0]["editable_source_digest"]
 
 
