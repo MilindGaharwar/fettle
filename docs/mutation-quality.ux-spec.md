@@ -68,6 +68,12 @@ seconds, excluding mutation execution time.
 - Error recoverable: missing tool, unmapped tests, timeout, or malformed
   evidence identifies the failed stage and prints a rerun or configuration
   action.
+- Interrupted calibration: completed mutant outcomes are retained under one
+  calibration ID, unfinished mutants remain pending, and the next attempt
+  reports how many outcomes were reused and how many will execute.
+- Stale or conflicting checkpoint: evidence from another calibration or input
+  identity is rejected without executing or scoring it; conflicting terminal
+  outcomes require a fresh calibration rather than majority voting.
 - Error fatal: incompatible evidence schema, revision, engine, or scope returns
   `unknown` or `tool_error`, exit code 2, and cannot be overridden into a pass.
 - Offline: local changed-scope execution remains available; remote baseline
@@ -182,6 +188,38 @@ execution uses a different revision
 When Fettle evaluates the report
 Then it returns `tool_error` or `unknown`, score `null`, and exit code 2.
 
+### Scenario: Interrupted calibration resumes pending work
+
+Given one calibration attempt has trustworthy terminal outcomes for only part
+of the immutable preflight corpus
+When a maintainer resumes the same calibration with that checkpoint
+Then Fettle reuses the completed outcomes, executes only pending fingerprints,
+and still refuses to produce a score until every expected fingerprint has one
+terminal outcome.
+
+### Scenario: Infrastructure failure is not a mutant outcome
+
+Given a worker or mutation process fails before one mutant returns a native
+mutation outcome
+When Fettle checkpoints the calibration
+Then that attempt is recorded as a retryable execution error, the mutant
+remains pending, and the error is excluded from outcome counts and score.
+
+### Scenario: Independent calibrations cannot share outcomes
+
+Given a completed or partial checkpoint belongs to the first calibration
+When a maintainer starts the second independent calibration
+Then Fettle rejects the first calibration's outcomes for reuse while allowing
+both calibrations to reference the same immutable preflight corpus.
+
+### Scenario: Conflicting resumed evidence fails closed
+
+Given two compatible checkpoints claim different terminal outcomes for one
+canonical fingerprint
+When Fettle merges them
+Then it reports conflicting evidence, produces no score, and requires a fresh
+calibration rather than selecting either outcome.
+
 ### Scenario: Mutation vocabulary preflight succeeds
 
 Given a configured project and the pinned mutation engine
@@ -244,6 +282,8 @@ policy disposition, and Fettle requests renewed review evidence.
 - A maintainer can prove canonicalization readiness without paying full mutation
   execution cost, and a rejected detail identifies the exact failed stage.
 - No accepted result depends on GitHub's advisory job color.
+- Interrupted calibration work can resume without rerunning terminal outcomes,
+  and no checkpoint can cross an independent-calibration boundary.
 - Seeded weak assertions are detected in both human and JSON output.
 - Reviewer feedback distinguishes actionable findings from equivalent or
   unproductive mutants before survivor policy can graduate.

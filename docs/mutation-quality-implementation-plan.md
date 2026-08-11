@@ -215,6 +215,36 @@ reruns the affected mutants; an input that cannot be mapped invalidates the
 whole cache. Scheduled full runs bypass reuse and measure cache correctness by
 comparison.
 
+### Resumable full-run evidence
+
+The successful preflight aggregate is the immutable corpus authority. It retains
+one complete canonical record per generated mutant, including mutants killed by
+the no-op preflight runner, and a real module-local mutmut numeric locator. Each
+execution shard is cryptographically bound to the exact partition manifest and
+the exact canonical fingerprint subset it is allowed to execute.
+
+One logical calibration has a unique calibration ID and an append-only logical
+outcome ledger keyed by canonical fingerprint. A terminal ledger record is one
+of `killed`, `survived`, `timeout`, `suspicious`, or `skipped`. A native
+per-mutant timeout is a terminal `timeout`; process launch failure, process
+crash, worker deadline, job cancellation, and orchestration failure are
+`execution_error` attempts and leave the mutant pending. Execution errors are
+never included in mutation counts or score.
+
+Checkpoint compatibility binds calibration ID, revision, preflight aggregate
+digest, partition manifest digest, exact corpus digest, source and test content,
+test mappings, mutation configuration, installed dependencies, Python,
+platform, engine, and runner. Unknown or mismatched identity rejects reuse.
+Merging is commutative for identical terminal records, rejects extra or missing
+corpus fingerprints, and fails closed on conflicting terminal outcomes.
+
+Retries derive work as `expected corpus - terminal outcomes` and execute only
+that pending set. The immutable preflight and manifests may be reused by two
+calibrations, but outcome checkpoints may never cross calibration IDs. A final
+schema-v2 report is derived only when every expected fingerprint has exactly one
+terminal outcome; killed records remain internal to complete evidence while the
+public `non_killed` contract remains compatible with baseline comparison.
+
 ### Equivalent and unproductive mutants
 
 Reviewer feedback classifies a mutant as actionable, equivalent, or
@@ -506,6 +536,30 @@ held-out verification, not discovery tools for engine output grammar.
 - [ ] Require a canonical override for any temporary regression or new survivor;
   verify expired overrides fail the next applicable run.
 
+### WP7.5: Resumable Calibration Evidence
+
+- [ ] Add fixture-first tests proving preflight retains canonical records for
+  killed and non-killed mutants with their real module-local engine locators.
+- [ ] Bind each preflight shard corpus to its partition-manifest digest and
+  reject missing, extra, duplicated, or reordered-without-rehashing records.
+- [ ] Add a strict checkpoint schema and tests for calibration identity,
+  compatibility-envelope drift, malformed attempts, duplicate outcomes, and
+  conflicting terminal outcomes.
+- [ ] Implement pending selection by canonical fingerprint and prove a resumed
+  attempt never executes a terminal mutant again.
+- [ ] Execute pending mutants by their verified module-local mutmut IDs; retain
+  native timeout as a mutation outcome and process/orchestration failure as a
+  retryable execution error.
+- [ ] Derive existing schema-v2 shard and aggregate reports only from complete
+  ledgers; incomplete ledgers expose pending counts and cannot produce a score.
+- [ ] Update `.github/workflows/mutation.yml` to download only an explicitly
+  selected same-calibration checkpoint, reserve time for unconditional artifact
+  upload, and fan out only partitions with pending fingerprints.
+- [ ] Add workflow contracts proving calibration 2 cannot consume calibration
+  1 outcomes and a stale or conflicting checkpoint fails before execution.
+- [ ] Simulate interruption and resume locally, then run focused tests, full
+  tests, Ruff, actionlint, and Fettle scan before dispatching calibration 1.
+
 ### WP8: Documentation And Release
 
 - [ ] Add installation and configuration guidance to `README.md` and
@@ -584,6 +638,8 @@ Operational:
 - Every full worker completes within 35 minutes.
 - Full mutation remains outside normal blocking PR critical path.
 - Full reports are reproducible for the same revision and execution identity.
+- Retried calibrations execute only pending canonical fingerprints; complete
+  outcomes survive infrastructure interruption without crossing calibration IDs.
 - Fettle scan, Ruff, actionlint, focused tests, full tests, and seeded mutation
   verification all pass before release.
 

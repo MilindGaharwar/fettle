@@ -38,6 +38,7 @@ _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
 _MAX_SHOW_BYTES = 50 * 1024 * 1024
 _PARTITION_SCHEMA_VERSION = "1"
 _MUTATION_CACHE_SCHEMA_VERSION = "1"
+_CHECKPOINT_SCHEMA_VERSION = "1"
 _MUTATION_WATCH_NAMES = (
     ".fettle.toml", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini",
     "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "requirements-dev.txt",
@@ -456,6 +457,295 @@ def _write_json_atomic(path: Path, value: dict) -> None:
             os.unlink(temporary)
 
 
+def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: set[str]) -> dict:
+    """Merge compatible terminal evidence while leaving failed attempts pending."""
+    if not checkpoints:
+        raise ValueError("at least one mutation checkpoint is required")
+    first = checkpoints[0]
+    required = {"schema_version", "calibration_id", "identity", "outcomes", "attempts"}
+    allowed = required | {"status", "pending"}
+    if not required <= set(first) <= allowed or first.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError("mutation checkpoint has an unsupported schema")
+    calibration_id = first.get("calibration_id")
+    identity = first.get("identity")
+    if not isinstance(calibration_id, str) or not calibration_id or not isinstance(identity, dict):
+        raise ValueError("mutation checkpoint identity is incomplete")
+    outcomes: dict[str, dict] = {}
+    attempts: list[dict] = []
+    seen_attempts: set[str] = set()
+    terminal_states = set(_STATES) - {"untested"}
+    for checkpoint in checkpoints:
+        if not isinstance(checkpoint, dict) or not required <= set(checkpoint) <= allowed:
+            raise ValueError("mutation checkpoint has an unsupported schema")
+        if checkpoint.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError("mutation checkpoint has an unsupported schema")
+        if checkpoint.get("calibration_id") != calibration_id:
+            raise ValueError("mutation checkpoints belong to different calibrations")
+        if checkpoint.get("identity") != identity:
+            raise ValueError("mutation checkpoint identity differs")
+        checkpoint_outcomes = checkpoint.get("outcomes")
+        checkpoint_attempts = checkpoint.get("attempts")
+        if not isinstance(checkpoint_outcomes, dict) or not isinstance(checkpoint_attempts, list):
+            raise ValueError("mutation checkpoint evidence is malformed")
+        for fingerprint, outcome in checkpoint_outcomes.items():
+            if fingerprint not in expected_fingerprints:
+                raise ValueError("mutation checkpoint contains a fingerprint outside its corpus")
+            if (
+                not isinstance(outcome, dict)
+                or outcome.get("state") not in terminal_states
+                or not isinstance(outcome.get("duration_ms"), int)
+                or isinstance(outcome.get("duration_ms"), bool)
+                or outcome["duration_ms"] < 0
+            ):
+                raise ValueError("mutation checkpoint outcome is malformed")
+            previous = outcomes.get(fingerprint)
+            if previous is not None and previous["state"] != outcome["state"]:
+                raise ValueError("mutation checkpoints contain conflicting terminal outcomes")
+            if previous is None or outcome["duration_ms"] < previous["duration_ms"]:
+                outcomes[fingerprint] = dict(outcome)
+        for attempt in checkpoint_attempts:
+            if not isinstance(attempt, dict) or attempt.get("fingerprint") not in expected_fingerprints:
+                raise ValueError("mutation checkpoint attempt is outside its corpus")
+            if attempt.get("status") not in {"completed", "execution_error"}:
+                raise ValueError("mutation checkpoint attempt is malformed")
+            digest = _canonical_digest(attempt)
+            if digest not in seen_attempts:
+                attempts.append(dict(attempt))
+                seen_attempts.add(digest)
+    pending = len(expected_fingerprints - outcomes.keys())
+    return {
+        "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+        "calibration_id": calibration_id,
+        "identity": identity,
+        "outcomes": outcomes,
+        "attempts": attempts,
+        "status": "completed" if pending == 0 else "incomplete",
+        "pending": pending,
+    }
+
+
+def pending_mutation_records(corpus: list[dict], checkpoint: dict) -> list[dict]:
+    """Select canonical corpus records that lack a terminal outcome."""
+    outcomes = checkpoint.get("outcomes")
+    if not isinstance(outcomes, dict):
+        raise ValueError("mutation checkpoint outcomes are malformed")
+    fingerprints = [record.get("fingerprint") for record in corpus if isinstance(record, dict)]
+    if len(fingerprints) != len(corpus) or len(fingerprints) != len(set(fingerprints)):
+        raise ValueError("mutation corpus fingerprints are incomplete or duplicated")
+    if not set(outcomes) <= set(fingerprints):
+        raise ValueError("mutation checkpoint contains a fingerprint outside its corpus")
+    return sorted(
+        (record for record in corpus if record["fingerprint"] not in outcomes),
+        key=lambda record: record["fingerprint"],
+    )
+
+
+def execute_pending_mutations(
+    root: str,
+    corpus: list[dict],
+    mapping: dict[str, list[str]],
+    line_ranges: list[dict],
+    checkpoint: dict,
+    timeout: int,
+    checkpoint_path: Path | None = None,
+) -> dict:
+    """Execute only pending canonical mutants after verifying current local IDs."""
+    expected = {record["fingerprint"] for record in corpus}
+    merged = merge_mutation_checkpoints([checkpoint], expected)
+    if checkpoint_path is not None:
+        _write_json_atomic(checkpoint_path, merged)
+    started = time.monotonic()
+    for file in sorted(mapping):
+        file_pending = [record for record in pending_mutation_records(corpus, merged) if record["file"] == file]
+        if not file_pending:
+            continue
+        ranges = [item for item in line_ranges if item["file"] == file]
+        remaining = timeout - int(time.monotonic() - started)
+        if remaining < 1:
+            break
+        generated = _preflight_mutmut(
+            root, [file], mapping[file], {file: mapping[file]}, remaining, ranges,
+        )
+        if generated.get("status") != "completed":
+            break
+        current = {record["fingerprint"]: record for record in generated.get("corpus", [])}
+        file_expected = {record["fingerprint"] for record in corpus if record["file"] == file}
+        if set(current) != file_expected:
+            raise ValueError(f"regenerated mutation corpus differs for {file}")
+        for record in file_pending:
+            remaining = timeout - int(time.monotonic() - started)
+            if remaining < 1:
+                break
+            engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
+            attempt_started = time.monotonic()
+            try:
+                run = _run(["mutmut", "run", engine_id], root, remaining)
+                if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
+                    raise OSError(f"mutmut exited with {run.returncode}")
+                ids, error = _collect_range_results(root, ranges, MUTMUT_VERSION, run.returncode)
+                if error:
+                    raise OSError(error["message"])
+                if ids is None:
+                    raise OSError("mutmut did not return mutation results")
+                observed = [state for state in _STATES if engine_id in ids[state]]
+                if len(observed) != 1 or observed[0] == "untested":
+                    raise OSError("mutmut did not produce one terminal outcome")
+                duration_ms = round((time.monotonic() - attempt_started) * 1000)
+                merged["outcomes"][record["fingerprint"]] = {
+                    "state": observed[0], "duration_ms": duration_ms,
+                }
+                merged["attempts"].append({
+                    "fingerprint": record["fingerprint"], "status": "completed",
+                    "state": observed[0], "duration_ms": duration_ms,
+                })
+                merged["pending"] = len(expected - merged["outcomes"].keys())
+                merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
+                if checkpoint_path is not None:
+                    _write_json_atomic(checkpoint_path, merged)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                merged["attempts"].append({
+                    "fingerprint": record["fingerprint"], "status": "execution_error",
+                    "message": str(exc),
+                })
+                if checkpoint_path is not None:
+                    _write_json_atomic(checkpoint_path, merged)
+                break
+        if any(
+            attempt["status"] == "execution_error"
+            for attempt in merged["attempts"][-len(file_pending):]
+        ):
+            break
+    merged["pending"] = len(expected - merged["outcomes"].keys())
+    merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
+    if checkpoint_path is not None:
+        _write_json_atomic(checkpoint_path, merged)
+    return merged
+
+
+def report_from_mutation_checkpoint(corpus: list[dict], checkpoint: dict) -> dict:
+    """Derive outcome counts and public non-killed evidence from a complete ledger."""
+    if checkpoint.get("status") != "completed" or checkpoint.get("pending") != 0:
+        raise ValueError("mutation checkpoint is incomplete")
+    outcomes = checkpoint.get("outcomes", {})
+    fingerprints = {record["fingerprint"] for record in corpus}
+    if set(outcomes) != fingerprints:
+        raise ValueError("mutation checkpoint does not exactly cover its corpus")
+    counts = {state: 0 for state in _STATES}
+    records = []
+    for record in corpus:
+        state = outcomes[record["fingerprint"]]["state"]
+        counts[state] += 1
+        if state != "killed":
+            records.append({**record, "state": state})
+    return {
+        **counts,
+        "non_killed": sorted(records, key=lambda record: record["fingerprint"]),
+        "duration_ms": sum(outcome["duration_ms"] for outcome in outcomes.values()),
+    }
+
+
+def run_resumable_mutation_shard(
+    root: str,
+    cfg: dict,
+    manifest_path: Path,
+    preflight_path: Path,
+    calibration_id: str,
+    checkpoint_path: Path,
+    timeout: int,
+    resume_paths: list[Path] | None = None,
+) -> dict:
+    """Resume one manifest-bound calibration shard from compatible checkpoints."""
+    try:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id):
+            raise ValueError("calibration ID must use 1-64 letters, numbers, hyphens, or underscores")
+        manifest = load_partition_manifest(manifest_path)
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+        if not isinstance(preflight, dict) or preflight.get("status") != "completed":
+            raise ValueError("retained mutation preflight is not completed")
+        if preflight.get("revision") != manifest["revision"]:
+            raise ValueError("retained mutation preflight revision differs from manifest")
+        aggregate_corpus = preflight.get("corpus")
+        declared_fingerprints = preflight.get("fingerprints")
+        if not isinstance(aggregate_corpus, list) or not isinstance(declared_fingerprints, list):
+            raise ValueError("retained mutation preflight corpus is malformed")
+        sorted_corpus = sorted(aggregate_corpus, key=lambda record: record.get("fingerprint", "") if isinstance(record, dict) else "")
+        aggregate_fingerprints = [
+            record.get("fingerprint") for record in sorted_corpus if isinstance(record, dict)
+        ]
+        if (
+            len(aggregate_fingerprints) != len(aggregate_corpus)
+            or aggregate_fingerprints != sorted(declared_fingerprints)
+            or preflight.get("corpus_digest") != _canonical_digest(sorted_corpus)
+        ):
+            raise ValueError("retained mutation preflight corpus digest differs")
+        manifest_digests = preflight.get("manifest_digests")
+        if (
+            not isinstance(manifest_digests, list)
+            or len(manifest_digests) != manifest["shard_count"]
+            or manifest_digests[manifest["shard_index"]] != manifest["digest"]
+        ):
+            raise ValueError("retained mutation preflight is not bound to this manifest")
+        corpus = [
+            record for record in aggregate_corpus
+            if isinstance(record, dict) and record.get("shard_index") == manifest["shard_index"]
+        ]
+        fingerprints = {record.get("fingerprint") for record in corpus}
+        if len(fingerprints) != len(corpus) or None in fingerprints:
+            raise ValueError("retained mutation preflight shard corpus is malformed")
+        mapping = _mapped_tests(root, manifest["files"], cfg.get("test_mappings", {}))
+        if any(not tests for tests in mapping.values()):
+            raise ValueError("retained mutation preflight shard has unmapped tests")
+        environment_identity = _runtime_cache_identity(root, manifest["files"], mapping, cfg)
+        if environment_identity is None:
+            raise ValueError("mutation execution environment identity is incomplete")
+        identity = {
+            "revision": manifest["revision"],
+            "preflight_digest": _canonical_digest(preflight),
+            "manifest_digest": manifest["digest"],
+            "corpus_digest": _canonical_digest(sorted(corpus, key=lambda record: record["fingerprint"])),
+            "environment_digest": environment_identity["digest"],
+        }
+        checkpoints = []
+        for path in resume_paths or []:
+            checkpoints.append(json.loads(path.read_text(encoding="utf-8")))
+        if checkpoints:
+            checkpoint = merge_mutation_checkpoints(checkpoints, fingerprints)
+            if checkpoint["calibration_id"] != calibration_id or checkpoint["identity"] != identity:
+                raise ValueError("resume checkpoint identity differs from this calibration")
+        else:
+            checkpoint = {
+                "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+                "calibration_id": calibration_id,
+                "identity": identity,
+                "outcomes": {},
+                "attempts": [],
+            }
+        result = execute_pending_mutations(
+            root, corpus, mapping, manifest["ranges"], checkpoint, timeout, checkpoint_path,
+        )
+        if result["status"] != "completed":
+            return result
+        outcome_report = report_from_mutation_checkpoint(corpus, result)
+        for engine_id, record in enumerate(outcome_report["non_killed"], start=1):
+            record["engine_id"] = str(engine_id)
+            record["rerun_command"] = shlex.join([
+                "mutmut", "run", record["locator"]["engine_id"],
+            ])
+        policy = evaluate_policy(outcome_report, cfg)
+        return {
+            "schema_version": "2", "status": "completed",
+            "revision": manifest["revision"], "merge_base": None, "selection": "shard",
+            "files_tested": manifest["files"], "deleted_files": [],
+            "engine_version": MUTMUT_VERSION, "test_runner": _TEST_RUNNER,
+            "tests_run": sorted({test for tests in mapping.values() for test in tests}),
+            "line_ranges": manifest["ranges"], "shard_index": manifest["shard_index"],
+            "shard_count": manifest["shard_count"], **outcome_report, **policy,
+            "threshold": float(cfg.get("score_target", 70)),
+        }
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return _error("unknown", f"Cannot resume mutation shard: {exc}")
+
+
 def write_timeout_evidence(path: Path, timeout_s: int) -> None:
     _write_json_atomic(path, _error(
         "tool_error", f"Mutation execution exceeded its {timeout_s}s deadline", partial=True,
@@ -562,7 +852,8 @@ def _source_tree_digest(root: Path) -> str:
         raise ValueError(f"mutation cache editable source is unreadable: {root}")
     ignored = {
         ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
-        "__pycache__", ".mutmut-cache",
+        "__pycache__", ".mutmut-cache", "mutation-manifests", "mutation-preflight-shards",
+        "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json", "mutation-report.json",
     }
     files = sorted(
         path for path in root.rglob("*")
@@ -854,6 +1145,7 @@ def _canonical_mutant(
                 [canonical_file, symbol, ast.dump(before_symbol, include_attributes=False)]
             ),
             "engine_id": engine_id,
+            "locator": {"file": canonical_file, "engine_id": engine_id},
             "state": state,
             "file": canonical_file,
             "line": line,
@@ -911,6 +1203,7 @@ def _canonical_mutant(
             [canonical_file, symbol, ast.dump(before_symbol, include_attributes=False)]
         ),
         "engine_id": engine_id,
+        "locator": {"file": canonical_file, "engine_id": engine_id},
         "state": state,
         "file": canonical_file,
         "line": line,
@@ -929,7 +1222,7 @@ def _collect_mutant_records(
     mapped_tests: list[str] | dict[str, list[str]],
     expected_files: list[str] | None = None,
 ) -> tuple[list[dict] | None, dict | None]:
-    states = {engine_id: state for state in _STATES[1:] for engine_id in ids[state]}
+    states = {engine_id: state for state in _STATES for engine_id in ids[state]}
     if not states:
         return [], None
     selected_files = {_canonical_path(item) for item in expected_files} if expected_files is not None else None
@@ -1167,7 +1460,7 @@ def _preflight_mutmut(
             return {
                 "status": "completed", "passed": True, "engine_version": actual,
                 "generated": 0, "canonicalized": 0, "collisions": 0,
-                "files": sorted(files), "fingerprints": [], "line_ranges": line_ranges,
+                "files": sorted(files), "fingerprints": [], "corpus": [], "line_ranges": line_ranges,
             }
         return _error("unknown", "Mutation preflight generated no mutants", engine_version=actual)
     records, error = _collect_mutant_records(root, ids, test_mapping, files)
@@ -1190,7 +1483,46 @@ def _preflight_mutmut(
         "collisions": 0,
         "files": sorted(files),
         "fingerprints": sorted(fingerprints),
+        "corpus": sorted(records, key=lambda record: record["fingerprint"]),
         **({"line_ranges": line_ranges} if line_ranges else {}),
+    }
+
+
+def _preflight_shard_modules(
+    root: str,
+    mapping: dict[str, list[str]],
+    line_ranges: list[dict],
+    timeout: int,
+) -> dict:
+    """Generate each module separately so numeric locators remain executable."""
+    started = time.monotonic()
+    reports = []
+    for file in sorted(mapping):
+        remaining = timeout - int(time.monotonic() - started)
+        if remaining < 1:
+            return _error("tool_error", f"Mutation preflight timed out after {timeout}s")
+        try:
+            (Path(root) / ".mutmut-cache").unlink(missing_ok=True)
+        except OSError as exc:
+            return _error("tool_error", f"Cannot isolate mutation preflight cache: {exc}")
+        ranges = [item for item in line_ranges if item["file"] == file]
+        report = _preflight_mutmut(
+            root, [file], mapping[file], {file: mapping[file]}, remaining, ranges,
+        )
+        if report["status"] != "completed":
+            return report
+        reports.append(report)
+    corpus = [record for report in reports for record in report["corpus"]]
+    fingerprints = [record["fingerprint"] for record in corpus]
+    if len(fingerprints) != len(set(fingerprints)):
+        return _error("unknown", "Mutation preflight corpus contains collisions")
+    generated = sum(report["generated"] for report in reports)
+    return {
+        "status": "completed", "passed": True, "engine_version": MUTMUT_VERSION,
+        "generated": generated, "canonicalized": len(corpus), "collisions": 0,
+        "files": sorted(mapping), "fingerprints": sorted(fingerprints),
+        "corpus": sorted(corpus, key=lambda record: record["fingerprint"]),
+        "line_ranges": line_ranges,
     }
 
 
@@ -1268,6 +1600,7 @@ def _run_mutmut(
         return {**error, "engine_version": actual, "run_exit_code": run.returncode}
     assert records is not None
 
+    non_killed = [record for record in records if record["state"] != "killed"]
     return {
         "status": "completed",
         "engine_version": actual,
@@ -1277,9 +1610,9 @@ def _run_mutmut(
         "run_exit_code": run.returncode,
         "results_exit_code": 0,
         **{state: len(ids[state]) for state in _STATES},
-        "non_killed": records,
-        "survivor_preview": [record for record in records if record["state"] == "survived"][:20],
-        "survivors": [record["fingerprint"] for record in records if record["state"] == "survived"],
+        "non_killed": non_killed,
+        "survivor_preview": [record for record in non_killed if record["state"] == "survived"][:20],
+        "survivors": [record["fingerprint"] for record in non_killed if record["state"] == "survived"],
         "stderr": _bounded(run.stderr),
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
@@ -1548,6 +1881,7 @@ def aggregate_preflight_shards(
     if [report.get("shard_index") for report in reports] != list(range(shard_count)):
         return _error("unknown", "Preflight shard indexes are incomplete or duplicated")
     fingerprints: list[str] = []
+    corpus: list[dict] = []
     tested_lines: list[tuple[str, int]] = []
     for index, report in enumerate(reports):
         if report.get("status") != "completed" or report.get("passed") is not True:
@@ -1557,10 +1891,18 @@ def aggregate_preflight_shards(
         if report.get("generated") != report.get("canonicalized"):
             return _error("unknown", f"Preflight shard {index} does not reconcile generated details")
         shard_fingerprints = report.get("fingerprints")
+        shard_corpus = report.get("corpus")
         ranges = report.get("line_ranges")
-        if not isinstance(shard_fingerprints, list) or not isinstance(ranges, list) or not ranges:
+        if (
+            not isinstance(shard_fingerprints, list) or not isinstance(shard_corpus, list)
+            or not isinstance(ranges, list) or not ranges
+            or sorted(record.get("fingerprint") for record in shard_corpus if isinstance(record, dict))
+            != sorted(shard_fingerprints)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(report.get("manifest_digest", "")))
+        ):
             return _error("unknown", f"Preflight shard {index} has incomplete evidence")
         fingerprints.extend(shard_fingerprints)
+        corpus.extend({**record, "shard_index": index} for record in shard_corpus)
         for item in ranges:
             if not isinstance(item, dict) or set(item) != {"file", "start", "end"}:
                 return _error("unknown", f"Preflight shard {index} has malformed ranges")
@@ -1584,6 +1926,9 @@ def aggregate_preflight_shards(
         "revision": _revision(root),
         "shard_count": shard_count, "generated": generated, "canonicalized": generated,
         "collisions": 0, "files": expected_files, "fingerprints": sorted(fingerprints),
+        "corpus": sorted(corpus, key=lambda record: record["fingerprint"]),
+        "corpus_digest": _canonical_digest(sorted(corpus, key=lambda record: record["fingerprint"])),
+        "manifest_digests": [report["manifest_digest"] for report in reports],
     }
 
 
@@ -1821,10 +2166,16 @@ def run_mutation_preflight(root: str, cfg: dict) -> dict:
     if unmapped:
         return _error("unknown", "No targeted tests mapped for: " + ", ".join(unmapped))
     tests = sorted({test for mapped in mapping.values() for test in mapped})
-    args = (root, files, tests, mapping, int(cfg.get("full_timeout_s", 2100)))
-    result = _preflight_mutmut(*args, line_ranges) if line_ranges else _preflight_mutmut(*args)
+    timeout = int(cfg.get("full_timeout_s", 2100))
+    result = (
+        _preflight_shard_modules(root, mapping, line_ranges, timeout)
+        if line_ranges else _preflight_mutmut(root, files, tests, mapping, timeout)
+    )
     if manifest is not None:
-        result.update({"shard_index": manifest["shard_index"], "shard_count": manifest["shard_count"]})
+        result.update({
+            "shard_index": manifest["shard_index"], "shard_count": manifest["shard_count"],
+            "manifest_digest": manifest["digest"],
+        })
     return result
 
 
@@ -1865,6 +2216,11 @@ def main() -> int:
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
+    parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
+    parser.add_argument("--retained-preflight", help="Complete retained preflight aggregate")
+    parser.add_argument("--calibration-id", help="Logical calibration identity")
+    parser.add_argument("--checkpoint-output", help="Atomic resumable checkpoint output")
+    parser.add_argument("--resume-checkpoints", help="Directory containing same-calibration checkpoints")
     parser.add_argument("--initialize-timeout-report", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--github-summary", metavar="REPORT", help=argparse.SUPPRESS)
     parser.add_argument("--artifact-name", help=argparse.SUPPRESS)
@@ -1908,7 +2264,26 @@ def main() -> int:
         mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
     )
     base = args.base or mutation["base"]
-    if args.preflight_manifest:
+    if args.resume_manifest:
+        missing = [
+            name for name, value in (
+                ("--retained-preflight", args.retained_preflight),
+                ("--calibration-id", args.calibration_id),
+                ("--checkpoint-output", args.checkpoint_output),
+            ) if not value
+        ]
+        if missing:
+            report = _error("unknown", "--resume-manifest requires " + ", ".join(missing))
+        else:
+            resume_paths = (
+                sorted(Path(args.resume_checkpoints).rglob("mutation-checkpoint.json"))
+                if args.resume_checkpoints else []
+            )
+            report = run_resumable_mutation_shard(
+                args.root, mutation, Path(args.resume_manifest), Path(args.retained_preflight),
+                args.calibration_id, Path(args.checkpoint_output), timeout, resume_paths,
+            )
+    elif args.preflight_manifest:
         report = run_mutation_preflight(args.root, {**mutation, "manifest": args.preflight_manifest})
     elif args.aggregate_preflight:
         if args.shard_count is None or args.shard_count < 1:
@@ -1945,7 +2320,9 @@ def main() -> int:
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
-    return 2 if report["status"] in {"unknown", "tool_error"} else (0 if report.get("passed", True) else 1)
+    if report["status"] not in {"completed", "not_applicable"}:
+        return 2
+    return 0 if report.get("passed", True) else 1
 
 
 if __name__ == "__main__":

@@ -45,6 +45,11 @@ from fettle.mutation_test import (
     main,
     run_mutation_test,
     run_mutation_preflight,
+    merge_mutation_checkpoints,
+    pending_mutation_records,
+    execute_pending_mutations,
+    report_from_mutation_checkpoint,
+    run_resumable_mutation_shard,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
@@ -470,6 +475,28 @@ def test_collect_records_is_complete_and_rejects_fingerprint_collision(tmp_path)
         records, error = _collect_mutant_records(str(tmp_path), ids, ["tests/test_calculator.py"])
     assert records is None and error["status"] == "unknown"
     assert "fingerprint" in error["message"]
+
+
+def test_collect_records_includes_killed_mutants_with_module_local_locator(tmp_path):
+    (tmp_path / "src").mkdir()
+    source = "def eligible_for_discount(total: int) -> bool:\n    return total >= 100\n"
+    (tmp_path / "src/calculator.py").write_text(source)
+    fixture = json.loads((FIXTURES / "mutmut-show.json").read_text())["records"][0]
+    output = f"# mutant {fixture['engine_id']}\n{fixture['diff']}"
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids["killed"] = [fixture["engine_id"]]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out=output)):
+        records, error = _collect_mutant_records(
+            str(tmp_path), ids, {"src/calculator.py": ["tests/test_calculator.py"]},
+            ["src/calculator.py"],
+        )
+
+    assert error is None
+    assert records is not None and records[0]["state"] == "killed"
+    assert records[0]["locator"] == {
+        "file": "src/calculator.py", "engine_id": fixture["engine_id"],
+    }
 
 
 def test_collect_records_includes_skipped_mutants(tmp_path):
@@ -1348,6 +1375,7 @@ def test_preflight_generates_and_canonicalizes_without_project_test_runner():
         "status": "completed", "passed": True, "engine_version": "2.5.1",
         "generated": 2, "canonicalized": 2, "collisions": 0,
         "files": ["src/app.py"], "fingerprints": ["a" * 64, "b" * 64],
+        "corpus": records,
     }
     command = run.call_args_list[1].args[0]
     assert command[:2] == ["mutmut", "run"]
@@ -1377,6 +1405,42 @@ def test_preflight_partition_uses_patch_and_range_results(tmp_path):
     collect.assert_called_once_with(str(tmp_path), ranges, "2.5.1", 2)
 
 
+def test_preflight_shard_runs_modules_independently_and_preserves_local_ids(tmp_path):
+    from fettle.mutation_test import _preflight_shard_modules
+
+    ranges = [
+        {"file": "src/a.py", "start": 1, "end": 1},
+        {"file": "src/b.py", "start": 1, "end": 1},
+    ]
+    mapping = {
+        "src/a.py": ["tests/test_a.py"],
+        "src/b.py": ["tests/test_b.py"],
+    }
+    results = [
+        {
+            "status": "completed", "passed": True, "engine_version": "2.5.1",
+            "generated": 1, "canonicalized": 1, "collisions": 0,
+            "files": [file], "line_ranges": [ranges[index]],
+            "fingerprints": [fingerprint * 64],
+            "corpus": [{
+                "fingerprint": fingerprint * 64, "engine_id": "1", "file": file,
+                "locator": {"file": file, "engine_id": "1"},
+            }],
+        }
+        for index, (file, fingerprint) in enumerate((("src/a.py", "a"), ("src/b.py", "b")))
+    ]
+
+    with patch("fettle.mutation_test._preflight_mutmut", side_effect=results) as preflight:
+        result = _preflight_shard_modules(str(tmp_path), mapping, ranges, 600)
+
+    assert result["status"] == "completed"
+    assert [record["locator"] for record in result["corpus"]] == [
+        {"file": "src/a.py", "engine_id": "1"},
+        {"file": "src/b.py", "engine_id": "1"},
+    ]
+    assert preflight.call_count == 2
+
+
 def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src/app.py").write_text("x = 1\ny = 2\n")
@@ -1385,8 +1449,8 @@ def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp
         "shard_count": 2, "generated": 1, "canonicalized": 1,
     }
     reports = [
-        {**base, "shard_index": 0, "line_ranges": [{"file": "src/app.py", "start": 1, "end": 1}], "fingerprints": ["a" * 64]},
-        {**base, "shard_index": 1, "line_ranges": [{"file": "src/app.py", "start": 2, "end": 2}], "fingerprints": ["b" * 64]},
+        {**base, "shard_index": 0, "manifest_digest": "c" * 64, "line_ranges": [{"file": "src/app.py", "start": 1, "end": 1}], "fingerprints": ["a" * 64], "corpus": [{"fingerprint": "a" * 64, "locator": {"file": "src/app.py", "engine_id": "1"}}]},
+        {**base, "shard_index": 1, "manifest_digest": "d" * 64, "line_ranges": [{"file": "src/app.py", "start": 2, "end": 2}], "fingerprints": ["b" * 64], "corpus": [{"fingerprint": "b" * 64, "locator": {"file": "src/app.py", "engine_id": "2"}}]},
     ]
 
     with patch("fettle.mutation_test._revision", return_value="a" * 40):
@@ -1394,6 +1458,8 @@ def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp
     assert result["status"] == "completed"
     assert result["revision"] == "a" * 40
     assert result["generated"] == result["canonicalized"] == 2
+    assert len(result["corpus"]) == 2
+    assert len(result["corpus_digest"]) == 64
 
     reports[1]["fingerprints"] = ["a" * 64]
     assert aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)["status"] == "unknown"
@@ -1403,6 +1469,239 @@ def test_preflight_aggregate_requires_exact_coverage_and_unique_fingerprints(tmp
     result = aggregate_preflight_shards(str(tmp_path), reports, ["src/"], [], 2)
     assert result["status"] == "unknown"
     assert "exactly cover" in result["message"]
+
+
+def _checkpoint(calibration_id="calibration-1", outcomes=None, attempts=None, **identity_changes):
+    identity = {
+        "revision": "a" * 40,
+        "preflight_digest": "b" * 64,
+        "manifest_digest": "c" * 64,
+        "corpus_digest": "d" * 64,
+        "environment_digest": "e" * 64,
+        **identity_changes,
+    }
+    return {
+        "schema_version": "1",
+        "calibration_id": calibration_id,
+        "identity": identity,
+        "outcomes": outcomes or {},
+        "attempts": attempts or [],
+    }
+
+
+def test_checkpoint_merge_is_idempotent_and_pending_selects_only_unfinished():
+    first = _checkpoint(
+        outcomes={"a" * 64: {"state": "killed", "duration_ms": 10}},
+        attempts=[{"fingerprint": "a" * 64, "status": "completed"}],
+    )
+    second = _checkpoint(
+        outcomes={"b" * 64: {"state": "survived", "duration_ms": 20}},
+        attempts=[{"fingerprint": "b" * 64, "status": "completed"}],
+    )
+
+    merged = merge_mutation_checkpoints([first, second, first], {"a" * 64, "b" * 64, "c" * 64})
+    corpus = [
+        {"fingerprint": fingerprint, "locator": {"file": "src/a.py", "engine_id": str(index)}}
+        for index, fingerprint in enumerate(("a" * 64, "b" * 64, "c" * 64), start=1)
+    ]
+
+    assert merged["status"] == "incomplete"
+    assert merged["pending"] == 1
+    assert [record["fingerprint"] for record in pending_mutation_records(corpus, merged)] == ["c" * 64]
+    assert len(merged["attempts"]) == 2
+
+
+@pytest.mark.parametrize(
+    "checkpoints,message",
+    [
+        ([_checkpoint(), _checkpoint(calibration_id="calibration-2")], "calibration"),
+        ([_checkpoint(), _checkpoint(revision="f" * 40)], "identity"),
+        ([_checkpoint(outcomes={"f" * 64: {"state": "killed", "duration_ms": 1}})], "corpus"),
+        ([_checkpoint(outcomes={"a" * 64: {"state": "killed", "duration_ms": 1}}),
+          _checkpoint(outcomes={"a" * 64: {"state": "survived", "duration_ms": 1}})], "conflicting"),
+    ],
+)
+def test_checkpoint_merge_rejects_cross_calibration_drift_extra_and_conflict(checkpoints, message):
+    with pytest.raises(ValueError, match=message):
+        merge_mutation_checkpoints(checkpoints, {"a" * 64})
+
+
+def test_execution_error_attempt_leaves_mutant_pending_and_unscored():
+    checkpoint = _checkpoint(attempts=[{
+        "fingerprint": "a" * 64, "status": "execution_error", "message": "runner exited",
+    }])
+
+    merged = merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+    assert merged["pending"] == 1
+    assert merged["outcomes"] == {}
+
+
+def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(tmp_path):
+    corpus = [
+        {
+            "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+            "locator": {"file": "src/a.py", "engine_id": "1"},
+        },
+        {
+            "fingerprint": "b" * 64, "file": "src/a.py", "state": "killed",
+            "locator": {"file": "src/a.py", "engine_id": "2"},
+        },
+    ]
+    checkpoint = _checkpoint(outcomes={"a" * 64: {"state": "killed", "duration_ms": 5}})
+    regenerated = {
+        "status": "completed", "corpus": [
+            {**corpus[0], "engine_id": "41", "locator": {"file": "src/a.py", "engine_id": "41"}},
+            {**corpus[1], "engine_id": "42", "locator": {"file": "src/a.py", "engine_id": "42"}},
+        ],
+    }
+    observed = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    observed["survived"] = ["42"]
+
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", return_value=_proc(2)) as run,
+        patch("fettle.mutation_test._collect_range_results", return_value=(observed, None)),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 2}], checkpoint, 60,
+        )
+
+    assert result["status"] == "completed"
+    assert result["outcomes"]["a" * 64]["state"] == "killed"
+    assert result["outcomes"]["b" * 64]["state"] == "survived"
+    assert run.call_args.args[0] == ["mutmut", "run", "42"]
+
+
+def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", side_effect=OSError("runner unavailable")),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["pending"] == 1
+    assert result["attempts"][-1]["status"] == "execution_error"
+    assert result["outcomes"] == {}
+
+
+def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema():
+    corpus = [
+        {
+            "fingerprint": "a" * 64, "file": "src/a.py", "engine_id": "1",
+            "state": "killed", "line": 1, "operator": "Compare", "before": "a",
+            "after": "b", "mapped_tests": ["tests/test_a.py"],
+            "source_context_digest": "1" * 64, "rerun_command": "mutmut run 1",
+            "locator": {"file": "src/a.py", "engine_id": "1"},
+        },
+        {
+            "fingerprint": "b" * 64, "file": "src/a.py", "engine_id": "2",
+            "state": "killed", "line": 2, "operator": "Compare", "before": "c",
+            "after": "d", "mapped_tests": ["tests/test_a.py"],
+            "source_context_digest": "2" * 64, "rerun_command": "mutmut run 2",
+            "locator": {"file": "src/a.py", "engine_id": "2"},
+        },
+    ]
+    incomplete = merge_mutation_checkpoints([
+        _checkpoint(outcomes={"a" * 64: {"state": "killed", "duration_ms": 5}}),
+    ], {"a" * 64, "b" * 64})
+    with pytest.raises(ValueError, match="incomplete"):
+        report_from_mutation_checkpoint(corpus, incomplete)
+
+    complete = merge_mutation_checkpoints([
+        _checkpoint(outcomes={
+            "a" * 64: {"state": "killed", "duration_ms": 5},
+            "b" * 64: {"state": "timeout", "duration_ms": 10},
+        }),
+    ], {"a" * 64, "b" * 64})
+    report = report_from_mutation_checkpoint(corpus, complete)
+
+    assert report["killed"] == 1 and report["timeout"] == 1
+    assert [record["fingerprint"] for record in report["non_killed"]] == ["b" * 64]
+
+
+def test_resumable_shard_rejects_corpus_not_bound_to_manifest_before_execution(tmp_path):
+    manifest = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    manifest["digest"] = __import__("hashlib").sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 1, "manifest_digests": ["f" * 64],
+        "fingerprints": [], "corpus": [],
+        "corpus_digest": __import__("hashlib").sha256(b"[]").hexdigest(),
+    }
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(preflight))
+
+    with patch("fettle.mutation_test.execute_pending_mutations") as execute:
+        result = run_resumable_mutation_shard(
+            str(tmp_path), {"test_mappings": {}}, manifest_path, preflight_path,
+            "calibration-1", tmp_path / "checkpoint.json", 60,
+        )
+
+    assert result["status"] == "unknown"
+    assert "manifest" in result["message"]
+    execute.assert_not_called()
+
+
+def test_resumable_shard_rejects_tampered_preflight_corpus_before_execution(tmp_path):
+    manifest = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    manifest["digest"] = __import__("hashlib").sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 1, "manifest_digests": [manifest["digest"]],
+        "fingerprints": ["a" * 64], "corpus": [], "corpus_digest": "e" * 64,
+    }
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(preflight))
+
+    with patch("fettle.mutation_test.execute_pending_mutations") as execute:
+        result = run_resumable_mutation_shard(
+            str(tmp_path), {"test_mappings": {}}, manifest_path, preflight_path,
+            "calibration-1", tmp_path / "checkpoint.json", 60,
+        )
+
+    assert result["status"] == "unknown"
+    assert "corpus digest" in result["message"]
+    execute.assert_not_called()
+
+
+def test_resumable_shard_rejects_unsafe_calibration_id_before_reading_evidence(tmp_path):
+    result = run_resumable_mutation_shard(
+        str(tmp_path), {}, tmp_path / "missing-manifest.json", tmp_path / "missing-preflight.json",
+        "bad'; touch pwned; '", tmp_path / "checkpoint.json", 60,
+    )
+
+    assert result["status"] == "unknown"
+    assert "calibration ID" in result["message"]
+    assert not (tmp_path / "pwned").exists()
 
 
 def test_preflight_rejects_empty_or_incomplete_corpus():
@@ -1673,6 +1972,21 @@ def test_cli_returns_two_for_unknown(monkeypatch):
     monkeypatch.setattr("fettle.mutation_test.run_mutation_test", lambda root, cfg: {"status": "unknown", "score": None, "passed": False})
     monkeypatch.setattr("sys.argv", ["mutation_test", "--json"])
     assert main() == 2
+
+
+def test_cli_returns_two_for_incomplete_resumable_checkpoint(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "fettle.mutation_test.run_resumable_mutation_shard",
+        lambda *args: {"status": "incomplete", "pending": 1, "outcomes": {}, "attempts": []},
+    )
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--resume-manifest", "manifest.json",
+        "--retained-preflight", "preflight.json", "--calibration-id", "calibration-1",
+        "--checkpoint-output", "checkpoint.json", "--json",
+    ])
+
+    assert main() == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "incomplete"
 
 
 def test_cli_loads_effective_mutation_config_and_allows_flag_overrides(monkeypatch, tmp_path):

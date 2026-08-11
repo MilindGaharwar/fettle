@@ -2,7 +2,7 @@
 
 **Metric:** successful full-run duration_ms <= 2100000 with valid nonzero outcomes
 **Best Score:** 1792060 ms (node 2)
-**Nodes:** 8 total | 3 merged | 2 pruned
+**Nodes:** 9 total | 3 merged | 3 pruned
 **Created:** 2026-08-07
 
 ---
@@ -50,6 +50,13 @@
     - Expected improvement: Reduce each `ci.py` execution to at most one third of the failed range while leaving the measured-complete `bench.py` range unchanged and preserving scope, topology, and timeout.
     - Evidence: Replay `31418846787` on `15fb0ce` succeeded after the `ci.py` and `post_edit.py` corrections, but calibration `31422666777` failed on thirteen retained shard reports, one artifact upload, and one aggregate rejection.
     - Insight: Narrow replay proves historical ranges but does not establish calibration-wide capacity. Full calibration telemetry must drive a bounded corpus-wide correction before independent baseline runs can begin.
-  - **8** [ACTIVE]: Split calibration-measured hotspots while preserving 256 shards and the 1,800-second worker bound; falsified if a resulting authoritative run still times out or retained evidence is incomplete
+  - **8** [PRUNED]: Split calibration-measured hotspots while preserving 256 shards and the 1,800-second worker bound; falsified if a resulting authoritative run still times out or retained evidence is incomplete
     - Informed by: Calibration `31422666777` directly measured both 60-line `result.py` ranges exhausting 1,349-1,527 seconds; 10-line `quality_scan.py` ranges reaching 1,484 seconds; 60-line `doctor.py` ranges reaching 1,157 seconds; `project_rules.py:61-85` exhausting 1,602 seconds; and 15-60-line `semgrep_util.py` ranges exhausting 1,238-1,364 seconds. Successful but unsafe co-located ranges measured `security_review.py` at 596-692 seconds and 20-line `tool_runner.py` at 422-949 seconds.
     - Expected improvement: Bound `result.py`, `doctor.py`, and `security_review.py` to 20 lines; `project_rules.py` and `tool_runner.py` to 10; and `quality_scan.py` and `semgrep_util.py` to 5, leaving capacity for sorted peer modules without changing mutation scope, topology, or timeout.
+    - Evidence: Calibration `31440813617` was cancelled after retained evidence and engine research showed that further static chunk tuning would discard trustworthy completed work whenever any worker failed.
+    - Insight: A worker deadline is an evidence interruption, not evidence that all work in that partition must be repeated. Static partition tuning cannot guarantee completion under variable infrastructure and should not remain the recovery mechanism.
+  - **9** [ACTIVE]: Resume one logical calibration from canonical fingerprint-keyed terminal outcomes; falsified if retries rerun completed mutants, incompatible checkpoints are accepted, or the final aggregate differs from an uninterrupted execution
+    - Informed by: The authoritative preflight `31439336650` produced 9,779 unique canonical fingerprints with exact full-scope coverage, while mutmut 2.5.1 can execute one numeric mutation ID at a time.
+    - Constraint: The immutable preflight corpus may be shared, but outcome checkpoints must be isolated by calibration ID so the two baseline reports remain independently executed.
+    - Constraint: Native per-mutant timeout is a terminal mutation outcome; process, worker, and orchestration failures are retryable execution errors and never enter score counts.
+    - Expected improvement: Infrastructure retries execute only pending fingerprints and converge to complete fail-closed evidence without changing mutation scope, 256-shard topology, or the pinned engine.

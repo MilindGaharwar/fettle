@@ -24,6 +24,14 @@ on:
         description: "Successful preflight run on this commit (required for replay/calibration)"
         required: false
         type: string
+      calibration_id:
+        description: "Unique logical calibration ID (required for calibration)"
+        required: false
+        type: string
+      resume_run_id:
+        description: "Prior run of this calibration to resume"
+        required: false
+        type: string
 
 concurrency:
   group: mutation-authoritative-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.repository }}
@@ -111,6 +119,13 @@ jobs:
         env:
           PREFLIGHT_RUN_ID: ${{ github.event.inputs.preflight_run_id }}
         run: test -n "$PREFLIGHT_RUN_ID" && test "$PREFLIGHT_RUN_ID" -eq "$PREFLIGHT_RUN_ID"
+      - name: Require calibration identity
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+        run: >-
+          python -c 'import os,re,sys; value=os.environ["CALIBRATION_ID"];
+          sys.exit(0 if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value) else 1)'
       - name: Download retained partition manifests
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -243,11 +258,53 @@ jobs:
         with:
           name: mutation-manifests-${{ github.run_id }}
           path: mutation-manifests
+      - name: Download retained preflight aggregate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutation-preflight-${{ github.event.inputs.preflight_run_id }}
+          path: retained-preflight
+          run-id: ${{ github.event.inputs.preflight_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download same-calibration checkpoints
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.resume_run_id != '' && github.event.inputs.calibration_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}
+          path: resume-checkpoints
+          run-id: ${{ github.event.inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Full mutation shard evidence
+        if: github.event.inputs.mode == 'replay'
         run: >-
           uv run --no-sync fettle mutation run --all
           --manifest mutation-manifests/partition-${{ matrix.shard }}.json
           --json --output mutation-report.json
+      - name: Resumable calibration shard evidence
+        if: github.event.inputs.mode == 'calibration'
+        timeout-minutes: 30
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          HAS_RESUME: ${{ github.event.inputs.resume_run_id != '' }}
+        run: |
+          args=(
+            --root .
+            --resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json
+            --retained-preflight retained-preflight/mutation-preflight.json
+            --calibration-id "$CALIBRATION_ID"
+            --checkpoint-output mutation-checkpoint.json
+            --timeout 1740 --json
+          )
+          if [[ "$HAS_RESUME" == "true" ]]; then
+            args+=(--resume-checkpoints resume-checkpoints)
+          fi
+          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json
+      - name: Retain resumable calibration checkpoint
+        if: always() && github.event.inputs.mode == 'calibration'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}
+          path: mutation-checkpoint.json
+          if-no-files-found: error
       - name: Retain mutation shard
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

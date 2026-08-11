@@ -287,8 +287,8 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "preflight_run_id:" in workflow
-    assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 2
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 2
+    assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 3
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 4
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert 'aggregate["revision"]==os.environ["GITHUB_SHA"]' in workflow
     assert 'item["revision"]==os.environ["GITHUB_SHA"]' in workflow
@@ -335,6 +335,21 @@ def test_authoritative_mutation_runs_are_serialized_without_cancelling_evidence(
     assert "concurrency:" in workflow
     assert "mutation-authoritative" in workflow
     assert "cancel-in-progress: false" in workflow
+
+
+def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "calibration_id:" in workflow
+    assert "resume_run_id:" in workflow
+    assert 'CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}' in workflow
+    assert '--calibration-id "$CALIBRATION_ID"' in workflow
+    assert 're.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value)' in workflow
+    assert "--checkpoint-output mutation-checkpoint.json" in workflow
+    assert "name: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}" in workflow
+    assert "if: always()" in workflow
+    assert "github.event.inputs.resume_run_id != ''" in workflow
+    assert "github.event.inputs.calibration_id != ''" in workflow
 
 
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
