@@ -60,3 +60,5 @@
     - Constraint: The immutable preflight corpus may be shared, but outcome checkpoints must be isolated by calibration ID so the two baseline reports remain independently executed.
     - Constraint: Native per-mutant timeout is a terminal mutation outcome; process, worker, and orchestration failures are retryable execution errors and never enter score counts.
     - Expected improvement: Infrastructure retries execute only pending fingerprints and converge to complete fail-closed evidence without changing mutation scope, 256-shard topology, or the pinned engine.
+    - Evidence: Preflight `31465957049` on `65ce306` retained 28,669 unique fingerprints with zero collisions. Calibration `31467136090` completed all 256 execution shards and retained their checkpoints, then aggregation correctly rejected seven decorator-deletion records because the report validator incorrectly required a non-empty replacement.
+    - Insight: Canonical mutation evidence must represent insertion and deletion with one empty side; require both sides to be strings and at least one side to be non-empty, rather than rejecting valid deletion outcomes after execution.

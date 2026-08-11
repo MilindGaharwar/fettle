@@ -712,6 +712,17 @@ def test_schema_v2_requires_complete_unique_non_killed_records():
         _validate_report_schema(_stable_report(survived="1"))
 
 
+def test_schema_v2_accepts_deletion_mutants():
+    report = _stable_report()
+    report["non_killed"][0] = {**report["non_killed"][0], "before": "@property", "after": ""}
+
+    _validate_report_schema(report)
+
+    report["non_killed"][0] = {**report["non_killed"][0], "before": ""}
+    with pytest.raises(ValueError, match="malformed"):
+        _validate_report_schema(report)
+
+
 def test_rerun_mutant_executes_exact_current_engine_id_and_rejects_stale_id():
     record = {"engine_id": "42", "state": "survived"}
     rerun_ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}

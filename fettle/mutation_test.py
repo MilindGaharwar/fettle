@@ -1313,7 +1313,10 @@ def _validate_report_schema(report: dict) -> None:
         or not isinstance(record["line"], int)
         or isinstance(record["line"], bool)
         or record["line"] < 1
-        or any(not isinstance(record[field], str) or not record[field] for field in ("file", "operator", "before", "after", "rerun_command"))
+        or any(not isinstance(record[field], str) or not record[field] for field in ("file", "operator", "rerun_command"))
+        or not isinstance(record["before"], str)
+        or not isinstance(record["after"], str)
+        or not (record["before"] or record["after"])
         for record in records
     ):
         raise ValueError("schema v2 contains malformed non-killed records")
