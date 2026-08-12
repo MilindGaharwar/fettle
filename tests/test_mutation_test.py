@@ -17,6 +17,7 @@ from fettle.mutation_test import (
     restore_mutation_native_cache,
     save_mutation_native_cache,
     mutation_cache_reusable,
+    _runtime_cache_identity,
     _shard_files,
     _shard_ranges,
     _patch_for_ranges,
@@ -871,6 +872,33 @@ def test_mutation_cache_identity_invalidates_dependency_engine_python_and_platfo
             str(tmp_path), ["src/app.py"], mapping, {}, **kwargs,
         )
         assert mutation_cache_reusable({"identity": original}, changed) is False
+
+
+def test_runtime_cache_identity_uses_stable_os_and_architecture(monkeypatch, tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/app.py").write_text("value = 1\n")
+    (tmp_path / "tests/test_app.py").write_text("import src.app\n")
+    dependencies = [{"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64}]
+    monkeypatch.setattr(
+        "fettle.mutation_test.collect_mutation_dependency_identities", lambda _: dependencies,
+    )
+    monkeypatch.setattr("fettle.mutation_test.platform.python_version", lambda: "3.12.13")
+    monkeypatch.setattr("fettle.mutation_test.platform.system", lambda: "Linux")
+    monkeypatch.setattr("fettle.mutation_test.platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        "fettle.mutation_test.platform.platform",
+        lambda: "Linux-6.11.0-1018-azure-x86_64-with-glibc2.39",
+    )
+
+    identity = _runtime_cache_identity(
+        str(tmp_path), ["src/app.py"], {"src/app.py": ["tests/test_app.py"]}, {},
+    )
+
+    assert identity is not None
+    assert identity["inputs"]["environment"] == {
+        "python": "3.12.13", "platform": "Linux-x86_64",
+    }
 
 
 def test_mutation_cache_identity_fails_closed_for_unknown_inputs(tmp_path):

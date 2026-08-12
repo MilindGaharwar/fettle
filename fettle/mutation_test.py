@@ -1015,7 +1015,10 @@ def _runtime_cache_identity(
         dependencies = collect_mutation_dependency_identities(list(importlib.metadata.distributions()))
         return build_mutation_cache_identity(
             root, files, mapping, cfg, dependencies=dependencies,
-            environment={"python": platform.python_version(), "platform": platform.platform()},
+            environment={
+                "python": platform.python_version(),
+                "platform": f"{platform.system()}-{platform.machine()}",
+            },
         )
     except (OSError, UnicodeError, ValueError):
         return None
