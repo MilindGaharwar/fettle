@@ -27,6 +27,7 @@ from fettle.mutation_test import (
     _find_replacement,
     _parse_result_ids,
     _collect_range_results,
+    _reset_generated_mutants,
     _canonical_mutant,
     _collect_mutant_records,
     _parse_show_all,
@@ -1419,6 +1420,7 @@ def test_preflight_generates_and_canonicalizes_without_project_test_runner():
         ]) as run,
         patch("fettle.mutation_test._collect_results", return_value=(ids, None)),
         patch("fettle.mutation_test._collect_mutant_records", return_value=(records, None)),
+        patch("fettle.mutation_test._reset_generated_mutants", return_value=None) as reset,
     ):
         result = _preflight_mutmut(
             ".", ["src/app.py"], ["tests/test_app.py"],
@@ -1435,6 +1437,7 @@ def test_preflight_generates_and_canonicalizes_without_project_test_runner():
     assert command[:2] == ["mutmut", "run"]
     assert command[command.index("--runner") + 1] == "python -c pass"
     assert "pytest" not in command
+    reset.assert_called_once_with(".", records)
 
 
 def test_preflight_partition_uses_patch_and_range_results(tmp_path):
@@ -1448,6 +1451,7 @@ def test_preflight_partition_uses_patch_and_range_results(tmp_path):
         patch("fettle.mutation_test._run", side_effect=[_proc(out="mutmut version 2.5.1\n"), _proc(2)]) as run,
         patch("fettle.mutation_test._collect_range_results", return_value=(ids, None)) as collect,
         patch("fettle.mutation_test._collect_mutant_records", return_value=(records, None)),
+        patch("fettle.mutation_test._reset_generated_mutants", return_value=None),
     ):
         result = _preflight_mutmut(
             str(tmp_path), ["src/app.py"], ["tests/test_app.py"],
@@ -1457,6 +1461,74 @@ def test_preflight_partition_uses_patch_and_range_results(tmp_path):
     assert result["line_ranges"] == ranges
     assert "--use-patch-file" in run.call_args_list[1].args[0]
     collect.assert_called_once_with(str(tmp_path), ranges, "2.5.1", 2)
+
+
+def test_preflight_reset_marks_exact_generated_mutants_untested(tmp_path):
+    cache = tmp_path / ".mutmut-cache"
+    connection = sqlite3.connect(cache)
+    connection.executescript(
+        "CREATE TABLE SourceFile (id INTEGER PRIMARY KEY, filename TEXT NOT NULL);"
+        "CREATE TABLE Line (id INTEGER PRIMARY KEY, sourcefile INTEGER NOT NULL);"
+        "CREATE TABLE Mutant (id INTEGER PRIMARY KEY, line INTEGER NOT NULL, "
+        "tested_against_hash TEXT NOT NULL, status TEXT NOT NULL);"
+        "CREATE TABLE MiscData (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "INSERT INTO MiscData VALUES ('baseline_time_elapsed', '0.01');"
+        "INSERT INTO MiscData VALUES ('hash_of_tests', 'test-hash');"
+        "INSERT INTO MiscData VALUES ('version', '4');"
+        "INSERT INTO SourceFile VALUES (1, 'src/a.py');"
+        "INSERT INTO Line VALUES (1, 1);"
+        "INSERT INTO Mutant VALUES (1, 1, 'test-hash', 'bad_survived');"
+        "INSERT INTO Mutant VALUES (2, 1, 'test-hash', 'bad_survived');"
+    )
+    connection.commit()
+    connection.close()
+
+    error = _reset_generated_mutants(str(tmp_path), [{
+        "engine_id": "2", "file": "src/a.py",
+    }])
+
+    connection = sqlite3.connect(cache)
+    rows = connection.execute("SELECT id, status, tested_against_hash FROM Mutant ORDER BY id").fetchall()
+    metadata = connection.execute("SELECT key, value FROM MiscData ORDER BY key").fetchall()
+    connection.close()
+    assert error is None
+    assert rows == [(1, "bad_survived", "test-hash"), (2, "untested", "test-hash")]
+    assert metadata == [("version", "4")]
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [{"engine_id": "2", "file": "src/missing.py"}],
+        [{"engine_id": "3", "file": "src/a.py"}],
+        [{"engine_id": "2", "file": "src/a.py"}, {"engine_id": "2", "file": "src/a.py"}],
+    ],
+)
+def test_preflight_reset_fails_closed_for_mismatched_cache(tmp_path, records):
+    cache = tmp_path / ".mutmut-cache"
+    connection = sqlite3.connect(cache)
+    connection.executescript(
+        "CREATE TABLE SourceFile (id INTEGER PRIMARY KEY, filename TEXT NOT NULL);"
+        "CREATE TABLE Line (id INTEGER PRIMARY KEY, sourcefile INTEGER NOT NULL);"
+        "CREATE TABLE Mutant (id INTEGER PRIMARY KEY, line INTEGER NOT NULL, "
+        "tested_against_hash TEXT NOT NULL, status TEXT NOT NULL);"
+        "CREATE TABLE MiscData (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "INSERT INTO MiscData VALUES ('baseline_time_elapsed', '0.01');"
+        "INSERT INTO MiscData VALUES ('hash_of_tests', 'test-hash');"
+        "INSERT INTO SourceFile VALUES (1, 'src/a.py');"
+        "INSERT INTO Line VALUES (1, 1);"
+        "INSERT INTO Mutant VALUES (2, 1, 'test-hash', 'bad_survived');"
+    )
+    connection.commit()
+    connection.close()
+
+    error = _reset_generated_mutants(str(tmp_path), records)
+
+    assert error is not None
+    assert error["status"] == "tool_error"
+    connection = sqlite3.connect(cache)
+    assert connection.execute("SELECT status FROM Mutant WHERE id = 2").fetchone() == ("bad_survived",)
+    connection.close()
 
 
 def test_preflight_shard_runs_modules_independently_and_preserves_local_ids(tmp_path):
@@ -1626,7 +1698,10 @@ def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(
     assert result["status"] == "completed"
     assert result["outcomes"]["a" * 64]["state"] == "killed"
     assert result["outcomes"]["b" * 64]["state"] == "survived"
-    assert run.call_args.args[0] == ["mutmut", "run", "42"]
+    assert run.call_args.args[0] == [
+        "mutmut", "run", "42", "--runner",
+        "python -m pytest -x --assert=plain tests/test_a.py",
+    ]
 
 
 def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tmp_path):

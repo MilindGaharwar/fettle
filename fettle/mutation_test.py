@@ -579,7 +579,10 @@ def execute_pending_mutations(
             engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
             attempt_started = time.monotonic()
             try:
-                run = _run(["mutmut", "run", engine_id], root, remaining)
+                run = _run([
+                    "mutmut", "run", engine_id, "--runner",
+                    "python -m pytest -x --assert=plain " + shlex.join(mapping[file]),
+                ], root, remaining)
                 if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
                     raise OSError(f"mutmut exited with {run.returncode}")
                 ids, error = _collect_range_results(root, ranges, MUTMUT_VERSION, run.returncode)
@@ -1412,6 +1415,45 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     return ids, None
 
 
+def _reset_generated_mutants(root: str, records: list[dict]) -> dict | None:
+    """Make the exact canonicalized corpus executable after the no-op preflight."""
+    locators = [(record.get("engine_id"), record.get("file")) for record in records]
+    if (
+        len(locators) != len(set(locators))
+        or any(not isinstance(engine_id, str) or not re.fullmatch(r"\d+", engine_id)
+               or not isinstance(file, str) or not file for engine_id, file in locators)
+    ):
+        return _error("tool_error", "Mutation preflight cache locators are incomplete or duplicated")
+    cache = Path(root) / ".mutmut-cache"
+    try:
+        connection = sqlite3.connect(cache)
+        with connection:
+            for engine_id, file in locators:
+                row = connection.execute(
+                    "SELECT SourceFile.filename FROM Mutant "
+                    "JOIN Line ON Mutant.line = Line.id "
+                    "JOIN SourceFile ON Line.sourcefile = SourceFile.id "
+                    "WHERE Mutant.id = ?",
+                    (int(engine_id),),
+                ).fetchone()
+                if row != (file,):
+                    raise ValueError("generated mutant locator does not match native cache")
+            connection.executemany(
+                "UPDATE Mutant SET status = 'untested' WHERE id = ?",
+                [(int(engine_id),) for engine_id, _ in locators],
+            )
+            connection.execute(
+                "DELETE FROM MiscData WHERE key IN ('baseline_time_elapsed', 'hash_of_tests')"
+            )
+            statuses = dict(connection.execute("SELECT id, status FROM Mutant").fetchall())
+            if any(statuses.get(int(engine_id)) != "untested" for engine_id, _ in locators):
+                raise ValueError("generated mutant reset is incomplete")
+        connection.close()
+    except (sqlite3.Error, ValueError) as exc:
+        return _error("tool_error", f"Cannot reset mutation preflight cache: {exc}")
+    return None
+
+
 def _preflight_mutmut(
     root: str,
     files: list[str],
@@ -1488,6 +1530,9 @@ def _preflight_mutmut(
             "unknown", "Mutation preflight corpus is incomplete or contains collisions",
             engine_version=actual, generated=generated, canonicalized=len(records),
         )
+    reset_error = _reset_generated_mutants(root, records)
+    if reset_error:
+        return {**reset_error, "engine_version": actual, "generated": generated}
     return {
         "status": "completed",
         "passed": True,
