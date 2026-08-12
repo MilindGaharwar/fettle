@@ -706,7 +706,7 @@ def run_resumable_mutation_shard(
             "preflight_digest": _canonical_digest(preflight),
             "manifest_digest": manifest["digest"],
             "corpus_digest": _canonical_digest(sorted(corpus, key=lambda record: record["fingerprint"])),
-            "environment_digest": environment_identity["digest"],
+            "environment_digest": _checkpoint_environment_digest(environment_identity),
         }
         checkpoints = []
         for path in resume_paths or []:
@@ -930,6 +930,20 @@ def mutation_cache_reusable(cache_entry: dict, current_identity: dict) -> bool:
         ):
             return False
     return cached == current_identity
+
+
+def _checkpoint_environment_digest(cache_identity: dict) -> str:
+    """Bind execution semantics without installation-instance metadata."""
+    inputs = cache_identity["inputs"]
+    dependencies = [
+        {"name": dependency["name"], "version": dependency["version"]}
+        for dependency in inputs["dependencies"]
+    ]
+    return _canonical_digest({
+        "engine": inputs["engine"],
+        "environment": inputs["environment"],
+        "dependencies": dependencies,
+    })
 
 
 def _read_regular_file(path: Path) -> bytes:

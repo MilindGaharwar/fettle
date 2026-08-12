@@ -17,6 +17,7 @@ from fettle.mutation_test import (
     restore_mutation_native_cache,
     save_mutation_native_cache,
     mutation_cache_reusable,
+    _checkpoint_environment_digest,
     _runtime_cache_identity,
     _shard_files,
     _shard_ranges,
@@ -899,6 +900,32 @@ def test_runtime_cache_identity_uses_stable_os_and_architecture(monkeypatch, tmp
     assert identity["inputs"]["environment"] == {
         "python": "3.12.13", "platform": "Linux-x86_64",
     }
+
+
+def test_checkpoint_environment_identity_ignores_installation_records_but_not_versions():
+    inputs = {
+        "engine": {"name": "mutmut", "version": "2.5.1"},
+        "environment": {"python": "3.12.13", "platform": "Linux-x86_64"},
+        "dependencies": [
+            {"name": "pytest", "version": "9.1.1", "record_digest": "a" * 64},
+            {"name": "finefettle", "version": "1.9.0", "editable_source_digest": "b" * 64},
+        ],
+    }
+    original = _checkpoint_environment_digest({"inputs": inputs})
+    reinstalled = _checkpoint_environment_digest({"inputs": {
+        **inputs,
+        "dependencies": [
+            {"name": "pytest", "version": "9.1.1", "record_digest": "c" * 64},
+            {"name": "finefettle", "version": "1.9.0", "editable_source_digest": "d" * 64},
+        ],
+    }})
+    upgraded = _checkpoint_environment_digest({"inputs": {
+        **inputs,
+        "dependencies": [{**inputs["dependencies"][0], "version": "9.2.0"}],
+    }})
+
+    assert reinstalled == original
+    assert upgraded != original
 
 
 def test_mutation_cache_identity_fails_closed_for_unknown_inputs(tmp_path):
