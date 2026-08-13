@@ -1,0 +1,7 @@
+mutmut==2.5.1
+pytest==9.1.1
+pytest-testmon==2.2.0
+pyyaml>=6.0
+ruff>=0.4.0
+semgrep>=1.50
+whatthepatch==1.0.7

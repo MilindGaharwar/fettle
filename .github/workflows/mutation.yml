@@ -7,6 +7,8 @@ on:
       - "tests/**/*.py"
       - ".fettle.toml"
       - ".github/workflows/mutation.yml"
+      - "requirements-mutation.in"
+      - "requirements-mutation.txt"
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
@@ -56,9 +58,10 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install pinned mutation tools
-        run: >-
-          uv venv --python 3.12 && uv pip install --quiet -e ".[all]"
-          pytest==9.1.1 pytest-testmon==2.2.0 mutmut==2.5.1 whatthepatch==1.0.7
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
       - name: Restore non-authoritative mutation cache
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
@@ -186,9 +189,10 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install pinned mutation tools
-        run: >-
-          uv venv --python 3.12 && uv pip install --quiet -e ".[all]"
-          pytest==9.1.1 pytest-testmon==2.2.0 mutmut==2.5.1 whatthepatch==1.0.7
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: mutation-manifests-${{ github.run_id }}
@@ -251,9 +255,10 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install pinned mutation tools
-        run: >-
-          uv venv --python 3.12 && uv pip install --quiet -e ".[all]"
-          pytest==9.1.1 pytest-testmon==2.2.0 mutmut==2.5.1 whatthepatch==1.0.7
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: mutation-manifests-${{ github.run_id }}
