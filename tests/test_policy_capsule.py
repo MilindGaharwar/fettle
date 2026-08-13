@@ -216,6 +216,9 @@ class TestMonotonicMerge:
         loc = {"x": {f"k{i}": f"loc{i}" for i in range(40)}}
         _, ignored = merge_for_child(cap, loc)
         assert len(ignored) == 20
+        assert [item["key"] for item in ignored] == [
+            f"x.k{i}" for i in sorted(range(40), key=lambda value: f"k{value}")[:20]
+        ]
 
     # P52: role merge semantics
 

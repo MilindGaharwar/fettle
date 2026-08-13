@@ -252,7 +252,7 @@ def merge_for_child(
 
     def walk(cap: dict, loc: dict, prefix: str) -> dict:
         out: dict = {}
-        for key in set(cap) | set(loc):
+        for key in sorted(set(cap) | set(loc)):
             path = f"{prefix}.{key}" if prefix else key
             in_cap, in_loc = key in cap, key in loc
             cap_v = cap.get(key)
