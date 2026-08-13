@@ -1754,7 +1754,7 @@ def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(
     assert result["outcomes"]["a" * 64]["state"] == "killed"
     assert result["outcomes"]["b" * 64]["state"] == "survived"
     assert run.call_args.args[0] == [
-        "mutmut", "run", "42", "--runner",
+        "mutmut", "run", "42", "--test-time-base", "60", "--runner",
         "python -m pytest -x --assert=plain tests/test_a.py",
     ]
 

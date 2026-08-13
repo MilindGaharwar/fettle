@@ -580,7 +580,7 @@ def execute_pending_mutations(
             attempt_started = time.monotonic()
             try:
                 run = _run([
-                    "mutmut", "run", engine_id, "--runner",
+                    "mutmut", "run", engine_id, "--test-time-base", str(timeout), "--runner",
                     "python -m pytest -x --assert=plain " + shlex.join(mapping[file]),
                 ], root, remaining)
                 if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
