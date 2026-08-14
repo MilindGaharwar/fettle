@@ -17,7 +17,7 @@ import pytest
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
-from fettle.bench import BenchResult, load_budgets, run_bench  # noqa: E402
+from fettle.bench import BenchResult, _count_kloc, load_budgets, run_bench  # noqa: E402
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
@@ -70,6 +70,27 @@ def test_bench_rate_computed_per_kloc(tmp_path):
     result = run_bench({"synthetic": str(corpus)}, budgets={})
     rate = result.measurements["synthetic"].rate_per_kloc("bare-except-swallow")
     assert rate == pytest.approx(2 / 1.01, rel=0.05)
+
+
+def test_count_kloc_sorts_file_iteration_order(tmp_path, monkeypatch):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    first = corpus / "a.py"
+    second = corpus / "b.py"
+    first.write_text("first = 1\n")
+    second.write_text("second = 2\nthird = 3\n")
+    opened = []
+    original_open = Path.open
+
+    monkeypatch.setattr(Path, "rglob", lambda self, pattern: iter((second, first)))
+    monkeypatch.setattr(
+        Path,
+        "open",
+        lambda self, *args, **kwargs: (opened.append(self), original_open(self, *args, **kwargs))[1],
+    )
+
+    assert _count_kloc(corpus) == pytest.approx(0.003)
+    assert opened == [first, second]
 
 
 # ── budget enforcement ───────────────────────────────────────────────

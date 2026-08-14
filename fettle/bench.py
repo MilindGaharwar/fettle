@@ -53,7 +53,7 @@ def load_budgets(path: str | Path) -> dict:
 
 def _count_kloc(corpus_dir: Path) -> float:
     total = 0
-    for f in corpus_dir.rglob("*"):
+    for f in sorted(corpus_dir.rglob("*")):
         if f.is_file() and classify_file(f) in ("implementation", "test"):
             total += sum(1 for _ in f.open(errors="replace"))
     return total / 1000.0
