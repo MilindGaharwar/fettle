@@ -31,7 +31,7 @@ on:
         required: false
         type: string
       resume_run_id:
-        description: "Prior run of this calibration to resume"
+        description: "Prior run of this replay/calibration to resume"
         required: false
         type: string
 
@@ -270,11 +270,11 @@ jobs:
           path: retained-preflight
           run-id: ${{ github.event.inputs.preflight_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download same-calibration checkpoints
-        if: github.event.inputs.mode == 'calibration' && github.event.inputs.resume_run_id != '' && github.event.inputs.calibration_id != ''
+      - name: Download same-execution checkpoints
+        if: github.event.inputs.resume_run_id != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}
+          pattern: mutation-checkpoint-${{ github.event.inputs.mode == 'replay' && format('replay-{0}', github.event.inputs.resume_run_id) || github.event.inputs.calibration_id }}-${{ matrix.shard }}
           path: resume-checkpoints
           run-id: ${{ github.event.inputs.resume_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -284,8 +284,9 @@ jobs:
           uv run --no-sync python -m fettle.mutation_test --root .
           --resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json
           --retained-preflight retained-preflight/mutation-preflight.json
-          --calibration-id "replay-${{ github.run_id }}"
+          --calibration-id "replay-${{ github.event.inputs.resume_run_id || github.run_id }}"
           --checkpoint-output mutation-checkpoint.json
+          ${{ github.event.inputs.resume_run_id != '' && '--resume-checkpoints resume-checkpoints' || '' }}
           --timeout 1740 --json > mutation-report.json
       - name: Resumable calibration shard evidence
         if: github.event.inputs.mode == 'calibration'
@@ -306,11 +307,11 @@ jobs:
             args+=(--resume-checkpoints resume-checkpoints)
           fi
           uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json
-      - name: Retain resumable calibration checkpoint
-        if: always() && github.event.inputs.mode == 'calibration'
+      - name: Retain resumable execution checkpoint
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}
+          name: mutation-checkpoint-${{ github.event.inputs.mode == 'replay' && format('replay-{0}', github.event.inputs.resume_run_id || github.run_id) || github.event.inputs.calibration_id }}-${{ matrix.shard }}
           path: mutation-checkpoint.json
           if-no-files-found: error
       - name: Retain mutation shard

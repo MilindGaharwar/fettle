@@ -346,10 +346,11 @@ def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
     assert '--calibration-id "$CALIBRATION_ID"' in workflow
     assert 're.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value)' in workflow
     assert "--checkpoint-output mutation-checkpoint.json" in workflow
-    assert "name: mutation-checkpoint-${{ github.event.inputs.calibration_id }}-${{ matrix.shard }}" in workflow
+    assert "github.event.inputs.mode == 'replay'" in workflow
+    assert "|| github.event.inputs.calibration_id }}-${{ matrix.shard }}" in workflow
     assert "if: always()" in workflow
     assert "github.event.inputs.resume_run_id != ''" in workflow
-    assert "github.event.inputs.calibration_id != ''" in workflow
+    assert "if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow
 
 
 def test_mutation_replay_uses_retained_canonical_corpus():
@@ -358,7 +359,10 @@ def test_mutation_replay_uses_retained_canonical_corpus():
     assert "fettle mutation run --all" not in workflow
     assert "--resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json" in workflow
     assert "--retained-preflight retained-preflight/mutation-preflight.json" in workflow
-    assert '--calibration-id "replay-${{ github.run_id }}"' in workflow
+    assert '--calibration-id "replay-${{ github.event.inputs.resume_run_id || github.run_id }}"' in workflow
+    assert "github.event.inputs.mode == 'replay' && format('replay-{0}', github.event.inputs.resume_run_id)" in workflow
+    assert "${{ github.event.inputs.resume_run_id != '' && '--resume-checkpoints resume-checkpoints' || '' }}" in workflow
+    assert "if: always()\n        uses: actions/upload-artifact@" in workflow
 
 
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):
