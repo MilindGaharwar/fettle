@@ -234,7 +234,7 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "timeout-minutes: 12" in workflow
     assert "prepare:" in workflow
     assert "fromJSON(needs.prepare.outputs.matrix)" in workflow
-    assert "--manifest" in workflow
+    assert "--resume-manifest" in workflow
     assert "shard: [0, 1," not in workflow
     assert "--paths fettle/" not in workflow
     assert "--shard-count 240" not in workflow
@@ -350,6 +350,15 @@ def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
     assert "if: always()" in workflow
     assert "github.event.inputs.resume_run_id != ''" in workflow
     assert "github.event.inputs.calibration_id != ''" in workflow
+
+
+def test_mutation_replay_uses_retained_canonical_corpus():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "fettle mutation run --all" not in workflow
+    assert "--resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json" in workflow
+    assert "--retained-preflight retained-preflight/mutation-preflight.json" in workflow
+    assert '--calibration-id "replay-${{ github.run_id }}"' in workflow
 
 
 def test_partition_manifest_rejects_tampering(tmp_path, monkeypatch):

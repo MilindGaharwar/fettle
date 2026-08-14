@@ -281,9 +281,12 @@ jobs:
       - name: Full mutation shard evidence
         if: github.event.inputs.mode == 'replay'
         run: >-
-          uv run --no-sync fettle mutation run --all
-          --manifest mutation-manifests/partition-${{ matrix.shard }}.json
-          --json --output mutation-report.json
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json
+          --retained-preflight retained-preflight/mutation-preflight.json
+          --calibration-id "replay-${{ github.run_id }}"
+          --checkpoint-output mutation-checkpoint.json
+          --timeout 1740 --json > mutation-report.json
       - name: Resumable calibration shard evidence
         if: github.event.inputs.mode == 'calibration'
         timeout-minutes: 30
