@@ -50,7 +50,7 @@ suite, but examples, links, version metadata, and tested documentation claims
 must still be verified. Changes to evaluation scenarios also require:
 
 ```bash
-uv run --extra evals python3 scripts/evals_runner.py validate
+uv run --extra evals python3 -m fettle.evals_runner validate
 ```
 
 ## Pull requests

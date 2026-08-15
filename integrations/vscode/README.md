@@ -44,7 +44,7 @@ cd ~/.claude/plugins/fettle/integrations/vscode
 npm install
 npm run vscode:prepublish
 npx @vscode/vsce package
-code --install-extension fettle-0.9.0.vsix
+code --install-extension fettle-0.9.1.vsix
 ```
 
 The VSIX filename reflects the extension package version, not the Fettle Python

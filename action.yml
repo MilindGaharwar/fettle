@@ -1,6 +1,6 @@
 name: "Fettle Quality Check"
 description: "Run Fettle quality enforcement (ruff + semgrep) with SARIF upload and PR annotations"
-author: "Milind Gaharwar"
+author: "Milind"
 
 branding:
   icon: "shield"

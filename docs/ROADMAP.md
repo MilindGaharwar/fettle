@@ -6,11 +6,12 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-The released package is v1.9.0. It includes the R1 evidence contract, the
+The released package is v1.10.0. It includes the R1 evidence contract, the
 graduated R2 canonical workspace/adapter substrate, scanner and CI result
-integrity, and deterministic change-integrity contracts. Mutation evidence,
-narrow formal verification, and authorship separation are shipped in advisory
-or partial form and remain subject to the graduation triggers below. See the
+integrity, deterministic change-integrity contracts, and P62's reproducible
+full-repository mutation calibration and accepted baseline. Changed-scope
+mutation policy, narrow formal verification, and authorship separation remain
+advisory or partial and subject to the graduation triggers below. See the
 [README](../README.md) for current capabilities and operational boundaries.
 
 ## Priorities
@@ -20,7 +21,7 @@ or partial form and remain subject to the graduation triggers below. See the
 | Graduated | Scanner and CI result integrity (P33) | Required scanner failures are canonical non-pass outcomes and cannot become clean CI results |
 | Graduated | Canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
 | Graduated | Change-integrity contracts and adversarial corpus (P44) | Immutable source, graph, provider, traversal, freshness, closure, and obligation records have deterministic identities and executable adversarial fixtures |
-| In progress | Mutation evidence integrity and quality ratchet (P34) | Changed and full advisory lanes retain trustworthy evidence with measured reproducibility and reviewer-confirmed actionability; then Fettle dogfoods zero new actionable survivors and a monotonic full-score baseline per the [mutation quality plan](mutation-quality-implementation-plan.md) |
+| Baseline complete; advisory graduation in progress | Mutation evidence integrity and quality ratchet (P34/P62-P65) | Independent full calibrations now reproduce exactly and establish the committed 49.1 floor; changed-scope runs must still demonstrate runtime and reviewer-confirmed actionability before zero-new-survivor enforcement per the [mutation quality plan](mutation-quality-implementation-plan.md) |
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
 | In progress | Authorship separation (P52) | Role-based edit enforcement is implemented; TLA+ role invariants, adversarial path coverage, and an evidenced multi-agent flow remain before graduation |
 | Proposed, priority | First-class portable evidence (P66-P71) | Consequential results bind producer, source, policy, scope, completeness, freshness, and occurrence; producers graduate independently with measured cost per verified change |

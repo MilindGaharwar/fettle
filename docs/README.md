@@ -14,6 +14,9 @@ than reading every subsystem.
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
 | Coordinate a team | `fettle init --profile team` | Plans, worklogs, and shared evidence |
 | Evaluate delegated-agent governance | `fettle init --profile enterprise` in a test repository | Capsules, claims, verification, and reports to validate |
+| Measure test-suite strength | [Mutation evidence](CONFIG.md#mutation-evidence-mutation) | Canonical changed/full Python mutation reports and baseline comparison |
+| Connect requirements to tests | `fettle spec lint`, then `fettle spec coverage` | Living-spec and scenario trace evidence |
+| Test from a user's perspective | `fettle uat doctor`, then `fettle uat manual` | Explicit acceptance scenarios and observable verdicts |
 | Integrate an enterprise analyzer | [Configuration: integrations](CONFIG.md#integrations-integrations-wp-14b) | Explicit, opt-in SonarQube, Black Duck, or Pact evidence |
 
 ## The Core Journey
@@ -36,6 +39,11 @@ than reading every subsystem.
   and the current Python-only diagnostic boundary.
 - [Behavioral evaluations](../evals/README.md): CI-safe static evaluation and
   trusted-operator live experiments.
+- [Evidence artifact contract](evidence-artifact-contract.md): portable
+  identity, completeness, freshness, and authority boundaries across assurance
+  producers.
+- [Mutation quality contract](mutation-quality.ux-spec.md): user-facing states,
+  evidence semantics, and graduation boundaries for Python mutation testing.
 - [Roadmap](ROADMAP.md): shipped baseline, active trust work, and graduation
   triggers.
 - [Advisory code-intelligence evaluation](advisory-code-intelligence-evaluation.md):
@@ -57,6 +65,8 @@ than reading every subsystem.
 | External integrations | SonarQube, Black Duck/Polaris, Pact | Disabled by default; credentials come from environment variables |
 | Guided workflows | 17 workflows across supported agents | Workflows guide agent reasoning; CLI commands remain deterministic automation |
 | Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
+| Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Requires pinned mutmut; changed-scope enforcement remains advisory |
+| Specifications and UAT | Living Markdown specs, trace coverage, agent/manual acceptance verdicts | UAT is report-only; unavailable automation remains visible |
 
 Every analyzer result preserves the distinction between `pass`, `violation`,
 `tool_error`, and `unknown`. Surface-specific non-applicable outcomes are also

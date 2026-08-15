@@ -3,7 +3,7 @@
   "version": "1.6.0",
   "description": "In-session quality governance for AI-assisted development, with advisory-first code and process gates, evidence, and multi-agent controls.",
   "author": {
-    "name": "Milind Gaharwar"
+    "name": "Milind"
   },
   "homepage": "https://github.com/MilindGaharwar/fettle",
   "license": "MIT"

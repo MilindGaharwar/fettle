@@ -174,6 +174,69 @@ token_env = "PACT_BROKER_TOKEN"
 allow_insecure = false
 ```
 
+## Mutation evidence (`[mutation]`)
+
+Fettle's Python mutation surface separates readiness, execution evidence, and
+policy. It is disabled by default and requires `mutmut==2.5.1` plus explicit
+source paths and test mappings where convention-based mapping is insufficient.
+
+```bash
+fettle mutation preflight --all --json
+fettle mutation run --changed --json --output mutation-report.json
+fettle mutation status --report mutation-report.json --json
+```
+
+- **Preflight** generates and canonicalizes the complete engine-detail corpus
+  without treating project-test outcomes as calibration evidence. Rejected
+  details or fingerprint collisions fail closed.
+- **Changed runs** select source from an explicit merge base and are the normal
+  advisory feedback path.
+- **Full runs** are scheduled/manual held-out verification. They support
+  manifest-bound sharding and resumable fingerprint-keyed checkpoints, but an
+  incomplete ledger cannot produce a score.
+- **Baseline comparison** records survivor fingerprints from two independent,
+  reproducible full reports on one revision. `new` and `existing` dispositions
+  apply only to survivors; timeout, suspicious, skipped, and untested remain
+  separate visible outcome classes.
+- **Policy** keeps score, new survivors, untested outcomes, native timeouts, and
+  suspicious outcomes distinct. `None` timeout/suspicious budgets are visible
+  uncalibrated debt, not implicit acceptance.
+
+```toml
+[mutation]
+enabled = true
+mode = "advisory"              # promote only after measured reviewer feedback
+engine = "mutmut"
+paths = ["src/"]
+exclude = ["tests/", "migrations/"]
+base = "origin/main"
+score_target = 80.0            # aspiration/policy target, not baseline history
+minimum_scored_mutants = 10
+max_new_actionable_survivors = 0
+max_untested = 0
+max_mutant_timeouts = 2        # omit to keep observed timeouts report-only debt
+max_suspicious_mutants = 0
+default_chunk_lines = 60
+full_shards = 1
+
+[mutation.test_mappings]
+"src/entrypoint.py" = ["tests/test_entrypoint.py"]
+```
+
+Establish or check a baseline only from retained complete reports:
+
+```bash
+fettle mutation baseline check report-a.json report-b.json \
+  --run-id RUN_A --run-id RUN_B --floor 70 --json
+fettle mutation baseline establish report-a.json report-b.json \
+  --run-id RUN_A --run-id RUN_B --floor 70 --json
+```
+
+The established file is `.fettle/mutation-baseline.json`. Commit it deliberately
+if it is part of repository policy; `.fettle/` is commonly ignored because it
+also contains runtime state. A baseline is a monotonic floor and identity record,
+not a waiver for future survivors or evidence-integrity failures.
+
 ## Example
 
 ```toml

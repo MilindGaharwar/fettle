@@ -100,7 +100,7 @@ privileged, platform-specific security product.
 
 ## 4. Current Baseline And Authoritative Scope
 
-v1.9.0 is the shipped trust baseline. The activity IDs below are the execution
+v1.10.0 is the shipped trust baseline. The activity IDs below are the execution
 source of truth; release work packages later in this document provide design
 detail. Estimates include tests and documentation for one experienced engineer
 and are planning ranges, not commitments.

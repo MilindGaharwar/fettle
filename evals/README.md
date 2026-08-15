@@ -14,7 +14,7 @@ important product question: **did the feedback help an agent change behavior?**
 - **Static side — CI-safe.** Scenario schema validation, check evaluation,
   verdict composition. Runs in pytest with a fake runner
   (`tests/test_evals_runner.py`). Never launches an agent CLI, never needs
-  API keys. `python3 scripts/evals_runner.py validate` is the CI entry.
+  API keys. `python3 -m fettle.evals_runner validate` is the CI entry.
 - **Live side — trusted-operator only, never public CI.** `run` launches
   `claude -p` in a scratch workdir with Fettle hooks active and grades the
   transcript plus resulting files. Costs tokens; transcripts may be
@@ -46,8 +46,8 @@ harness does not infer turns from prose.
 ## Commands
 
 ```bash
-python3 scripts/evals_runner.py validate                 # CI-safe
-python3 scripts/evals_runner.py run evals/scenarios/hook-catches-debug-statement   # LIVE
+python3 -m fettle.evals_runner validate                 # CI-safe
+python3 -m fettle.evals_runner run evals/scenarios/hook-catches-debug-statement   # LIVE
 ```
 
 Run static validation for every contribution that changes a scenario, grader,

@@ -1,5 +1,56 @@
 # Changelog
 
+## v1.10.0 — Reproducible Mutation Evidence
+
+**Released 2026-08-15**
+
+This release turns full-repository Python mutation testing from an expensive
+experiment into reproducible assurance evidence. Fettle now has an accepted,
+independently reproduced mutation baseline for its own codebase, a resumable
+fingerprint-keyed calibration path, and stricter separation between actionable
+survivors and other evidence-debt outcomes.
+
+### Authoritative Mutation Calibration
+
+- Two independent full calibrations on one pinned revision produced the same
+  28,723 canonical outcomes: 14,107 killed, 14,611 survived, five native
+  timeouts, zero suspicious, and zero untested mutants.
+- The accepted `.fettle/mutation-baseline.json` records the exact revision,
+  engine and runner identities, policy and scope digests, report identities,
+  survivor fingerprints, measured 49.1 percent floor, and 80 percent aspiration.
+- Full calibration can resume by canonical fingerprint without rerunning
+  terminal mutants. Checkpoints fail closed on incompatible execution identity,
+  conflicting outcomes, missing evidence, or incomplete ledgers.
+- Preflight, historical replay, full execution, aggregation, and policy remain
+  separate stages. A full run is held-out verification, not a discovery tool
+  for parser or engine-output defects.
+
+### Honest Comparison And CLI Recovery
+
+- Baseline comparison now applies `new` and `existing` only to surviving
+  mutants. Native timeout, suspicious, and skipped outcomes retain their own
+  debt classes and explicit budgets instead of becoming false new survivors.
+- `fettle mutation status` now loads policy correctly when evaluating a retained
+  report against a committed baseline.
+- Regression tests cover accepted timeout debt and the baseline-present status
+  command. The authoritative source report passes self-comparison with 14,611
+  existing survivors, five visible timeouts, zero resolved mutants, and no score
+  delta.
+
+### Documentation And Adoption
+
+- The README and documentation index now present Fettle by user journey: local
+  evaluation, live agent governance, independent verification, mutation
+  evidence, delegated work, and human-controlled policy learning.
+- The configuration reference documents the mutation command and policy
+  contract, including explicit evidence-debt budgets and advisory-first use.
+- Behavioral-evaluation and VS Code instructions now use current executable and
+  package paths.
+
+Mutation changed-scope policy remains advisory while representative runs and
+reviewer feedback establish actionability and runtime. The accepted repository
+floor is evidence, not a claim that 49.1 percent is a universal quality target.
+
 ## v1.9.0 — Trustworthy Change Evidence
 
 **Released 2026-08-07**

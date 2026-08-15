@@ -1,7 +1,7 @@
 {
   "name": "fettle-marketplace",
   "owner": {
-    "name": "Milind Gaharwar",
+    "name": "Milind",
     "url": "https://github.com/MilindGaharwar"
   },
   "plugins": [
@@ -10,7 +10,7 @@
       "source": "./",
       "description": "In-session quality governance with advisory-first code and process gates, evidence, and multi-agent controls.",
       "version": "1.6.0",
-      "author": {"name": "Milind Gaharwar"},
+      "author": {"name": "Milind"},
       "license": "MIT",
       "homepage": "https://github.com/MilindGaharwar/fettle",
       "keywords": ["quality", "ai-agents", "lint", "semgrep", "ruff", "hooks", "governance"]
