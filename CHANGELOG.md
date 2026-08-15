@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.11.1 — Python 3.11 Evidence Compatibility
+
+**Released 2026-08-15**
+
+### Fixed
+
+- Restored canonical evidence parsing on Python 3.11 by validating serialized
+  result states through the enum constructor instead of version-dependent enum
+  containment behavior.
+
 ## v1.11.0 — Wheel-Native Agent Governance
 
 **Released 2026-08-15**
