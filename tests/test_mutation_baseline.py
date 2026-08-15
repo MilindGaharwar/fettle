@@ -160,6 +160,20 @@ def test_compare_labels_new_existing_resolved_and_waived_without_changing_counts
     assert result["score_delta"] == 0.0
 
 
+def test_compare_keeps_non_survivor_outcomes_out_of_new_survivor_policy():
+    timeout = _record("f" * 64, "2", "timeout")
+    report = _report(
+        killed=8, survived=1, timeout=1, score=88.9,
+        non_killed=[_record(), timeout],
+    )
+    baseline = establish_baseline([report, report], ["1", "2"], floor=80)
+
+    result = compare_report(report, baseline)
+
+    assert [item["disposition"] for item in result["records"]] == ["existing", "timeout"]
+    assert result["passed"] is True
+
+
 def test_compare_bounds_actionable_preview_without_truncating_records():
     baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
     records = [

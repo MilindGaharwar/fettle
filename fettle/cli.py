@@ -419,8 +419,8 @@ def cmd_mutation(args: argparse.Namespace) -> None:
                 result["baseline_digest"] = digest
         else:
             report_path = Path(args.report) if getattr(args, "report", None) else None
+            mutation = load_config(str(root))["mutation"]
             if action in {"run", "preflight"}:
-                mutation = load_config(str(root))["mutation"]
                 if not mutation.get("enabled", False):
                     result = {
                         "status": "not_configured", "passed": False,
@@ -457,7 +457,7 @@ def cmd_mutation(args: argparse.Namespace) -> None:
                     max_findings_per_line=mutation.get("max_findings_per_line", 1),
                     max_findings_per_file=mutation.get("max_findings_per_file", 7),
                 )
-                enforce_survivors = load_config(str(root))["mutation"].get("mode") == "enforce"
+                enforce_survivors = mutation.get("mode") == "enforce"
                 result = {
                     **result,
                     "comparison": comparison,

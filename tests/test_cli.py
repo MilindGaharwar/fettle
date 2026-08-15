@@ -438,6 +438,33 @@ def test_mutation_advisory_reports_new_survivor_without_blocking(monkeypatch, ca
     assert json.loads(capsys.readouterr().out)["comparison"]["passed"] is False
 
 
+def test_mutation_status_compares_retained_report_with_baseline(monkeypatch, capsys, tmp_path):
+    report_path = tmp_path / "mutation.json"
+    report = {"schema_version": "2", "status": "completed", "passed": True}
+    report_path.write_text(json.dumps(report))
+    baseline = {"schema_version": "1"}
+    comparison = {"status": "completed", "passed": True, "records": []}
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    from fettle.cli import main
+    with (
+        patch("fettle.paths.find_repo_root", return_value=tmp_path),
+        patch("fettle.config.load_config", return_value={"mutation": {"mode": "advisory"}}),
+        patch("fettle.mutation_baseline.load_baseline", return_value=baseline),
+        patch("fettle.mutation_baseline.load_classifications", return_value=[]),
+        patch("fettle.mutation_baseline.compare_report", return_value=comparison),
+        patch("fettle.overrides.load_override_ledger") as ledger,
+        patch("sys.argv", ["fettle", "mutation", "status", "--report", str(report_path), "--json"]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        ledger.return_value.records = ()
+        ledger.return_value.invalid = ()
+        main()
+
+    assert exc_info.value.code == 0
+    assert json.loads(capsys.readouterr().out)["comparison"] == comparison
+
+
 def test_mutation_show_finds_canonical_record(monkeypatch, capsys, tmp_path):
     (tmp_path / ".git").mkdir()
     report = tmp_path / "mutation.json"

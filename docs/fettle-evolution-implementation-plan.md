@@ -169,7 +169,7 @@ and are planning ranges, not commitments.
 | P59 | Add advisory duplicate-state and invalidation heuristics | unscheduled | P53, measured corpus | 5-8 days | Evidence-gated |
 | P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | Blocked on P35 -> P38 |
 | P61 | Pilot state-consistency contracts and decide per-surface graduation | after P57-P60 as applicable | P55-P60 evidence | 30 qualifying runs | Evidence-gated |
-| P62 | Complete authoritative mutation calibration and baseline | immediate, P0 | P34 implemented preflight slice | 2 full runs plus replay | In progress |
+| P62 | Complete authoritative mutation calibration and baseline | immediate, P0 | P34 implemented preflight slice | 2 full runs plus replay | Complete |
 | P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Planned |
 | P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
 | P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
@@ -447,22 +447,29 @@ Priority means:
 Execute strictly in order. A failed step returns to the cheapest preceding
 falsifying check; it never authorizes skipping ahead.
 
-1. [ ] Run the pinned CI mutation preflight.
-2. [ ] Verify retained preflight evidence reconciles generated and canonicalized
+1. [x] Run the pinned CI mutation preflight.
+2. [x] Verify retained preflight evidence reconciles generated and canonicalized
    counts with zero collisions and zero rejected details.
-3. [ ] Replay historical failing shards/ranges 46, 62, 63, and 239.
-4. [ ] For every failure, add an adversarial fixture first, fix the generic
+3. [x] Replay historical failing shards/ranges 46, 62, 63, and 239.
+4. [x] For every failure, add an adversarial fixture first, fix the generic
    contract, and rerun fixtures, corpus preflight, and narrow replay.
-5. [ ] Run one complete held-out authoritative calibration.
-6. [ ] Launch the second calibration only after the first is authoritative.
-7. [ ] Compare revision, scope, identities, outcomes, policy/configuration
+5. [x] Run one complete held-out authoritative calibration.
+6. [x] Launch the second calibration only after the first is authoritative.
+7. [x] Compare revision, scope, identities, outcomes, policy/configuration
    digests, invalidation inputs, and runtime across both reports.
-8. [ ] Establish the baseline only when both reports satisfy the reproducibility
+8. [x] Establish the baseline only when both reports satisfy the reproducibility
    contract and contain zero untested mutants.
 
 P62 completion evidence: retained preflight and replay artifacts, two accepted
 independent report IDs for one revision, comparison output, and the reviewed
 baseline digest.
+
+Accepted evidence: preflight `31821815789` and replay `31831754903` on
+`9eef2fab60c504e26be176db123164bc46e593fe`; independent complete reports
+`31850858224` and `31865158733`; 14,107 killed, 14,611 survived, 5 native
+timeouts, zero suspicious, and zero untested outcomes in both reports; score
+and floor 49.1 with target 80.0; baseline digest
+`4fe9e0fb238ad72169109b3d45666c54b83904bf5233d5568acaf2ac448e4a4c`.
 
 ##### P63: Durable Learning And Developer Experience (P1)
 

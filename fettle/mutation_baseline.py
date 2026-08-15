@@ -341,7 +341,9 @@ def compare_report(
     compared: list[dict] = []
     for record in report["non_killed"]:
         fingerprint = record["fingerprint"]
-        disposition = "existing" if fingerprint in baseline_survivors else "new"
+        disposition = record["state"]
+        if disposition == "survived":
+            disposition = "existing" if fingerprint in baseline_survivors else "new"
         classification = classifications_by_id.get(fingerprint)
         if classification is not None:
             expiry = datetime.fromisoformat(classification["expiry"].replace("Z", "+00:00")).astimezone(UTC)

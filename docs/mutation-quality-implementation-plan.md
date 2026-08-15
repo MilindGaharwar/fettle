@@ -497,21 +497,21 @@ held-out verification, not discovery tools for engine output grammar.
 
 ### WP7: Fettle Dogfood Graduation
 
-- [ ] After schema-v2 canonical evidence and WP3.5 preflight pass, replay the
+- [x] After schema-v2 canonical evidence and WP3.5 preflight pass, replay the
   archived failing ranges independently. Require zero canonicalization errors,
   zero fingerprint collisions, zero unmapped tests, and zero cache leakage.
-- [ ] Dispatch one full report for the pinned revision. Treat it as held-out
+- [x] Dispatch one full report for the pinned revision. Treat it as held-out
   validation: if invalid, retain diagnostics, update the adversarial corpus,
   return to preflight, and do not dispatch a second run.
-- [ ] Only after the first report is authoritative, dispatch the second
+- [x] Only after the first report is authoritative, dispatch the second
   independent report for the exact same revision. Compare identities, outcomes,
   scope, invalidation inputs, and runtime; use another run only to diagnose a
   mismatch, never to outvote it.
-- [ ] If a run is invalid, record the exact stage, native detail shape,
+- [x] If a run is invalid, record the exact stage, native detail shape,
   module/range duration, and reusable insight in `docs/hypothesis-tree.md`;
   adjust only measured canonicalization or chunk configuration and rerun the
   narrowest falsifying check first.
-- [ ] Establish `.fettle/mutation-baseline.json` only after the measured
+- [x] Establish `.fettle/mutation-baseline.json` only after the measured
   calibration contract accepts independent full reports on one commit; review
   the generated diff before commit.
 - [ ] Run changed-scope mutation advisory on at least ten representative Fettle
