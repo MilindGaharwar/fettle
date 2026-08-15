@@ -174,7 +174,7 @@ and are planning ranges, not commitments.
 | P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
 | P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
 | P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Complete |
-| P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Proposed |
+| P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Complete |
 | P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Proposed |
 | P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Proposed |
 | P70 | Run advisory evidence migration and graduate producers independently | after P69, P2 | P37, P69 | 30 qualifying runs | Evidence-gated |
@@ -668,29 +668,29 @@ separately gated.
 Goal: prove the contract on one bounded, consequential path before broad
 migration.
 
-10. [ ] Add a zero-runtime-dependency `fettle/evidence.py` containing immutable
+10. [x] Add a zero-runtime-dependency `fettle/evidence.py` containing immutable
     artifact/reference types, canonical serialization, full-digest calculation,
     construction, parsing, and validation. Keep it independent of graph and
     persistence modules.
-11. [ ] Separate artifact content digest from observation/run identity. Prove
+11. [x] Separate artifact content digest from observation/run identity. Prove
     equal content across independent runs has equal content identity but distinct
     occurrence identity, and that neither can substitute for the other.
-12. [ ] Centralize bounded payload validation, redaction, repository-relative
+12. [x] Centralize bounded payload validation, redaction, repository-relative
     path normalization, secret filtering, and safe diagnostic rendering. Reject
     unsupported values instead of stringifying arbitrary objects into authority.
-13. [ ] Add explicit binding validation for requested source, policy, scope,
+13. [x] Add explicit binding validation for requested source, policy, scope,
     producer, schema, and freshness. Return typed validity reasons and one safe
     recovery action without embedding source bodies or secrets.
-14. [ ] Extend `EvidenceReference` additively and implement the P66 compatibility
+14. [x] Extend `EvidenceReference` additively and implement the P66 compatibility
     matrix for legacy readers: read-only, migrate, reject, and expiry paths each
     receive executable tests and rollback behavior. Preserve existing host wire
     formats until dispatcher/agent conformance tests authorize a version change.
-15. [ ] Pilot canonical artifacts in `fettle verify`: bind the exact source
+15. [x] Pilot canonical artifacts in `fettle verify`: bind the exact source
     state, effective policy, affected workspace/scope, runner identity, command
     outcome, and run occurrence to the verification stamp.
-16. [ ] Prove verification evidence cannot authorize another revision, dirty
+16. [x] Prove verification evidence cannot authorize another revision, dirty
     state, policy, workspace, producer version, or expired/invalidated request.
-17. [ ] Preserve concise human output while retaining the complete bounded
+17. [x] Preserve concise human output while retaining the complete bounded
     artifact in machine-readable output; interruption or write failure cannot
     leave a parseable success artifact.
 
@@ -706,6 +706,20 @@ Primary files:
 P67 completion evidence: cross-process deterministic artifact tests, adversarial
 binding tests, installed-CLI verification UAT, legacy-stamp compatibility tests,
 and no regression in hook or verification latency budgets.
+
+Status 2026-08-15: complete. `fettle/evidence.py` implements the frozen P66
+artifact/reference schema, deterministic serialization, full content identity,
+separate occurrence identity, bounded payload handling, strict parsing, and
+typed applicability validation without graph or persistence dependencies.
+`fettle verify` atomically writes `.fettle/verify-evidence.json` beside the
+legacy stamp and binds source, effective policy, selected scope, producer,
+outcome, completeness, trust, and occurrence. Stamps that claim canonical
+evidence fail closed on invalid or mismatched artifacts; legacy-only stamps
+remain accepted for rollback. The frozen adversarial corpus, split-write paths,
+cross-process determinism, installed-CLI flow, and compatibility are covered by
+2,514 passing repository tests and the UAT report in
+`docs/uat/canonical-evidence-verification.md`. P68 remains responsible for CI,
+trace, and inspection migration.
 
 ##### P68: CI, Trace, And Inspection Binding (P0)
 

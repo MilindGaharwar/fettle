@@ -42,6 +42,10 @@ than reading every subsystem.
 - [Evidence artifact contract](evidence-artifact-contract.md): portable
   identity, completeness, freshness, and authority boundaries across assurance
   producers.
+- [Canonical verification UX contract](canonical-evidence-verification.ux-spec.md):
+  active `fettle verify` artifact bindings, terminal states, compatibility, and
+  recovery behavior. See the [UAT report](uat/canonical-evidence-verification.md)
+  for installed-CLI evidence.
 - [Mutation quality contract](mutation-quality.ux-spec.md): user-facing states,
   evidence semantics, and graduation boundaries for Python mutation testing.
 - [Roadmap](ROADMAP.md): shipped baseline, active trust work, and graduation

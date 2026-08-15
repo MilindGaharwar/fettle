@@ -15,7 +15,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fettle.dispatcher_types import Decision, HookContext, HookInput
-from fettle.verify_gate import STAMP_RELPATH, impacted_tests, run_check, run_verify
+from fettle.evidence import parse_artifact
+from fettle.verify_gate import (
+    EVIDENCE_RELPATH,
+    STAMP_RELPATH,
+    impacted_tests,
+    run_check,
+    run_verify,
+)
 
 CLI = [sys.executable, "-m", "fettle.cli"]
 
@@ -80,6 +87,64 @@ class TestRunVerify:
         assert stamp["evidence_id"].startswith("ev-")
         on_disk = json.loads((repo / STAMP_RELPATH).read_text())
         assert on_disk["ok"] is True
+
+    def test_green_run_writes_bound_canonical_sidecar_and_reference(self, tmp_path):
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+
+        stamp = run_verify(str(repo), _cfg(), session_id="sess-1")
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["canonical_evidence"]["artifact_digest"] == artifact.artifact_digest
+        assert stamp["canonical_observation_id"] == artifact.observation_id
+        assert artifact.result_state == "pass"
+        assert artifact.completeness == "complete"
+        assert artifact.source["snapshot_digest"].startswith("sha256:")
+        assert artifact.policy_digest == stamp["canonical_evidence"]["expected"]["policy_digest"]
+        assert artifact.scope_digest == stamp["canonical_evidence"]["expected"]["scope_digest"]
+        assert artifact.observation_id
+        assert set(artifact.payload) == {"exit_code", "scope"}
+
+    def test_canonical_sidecar_write_failure_cannot_leave_green_run(self, tmp_path):
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+
+        with patch(
+            "fettle.verify_gate._write_bytes_atomic",
+            side_effect=[OSError("disk full"), None],
+        ):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-1")
+
+        assert stamp["ok"] is False
+        assert stamp["canonical_evidence_error"] == "unavailable"
+        assert "canonical evidence" in stamp["error"]
+        assert not (repo / EVIDENCE_RELPATH).exists()
+
+    def test_stamp_write_failure_cannot_make_new_sidecar_authoritative(self, tmp_path):
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        src = repo / "src.py"
+        src.write_text("x = 1\n")
+        state = repo / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        run_verify(str(repo), _cfg(), session_id="sess-g")
+        old_stamp = (repo / STAMP_RELPATH).read_bytes()
+
+        real_write = __import__("fettle.verify_gate", fromlist=["_write_bytes_atomic"])._write_bytes_atomic
+
+        def fail_stamp(path, content):
+            if path.name == "verify.json":
+                raise OSError("disk full")
+            real_write(path, content)
+
+        with patch("fettle.verify_gate._write_bytes_atomic", side_effect=fail_stamp):
+            run_verify(str(repo), _cfg(), session_id="new")
+
+        assert (repo / STAMP_RELPATH).read_bytes() == old_stamp
+        old_observation = json.loads(old_stamp)["canonical_observation_id"]
+        new_artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+        assert old_observation != new_artifact.observation_id
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(repo, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "duplicate_id" in result.message
 
     def test_red_run_records_failure_tail(self, tmp_path):
         repo = _project(
@@ -358,6 +423,80 @@ class TestStopGate:
                                      "scope": "full"}))
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+
+    def test_new_stamp_with_tampered_canonical_sidecar_is_rejected(self, tmp_path):
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        with patch("fettle.config.state_dir", return_value=state):
+            run_verify(str(repo), _cfg(), session_id="sess-g")
+        sidecar = repo / EVIDENCE_RELPATH
+        artifact = json.loads(sidecar.read_text())
+        artifact["payload"]["exit_code"] = 1
+        sidecar.write_text(json.dumps(artifact, sort_keys=True, separators=(",", ":")))
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ADVISORY
+        assert "tampered" in result.message
+        assert "Run: fettle verify" in result.message
+
+    def test_new_stamp_cannot_authorize_changed_effective_policy(self, tmp_path):
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        with patch("fettle.config.state_dir", return_value=state):
+            run_verify(str(repo), _cfg(), session_id="sess-g")
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg(timeout_s=31)))
+
+        assert result.decision == Decision.ADVISORY
+        assert "wrong_policy" in result.message
+
+    def test_new_stamp_rejects_unsupported_reference_schema(self, tmp_path):
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        with patch("fettle.config.state_dir", return_value=state):
+            run_verify(str(repo), _cfg(), session_id="sess-g")
+        stamp_path = repo / STAMP_RELPATH
+        stamp = json.loads(stamp_path.read_text())
+        stamp["canonical_evidence"]["schema_version"] = "999"
+        stamp_path.write_text(json.dumps(stamp))
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ADVISORY
+        assert "unsupported" in result.message
+
+    def test_fettle_runtime_files_do_not_invalidate_their_own_evidence(self, tmp_path):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
+        src = tmp_path / "src.py"
+        src.write_text("x = 1\n")
+        (tmp_path / ".fettle.toml").write_text(
+            f'[profile]\ntest_command = "{sys.executable} -c pass"\n'
+        )
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(src)])
+
+        with patch("fettle.config.state_dir", return_value=state):
+            run_verify(str(tmp_path), _cfg(), session_id="sess-g")
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ALLOW
 
     def test_stale_stamp_advisory(self, tmp_path):
         src = tmp_path / "src.py"

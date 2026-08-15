@@ -55,11 +55,29 @@ class Confidence(StrEnum):
 class EvidenceReference:
     """Pointer to bounded evidence persisted outside a host response."""
 
-    evidence_id: str
+    evidence_id: str | None
     kind: str
+    artifact_digest: str | None = None
+    schema_version: str | None = None
+    expected: dict[str, str] | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {"evidence_id": self.evidence_id, "kind": self.kind}
+    def __post_init__(self) -> None:
+        legacy = self.evidence_id is not None
+        canonical = self.artifact_digest is not None
+        if legacy == canonical:
+            raise ValueError("evidence reference requires exactly one identity format")
+        if canonical and (self.schema_version is None or self.expected is None):
+            raise ValueError("canonical evidence reference requires schema and bindings")
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.evidence_id is not None:
+            return {"evidence_id": self.evidence_id, "kind": self.kind}
+        return {
+            "artifact_digest": self.artifact_digest,
+            "kind": self.kind,
+            "schema_version": self.schema_version,
+            "expected": dict(self.expected or {}),
+        }
 
 
 @dataclass

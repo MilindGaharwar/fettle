@@ -22,14 +22,26 @@ Off by default. Modes: advisory | enforce.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import shlex
 import subprocess
+import tempfile
 import time
+import unicodedata
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
+from fettle import __version__
 from fettle.dispatcher_types import CheckResult, HookContext
+from fettle.evidence import (
+    EvidenceArtifact,
+    EvidenceValidationContext,
+    Validity,
+    validate_artifact,
+)
 from fettle.paths import classify_file
 from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
@@ -38,6 +50,7 @@ from fettle.trace import build_evidence
 from fettle.workspace import Workspace, route_file_to_workspace
 
 STAMP_RELPATH = os.path.join(".fettle", "verify.json")
+EVIDENCE_RELPATH = os.path.join(".fettle", "verify-evidence.json")
 FAILURE_HISTORY_RELPATH = os.path.join(".fettle", "test-failures.json")
 
 # ── Impacted-test mapping (deterministic, name-convention based) ──────────
@@ -137,6 +150,7 @@ def run_verify(
             session_id=session_id,
             impacted=not full and scope_cfg == "impacted",
             parallel=bool(gate_cfg.get("parallel", False)),
+            config=config,
         )
 
     tc = discover_test_config(cwd)
@@ -153,7 +167,7 @@ def run_verify(
             "no test command discovered — set [profile] test_command "
             "in .fettle.toml"
         )
-        _write_stamp(cwd, stamp)
+        _write_stamp(cwd, stamp, config)
         return stamp
 
     argv = shlex.split(tc.command)
@@ -194,7 +208,7 @@ def run_verify(
         stamp["error"] = f"could not launch test command: {e}"
     stamp["duration_s"] = round(time.monotonic() - start, 2)
     stamp["ts"] = time.time()
-    _write_stamp(cwd, stamp)
+    _write_stamp(cwd, stamp, config)
     return stamp
 
 
@@ -225,6 +239,7 @@ def _run_workspace_verification(
     session_id: str | None,
     impacted: bool,
     parallel: bool,
+    config: dict | None = None,
 ) -> dict:
     """Run reliable impacted tests or each affected workspace's full suite."""
     records: list[dict] = []
@@ -305,7 +320,7 @@ def _run_workspace_verification(
         "dirty_digest": _dirty_digest(cwd),
         "workspaces": records,
     }
-    _write_stamp(cwd, stamp)
+    _write_stamp(cwd, stamp, config or {})
     return stamp
 
 
@@ -321,18 +336,217 @@ def _record_pytest_failures(cwd: str, stdout: str) -> None:
             record_failures(os.path.join(cwd, FAILURE_HISTORY_RELPATH), failed)
 
 
-def _write_stamp(cwd: str, stamp: dict) -> None:
+def _write_stamp(cwd: str, stamp: dict, config: dict) -> None:
     evidence = build_evidence(
         "verify", command=stamp.get("command", ""), exit_code=stamp.get("exit_code"),
         duration_ms=float(stamp.get("duration_s", 0)) * 1000, scope=stamp.get("scope", ""),
     )
     stamp["evidence_id"] = evidence["evidence_id"]
+    try:
+        artifact = _verification_artifact(cwd, stamp, config)
+        _write_bytes_atomic(Path(cwd) / EVIDENCE_RELPATH, artifact.to_bytes())
+        stamp["canonical_evidence"] = _artifact_reference(artifact)
+        stamp["canonical_observation_id"] = artifact.observation_id
+    except (OSError, TypeError, ValueError):
+        stamp.pop("canonical_evidence", None)
+        stamp.pop("canonical_observation_id", None)
+        stamp["ok"] = False
+        stamp["canonical_evidence_error"] = "unavailable"
+        detail = "canonical evidence could not be persisted"
+        stamp["error"] = "\n".join(filter(None, (str(stamp.get("error") or ""), detail)))
     path = Path(cwd) / STAMP_RELPATH
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(stamp, indent=2) + "\n")
+        _write_bytes_atomic(path, (json.dumps(stamp, indent=2) + "\n").encode())
     except OSError:
         pass  # gate will report the missing stamp — failure stays visible
+
+
+def _json_digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    )
+    normalized = unicodedata.normalize("NFC", encoded).encode("utf-8")
+    return "sha256:" + hashlib.sha256(normalized).hexdigest()
+
+
+def _policy_digest(config: dict) -> str:
+    return _json_digest(config)
+
+
+def _source_snapshot(cwd: str) -> tuple[str, str]:
+    revision = _head_sha(cwd)
+    status = _git_out(cwd, "status", "--porcelain=v1", "--untracked-files=all")
+    untracked: list[dict[str, str]] = []
+    root = Path(cwd).resolve()
+    for line in status.splitlines():
+        if not line.startswith("?? "):
+            continue
+        relative = line[3:]
+        if relative == ".fettle" or relative.startswith(".fettle/"):
+            continue
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+            digest = hashlib.sha256()
+            with candidate.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except (OSError, ValueError):
+            continue
+        untracked.append({
+            "path": relative.replace("\\", "/"),
+            "digest": digest.hexdigest(),
+        })
+    snapshot = {
+        "revision": revision,
+        "status": "\n".join(
+            line for line in status.splitlines()
+            if line[3:] != ".fettle" and not line[3:].startswith(".fettle/")
+        ),
+        "diff": _git_out(cwd, "diff", "HEAD", "--binary"),
+        "untracked": sorted(untracked, key=lambda item: item["path"]),
+    }
+    return _json_digest(snapshot), revision
+
+
+def _scope_projection(stamp: dict) -> dict:
+    projection: dict = {
+        "scope": str(stamp.get("scope") or ""),
+        "impacted": sorted(str(path) for path in stamp.get("impacted") or []),
+    }
+    if stamp.get("workspaces"):
+        projection["workspaces"] = sorted((
+            {
+                "path": str(record.get("path") or ""),
+                "scope": str(record.get("scope") or ""),
+                "impacted": sorted(str(path) for path in record.get("impacted") or []),
+            }
+            for record in stamp["workspaces"] if isinstance(record, dict)
+        ), key=lambda record: record["path"])
+    return projection
+
+
+def _producer_digest() -> str:
+    return "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtifact:
+    source_digest, revision = _source_snapshot(cwd)
+    source = {"snapshot_digest": source_digest}
+    if revision:
+        source["revision"] = revision
+    exit_code = stamp.get("exit_code")
+    if stamp.get("ok"):
+        result_state = "pass"
+    elif isinstance(exit_code, int) and exit_code >= 0:
+        result_state = "violation"
+    else:
+        result_state = "tool_error"
+    return EvidenceArtifact.create(
+        kind="fettle.verify",
+        producer={
+            "id": "fettle.verify",
+            "version": __version__,
+            "implementation_digest": _producer_digest(),
+        },
+        result_state=result_state,
+        completeness="complete" if isinstance(exit_code, int) and exit_code >= 0 else "unknown",
+        trust_class="authoritative",
+        source=source,
+        policy_digest=_policy_digest(config),
+        scope_digest=_json_digest(_scope_projection(stamp)),
+        observation_id="verify-" + uuid.uuid4().hex,
+        observed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        payload={
+            "exit_code": exit_code if isinstance(exit_code, int) else -1,
+            "scope": str(stamp.get("scope") or ""),
+        },
+    )
+
+
+def _artifact_reference(artifact: EvidenceArtifact) -> dict:
+    expected = {
+        "source_snapshot_digest": artifact.source["snapshot_digest"],
+        "policy_digest": artifact.policy_digest,
+        "scope_digest": artifact.scope_digest,
+        "producer_id": artifact.producer["id"],
+    }
+    return {
+        "artifact_digest": artifact.artifact_digest,
+        "kind": artifact.kind,
+        "schema_version": artifact.schema_version,
+        "expected": expected,
+    }
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+
+
+def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validity:
+    reference = stamp.get("canonical_evidence")
+    if not isinstance(reference, dict):
+        return Validity.MALFORMED
+    if (
+        reference.get("schema_version") != "1"
+        or reference.get("kind") != "fettle.verify"
+    ):
+        return Validity.UNSUPPORTED
+    expected = reference.get("expected")
+    if not isinstance(expected, dict):
+        return Validity.MALFORMED
+    source_digest, revision = _source_snapshot(cwd)
+    context = EvidenceValidationContext(
+        kind="fettle.verify",
+        source_snapshot_digest=source_digest,
+        source_revision=revision or None,
+        policy_digest=_policy_digest(config),
+        scope_digest=_json_digest(_scope_projection(stamp)),
+        producer_id="fettle.verify",
+        producer_versions=frozenset({__version__}),
+        producer_implementation_digest=_producer_digest(),
+        recovery_action="fettle verify",
+    )
+    path = Path(cwd) / EVIDENCE_RELPATH
+    if not path.is_file():
+        return Validity.MISSING
+    try:
+        content = path.read_bytes()
+    except OSError:
+        return Validity.UNAVAILABLE
+    result = validate_artifact(content, context)
+    if result.validity != Validity.VALID:
+        return result.validity
+    try:
+        artifact_data = json.loads(content)
+        artifact_digest = artifact_data["artifact_digest"]
+        observation_id = artifact_data["observation_id"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return Validity.MALFORMED
+    if reference.get("artifact_digest") != artifact_digest:
+        return Validity.TAMPERED
+    if stamp.get("canonical_observation_id") != observation_id:
+        return Validity.DUPLICATE_ID
+    requested = {
+        "source_snapshot_digest": source_digest,
+        "policy_digest": context.policy_digest,
+        "scope_digest": context.scope_digest,
+        "producer_id": context.producer_id,
+    }
+    if expected != requested:
+        return Validity.MALFORMED
+    return Validity.VALID
 
 
 def _edits_path(session_id: str | None) -> Path | None:
@@ -443,6 +657,10 @@ def run_check(ctx: HookContext) -> CheckResult:
             if not needed or not set(needed) <= verified:
                 problem = ("the last verification run did not cover every "
                            "file edited this session")
+        if not problem and "canonical_evidence" in stamp:
+            validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
+            if validity != Validity.VALID:
+                problem = f"canonical verification evidence is {validity.value}"
 
     if not problem:
         return CheckResult.allow()

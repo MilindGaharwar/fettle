@@ -231,6 +231,29 @@ def test_evidence_reference_serializes_without_raw_source():
     }
 
 
+def test_canonical_evidence_reference_is_additive_without_changing_legacy_wire():
+    evidence = EvidenceReference(
+        evidence_id=None,
+        kind="fettle.verify",
+        artifact_digest="sha256:" + "a" * 64,
+        schema_version="1",
+        expected={
+            "source_snapshot_digest": "sha256:" + "b" * 64,
+            "producer_id": "fettle.verify",
+        },
+    )
+
+    assert evidence.to_dict() == {
+        "artifact_digest": "sha256:" + "a" * 64,
+        "kind": "fettle.verify",
+        "schema_version": "1",
+        "expected": {
+            "source_snapshot_digest": "sha256:" + "b" * 64,
+            "producer_id": "fettle.verify",
+        },
+    }
+
+
 # --- Confidence ---
 
 

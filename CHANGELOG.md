@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Canonical Verification Evidence
+
+- Added a zero-runtime-dependency canonical evidence kernel with immutable
+  artifacts and references, deterministic full SHA-256 content identities,
+  separate execution occurrence identities, strict bounds, secret/path
+  filtering, and typed fail-closed validity outcomes.
+- `fettle verify` now atomically writes `.fettle/verify-evidence.json` alongside
+  its legacy stamp. The artifact binds the exact source snapshot, effective
+  policy, selected scope, producer implementation, command outcome, and run
+  occurrence.
+- The Stop gate validates canonical evidence whenever a new stamp claims it and
+  reports one recovery command, `fettle verify`, for missing, malformed,
+  tampered, incomplete, stale, or mismatched evidence. Legacy-only stamps remain
+  supported for rollback during the migration window.
+- The frozen P66 adversarial corpus now executes against the runtime validator.
+  Cross-process determinism, split writes, policy/source/scope replay,
+  occurrence substitution, installed-CLI output, and host-wire compatibility
+  have regression coverage.
+- CI, trace, coverage, UAT, integrations, mutation, and override migration remain
+  separately gated under P68-P70; local verification evidence does not replace
+  remote CI authority or become an attestation.
+
 ## v1.10.0 — Reproducible Mutation Evidence
 
 **Released 2026-08-15**

@@ -98,7 +98,7 @@ python3 fettle/cli.py init --interactive
 After local evaluation or agent setup:
 
 ```bash
-fettle verify                 # run affected tests and bind a fresh stamp
+fettle verify                 # run tests; bind source, policy, scope, and runner evidence
 fettle ci wait                # bind the pushed revision to remote CI
 fettle explain                # inspect the latest decision and recovery path
 ```
@@ -157,9 +157,14 @@ surface; the [capability map](#capability-map) states the boundaries explicitly.
 
 ### Verification Is Bound to the Change
 
-Verification stamps bind test results to session, revision, and dirty-tree
-identity. Remote CI stamps bind a pushed commit to its GitHub Actions verdict.
-Stale, foreign, malformed, or unavailable evidence remains visibly unverified.
+Verification writes a canonical local artifact alongside the legacy stamp. It
+binds test results to the exact source snapshot, effective policy, selected
+workspace/test scope, Fettle producer implementation, and execution occurrence.
+The Stop gate recomputes those bindings and rejects missing, stale, malformed,
+tampered, incomplete, or mismatched claimed artifacts with `fettle verify` as
+the recovery command. Legacy-only stamps remain accepted during migration.
+Remote CI remains an independent authority bound to the pushed commit; local
+verification evidence does not substitute for it or become an attestation.
 
 ### Mutation Testing Produces Evidence, Not Theater
 

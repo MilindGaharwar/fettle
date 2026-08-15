@@ -1,9 +1,13 @@
 # Portable Evidence Artifact Contract
 
-Status: P66 contract frozen, 2026-08-09. This document defines data
-and compatibility contracts only. It does not change any current writer,
-reader, policy decision, or authority boundary. Runtime implementation begins
-only under P67.
+Status: P66 contract frozen, 2026-08-09; P67 verification pilot implemented,
+2026-08-15. The schema remains the frozen portable contract. Runtime adoption
+is currently limited to `fettle verify`; CI, trace, and other producers retain
+their existing authority boundaries until P68-P70.
+
+P66 itself does not change any current writer, reader, policy decision, or
+authority boundary; the active verification behavior is the separately tested
+P67 implementation.
 
 ## Purpose And Boundary
 
@@ -170,7 +174,7 @@ source, policy, scope, producer, and kind-specific invalidation inputs.
 | Trace v1 entries | Read-only tolerant diagnostic | Read forever as currently promised; never artifact authority |
 | Trace v2 bounded `ev-` evidence | Read-only legacy reference | Retain under current rotation; truncated ID cannot become v1 digest |
 | Finding bare `evidence_id` and reference v1 | Read-only on existing host wires | No independent artifact validation; new consequential uses require v2 |
-| Verify stamp | Read-only until P67 pilot writes canonical artifact alongside it | Existing gate semantics remain until parity, migration, and rollback tests pass |
+| Verify stamp | P67 writes and validates a canonical artifact alongside it; legacy-only stamps remain readable for rollback | A stamp claiming canonical evidence must pass digest, occurrence, source, policy, scope, producer, completeness, and trust validation; invalid claimed evidence is non-pass |
 | CI status stamp | Read-only until P68 | Existing SHA/timestamp gate remains authoritative; local verify evidence cannot substitute |
 | Coverage and UAT records | Read-only until per-producer P69 migration | Existing domain semantics and retention remain |
 | Integration report | Read-only until P69 | Existing adapter policy remains; unavailable cannot become pass |
