@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Fettle assurance loop terminal proof</title>
+  <desc id="desc">A terminal sequence where Fettle detects an unused import, identifies Ruff rule F401 and its location, then reports no issues after repair.</desc>
+  <rect width="960" height="420" rx="18" fill="#161b22"/>
+  <circle cx="32" cy="30" r="7" fill="#f85149"/>
+  <circle cx="54" cy="30" r="7" fill="#d29922"/>
+  <circle cx="76" cy="30" r="7" fill="#3fb950"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">
+    <text x="30" y="82" fill="#c9d1d9">$ cp broken.py app.py</text>
+    <text x="30" y="118" fill="#c9d1d9">$ fettle check --all</text>
+    <text x="48" y="158" fill="#f2cc60">[WARNING] app.py:1 F401</text>
+    <text x="48" y="188" fill="#c9d1d9">os imported but unused</text>
+    <text x="30" y="238" fill="#c9d1d9">$ cp fixed.py app.py</text>
+    <text x="30" y="274" fill="#c9d1d9">$ fettle check --all</text>
+    <text x="48" y="314" fill="#56d364">No issues found.</text>
+    <text x="30" y="370" fill="#8b949e">detect  -&gt; locate  -&gt; repair  -&gt; verify</text>
+  </g>
+</svg>

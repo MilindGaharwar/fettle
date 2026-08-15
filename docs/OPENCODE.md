@@ -9,10 +9,10 @@ OpenCode's **native** event shapes (`tool.execute.before/after`,
 `session.idle`) directly via `fettle.agents.opencode` — translation is
 conformance-tested in Python, and the TypeScript shim is a thin transport.
 
-**Setup: run `fettle init` from a Fettle Git checkout.** It detects
-`~/.config/opencode` and registers the plugin while preserving existing config.
-The PyPI wheel does not include this TypeScript transport. Manual
-registration, if you prefer:
+Run `fettle init --dry-run`, inspect the proposed plugin registration, then run
+`fettle init`. The v1.11.0 wheel materializes a versioned, digest-checked
+TypeScript transport and preserves existing OpenCode config. Restart OpenCode
+after installation. Manual checkout registration, if you prefer:
 
 ```json
 {
@@ -22,7 +22,7 @@ registration, if you prefer:
 }
 ```
 
-in `~/.config/opencode/config.json`. The transport defaults to
+in `~/.config/opencode/config.json`. The checkout transport defaults to
 `~/.claude/plugins/fettle`, where `fettle init` links the checkout when Claude
 Code is installed. Otherwise set `FETTLE_PLUGIN_ROOT` to the checkout root
 before starting OpenCode. Restart OpenCode after changing its configuration.
@@ -54,6 +54,6 @@ tool availability, and recovery flow work in your repository.
 | Symptom | Action |
 |---|---|
 | Plugin is not loaded | Check the `file://` path, then restart OpenCode |
-| Fettle executable or dispatcher is missing | Set `FETTLE_PLUGIN_ROOT` to the checkout root and rerun `fettle doctor` |
+| Fettle executable or dispatcher is missing | Run `fettle init`, then `fettle doctor`; in checkout mode verify `FETTLE_PLUGIN_ROOT` points to the checkout |
 | No findings appear | Confirm the event reached `.fettle/trace.jsonl`, then verify the relevant gate is enabled |
 | External analyzer is unavailable | Install the tool or leave the gate advisory; unavailable analysis is not a clean result |

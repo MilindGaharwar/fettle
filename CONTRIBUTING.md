@@ -31,6 +31,9 @@ uv sync --extra dev --extra semgrep
 - Add both positive and clean fixtures for rule changes.
 - Do not edit archived plans to describe current behavior. Update the README,
   active guides, changelog, or roadmap instead.
+- New contributors can start with the repository's
+  [`good first issue`](https://github.com/MilindGaharwar/fettle/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
+  backlog. Each starter issue must name its non-goals and verification commands.
 
 ## Verify the change
 

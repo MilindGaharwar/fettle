@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v1.11.0 — Wheel-Native Agent Governance
+
+**Released 2026-08-15**
+
+### Adoption And Packaging
+
+- Added a contract-tested two-minute assurance example with violating and clean
+  fixtures, a text transcript, and an accessible terminal summary.
+- Added a versioned installed-package governance bridge so the wheel can
+  register Claude Code, Codex CLI, Gemini CLI, and OpenCode without a source
+  checkout. Bridge manifests bind package version, interpreter, and every owned
+  file; dry-run, idempotency, tamper detection, malformed host configuration,
+  and paths with spaces have regression coverage.
+- `fettle doctor` now validates an installed bridge and recognizes hook
+  registrations for all four supported hosts.
+- Added structured public bug and feature intake plus a bounded contributor
+  entry path. Discussions remains demand-gated.
+
 ### Canonical Evidence
 
 - Added a zero-runtime-dependency canonical evidence kernel with immutable

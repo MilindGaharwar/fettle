@@ -49,6 +49,14 @@ class _BuildPyWithRules(build_py):
             dest.mkdir(parents=True, exist_ok=True)
             for resource in src_commands.glob("*.md"):
                 shutil.copy2(resource, dest / resource.name)
+        # Copy the host-neutral SubagentStart transport used by the installed
+        # governance bridge. Host hook files are generated with the exact
+        # installed interpreter path during `fettle init`.
+        src_subagent = Path(__file__).parent / "hooks" / "subagent_inject.js"
+        if src_subagent.is_file():
+            dest = Path(self.build_lib) / "fettle" / "_bridge"
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_subagent, dest / src_subagent.name)
 
 
 setup(cmdclass={"build_py": _BuildPyWithRules})

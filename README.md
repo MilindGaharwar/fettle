@@ -45,6 +45,19 @@ connects them into a fail-visible control loop, records decision provenance
 without collecting hidden reasoning, and refuses to turn missing or malformed
 evidence into a clean result.
 
+## See The Loop
+
+<p align="center">
+  <a href="examples/assurance-loop/README.md">
+    <img src="assets/assurance-loop.svg" width="720" alt="Terminal proof: Fettle detects an unused import, identifies its rule and location, then verifies the repaired file">
+  </a>
+</p>
+
+The checked-in [two-minute assurance loop](examples/assurance-loop/README.md)
+contains the violating and repaired fixtures, complete transcript, reset path,
+and an automated drift test. The visual is a summary; the executable example is
+authoritative.
+
 | Built for the agentic change loop | Current, reproducible scope |
 |---|---|
 | Agent hosts | Claude Code, Codex CLI, Gemini CLI, OpenCode |
@@ -64,6 +77,7 @@ inspection:
 
 ```bash
 pipx install finefettle
+pipx inject finefettle ruff       # analyzer remains explicit and user-controlled
 cd your-project
 fettle check --changed
 fettle doctor
@@ -74,13 +88,14 @@ This path does not modify agent settings.
 
 ### Add Live Agent Governance
 
-Agent transports currently run from a Git checkout because host hook assets are
-not part of the wheel:
+The v1.11.0 wheel includes a versioned installed-package bridge for Claude Code,
+Codex CLI, Gemini CLI, and OpenCode. Preview every repository and host mutation
+before applying it:
 
 ```bash
-git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle
-cd ~/projects/fettle
-python3 fettle/cli.py init --install-tools
+cd your-project
+fettle init --dry-run
+fettle init
 fettle doctor
 ```
 
@@ -89,8 +104,8 @@ unrelated host settings, creates an advisory-first project configuration, and
 installs guided workflows. Use `--dry-run` to inspect changes first.
 
 ```bash
-python3 fettle/cli.py init --dry-run
-python3 fettle/cli.py init --interactive
+fettle init --interactive
+fettle init --install-tools
 ```
 
 ### Close the Evidence Loop
@@ -324,8 +339,8 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 ## Operational Boundaries
 
 - Python 3.11 or newer is required.
-- Agent transports currently require a repository checkout; CLI workflows,
-  rules, and templates ship in the wheel.
+- Agent transports can run from the v1.11.0 wheel or a source checkout. Installed
+  bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
 - External analyzers and language toolchains must be installed when their
   checks are enabled.
 - Hooks favor session continuity and visible degradation; CI is the independent
@@ -354,7 +369,9 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 
 Contributions are welcome. Fettle expects focused changes, explicit failure
 states, clean and violating fixtures, and verification proportional to risk.
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[`good first issue`](https://github.com/MilindGaharwar/fettle/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
+backlog.
 
 ## License
 

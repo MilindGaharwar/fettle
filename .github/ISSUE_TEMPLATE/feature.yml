@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a measured user outcome, not only an implementation
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: When does the need occur, what should the user accomplish, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround and cost
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence of demand
+      description: Link reproducible examples, repeated incidents, or affected workflows. Avoid private data.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Important boundaries
+      description: What must remain unsupported, advisory, local, or independently verified?
+    validations:
+      required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Contribution interest
+      options:
+        - I can submit a focused pull request
+        - I can test or review a proposed change
+        - I am reporting demand only
+    validations:
+      required: true

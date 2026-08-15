@@ -1,0 +1,66 @@
+name: Bug report
+description: Report reproducible incorrect or degraded Fettle behavior
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Security vulnerabilities belong in SECURITY.md, not a public issue. Remove credentials, private transcripts, proprietary source, and generated `.fettle/` state.
+  - type: input
+    id: version
+    attributes:
+      label: Fettle version
+      placeholder: "fettle 1.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation mode
+      options:
+        - PyPI wheel or pipx
+        - Source checkout
+        - GitHub Action
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Agent host
+      options:
+        - Standalone CLI
+        - Claude Code
+        - Codex CLI
+        - Gemini CLI
+        - OpenCode
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include exact commands, input shape, exit code, and a minimal repository or fixture when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected canonical state
+      description: State the expected pass, violation, tool_error, unknown, or surface-specific outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual state and recovery shown
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data confirmation
+      options:
+        - label: I removed secrets, private transcripts, proprietary source, and generated `.fettle/` state.
+          required: true

@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import shlex
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
@@ -84,13 +85,12 @@ def init_claude_code(dry_run: bool) -> list[Step]:
     claude_dir = Path.home() / ".claude"
     if not claude_dir.is_dir():
         return [Step("claude-code", "skipped", "~/.claude not found — Claude Code not installed")]
-    if not _is_clone_mode():
-        return [Step("claude-code", "action",
-                     "hooks need a git checkout (wheels don't ship run.sh) — "
-                     "git clone https://github.com/MilindGaharwar/fettle ~/projects/fettle && fettle init")]
-
     link = claude_dir / "plugins" / "fettle"
-    root = _plugin_root()
+    if _is_clone_mode():
+        root = _plugin_root()
+    else:
+        from fettle.bridge import bridge_dir
+        root = bridge_dir()
     if link.is_symlink() or link.exists():
         try:
             if link.resolve() == root.resolve():
@@ -110,10 +110,12 @@ def init_opencode(dry_run: bool) -> list[Step]:
     config_dir = Path.home() / ".config" / "opencode"
     if not config_dir.is_dir():
         return [Step("opencode", "skipped", "~/.config/opencode not found — OpenCode not installed")]
-    if not _is_clone_mode():
-        return [Step("opencode", "action", "plugin requires a git checkout — see docs/OPENCODE.md")]
-
-    plugin_uri = f"file://{_plugin_root()}/integrations/opencode/fettle.ts"
+    if _is_clone_mode():
+        plugin_path = _plugin_root() / "integrations" / "opencode" / "fettle.ts"
+    else:
+        from fettle.bridge import bridge_dir
+        plugin_path = bridge_dir() / "opencode" / "fettle.ts"
+    plugin_uri = plugin_path.resolve().as_uri()
     config_path = config_dir / "config.json"
     try:
         config = json.loads(config_path.read_text()) if config_path.is_file() else {}
@@ -138,7 +140,10 @@ def init_opencode(dry_run: bool) -> list[Step]:
 
 def _dispatcher_command() -> str:
     """The hook command every host runs — identical across agents."""
-    return f"bash {_plugin_root()}/fettle/run.sh dispatcher.py"
+    if _is_clone_mode():
+        return f"bash {shlex.quote(str(_plugin_root() / 'fettle' / 'run.sh'))} dispatcher.py"
+    from fettle.bridge import dispatcher_command
+    return dispatcher_command()
 
 
 def _merge_hook_events(existing: dict, events: dict[str, dict]) -> bool:
@@ -180,9 +185,6 @@ def init_codex(dry_run: bool) -> list[Step]:
     codex_dir = Path.home() / ".codex"
     if not codex_dir.is_dir():
         return [Step("codex", "skipped", "~/.codex not found — Codex CLI not installed")]
-    if not _is_clone_mode():
-        return [Step("codex", "action", "hooks require a git checkout — clone fettle and re-run init")]
-
     command = _dispatcher_command()
     hooks_path = codex_dir / "hooks.json"
     try:
@@ -223,9 +225,6 @@ def init_gemini(dry_run: bool) -> list[Step]:
     gemini_dir = Path.home() / ".gemini"
     if not gemini_dir.is_dir():
         return [Step("gemini", "skipped", "~/.gemini not found — Gemini CLI not installed")]
-    if not _is_clone_mode():
-        return [Step("gemini", "action", "hooks require a git checkout — clone fettle and re-run init")]
-
     command = _dispatcher_command()
     settings_path = gemini_dir / "settings.json"
     try:
@@ -372,6 +371,12 @@ def install_system_tools(dry_run: bool) -> list[Step]:
 def run_init(repo_root: Path, *, tools: bool = False, dry_run: bool = False) -> tuple[list[Step], int]:
     steps: list[Step] = []
     steps += init_repo_files(repo_root, dry_run)
+    if not _is_clone_mode():
+        from fettle.bridge import publish_bridge
+        bridge = publish_bridge(dry_run=dry_run)
+        steps.append(Step("bridge", bridge.status, bridge.detail))
+        if bridge.status == "error":
+            return steps, 1
     steps += init_claude_code(dry_run)
     steps += init_opencode(dry_run)
     steps += init_codex(dry_run)

@@ -188,6 +188,41 @@ class TestAgentDetection:
         named = _by_name(run_init(repo)[0])
         assert named["gemini"].status == "action"
 
+    def test_wheel_mode_publishes_bridge_and_registers_all_hosts(
+        self, repo, monkeypatch, tmp_path
+    ) -> None:
+        from fettle import bridge
+
+        for directory in (".claude", ".codex", ".gemini"):
+            (Path.home() / directory).mkdir()
+        (Path.home() / ".config" / "opencode").mkdir(parents=True)
+        monkeypatch.setattr(init_cmd, "_is_clone_mode", lambda: False)
+        monkeypatch.setattr(bridge, "bridge_base", lambda: tmp_path / "bridge")
+
+        named = _by_name(run_init(repo)[0])
+
+        assert named["bridge"].status == "created"
+        assert named["claude-code"].status == "created"
+        assert named["codex"].status == "created"
+        assert named["gemini"].status == "created"
+        assert named["opencode"].status == "created"
+        assert bridge.validate_bridge().ok
+
+    def test_wheel_mode_dry_run_does_not_write_home(self, repo, monkeypatch, tmp_path) -> None:
+        from fettle import bridge
+
+        (Path.home() / ".codex").mkdir()
+        before = sorted(str(path.relative_to(Path.home())) for path in Path.home().rglob("*"))
+        monkeypatch.setattr(init_cmd, "_is_clone_mode", lambda: False)
+        monkeypatch.setattr(bridge, "bridge_base", lambda: tmp_path / "bridge")
+
+        named = _by_name(run_init(repo, dry_run=True)[0])
+
+        after = sorted(str(path.relative_to(Path.home())) for path in Path.home().rglob("*"))
+        assert before == after
+        assert named["bridge"].status == "created"
+        assert not tmp_path.joinpath("bridge").exists()
+
 
 class TestPreCommit:
     def test_writes_config(self, repo) -> None:
@@ -210,6 +245,7 @@ class TestInstallTools:
             assert named[f"tool:{tool}"].status == "ok"
 
     def test_missing_uv_is_action(self, repo, monkeypatch) -> None:
+        monkeypatch.setattr(init_cmd, "_is_clone_mode", lambda: True)
         monkeypatch.setattr(init_cmd.shutil, "which", lambda name: None)
         monkeypatch.setattr(init_cmd.os.path, "isfile", lambda p: False)
         named = _by_name(run_init(repo, tools=True)[0])

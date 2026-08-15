@@ -63,6 +63,40 @@ def test_python_check_reports_interpreter():
     assert sys.version.split()[0] in py["detail"]
 
 
+def test_bridge_health_reports_valid_and_tampered_states(tmp_path, monkeypatch):
+    from fettle import bridge
+
+    monkeypatch.setattr(bridge, "bridge_base", lambda: tmp_path / "bridge")
+    assert package_doctor.check_bridge_health() == []
+
+    bridge.publish_bridge(dry_run=False)
+    healthy = package_doctor.check_bridge_health()[0]
+    assert healthy["ok"] is True
+
+    (bridge.bridge_dir() / "opencode" / "fettle.ts").write_text("tampered")
+    stale = package_doctor.check_bridge_health()[0]
+    assert stale["ok"] is False
+    assert "fettle init" in stale["detail"]
+
+
+def test_runner_governance_recognizes_registered_hosts(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".claude" / "plugins" / "fettle").mkdir(parents=True)
+    (home / ".codex").mkdir()
+    (home / ".codex" / "hooks.json").write_text('{"command":"fettle"}')
+    (home / ".gemini").mkdir()
+    (home / ".gemini" / "settings.json").write_text('{"command":"fettle"}')
+    (home / ".config" / "opencode").mkdir(parents=True)
+    (home / ".config" / "opencode" / "config.json").write_text('{"plugin":"fettle"}')
+    monkeypatch.setattr(package_doctor.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(package_doctor, "_which", lambda name: f"/bin/{name}")
+
+    checks = package_doctor.check_runner_governance()
+
+    assert len(checks) == 4
+    assert all(check["ok"] for check in checks)
+
+
 def test_mutation_readiness_is_informational_when_disabled(monkeypatch):
     monkeypatch.setattr("fettle.config.load_config", lambda _root: {
         "mutation": {"enabled": False},

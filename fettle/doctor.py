@@ -14,6 +14,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _version_of(binary: str, args: list[str] | None = None) -> str | None:
@@ -281,39 +282,23 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
 
 
 def check_runner_governance() -> list[dict]:
-    """Per-runner hook-parity probe (WP-157, E2 visibility).
-
-    An installed agent CLI whose runtime carries no fettle hooks means any
-    child spawned there runs ungoverned. Claude wires hooks via
-    `fettle init`; the other runners have no hook surface yet, so their
-    presence alone is worth a warning when [gates.agent_spawn] is on.
-    """
-    import os
+    """Per-runner visibility for host registrations created by `fettle init`."""
     checks: list[dict] = []
     probes = {
-        "claude": os.path.expanduser("~/.claude/settings.json"),
-        "codex": None,
-        "gemini": None,
-        "opencode": None,
+        "claude": Path.home() / ".claude" / "plugins" / "fettle",
+        "codex": Path.home() / ".codex" / "hooks.json",
+        "gemini": Path.home() / ".gemini" / "settings.json",
+        "opencode": Path.home() / ".config" / "opencode" / "config.json",
     }
-    for name in sorted(probes):
+    for name, path in sorted(probes.items()):
         if not _which(name):
             continue
-        settings = probes[name]
-        if settings:
+        try:
+            wired = path.exists() and (path.is_dir() or "fettle" in path.read_text())
+        except OSError:
             wired = False
-            try:
-                with open(settings) as fh:
-                    wired = "fettle" in fh.read()
-            except OSError:
-                wired = False
-            detail = ("fettle hooks wired" if wired else
-                      "installed but no fettle hooks — children spawned here "
-                      "run ungoverned; run: fettle init")
-        else:
-            wired = False
-            detail = ("installed; runtime has no hook surface — govern "
-                      "children via `fettle spawn` (policy capsule)")
+        detail = ("fettle hooks wired" if wired else
+                  "installed but no fettle hooks — run: fettle init")
         checks.append({
             "name": f"runner:{name}",
             "required": False,
@@ -321,6 +306,22 @@ def check_runner_governance() -> list[dict]:
             "detail": detail,
         })
     return checks
+
+
+def check_bridge_health() -> list[dict]:
+    """Validate a published installed-package host bridge when one exists."""
+    from fettle.bridge import bridge_dir, validate_bridge
+
+    if not bridge_dir().exists():
+        return []
+    validation = validate_bridge()
+    return [{
+        "name": "bridge",
+        "required": False,
+        "ok": validation.ok,
+        "status": validation.status,
+        "detail": validation.detail,
+    }]
 
 
 def check_config_valid() -> list[dict]:
@@ -512,7 +513,7 @@ def main() -> int:
     checks = (check_environment() + check_mutation_readiness()
               + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health()
-              + check_runner_governance() + check_mcp_trust()
+              + check_runner_governance() + check_bridge_health() + check_mcp_trust()
               + check_integrations() + check_workflows())
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes

@@ -61,6 +61,16 @@ jobs:
           WHEEL=$(ls dist/*.whl)
           /tmp/smoke/bin/pip install --quiet "${WHEEL}[evals]"
           /tmp/smoke/bin/python -c "import fettle.evals_runner"
+          mkdir -p /tmp/bridge-home/.claude /tmp/bridge-home/.codex /tmp/bridge-home/.gemini /tmp/bridge-home/.config/opencode /tmp/bridge-project
+          git -C /tmp/bridge-project init -q
+          pushd /tmp/bridge-project
+          HOME=/tmp/bridge-home /tmp/smoke/bin/fettle init --dry-run --json > /tmp/bridge-dry-run.json
+          test ! -e /tmp/bridge-home/.local/share/fettle/bridge
+          HOME=/tmp/bridge-home /tmp/smoke/bin/fettle init --json > /tmp/bridge-init.json
+          popd
+          HOME=/tmp/bridge-home /tmp/smoke/bin/python -c "from fettle.bridge import validate_bridge; assert validate_bridge().ok"
+          test "$(find /tmp/bridge-home/.local/share/fettle/bridge -path '*/commands/*.md' | wc -l)" -eq 17
+          printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"app.py"},"cwd":"/tmp/bridge-project","session_id":"wheel-smoke"}' | HOME=/tmp/bridge-home /tmp/smoke/bin/python -m fettle.dispatcher | grep -q hookSpecificOutput
 
       - name: Prove sdist reconstructs a complete wheel
         run: |
@@ -68,6 +78,7 @@ jobs:
           /tmp/sdist-smoke/bin/pip install --quiet dist/*.tar.gz
           /tmp/sdist-smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; assert any(rules_dir().glob('*.yml')); assert len(list(commands_dir().glob('*.md'))) == 17"
           /tmp/sdist-smoke/bin/fettle workflows list
+          /tmp/sdist-smoke/bin/python -c "from fettle.bridge import _source_subagent_hook; assert _source_subagent_hook().is_file()"
 
       # WP-147: SLSA provenance + Sigstore signatures for every artifact,
       # via GitHub's native attestation (verify: `gh attestation verify`).
@@ -136,5 +147,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          NOTES="docs/engagement/${GITHUB_REF_NAME}-release-notes.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::Missing authored release notes: $NOTES"
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" dist/* sbom/* \
-            --verify-tag --generate-notes
+            --verify-tag --notes-file "$NOTES"
