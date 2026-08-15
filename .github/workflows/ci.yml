@@ -156,3 +156,22 @@ jobs:
         with:
           name: coverage-xml
           path: coverage.xml
+
+  required:
+    name: CI required
+    if: always()
+    needs: [lint, test, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every blocking CI job
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          if [ "$LINT_RESULT" != "success" ] || \
+             [ "$TEST_RESULT" != "success" ] || \
+             [ "$COVERAGE_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT"
+            exit 1
+          fi
