@@ -355,10 +355,19 @@ def _render_mutation(report: dict) -> str:
         lines.append(str(report["message"]))
     if report.get("score") is not None:
         lines.append(f"Score: {report['score']}%")
+    if report.get("engine_version"):
+        lines.append(f"Engine: mutmut {report['engine_version']}")
+    if isinstance(report.get("files"), list):
+        lines.append(f"Scope: {len(report['files'])} file(s)")
     if report.get("generated") is not None:
         lines.append(f"Generated details: {report['generated']}")
         lines.append(f"Canonicalized details: {report.get('canonicalized', 0)}")
+        lines.append(
+            f"Rejected details: {max(0, report['generated'] - report.get('canonicalized', 0))}"
+        )
         lines.append(f"Fingerprint collisions: {report.get('collisions', 0)}")
+        if report.get("status") == "completed" and report.get("passed"):
+            lines.append("Next: fettle mutation run --changed")
     records = report.get("records", report.get("survivor_preview", []))
     for record in records[:20] if isinstance(records, list) else []:
         lines.append(
@@ -477,6 +486,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     import subprocess
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cmd = [sys.executable, os.path.join(script_dir, "doctor.py")]
+    if getattr(args, "json", False):
+        cmd.append("--json")
     if getattr(args, "verify_hashes", False):
         cmd.append("--verify-hashes")
     if getattr(args, "fix", False):
@@ -679,6 +690,13 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"  decisions: {data['total_decisions']}  "
               f"pass: {data['pass_rate_pct']}%  violations: {data['violation_rate_pct']}%  "
               f"tool errors: {data['tool_error_rate_pct']}%")
+        canonical = data.get("canonical_evidence", {})
+        if canonical.get("accepted") or canonical.get("rejected"):
+            print(f"  canonical evidence: {canonical.get('accepted', 0)} accepted, "
+                  f"{canonical.get('rejected', 0)} rejected")
+            for rejection in canonical.get("recent_rejections", [])[-3:]:
+                print(f"    {rejection['kind']}: {rejection['validity']} — "
+                      f"{rejection['reason']}")
         for code, count in data["top_violations"]:
             print(f"    {code}: {count}")
     sys.exit(0)
@@ -1467,6 +1485,10 @@ def main() -> None:
     p_baseline.add_argument("action", choices=["create", "update"], help="Baseline action")
 
     p_mutation = subparsers.add_parser("mutation", help="Run and inspect Python mutation evidence")
+    p_mutation.epilog = (
+        "Guide: https://github.com/MilindGaharwar/fettle/blob/main/"
+        "docs/mutation-quality-playbook.md"
+    )
     mutation_sub = p_mutation.add_subparsers(dest="mutation_action", required=True)
     p_mutation_run = mutation_sub.add_parser("run", help="Run changed or full mutation evidence")
     mutation_scope = p_mutation_run.add_mutually_exclusive_group(required=True)
@@ -1505,6 +1527,7 @@ def main() -> None:
         command.add_argument("--json", action="store_true", help="JSON output")
 
     p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
+    p_doctor.add_argument("--json", action="store_true", help="JSON output")
     p_doctor.add_argument("--fix", action="store_true",
                           help="Apply mechanical fixes only (wire declared pre-commit hooks)")
     p_doctor.add_argument("--verify-hashes", dest="verify_hashes", action="store_true",

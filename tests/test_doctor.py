@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import doctor  # noqa: E402
+from fettle import doctor as package_doctor
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPT = os.path.join(PLUGIN_DIR, "scripts", "doctor.py")
@@ -60,6 +61,62 @@ def test_python_check_reports_interpreter():
     assert py["name"] == "python"
     assert py["ok"] is (sys.version_info >= (3, 11))
     assert sys.version.split()[0] in py["detail"]
+
+
+def test_mutation_readiness_is_informational_when_disabled(monkeypatch):
+    monkeypatch.setattr("fettle.config.load_config", lambda _root: {
+        "mutation": {"enabled": False},
+    })
+
+    check = package_doctor.check_mutation_readiness()[0]
+
+    assert check == {
+        "name": "mutation", "required": False, "ok": True,
+        "status": "disabled",
+        "detail": "disabled — enable [mutation] before running mutation preflight",
+    }
+
+
+def test_mutation_readiness_names_missing_tool_recovery(monkeypatch):
+    monkeypatch.setattr("fettle.config.load_config", lambda _root: {
+        "mutation": {"enabled": True},
+    })
+    monkeypatch.setattr(package_doctor, "_which", lambda _name: None)
+
+    check = package_doctor.check_mutation_readiness()[0]
+
+    assert check["ok"] is False
+    assert check["status"] == "unavailable"
+    assert "mutmut==2.5.1" in check["detail"]
+    assert "requirements-mutation.txt" in check["detail"]
+
+
+def test_mutation_readiness_rejects_unsupported_version(monkeypatch):
+    monkeypatch.setattr("fettle.config.load_config", lambda _root: {
+        "mutation": {"enabled": True},
+    })
+    monkeypatch.setattr(package_doctor, "_which", lambda _name: "/bin/mutmut")
+    monkeypatch.setattr(package_doctor, "_version_of", lambda *_args: "mutmut version 3.0.0")
+
+    check = package_doctor.check_mutation_readiness()[0]
+
+    assert check["ok"] is False
+    assert check["status"] == "unsupported"
+    assert "expected 2.5.1" in check["detail"]
+
+
+def test_mutation_readiness_ready_has_preflight_next_action(monkeypatch):
+    monkeypatch.setattr("fettle.config.load_config", lambda _root: {
+        "mutation": {"enabled": True},
+    })
+    monkeypatch.setattr(package_doctor, "_which", lambda _name: "/bin/mutmut")
+    monkeypatch.setattr(package_doctor, "_version_of", lambda *_args: "mutmut version 2.5.1")
+
+    check = package_doctor.check_mutation_readiness()[0]
+
+    assert check["ok"] is True
+    assert check["status"] == "ready"
+    assert "fettle mutation preflight" in check["detail"]
 
 
 # ─── WP-16: SYSTEM_TOOLS tier (shellcheck via brew/apt) ─────────────────────

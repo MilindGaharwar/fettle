@@ -72,6 +72,34 @@ def compute_effectiveness(days: int = 30) -> dict:
         for override in entry.get("overrides", [])
         if isinstance(override, dict)
     ][-20:]
+    canonical = [
+        (evidence, evidence.get("inspection"))
+        for entry in recent
+        for evidence in entry.get("evidence", [])
+        if isinstance(evidence, dict)
+        and evidence.get("artifact_digest")
+        and isinstance(evidence.get("inspection"), dict)
+    ]
+    accepted_evidence = sum(
+        1 for _evidence, inspection in canonical if inspection.get("accepted") is True
+    )
+    rejected_evidence = sum(
+        1 for _evidence, inspection in canonical if inspection.get("accepted") is False
+    )
+    evidence_validity = Counter(
+        str(inspection.get("validity", "unknown"))
+        for _evidence, inspection in canonical
+    )
+    recent_rejections = [
+        {
+            "kind": str(evidence.get("kind", "unknown")),
+            "validity": str(inspection.get("validity", "unknown")),
+            "reason": str(inspection.get("reason", "")),
+            "recovery_action": str(inspection.get("recovery_action", "")),
+        }
+        for evidence, inspection in canonical
+        if inspection.get("accepted") is False
+    ][-20:]
 
     # Stage-0 failure visibility: dispatcher fail-open events (check crashes,
     # budget kills, input/config/registry failures) are part of effectiveness —
@@ -108,6 +136,12 @@ def compute_effectiveness(days: int = 30) -> dict:
         "evidence_ids": list(dict.fromkeys(evidence_ids))[-20:],
         "overridden_count": len(override_entries),
         "recent_overrides": recent_overrides,
+        "canonical_evidence": {
+            "accepted": accepted_evidence,
+            "rejected": rejected_evidence,
+            "by_validity": dict(evidence_validity),
+            "recent_rejections": recent_rejections,
+        },
     }
 
 

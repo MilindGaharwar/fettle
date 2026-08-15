@@ -99,5 +99,5 @@ class TestDoctorJsonContract:
         rc = doctor_mod.main()
         payload = json.loads(capsys.readouterr().out)
         names = {c["name"] for c in payload["checks"]}
-        assert {"audit-trace", "dispatch"} <= names
+        assert {"audit-trace", "dispatch", "mutation"} <= names
         assert rc in (0, 1)  # contract unchanged: only required tools flip it

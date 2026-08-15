@@ -174,6 +174,8 @@ checkpoints, and aggregate only complete ledgers. Two independent calibrations
 established Fettle's own 28,723-mutant baseline with zero untested outcomes.
 Changed-scope survivor enforcement remains advisory until runtime and reviewer
 feedback satisfy the published graduation criteria.
+Use the [mutation quality playbook](docs/mutation-quality-playbook.md) for setup,
+the validation funnel, exit semantics, cache isolation, and recovery.
 
 ### Rules Learn From Real Failures, With Human Control
 

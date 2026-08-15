@@ -211,6 +211,28 @@ of an authorized producer emitting false observations.
 | Advisory graph or external memory authority escalation | Preserve trust class and domain authority boundary; such output cannot grant authority |
 | Artifact confused with attestation | Digest proves content identity only; signatures and commit-linked attestations remain P41-owned |
 
+## P41 Attestation Integration Boundary
+
+P68 publishes an integration point, not an attestation implementation. After
+P38 and P41 receive separate authorization, a durable attestation may reference:
+
+- the canonical `EvidenceArtifact.artifact_digest` without rewriting or
+  flattening the artifact;
+- the artifact's `observation_id` when one execution occurrence must be named;
+- the immutable candidate identity independently established by the CI or
+  governance provider; and
+- the attestation producer, signing mechanism, verification material, issuance
+  time, and validity policy in a separate P41-owned versioned object.
+
+The attestation must bind the full artifact digest and immutable candidate
+identity in its signed statement. It must not treat trace presence, an
+`evidence_id`, a truncated digest, `observed_at`, or local filesystem metadata
+as proof. Signature absence, verification failure, candidate mismatch, artifact
+unavailability, or artifact validation failure remains non-pass for any future
+consumer that requires attestation. P41 owns key lifecycle, platform identity,
+revocation, transparency, retention, and durable commit linkage; P68 owns none
+of those guarantees and trace labels canonical references `diagnostic_only`.
+
 The machine-readable fixture corpus is `tests/fixtures/evidence/`.
 `adversarial-v1.json` names a base artifact and applies these deterministic
 operations before validation:

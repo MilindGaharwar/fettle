@@ -72,3 +72,39 @@ def test_override_inventory_exposes_active_expired_and_invalid(tmp_path):
 
     assert result["invalid_count"] == 1
     assert result["active_count"] == 0
+
+
+def test_effectiveness_summarizes_canonical_evidence_decisions(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    from fettle.trace import log_decision
+    binding = "sha256:" + "b" * 64
+    base = {
+        "artifact_digest": "sha256:" + "a" * 64,
+        "kind": "fettle.ci", "schema_version": "1", "expected": {},
+        "availability": "available",
+    }
+    log_decision(hook="ci_gate", status="pass", evidence=[dict(base, inspection={
+        "producer": "fettle.ci", "scope": "CI", "source_binding": binding,
+        "policy_binding": binding, "result": "pass", "completeness": "complete",
+        "freshness": "current", "validity": "valid", "accepted": True,
+        "reason": "exact bindings matched", "recovery_action": "",
+    })])
+    rejected = dict(base, artifact_digest="sha256:" + "c" * 64, inspection={
+        "producer": "fettle.ci", "scope": "CI", "source_binding": binding,
+        "policy_binding": binding, "result": "pass", "completeness": "complete",
+        "freshness": "stale", "validity": "wrong_policy", "accepted": False,
+        "reason": "policy binding changed", "recovery_action": "fettle ci wait",
+    })
+    log_decision(hook="ci_gate", status="unknown", evidence=[rejected])
+
+    result = compute_effectiveness(days=30)
+
+    assert result["canonical_evidence"] == {
+        "accepted": 1,
+        "rejected": 1,
+        "by_validity": {"valid": 1, "wrong_policy": 1},
+        "recent_rejections": [{
+            "kind": "fettle.ci", "validity": "wrong_policy",
+            "reason": "policy binding changed", "recovery_action": "fettle ci wait",
+        }],
+    }

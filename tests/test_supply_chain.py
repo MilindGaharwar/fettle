@@ -143,6 +143,14 @@ class TestDoctorWiring:
         cli.cmd_doctor(argparse.Namespace(verify_hashes=True))
         assert captured["cmd"][-1] == "--verify-hashes"
 
+    def test_cmd_doctor_forwards_json(self, monkeypatch):
+        from fettle import cli
+
+        captured: dict = {}
+        monkeypatch.setattr("subprocess.run", self._run_stub(captured))
+        cli.cmd_doctor(argparse.Namespace(json=True))
+        assert captured["cmd"][-1] == "--json"
+
     def test_cmd_doctor_default_no_flag(self, monkeypatch):
         from fettle import cli
 

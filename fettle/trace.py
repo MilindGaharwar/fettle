@@ -30,6 +30,8 @@ import sys
 import time
 from typing import Any
 
+from fettle.evidence import EvidenceReference
+
 AUDIT_SCHEMA_VERSION = 2
 _MAX_TEXT = 2048
 _MAX_FINDINGS = 50
@@ -108,6 +110,37 @@ def _bounded_evidence(evidence: dict) -> dict:
     )
     if evidence.get("evidence_id"):
         bounded["evidence_id"] = _redact_text(evidence["evidence_id"], 128)
+    if "artifact_digest" in evidence:
+        try:
+            reference = EvidenceReference(
+                artifact_digest=evidence["artifact_digest"],
+                kind=evidence["kind"],
+                schema_version=evidence["schema_version"],
+                expected=evidence.get("expected", {}),
+            )
+        except (KeyError, TypeError, ValueError):
+            return bounded
+        availability = evidence.get("availability")
+        if availability not in {"available", "missing", "unavailable"}:
+            return bounded
+        bounded.update(reference.to_dict())
+        bounded["availability"] = availability
+        bounded["authority"] = "diagnostic_only"
+        inspection = evidence.get("inspection")
+        if isinstance(inspection, dict):
+            allowed_text = {
+                "producer", "scope", "source_binding", "policy_binding", "result",
+                "completeness", "freshness", "validity", "reason", "recovery_action",
+            }
+            projected = {
+                key: _redact_text(value, 512)
+                for key, value in inspection.items()
+                if key in allowed_text and isinstance(value, str)
+            }
+            if isinstance(inspection.get("accepted"), bool):
+                projected["accepted"] = inspection["accepted"]
+            if projected:
+                bounded["inspection"] = projected
     return bounded
 
 
@@ -209,10 +242,9 @@ def log_decision(
     except OSError as exc:
         global _write_failure_warned
         if not _write_failure_warned:
-            print(
+            sys.stderr.write(
                 f"fettle: WARNING — audit trace write failed ({exc}); "
-                "hook decisions are NOT being recorded. Run `fettle doctor`.",
-                file=sys.stderr,
+                "hook decisions are NOT being recorded. Run `fettle doctor`.\n"
             )
             _write_failure_warned = True
         return False

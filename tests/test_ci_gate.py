@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from fettle import ci_gate
 from fettle.dispatcher_types import HookContext, HookInput
+from fettle.evidence import Validity, parse_artifact
 from fettle.overrides import OverrideRecord, save_override_ledger
 
 
@@ -122,6 +123,57 @@ class TestRunCIStatus:
         assert stamp["evidence_id"].startswith("ev-")
         on_disk = json.loads((repo / ci_gate.STAMP_RELPATH).read_text())
         assert on_disk["sha"] == stamp["sha"] and len(stamp["sha"]) == 40
+
+    def test_green_writes_independent_canonical_ci_evidence(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")), \
+             patch.object(ci_gate, "log_decision") as log:
+            stamp = ci_gate.run_ci_status(str(repo), config)
+
+        artifact = parse_artifact((repo / ci_gate.EVIDENCE_RELPATH).read_bytes())
+        assert stamp["canonical_evidence"]["artifact_digest"] == artifact.artifact_digest
+        assert stamp["canonical_observation_id"] == artifact.observation_id
+        assert artifact.kind == "fettle.ci"
+        assert artifact.source["revision"] == stamp["sha"]
+        assert artifact.result_state == "pass"
+        assert artifact.completeness == "complete"
+        assert artifact.trust_class == "external"
+        assert artifact.payload["provider"] == "github-actions"
+        assert artifact.payload["run_ids"] == (1,)
+        traced = log.call_args.kwargs["evidence"][0]
+        assert traced["availability"] == "available"
+        assert traced["inspection"]["accepted"] is True
+        assert traced["inspection"]["validity"] == "valid"
+
+    def test_canonical_write_failure_cannot_leave_success_stamp(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")), \
+             patch.object(ci_gate, "_write_bytes_atomic", side_effect=OSError("disk full")):
+            stamp = ci_gate.run_ci_status(str(repo), _cfg())
+
+        assert stamp["ok"] is False
+        assert stamp["canonical_evidence_error"] == "unavailable"
+        assert not (repo / ci_gate.EVIDENCE_RELPATH).exists()
+
+    def test_stamp_write_failure_cannot_make_new_sidecar_authoritative(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        real_write = ci_gate._write_bytes_atomic
+
+        def fail_stamp(path: Path, content: bytes) -> None:
+            if path.name == "ci-status.json":
+                raise OSError("disk full")
+            real_write(path, content)
+
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")), \
+             patch.object(ci_gate, "_write_bytes_atomic", side_effect=fail_stamp), \
+             patch.object(ci_gate, "log_decision") as log:
+            stamp = ci_gate.run_ci_status(str(repo), _cfg())
+
+        assert stamp["ok"] is True
+        assert (repo / ci_gate.EVIDENCE_RELPATH).is_file()
+        assert not (repo / ci_gate.STAMP_RELPATH).exists()
+        log.assert_not_called()
 
     def test_red_stamp_has_detail(self, tmp_path: Path) -> None:
         repo = _git_repo(tmp_path)
@@ -318,6 +370,121 @@ class TestStopGate:
         _stamp(tmp_path, "a" * 40, ok=True)
         with patch("fettle.config.state_dir", return_value=state):
             assert ci_gate.run_check(_ctx(tmp_path, _cfg())).decision.value == "allow"
+
+    def test_fresh_canonical_green_stamp_allows(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        _record(state, stamp["sha"], ts=stamp["ts"] - 1)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "allow"
+
+    def test_copied_canonical_evidence_cannot_authorize_another_candidate(
+        self, tmp_path: Path,
+    ) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        other_sha = "b" * 40
+        stamp["sha"] = other_sha
+        (repo / ci_gate.STAMP_RELPATH).write_text(json.dumps(stamp))
+        _record(state, other_sha, ts=stamp["ts"] - 1)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "advisory"
+        assert "wrong_source" in result.message
+
+    def test_prior_occurrence_cannot_authorize_current_stamp(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        stamp["canonical_observation_id"] = "ci-copied-occurrence"
+        (repo / ci_gate.STAMP_RELPATH).write_text(json.dumps(stamp))
+        _record(state, stamp["sha"], ts=stamp["ts"] - 1)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "advisory"
+        assert "duplicate_id" in result.message
+
+    def test_policy_change_rejects_canonical_ci_evidence(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), _cfg())
+        _record(state, stamp["sha"], ts=stamp["ts"] - 1)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, _cfg(timeout_s=6)))
+
+        assert result.decision.value == "advisory"
+        assert "wrong_policy" in result.message
+
+    def test_scope_change_rejects_canonical_ci_evidence(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        stamp["runs"].append({
+            "id": 2, "name": "Copied", "status": "completed",
+            "conclusion": "success", "url": "https://x/Copied",
+        })
+        (repo / ci_gate.STAMP_RELPATH).write_text(json.dumps(stamp))
+        _record(state, stamp["sha"], ts=stamp["ts"] - 1)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "advisory"
+        assert "wrong_scope" in result.message
+
+    def test_incomplete_canonical_ci_evidence_is_non_pass(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        config = _cfg()
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        artifact = parse_artifact((repo / ci_gate.EVIDENCE_RELPATH).read_bytes())
+        value = artifact.to_dict()
+        value["completeness"] = "partial"
+
+        assert ci_gate._canonical_evidence_validity(
+            str(repo), config, stamp, artifact_value=value,
+        ) == Validity.INCOMPLETE
+
+    def test_local_verification_artifact_cannot_substitute_for_ci(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        sha = ci_gate._head_sha(str(repo))
+        _record(state, sha, ts=time.time() - 1)
+        _stamp(repo, sha, ok=True, canonical_evidence={
+            "schema_version": "1", "kind": "fettle.verify",
+            "artifact_digest": "sha256:" + "a" * 64, "expected": {},
+        })
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, _cfg()))
+
+        assert result.decision.value == "advisory"
+        assert "unsupported" in result.message
 
     def test_stamp_for_other_commit_is_stale(self, tmp_path: Path) -> None:
         state = tmp_path / "state"

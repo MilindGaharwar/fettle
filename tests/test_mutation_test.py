@@ -58,6 +58,14 @@ from fettle.mutation_test import (
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
 
 
+def test_historical_failure_fixture_references_executable_regressions():
+    scenarios = json.loads((FIXTURES / "historical-failures.json").read_text())["scenarios"]
+
+    assert len(scenarios) == 9
+    assert all(callable(globals().get(case["regression_test"])) for case in scenarios)
+    assert all("shard" not in case and "engine_id" not in case for case in scenarios)
+
+
 def _proc(code=0, out="", err=""):
     return subprocess.CompletedProcess([], code, out, err)
 

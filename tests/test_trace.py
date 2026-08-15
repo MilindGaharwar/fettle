@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from unittest.mock import patch
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
@@ -118,6 +119,97 @@ def test_evidence_reference_keeps_existing_id(tmp_path, monkeypatch):
 
     entry = get_recent_decisions(limit=1)[0]
     assert entry["evidence"] == [{"evidence_id": "ev-existing123", "kind": "command"}]
+
+
+def test_canonical_evidence_reference_is_portable_bounded_and_diagnostic_only(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    digest = "sha256:" + "a" * 64
+    binding = "sha256:" + "b" * 64
+    log_decision(
+        hook="ci_gate", status="pass", evidence=[{
+            "artifact_digest": digest,
+            "kind": "fettle.ci",
+            "schema_version": "1",
+            "expected": {
+                "source_snapshot_digest": binding,
+                "policy_digest": binding,
+                "scope_digest": binding,
+                "producer_id": "fettle.ci",
+            },
+            "availability": "available",
+            "inspection": {
+                "producer": "fettle.ci",
+                "scope": "CI, Docs",
+                "source_binding": binding,
+                "policy_binding": binding,
+                "result": "pass",
+                "completeness": "complete",
+                "freshness": "current",
+                "validity": "valid",
+                "accepted": True,
+                "reason": "exact bindings matched",
+                "recovery_action": "",
+                "secret": "token=do-not-store",
+            },
+        }],
+    )
+
+    evidence = get_recent_decisions(limit=1)[0]["evidence"][0]
+    assert evidence["artifact_digest"] == digest
+    assert evidence["expected"]["producer_id"] == "fettle.ci"
+    assert evidence["availability"] == "available"
+    assert evidence["authority"] == "diagnostic_only"
+    assert evidence["inspection"]["validity"] == "valid"
+    assert evidence["inspection"]["accepted"] is True
+    assert "secret" not in evidence["inspection"]
+    assert "do-not-store" not in json.dumps(evidence)
+
+
+def test_malformed_canonical_reference_is_not_promoted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    log_decision(hook="ci_gate", status="unknown", evidence=[{
+        "artifact_digest": "ev-truncated",
+        "kind": "fettle.ci",
+        "schema_version": "1",
+        "availability": "available",
+    }])
+
+    evidence = get_recent_decisions(limit=1)[0]["evidence"][0]
+    assert "artifact_digest" not in evidence
+    assert "authority" not in evidence
+
+
+def test_legacy_trace_entry_replays_without_canonical_guessing(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    trace_path = tmp_path / "fettle" / "trace.jsonl"
+    trace_path.parent.mkdir(parents=True)
+    trace_path.write_text(json.dumps({
+        "timestamp": "2025-01-01T00:00:00", "ts": 1, "hook": "legacy",
+        "status": "pass", "evidence": [{"evidence_id": "ev-old", "kind": "command"}],
+    }) + "\n")
+
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["evidence"] == [{"evidence_id": "ev-old", "kind": "command"}]
+    assert "canonical_evidence" not in entry
+
+
+def test_trace_append_failure_with_canonical_reference_is_visible(tmp_path, monkeypatch, capsys):
+    import fettle.trace as trace_mod
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(trace_mod, "_write_failure_warned", False)
+    with patch("builtins.open", side_effect=OSError("read only")):
+        written = log_decision(
+            hook="ci_gate", status="pass", evidence=[{
+                "artifact_digest": "sha256:" + "a" * 64,
+                "kind": "fettle.ci", "schema_version": "1",
+                "expected": {}, "availability": "available",
+            }],
+        )
+
+    assert written is False
+    assert "audit trace write failed" in capsys.readouterr().err
 
 
 def test_override_is_recorded_distinctly_and_bounded(tmp_path, monkeypatch):

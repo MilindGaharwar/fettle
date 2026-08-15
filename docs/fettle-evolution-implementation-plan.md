@@ -170,12 +170,12 @@ and are planning ranges, not commitments.
 | P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | Blocked on P35 -> P38 |
 | P61 | Pilot state-consistency contracts and decide per-surface graduation | after P57-P60 as applicable | P55-P60 evidence | 30 qualifying runs | Evidence-gated |
 | P62 | Complete authoritative mutation calibration and baseline | immediate, P0 | P34 implemented preflight slice | 2 full runs plus replay | Complete |
-| P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Planned |
+| P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Complete |
 | P64 | Automate mutation methodology and generalize evidence staging | following minor, P2 | P62, P63 | 5-8 days | Planned |
 | P65 | Operate and evolve mutation evidence from measured feedback | ongoing, P3 | P62, P64 | recurring | Evidence-gated |
 | P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Complete |
 | P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Complete |
-| P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Proposed |
+| P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Complete |
 | P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Proposed |
 | P70 | Run advisory evidence migration and graduate producers independently | after P69, P2 | P37, P69 | 30 qualifying runs | Evidence-gated |
 | P71 | Connect canonical evidence to change-integrity and evaluate persistence | after P45-P50 as applicable, P3 | P45, P49, P70 | 5-10 days | Evidence-gated |
@@ -473,30 +473,30 @@ and floor 49.1 with target 80.0; baseline digest
 
 ##### P63: Durable Learning And Developer Experience (P1)
 
-9. [ ] Create `docs/mutation-quality-playbook.md` documenting the validation
+9. [x] Create `docs/mutation-quality-playbook.md` documenting the validation
    funnel, evidence invariants, cache isolation, exit semantics, and recovery.
-10. [ ] Link the playbook from `README.md`, mutation documentation, and CLI help;
+10. [x] Link the playbook from `README.md`, mutation documentation, and CLI help;
     execute every copied command in a temporary project.
-11. [ ] Add concise mutation invariants to repository-local agent instructions:
+11. [x] Add concise mutation invariants to repository-local agent instructions:
     full runs are held-out verification; use fixtures -> preflight -> narrow
     replay -> full run; distrust engine IDs and unverified caches; calibrate
     sequentially.
-12. [ ] Store the reusable evidence-integrity lessons in the persistent knowledge
+12. [x] Store the reusable evidence-integrity lessons in the persistent knowledge
     wiki and link back to this plan when the connection is useful.
-13. [ ] Update WP3.5 completion state and hypothesis records with implementation
+13. [x] Update WP3.5 completion state and hypothesis records with implementation
     and retained-run evidence.
-14. [ ] Add every historical mutation failure to the permanent adversarial
+14. [x] Add every historical mutation failure to the permanent adversarial
     fixture corpus; shard numbers remain provenance, never runtime logic.
-15. [ ] Add mutation readiness to `fettle doctor`.
-16. [ ] Make human preflight output show scope, engine, generated,
+15. [x] Add mutation readiness to `fettle doctor`.
+16. [x] Make human preflight output show scope, engine, generated,
     canonicalized, rejected, collisions, and one next action.
-17. [ ] Preserve complete bounded diagnostics in JSON artifacts without secrets
+17. [x] Preserve complete bounded diagnostics in JSON artifacts without secrets
     or absolute paths.
-18. [ ] Document and test exit 0 as success, exit 1 as valid policy failure, and
+18. [x] Document and test exit 0 as success, exit 1 as valid policy failure, and
     exit 2 as configuration, tool, or evidence-integrity failure.
-19. [ ] Add setup and troubleshooting examples for missing mutmut, unsupported
+19. [x] Add setup and troubleshooting examples for missing mutmut, unsupported
     versions, unmapped tests, stale caches, parser drift, and collisions.
-20. [ ] Manually validate first-time, success, empty, error, and recovery CLI
+20. [x] Manually validate first-time, success, empty, error, and recovery CLI
     flows using the installed executable in a clean sample repository.
 
 P63 completion evidence: linked playbook, automatic agent instruction surface,
@@ -726,25 +726,25 @@ trace, and inspection migration.
 Goal: make canonical evidence independently inspectable at the authority
 boundary without treating a local trace as an attestation.
 
-18. [ ] Bind CI artifacts to the exact checked-out revision or merge candidate,
+18. [x] Bind CI artifacts to the exact checked-out revision or merge candidate,
     effective policy, selected scope, producer/toolchain, result state,
     completeness, and run identity. Recomputed CI evidence remains independent
     from local verification evidence.
-19. [ ] Reject local or prior-run references when source, policy, scope,
+19. [x] Reject local or prior-run references when source, policy, scope,
     producer, or run expectations do not match; prove a copied evidence ID cannot
     authorize a different candidate.
-20. [ ] Update trace schema additively to retain canonical artifacts or portable
+20. [x] Update trace schema additively to retain canonical artifacts or portable
     references with explicit availability. Preserve bounded redaction, rotation,
     tolerant legacy reads, and visible append failures.
-21. [ ] Extend `fettle explain` and reports to show producer, covered scope,
+21. [x] Extend `fettle explain` and reports to show producer, covered scope,
     source/policy binding, result, completeness, freshness, and the exact reason
     evidence was accepted or rejected. Human and JSON decisions must match.
-22. [ ] Publish the canonical attestation integration point for P41. When P41 is
+22. [x] Publish the canonical attestation integration point for P41. When P41 is
     separately authorized after P38, it owns durable commit-linked implementation
     and binds signatures or platform attestations to artifact digest plus
     immutable candidate identity rather than defining a competing evidence
     schema.
-23. [ ] Add replay and cross-boundary tests proving local pass, stale pass,
+23. [x] Add replay and cross-boundary tests proving local pass, stale pass,
     missing analyzer, malformed artifact, trace loss, CI tool failure, and policy
     change cannot manufacture accepted evidence.
 
@@ -763,6 +763,17 @@ Primary files:
 
 P68 completion evidence: independent local/CI mismatch fixtures, retained CI
 artifacts, JSON/human parity, legacy trace replay, and zero false-clean results.
+
+Status 2026-08-15: complete. Remote CI writes an independently recomputed
+canonical sidecar and validates exact candidate, policy, workflow scope,
+producer implementation, result, completeness, and occurrence bindings at the
+existing authority boundary. Trace stores bounded diagnostic-only references;
+legacy entries remain readable, and append loss is visible without changing CI
+authority. Detailed explain and report output derive human and JSON decisions
+from the same inspection fields. Focused P68 tests passed, installed CLI UAT
+covered accepted and malformed evidence, and 300 Stop-gate validations measured
+p95 0.359 ms and maximum 3.29 ms against the existing 100 ms budget. See
+`docs/uat/canonical-evidence-inspection.md`.
 
 ##### P69: Producer Migration And Override Integrity (P1)
 

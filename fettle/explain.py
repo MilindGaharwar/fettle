@@ -83,8 +83,28 @@ def explain_entry(entry: dict, *, detailed: bool = False, json_output: bool = Fa
                 f"{key}={evidence[key]}" for key in ("exit_code", "duration_ms", "scope", "tool_version")
                 if key in evidence
             )
-            lines.append(f"    {evidence.get('evidence_id', '?')} ({evidence.get('kind', '?')})"
+            identity = evidence.get("artifact_digest") or evidence.get("evidence_id", "?")
+            lines.append(f"    {identity} ({evidence.get('kind', '?')})"
                          + (f": {detail}" if detail else ""))
+            inspection = evidence.get("inspection")
+            if isinstance(inspection, dict):
+                accepted = "accepted" if inspection.get("accepted") else "rejected"
+                lines.extend((
+                    f"      Decision: {accepted}; validity={inspection.get('validity', 'unknown')}; "
+                    f"availability={evidence.get('availability', 'unknown')}",
+                    f"      Producer: {inspection.get('producer', '?')}; "
+                    f"scope={inspection.get('scope', '?')}",
+                    f"      Bindings: source={inspection.get('source_binding', '?')}; "
+                    f"policy={inspection.get('policy_binding', '?')}",
+                    f"      Observation: result={inspection.get('result', 'unknown')}; "
+                    f"completeness={inspection.get('completeness', 'unknown')}; "
+                    f"freshness={inspection.get('freshness', 'unknown')}",
+                    f"      Reason: {inspection.get('reason', '?')}",
+                ))
+                if inspection.get("recovery_action"):
+                    lines.append(f"      Recover: {inspection['recovery_action']}")
+                if evidence.get("authority") == "diagnostic_only":
+                    lines.append("      Authority: diagnostic only (not an attestation)")
 
     return "\n".join(lines)
 

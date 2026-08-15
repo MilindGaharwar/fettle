@@ -1,0 +1,40 @@
+{
+  "scenarios": [
+    {
+      "failure": "invalid Python mutation detail",
+      "regression_test": "test_canonical_identity_handles_mutmut_diff_that_is_not_parseable_python"
+    },
+    {
+      "failure": "deletion-only mutation detail",
+      "regression_test": "test_canonical_identity_handles_deletion_only_diff"
+    },
+    {
+      "failure": "one semantic mutation represented by multiple hunks",
+      "regression_test": "test_canonical_identity_handles_one_mutation_spanning_multiple_hunks"
+    },
+    {
+      "failure": "preflight cache contains terminal no-op outcomes",
+      "regression_test": "test_preflight_reset_marks_exact_generated_mutants_untested"
+    },
+    {
+      "failure": "runner-specific kernel metadata invalidates checkpoints",
+      "regression_test": "test_runtime_cache_identity_uses_stable_os_and_architecture"
+    },
+    {
+      "failure": "installation-instance metadata invalidates checkpoints",
+      "regression_test": "test_checkpoint_environment_identity_ignores_installation_records_but_not_versions"
+    },
+    {
+      "failure": "cross-calibration or conflicting terminal outcomes",
+      "regression_test": "test_checkpoint_merge_rejects_cross_calibration_drift_extra_and_conflict"
+    },
+    {
+      "failure": "incomplete or tampered preflight corpus",
+      "regression_test": "test_resumable_shard_rejects_tampered_preflight_corpus_before_execution"
+    },
+    {
+      "failure": "overlapping shard source ranges",
+      "regression_test": "test_aggregate_shards_rejects_overlapping_source_ranges"
+    }
+  ]
+}

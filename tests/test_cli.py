@@ -75,6 +75,36 @@ def test_cli_doctor(tmp_path, monkeypatch):
     cmd_doctor(args)
 
 
+def test_mutation_preflight_human_output_is_actionable():
+    from fettle.cli import _render_mutation
+
+    output = _render_mutation({
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "files": ["src/app.py"], "generated": 2, "canonicalized": 2,
+        "collisions": 0,
+    })
+
+    assert "Engine: mutmut 2.5.1" in output
+    assert "Scope: 1 file(s)" in output
+    assert "Rejected details: 0" in output
+    assert "Next: fettle mutation run --changed" in output
+
+
+@pytest.mark.parametrize(
+    ("report", "exit_code"),
+    [
+        ({"status": "completed", "passed": True}, 0),
+        ({"status": "completed", "passed": False}, 1),
+        ({"status": "tool_error", "passed": False}, 2),
+        ({"status": "unknown", "passed": False}, 2),
+    ],
+)
+def test_mutation_exit_contract(report, exit_code):
+    from fettle.cli import _mutation_exit
+
+    assert _mutation_exit(report) == exit_code
+
+
 def test_cli_explain_supports_detailed_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     from fettle.trace import log_decision

@@ -83,3 +83,31 @@ class TestExplainEntry:
         entry = {"hook": "verify", "status": "unknown", "findings": [],
                  "evidence": [{"evidence_id": "ev-1", "kind": "command"}]}
         assert json.loads(explain_entry(entry, json_output=True)) == entry
+
+    def test_detailed_canonical_evidence_shows_decision_dimensions(self):
+        entry = {
+            "hook": "ci_gate", "status": "unknown", "timestamp": "now", "findings": [],
+            "evidence": [{
+                "artifact_digest": "sha256:" + "a" * 64,
+                "kind": "fettle.ci", "schema_version": "1",
+                "expected": {}, "availability": "available",
+                "authority": "diagnostic_only",
+                "inspection": {
+                    "producer": "fettle.ci", "scope": "CI, Docs",
+                    "source_binding": "sha256:source", "policy_binding": "sha256:policy",
+                    "result": "pass", "completeness": "complete",
+                    "freshness": "current", "validity": "wrong_policy",
+                    "accepted": False, "reason": "policy binding changed",
+                    "recovery_action": "fettle ci wait",
+                },
+            }],
+        }
+
+        output = explain_entry(entry, detailed=True)
+
+        for text in (
+            "fettle.ci", "CI, Docs", "sha256:source", "sha256:policy", "pass",
+            "complete", "current", "wrong_policy", "rejected",
+            "policy binding changed", "fettle ci wait", "diagnostic only",
+        ):
+            assert text in output

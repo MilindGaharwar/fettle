@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Canonical Verification Evidence
+### Canonical Evidence
 
 - Added a zero-runtime-dependency canonical evidence kernel with immutable
   artifacts and references, deterministic full SHA-256 content identities,
@@ -20,9 +20,15 @@
   Cross-process determinism, split writes, policy/source/scope replay,
   occurrence substitution, installed-CLI output, and host-wire compatibility
   have regression coverage.
-- CI, trace, coverage, UAT, integrations, mutation, and override migration remain
-  separately gated under P68-P70; local verification evidence does not replace
-  remote CI authority or become an attestation.
+- Remote CI now writes an independent canonical sidecar bound to its exact
+  candidate, policy, workflow scope, producer, toolchain, result, completeness,
+  and occurrence. Copied, stale, malformed, incomplete, or mismatched evidence
+  remains non-pass; local verification evidence cannot replace remote authority.
+- Trace retains bounded canonical references as diagnostic-only history, while
+  detailed explain and report output expose matching human/JSON acceptance and
+  rejection reasons. Durable attestations remain a separate P41 boundary.
+- Coverage, UAT, integrations, mutation, and override migration remain separately
+  gated under P69-P70.
 
 ## v1.10.0 — Reproducible Mutation Evidence
 

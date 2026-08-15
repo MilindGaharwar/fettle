@@ -82,6 +82,51 @@ def check_environment() -> list[dict]:
     return checks
 
 
+def check_mutation_readiness() -> list[dict]:
+    """Report whether the pinned Python mutation engine is ready to preflight."""
+    from fettle.config import load_config
+
+    try:
+        mutation = load_config(".").get("mutation", {})
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        return [{
+            "name": "mutation", "required": False, "ok": False,
+            "status": "unavailable",
+            "detail": f"configuration unavailable ({exc}) — run: fettle config --validate",
+        }]
+
+    if not mutation.get("enabled", False):
+        return [{
+            "name": "mutation", "required": False, "ok": True,
+            "status": "disabled",
+            "detail": "disabled — enable [mutation] before running mutation preflight",
+        }]
+
+    path = _which("mutmut")
+    if not path:
+        return [{
+            "name": "mutation", "required": False, "ok": False,
+            "status": "unavailable",
+            "detail": "mutmut==2.5.1 not on PATH — install: "
+                      "python -m pip install -r requirements-mutation.txt",
+        }]
+
+    version = _version_of(path, ["version"])
+    if version != "mutmut version 2.5.1":
+        return [{
+            "name": "mutation", "required": False, "ok": False,
+            "status": "unsupported",
+            "detail": f"{version or 'unknown version'} at {path}; expected 2.5.1 — install: "
+                      "python -m pip install -r requirements-mutation.txt",
+        }]
+
+    return [{
+        "name": "mutation", "required": False, "ok": True,
+        "status": "ready",
+        "detail": f"mutmut 2.5.1 at {path} — run: fettle mutation preflight",
+    }]
+
+
 def check_commit_guards() -> list[dict]:
     """Warn when the repo declares pre-commit hooks but they aren't wired (WP-141).
 
@@ -464,7 +509,8 @@ def main() -> int:
                         help="Verify pinned tools' installed files against wheel RECORD hashes (WP-147)")
     args = parser.parse_args()
 
-    checks = (check_environment() + check_commit_guards() + check_org_policy()
+    checks = (check_environment() + check_mutation_readiness()
+              + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health()
               + check_runner_governance() + check_mcp_trust()
               + check_integrations() + check_workflows())

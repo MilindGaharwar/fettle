@@ -48,6 +48,8 @@ than reading every subsystem.
   for installed-CLI evidence.
 - [Mutation quality contract](mutation-quality.ux-spec.md): user-facing states,
   evidence semantics, and graduation boundaries for Python mutation testing.
+- [Mutation quality playbook](mutation-quality-playbook.md): setup, validation
+  funnel, cache isolation, exit semantics, and recovery.
 - [Roadmap](ROADMAP.md): shipped baseline, active trust work, and graduation
   triggers.
 - [Advisory code-intelligence evaluation](advisory-code-intelligence-evaluation.md):

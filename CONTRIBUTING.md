@@ -53,6 +53,10 @@ must still be verified. Changes to evaluation scenarios also require:
 uv run --extra evals python3 -m fettle.evals_runner validate
 ```
 
+Changes to mutation behavior must follow the
+[mutation quality playbook](docs/mutation-quality-playbook.md): fixtures first,
+then preflight, narrow replay, and only then held-out full verification.
+
 ## Pull requests
 
 Explain the user-visible problem, the smallest solution, and the checks run.
