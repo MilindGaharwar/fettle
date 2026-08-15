@@ -31,8 +31,6 @@ fettle check --all --json
 ### Violations State Example
 When checking `app.py` based on `broken.py`, finding records populate with stable schema fields (`file`, `line`, `code`, `message`, `severity`, `tool`):
 
-JSON
-
 ```json
 {
   "findings": [
@@ -52,8 +50,6 @@ JSON
 ### Clean State Example
 When `app.py` is fixed, the JSON output returns a clean findings list:
 
-JSON
-
 ```json
 {
   "findings": [],
@@ -67,10 +63,7 @@ message in its finding, so this CLI-only proof does not manufacture a trace that
 does not exist.
 
 Reset at any time:
-
-Bash
-
-```
+```bash
 cp broken.py app.py
 ```
 
