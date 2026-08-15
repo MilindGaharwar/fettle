@@ -1456,6 +1456,27 @@ def cmd_uat(args: argparse.Namespace) -> None:
     sys.exit(0 if all(c.ready for c in caps) else 1)
 
 
+def cmd_completion(args: argparse.Namespace) -> None:
+    """Validate authoritative milestone completion manifests."""
+    from fettle.completion import evaluate_manifests, render_completion
+    from fettle.paths import find_repo_root
+
+    root = find_repo_root()
+    if root is None:
+        result = evaluate_manifests(Path.cwd(), milestone=args.milestone)
+        result.errors.insert(0, "not inside a Fettle repository")
+        result.valid = False
+        result.complete = False
+        result.exit_code = 2
+    else:
+        result = evaluate_manifests(Path(root), milestone=args.milestone)
+    if args.json:
+        print(json.dumps(result.as_dict(), indent=2))
+    else:
+        print(render_completion(result), end="")
+    sys.exit(result.exit_code)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fettle", description="Quality enforcement CLI")
     parser.add_argument("--version", action="version", version=f"fettle {_version()}")
@@ -1525,6 +1546,16 @@ def main() -> None:
         command.add_argument("--run-id", action="append", required=True, help="Independent CI run ID (twice)")
         command.add_argument("--floor", type=float, required=True, help="Accepted repository score floor")
         command.add_argument("--json", action="store_true", help="JSON output")
+
+    p_completion = subparsers.add_parser(
+        "completion", help="Validate milestone completion evidence",
+    )
+    completion_sub = p_completion.add_subparsers(dest="completion_action", required=True)
+    p_completion_validate = completion_sub.add_parser(
+        "validate", help="Derive completion from required evidence",
+    )
+    p_completion_validate.add_argument("--milestone", help="Validate one milestone ID")
+    p_completion_validate.add_argument("--json", action="store_true", help="JSON output")
 
     p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
     p_doctor.add_argument("--json", action="store_true", help="JSON output")
@@ -1855,6 +1886,7 @@ def main() -> None:
         "explain": cmd_explain,
         "baseline": cmd_baseline,
         "mutation": cmd_mutation,
+        "completion": cmd_completion,
         "doctor": cmd_doctor,
         "integrations": cmd_integrations,
         "init": cmd_init,

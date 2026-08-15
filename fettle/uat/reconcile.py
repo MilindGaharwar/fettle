@@ -112,7 +112,12 @@ def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple
         "surface": session.get("surface", ""),
         "evidence_id": evidence_id,
         "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
-                      "observed": v.observed, "note": v.note} for v in verdicts],
+                       "observed": v.observed, "note": v.note} for v in verdicts],
+        "completion": {
+            "complete": bool(verdicts) and all(v.verdict == "CONFIRMED" for v in verdicts),
+            "required_total": len(verdicts),
+            "required_confirmed": sum(v.verdict == "CONFIRMED" for v in verdicts),
+        },
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

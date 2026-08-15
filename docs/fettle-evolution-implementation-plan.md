@@ -502,6 +502,19 @@ and floor 49.1 with target 80.0; baseline digest
 P63 completion evidence: linked playbook, automatic agent instruction surface,
 doctor and CLI acceptance output, adversarial corpus, and manual UAT record.
 
+Correction 2026-08-15: implementation, automated contracts, and error-state UAT
+are complete, but the required installed-CLI success flow exceeded its manual
+120-second window. That timeout proves timeout handling only; it does not satisfy
+the successful preflight criterion. P63 remains in progress until a fresh
+installed sample exits 0 with complete collision-free canonical evidence and
+the copied validation-funnel commands are exercised successfully.
+
+Corrective evidence 2026-08-15: an exact rebuilt wheel in a dedicated
+environment completed preflight with 6 generated = 6 canonicalized details,
+zero rejected details, and zero collisions. The copied changed-scope flow then
+killed 6/6 mutants with no timeout, suspicious, or untested outcomes. P63 is
+complete; the original timeout remains error-path evidence only.
+
 ##### P64: Automated Methodology And Fettle-Wide Adoption (P2)
 
 21. [ ] Add a Fettle rule that detects full mutation workflows without a

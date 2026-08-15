@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "milestone": "P63",
+  "revision": "corrective-2026-08-15",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "installed-preflight-success",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p63-installed-cli.json",
+        "sha256": "aab55d3ef85fcea369c62055ae4656cd0887e6eb41f341c636157504ed64bcf0",
+        "revision": "corrective-2026-08-15"
+      },
+      "recovery": "Rebuild and rerun the installed-wheel preflight"
+    },
+    {
+      "id": "copied-validation-funnel",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p63-installed-cli.json",
+        "sha256": "aab55d3ef85fcea369c62055ae4656cd0887e6eb41f341c636157504ed64bcf0",
+        "revision": "corrective-2026-08-15"
+      },
+      "recovery": "Run doctor, preflight, changed mutation, and status in a clean repository"
+    }
+  ]
+}

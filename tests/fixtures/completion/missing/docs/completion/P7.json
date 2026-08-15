@@ -1,0 +1,1 @@
+{"schema_version":1,"milestone":"P7","revision":"rev-7","status":"in_progress","uat_decision":"FIX_FIRST","criteria":[{"id":"success","kind":"success","required":true,"verdict":"confirmed","observed":"success","evidence":{"path":"evidence/absent.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000","revision":"rev-7"},"recovery":"Create evidence"}]}

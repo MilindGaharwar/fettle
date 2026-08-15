@@ -510,6 +510,28 @@ def test_collect_records_includes_killed_mutants_with_module_local_locator(tmp_p
     }
 
 
+def test_collect_records_falls_back_when_mutmut_show_all_is_empty(tmp_path):
+    (tmp_path / "src").mkdir()
+    source = "def eligible_for_discount(total: int) -> bool:\n    return total >= 100\n"
+    (tmp_path / "src/calculator.py").write_text(source)
+    fixture = json.loads((FIXTURES / "mutmut-show.json").read_text())["records"][0]
+    ids = {state: [] for state in ("killed", "survived", "timeout", "suspicious", "untested", "skipped")}
+    ids["survived"] = [fixture["engine_id"]]
+
+    with patch("fettle.mutation_test._run", side_effect=[
+        _proc(out="To show a mutant: mutmut show <id>\n"),
+        _proc(out=fixture["diff"]),
+    ]) as run:
+        records, error = _collect_mutant_records(
+            str(tmp_path), ids, {"src/calculator.py": ["tests/test_calculator.py"]},
+            ["src/calculator.py"],
+        )
+
+    assert error is None
+    assert records is not None and records[0]["engine_id"] == fixture["engine_id"]
+    assert run.call_args_list[1].args[0] == ["mutmut", "show", fixture["engine_id"]]
+
+
 def test_collect_records_includes_skipped_mutants(tmp_path):
     (tmp_path / "src").mkdir()
     source = "def eligible_for_discount(total: int) -> bool:\n    return total >= 100\n"

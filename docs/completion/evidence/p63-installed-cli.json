@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-15",
+  "package": {
+    "name": "finefettle",
+    "version": "1.10.0",
+    "wheel_sha256": "0f672382420bece474302bb761c13fee40a9c929a2d0365c8d4b39e4e5d2e41b"
+  },
+  "environment": {
+    "python": "3.14.5",
+    "mutmut": "2.5.1",
+    "isolated_venv": true,
+    "absolute_executable_verified": true
+  },
+  "fixture": {
+    "source_sha256": "9f42f9f05b3daa12cbe1b258dc94980748d824dba179c5ea919a7cd4df6af322",
+    "tests_sha256": "ea121f9dfa39552e8402ab1b65e81ee270de66c605dab859ef063b1feccac22e",
+    "config_sha256": "66260e913552ceeeb6df13b17f55da4269d07da55e410d0fde31b6cb7c862051"
+  },
+  "preflight": {
+    "exit_code": 0,
+    "status": "completed",
+    "passed": true,
+    "generated": 6,
+    "canonicalized": 6,
+    "rejected": 0,
+    "collisions": 0
+  },
+  "changed_run": {
+    "exit_code": 0,
+    "status": "completed",
+    "passed": true,
+    "killed": 6,
+    "survived": 0,
+    "timeout": 0,
+    "suspicious": 0,
+    "untested": 0,
+    "score": 100.0
+  }
+}

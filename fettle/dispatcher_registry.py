@@ -277,6 +277,24 @@ CHECKS: tuple[CheckSpec, ...] = (
         order=53,
         budget_ms=100,
     ),
+    # Stop — reject malformed or contradictory milestone completion claims.
+    CheckSpec(
+        name="completion_gate",
+        run=_lazy("fettle.completion_gate"),
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=54,
+        budget_ms=100,
+    ),
+    CheckSpec(
+        name="completion_manifest_gate",
+        run=_lazy("fettle.completion_gate"),
+        events=frozenset({"PostToolUse"}),
+        tools=frozenset({"Write", "Edit"}),
+        extensions=frozenset({".json"}),
+        order=18,
+        budget_ms=100,
+    ),
     # Stop — coverage (advisory by default, after blocking checks)
     CheckSpec(
         name="coverage_gate",

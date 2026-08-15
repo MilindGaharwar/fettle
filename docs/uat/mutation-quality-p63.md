@@ -12,7 +12,8 @@ Date: 2026-08-15
 | Distinguish success, policy failure, and integrity/tool failure | Exit-code contract | Pass |
 | Recover from missing or unsupported mutmut | Doctor unit and JSON contracts | Pass |
 | Preserve historical failure regressions | Permanent fixture manifest | Pass |
-| Run clean-sample preflight inside a 120-second manual window | Temporary installed-CLI project | Timed out; no success claimed |
+| Run clean-sample preflight inside a 120-second manual window | Exact wheel in a dedicated environment | Pass: 6 generated, 6 canonicalized, 0 rejected/collisions |
+| Execute the copied local validation funnel | Clean installed-CLI project | Pass: changed run killed 6/6 in 4.036 s |
 
 Observed readiness:
 
@@ -35,10 +36,11 @@ linked the public mutation playbook.
   timeout, and incomplete evidence.
 - Recovery: every visible readiness/error state names one next command or repair.
 
-The temporary-project preflight exceeded 120 seconds and was terminated by the
-UAT harness. This is retained as error-state evidence only; it did not authorize
-a replay or full run. Accepted preflight and calibration evidence remains the
-retained run set in the implementation plan.
+The original temporary-project preflight exceeded 120 seconds and remains
+error-state evidence only. The corrective UAT pinned the exact wheel digest,
+fixture digests, dedicated environment, `mutmut==2.5.1`, and executable PATH.
+It exposed and repaired mutmut 2.5.1's empty `show all` behavior, then completed
+preflight and changed-scope execution. No full mutation run was used.
 
 ## Accessibility
 
@@ -60,8 +62,17 @@ retained run set in the implementation plan.
 | P1 | Installed `fettle doctor` initially probed mutmut with unsupported `--version` and falsely reported the pinned engine unsupported | Probe now uses `mutmut version`, matching execution preflight |
 | P1 | Installed `fettle doctor --json` did not forward `--json` to the package doctor | CLI parser and subprocess forwarding now preserve JSON output |
 
+## Status
+
+- Implementation: Complete.
+- Automated verification: Complete.
+- Error-state UAT: Complete.
+- Successful installed preflight UAT: Complete.
+- Copied validation funnel: Complete.
+- P63 milestone: Complete.
+
 ## Decision
 
-P63 developer guidance and readiness are acceptable for advisory use. Full
-mutation execution was not repeated: it remains held-out verification, and the
-accepted independent calibration evidence is unchanged.
+SHIP. The prior timeout still proves only its error path; independent installed
+success evidence now confirms the required flow. Full mutation execution was
+not repeated and the accepted independent calibration evidence is unchanged.

@@ -238,6 +238,10 @@ DEFAULTS: dict[str, Any] = {
             "require_semver": True,
             "check_breaking_changes": True,
         },
+        "completion": {
+            "enabled": False,
+            "mode": "advisory",
+        },
         "architecture_boundaries": {
             "enabled": False,
             "rules": [],

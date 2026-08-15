@@ -43,6 +43,7 @@ jobs:
           # fettle must be importable from any cwd (same fix as ci.yml).
           python -m pip install --quiet -e .
           python -m pytest tests/ -q
+          fettle completion validate
 
       - name: Build sdist + wheel
         run: |

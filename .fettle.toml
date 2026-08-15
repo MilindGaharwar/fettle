@@ -25,6 +25,10 @@ mode = "advisory"
 enabled = true
 mode = "enforce"
 
+[gates.completion]
+enabled = true
+mode = "enforce"
+
 [gates.plan]
 exclude = [
     "docs/change-integrity-implementation-plan.md",

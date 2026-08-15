@@ -84,6 +84,13 @@ def run_check(ctx):
         elif len(parts) >= 1:
             findings.append("BREAKING CHANGE detected in commits but version may not reflect a MAJOR bump")
 
+    completion_cfg = ctx.config.get("gates", {}).get("completion", {})
+    if completion_cfg.get("enabled", False):
+        from fettle.completion import evaluate_manifests
+        completion = evaluate_manifests(ctx.cwd)
+        if not completion.valid:
+            findings.extend("completion: " + error for error in completion.errors)
+
     if not findings:
         return CheckResult.allow()
 

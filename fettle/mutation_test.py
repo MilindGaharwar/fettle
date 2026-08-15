@@ -1261,7 +1261,20 @@ def _collect_mutant_records(
         shown = _run(["mutmut", "show", "all"], root, 120)
         if shown.returncode:
             return None, _error("tool_error", "mutmut show all failed", stderr=_bounded(shown.stderr or shown.stdout))
-        details = _parse_show_all(shown.stdout, set(states))
+        try:
+            details = _parse_show_all(shown.stdout, set(states))
+        except ValueError as exc:
+            if "mutation details are missing" not in str(exc):
+                raise
+            details = {}
+            for engine_id in sorted(states, key=int):
+                detail = _run(["mutmut", "show", engine_id], root, 120)
+                if detail.returncode:
+                    return None, _error(
+                        "tool_error", f"mutmut show {engine_id} failed",
+                        stderr=_bounded(detail.stderr or detail.stdout),
+                    )
+                details[engine_id] = detail.stdout
         for engine_id, state in list(states.items()):
             if state in {"untested", "skipped"} and not details[engine_id].strip():
                 ids[state].remove(engine_id)

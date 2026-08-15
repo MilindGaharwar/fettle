@@ -118,6 +118,9 @@ jobs:
       - name: Tests
         run: python -m pytest tests/ -q
 
+      - name: Validate completion evidence
+        run: fettle completion validate
+
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null
 

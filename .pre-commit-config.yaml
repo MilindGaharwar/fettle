@@ -36,6 +36,12 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: fettle-completion
+        name: fettle completion evidence
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m fettle.cli completion validate'
+        language: system
+        pass_filenames: false
+        always_run: true
       # Full suite at push time (~4.5 min): the commit->CI gap closer.
       # Pushes are batch events; a red CI costs more than the wait.
       - id: fettle-full-suite

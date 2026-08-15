@@ -98,6 +98,11 @@ class TestArtifactsAndSummary:
         data = json.loads(Path(path).read_text())
         assert data["session_id"] == "uat-x"
         assert len(data["verdicts"]) == 2
+        assert data["completion"] == {
+            "complete": False,
+            "required_total": 2,
+            "required_confirmed": 0,
+        }
 
     def test_format_verdicts_expands_problems(self):
         text = ("SCENARIO: greeter/S1\nOBSERVED: Hola\nOUTCOME: differs\n"

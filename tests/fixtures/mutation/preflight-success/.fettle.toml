@@ -1,0 +1,7 @@
+[mutation]
+enabled = true
+paths = ["src/"]
+full_timeout_s = 120
+
+[mutation.test_mappings]
+"src/app.py" = ["tests/test_app.py"]

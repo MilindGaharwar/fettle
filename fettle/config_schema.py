@@ -76,6 +76,7 @@ MODE_ENUMS: dict[str, frozenset[str]] = {
     "gates.coverage.mode": frozenset({"advisory", "enforce"}),
     "gates.deploy_safety.mode": frozenset({"advisory", "enforce"}),
     "gates.release.mode": frozenset({"advisory", "enforce"}),
+    "gates.completion.mode": frozenset({"advisory", "enforce"}),
     "gates.artifact_integrity.mode": frozenset({"advisory", "enforce"}),
     "gates.provenance.mode": frozenset({"none", "marker", "manifest", "commit"}),
     "gates.worklog.mode": frozenset({"advisory", "enforce"}),

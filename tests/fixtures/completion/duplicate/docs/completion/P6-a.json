@@ -1,0 +1,1 @@
+{"schema_version":1,"milestone":"P6","revision":"rev-6","status":"complete","uat_decision":"SHIP","criteria":[{"id":"success","kind":"success","required":true,"verdict":"confirmed","observed":"success","evidence":{"path":"evidence/success.json","sha256":"0fe5319189e23237c8aa6a8f29e355123e9cd130d6b760908f56ca412b2cdff4","revision":"rev-6"},"recovery":"Re-run UAT"}]}
