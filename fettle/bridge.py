@@ -191,9 +191,22 @@ def validate_bridge() -> BridgeValidation:
         files = manifest.get("files")
         if not isinstance(files, dict) or not files:
             raise ValueError("manifest file inventory is missing")
+        resolved_root = root.resolve()
         for relative, expected in files.items():
-            path = root / relative
-            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            if not isinstance(relative, str) or not relative:
+                raise ValueError("manifest file path is not text")
+            relative_path = Path(relative)
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                raise ValueError(f"manifest file path escapes bridge root: {relative}")
+            path = root / relative_path
+            try:
+                resolved_path = path.resolve()
+                resolved_path.relative_to(resolved_root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"manifest file path escapes bridge root: {relative}"
+                ) from exc
+            if not resolved_path.is_file() or hashlib.sha256(resolved_path.read_bytes()).hexdigest() != expected:
                 raise ValueError(f"file digest mismatch: {relative}")
     except (OSError, ValueError, json.JSONDecodeError, TypeError) as exc:
         return BridgeValidation(False, "stale", f"installed bridge invalid ({exc}) — run: fettle init")
@@ -215,24 +228,59 @@ def publish_bridge(*, dry_run: bool) -> BridgeResult:
         return BridgeResult("created", f"(dry-run) would publish installed bridge at {root}")
     base.parent.mkdir(parents=True, exist_ok=True)
     base.mkdir(mode=0o700, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{__version__}.tmp-", dir=base))
-    backup = base / f".{__version__}.backup"
+    had_prior = root.exists()
+    temporary = None
+    backup_container = None
+    backup = None
     try:
+        temporary = Path(tempfile.mkdtemp(prefix=f".{__version__}.tmp-", dir=base))
+        if had_prior:
+            backup_container = Path(tempfile.mkdtemp(
+                prefix=f".{__version__}.backup-", dir=base,
+            ))
+            backup = backup_container / "root"
         _write_tree(temporary, root)
-        if root.exists():
-            if backup.exists():
-                shutil.rmtree(backup)
+        if backup is not None:
             os.replace(root, backup)
         os.replace(temporary, root)
     except (OSError, ValueError) as exc:
-        shutil.rmtree(temporary, ignore_errors=True)
-        if backup.exists() and not root.exists():
-            os.replace(backup, root)
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
+        if backup is None and root.exists():
+            concurrent = validate_bridge()
+            if concurrent.ok:
+                return BridgeResult("ok", concurrent.detail)
+        if backup is not None and backup.exists():
+            try:
+                if root.exists():
+                    shutil.rmtree(root)
+                os.replace(backup, root)
+            except OSError as rollback_exc:
+                return BridgeResult(
+                    "error",
+                    f"could not publish installed bridge: {exc}; rollback failed: "
+                    f"{rollback_exc} — prior bridge retained at {backup}",
+                )
+        if backup_container is not None:
+            shutil.rmtree(backup_container, ignore_errors=True)
         return BridgeResult("error", f"could not publish installed bridge: {exc}")
     validation = validate_bridge()
     if validation.ok:
-        shutil.rmtree(backup, ignore_errors=True)
-    elif backup.exists():
-        shutil.rmtree(root, ignore_errors=True)
-        os.replace(backup, root)
+        if backup_container is not None:
+            shutil.rmtree(backup_container, ignore_errors=True)
+    elif backup is not None and backup.exists():
+        try:
+            shutil.rmtree(root)
+            os.replace(backup, root)
+        except OSError as exc:
+            return BridgeResult(
+                "error",
+                f"{validation.detail}; rollback failed: {exc} — prior bridge retained at {backup}",
+            )
+        shutil.rmtree(backup_container, ignore_errors=True)
+    else:
+        try:
+            shutil.rmtree(root)
+        except OSError as exc:
+            return BridgeResult("error", f"{validation.detail}; could not remove failed bridge: {exc}")
     return BridgeResult("created" if validation.ok else "error", validation.detail)

@@ -14,7 +14,7 @@ Date: 2026-08-16
 | Detect and repair a tampered bridge | Modified `opencode/fettle.ts` | PASS; `stale` with `run: fettle init`, then `supported-installed` |
 | OpenCode real session invokes governance | OpenCode 1.18.15 | PASS; host wrote the requested file, surfaced F401, and recorded session-linked trace evidence |
 | Claude Code real session | Claude Code 2.1.233, managed Bedrock authentication | BLOCKED; candidate plugin loaded, but the provider returned HTTP 429 before a tool call |
-| Codex CLI real session | Codex CLI 0.147.0, isolated ChatGPT authentication | BLOCKED; the host created the requested file, but did not invoke configured Fettle hooks |
+| Codex CLI real session | Codex CLI 0.147.0, isolated ChatGPT authentication | PASS; native tool matchers invoked governance and recorded session-linked F401 evidence |
 | Gemini CLI real session | Gemini CLI 0.55.1, Google OAuth | BLOCKED; Google rejected the retired client for the account tier with `UNSUPPORTED_CLIENT` |
 
 ## Evidence
@@ -37,7 +37,12 @@ Date: 2026-08-16
 - Codex session `01a0098d-225c-7a80-8cc1-6c565420ddd1` authenticated through
   ChatGPT and wrote the requested two-line F401 file. Codex reported its
   `hooks` feature as stable and enabled, but no Fettle trace or configured hook
-  invocation was observed.
+  invocation was observed. Wire-level probes identified native `apply_patch`
+  events rather than Claude-style `Write|Edit|Bash` matcher names. After
+  registering Codex-native matchers and normalizing a single-file patch target,
+  session `01a009e9-61bc-7252-ad78-9783a23aab14` wrote
+  `app/codex-fettle-final.py` and produced a session-linked `adapter_check`
+  violation for Ruff F401.
 - Claude session `b17b927a-2f3a-49e9-98bb-4cedf4a2debe` loaded the candidate
   `1.11.1` bridge plugin under managed Bedrock authentication, then stopped on
   HTTP 429 before any tool call.
@@ -49,8 +54,7 @@ Date: 2026-08-16
 | Host | Blocker | Recovery |
 |---|---|---|
 | Claude Code | Managed Bedrock provider returned HTTP 429 before a tool call | Repeat when provider capacity is available |
-| Codex CLI | Authenticated session did not invoke enabled `hooks.json` commands | Resolve Codex 0.147 hook event/schema compatibility in issue #9, then repeat |
-| Gemini CLI | OAuth rejected retired client `0.55.1` with `UNSUPPORTED_CLIENT` | Assess Antigravity migration in issue #8; use an eligible API/Workspace path only if already available |
+| Gemini CLI | OAuth rejected retired client `0.55.1` with `UNSUPPORTED_CLIENT` | Use an eligible API/Workspace path if available; Antigravity remains gated on live CLI conformance |
 
 The Codex lifecycle sentinel was intentionally a foreign top-level field.
 Fettle preserved it, as required, while Codex 0.147.0 correctly rejected that
@@ -69,7 +73,6 @@ hook invocation separately.
 
 CONDITIONAL PASS. Installed artifact publication, upgrade convergence,
 configuration preservation, stale recovery, and OpenCode real-session
-governance are observed. Authentication was established for Claude Code,
-Codex CLI, and Gemini CLI, but their success criteria remain non-pass because
-of provider throttling, unobserved Codex hook invocation, and upstream Gemini
-client retirement respectively.
+and Codex CLI governance are observed. Authentication was established for
+Claude Code and Gemini CLI, but their success criteria remain non-pass because
+of provider throttling and upstream Gemini client retirement respectively.

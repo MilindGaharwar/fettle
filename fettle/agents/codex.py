@@ -17,6 +17,7 @@ re-verify against a live Codex install when available.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fettle.agents import claude_code
@@ -30,6 +31,18 @@ _TOOL_MAP = {
     "apply_patch": "Edit",
 }
 
+_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+
+
+def _normalize_tool_input(tool_name: str | None, tool_input: object) -> dict[str, Any]:
+    normalized = dict(tool_input) if isinstance(tool_input, dict) else {}
+    if tool_name != "apply_patch" or not isinstance(normalized.get("command"), str):
+        return normalized
+    paths = set(_PATCH_FILE_RE.findall(normalized["command"]))
+    if len(paths) == 1:
+        normalized["file_path"] = paths.pop()
+    return normalized
+
 
 def matches(payload: dict[str, Any]) -> bool:
     """Codex payloads are Claude-shaped plus a required ``turn_id``."""
@@ -41,6 +54,10 @@ def matches(payload: dict[str, Any]) -> bool:
 
 def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
     tool_name = payload.get("tool_name")
-    if isinstance(tool_name, str) and tool_name in _TOOL_MAP:
-        payload = {**payload, "tool_name": _TOOL_MAP[tool_name]}
+    if isinstance(tool_name, str):
+        payload = {
+            **payload,
+            "tool_name": _TOOL_MAP.get(tool_name, tool_name),
+            "tool_input": _normalize_tool_input(tool_name, payload.get("tool_input")),
+        }
     return claude_code.translate(payload, fallback_cwd)

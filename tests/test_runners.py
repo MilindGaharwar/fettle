@@ -16,7 +16,9 @@ from fettle.runners.opencode import OpenCodeRunner
 
 #: (runner class, binary, flags that MUST appear in argv)
 CLI_RUNNERS = [
-    (CodexRunner, "codex", ["exec", "--full-auto"]),
+    (CodexRunner, "codex", [
+        "-a", "never", "-s", "workspace-write", "--dangerously-bypass-hook-trust", "exec",
+    ]),
     (GeminiRunner, "gemini", ["--yolo", "-p"]),
     (OpenCodeRunner, "opencode", ["run"]),
 ]
@@ -91,6 +93,16 @@ class TestClaudeRunner:
 class TestCliRunners:
     """Codex/Gemini/OpenCode adapters share the _subprocess core — same
     fail-visible contract as ClaudeRunner, pinned per adapter."""
+
+    def test_codex_places_global_flags_before_exec(self, tmp_path):
+        proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+        with patch("fettle.runners._subprocess.shutil.which", return_value="/usr/bin/codex"), \
+             patch("fettle.runners._subprocess.subprocess.run", return_value=proc) as mock_run:
+            CodexRunner().run("prompt", tmp_path)
+        assert mock_run.call_args[0][0] == [
+            "/usr/bin/codex", "-a", "never", "-s", "workspace-write",
+            "--dangerously-bypass-hook-trust", "exec", "prompt",
+        ]
 
     @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
     def test_protocol_conformance(self, cls, binary, flags):

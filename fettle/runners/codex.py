@@ -1,10 +1,9 @@
 """Codex CLI headless adapter (Stage 13).
 
 LIVE runner: launches ``codex exec`` (non-interactive mode). Trusted-
-operator use only; never runs in public CI. ``--full-auto`` is the quorum
-approach's Codex equivalent of Claude's --dangerously-skip-permissions:
-in exec mode approval prompts cannot be answered, so the run gets a
-sandboxed workspace-write policy with no prompts.
+operator use only; never runs in public CI. Approval and sandbox flags give
+the run a workspace-write policy with no prompts. Fettle also bypasses the
+interactive hook-trust prompt so its registered hooks execute headlessly.
 """
 
 from __future__ import annotations
@@ -23,4 +22,8 @@ class CodexRunner:
         return shutil.which("codex") is not None
 
     def run(self, prompt: str, cwd: Path, timeout_s: int = 600) -> RunnerResult:
-        return run_cli("codex", ["exec", "--full-auto", prompt], cwd, timeout_s)
+        args = [
+            "-a", "never", "-s", "workspace-write",
+            "--dangerously-bypass-hook-trust", "exec", prompt,
+        ]
+        return run_cli("codex", args, cwd, timeout_s)

@@ -46,6 +46,10 @@ The bridge root follows operating-system user-data conventions:
 Files are generated in a sibling temporary directory, assigned user-only write
 permissions where supported, and atomically published. On Windows, the bridge
 inherits the user's profile ACL because POSIX mode bits do not enforce a DACL.
+Windows command serialization and junction detection are covered by portable
+contract tests, but real Windows publication remains unverified because the
+current UAT environment has no Windows runner. Windows support therefore retains
+this explicit platform-verification blocker.
 `manifest.json` records:
 
 - schema version;
