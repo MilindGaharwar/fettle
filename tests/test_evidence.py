@@ -161,6 +161,23 @@ def test_non_pass_artifact_never_maps_to_pass():
     assert result.result_state == ResultState.TOOL_ERROR
 
 
+@pytest.mark.parametrize("result_state", list(ResultState))
+def test_parser_accepts_each_supported_result_state_as_a_string(result_state):
+    artifact = _artifact(result_state=result_state.value)
+
+    parsed = parse_artifact(artifact.to_dict())
+
+    assert parsed.result_state == result_state.value
+
+
+def test_parser_rejects_unsupported_result_state_with_domain_error():
+    artifact = _artifact().to_dict()
+    artifact["result_state"] = "unexpected"
+
+    with pytest.raises(ValueError, match="^unsupported result_state$"):
+        parse_artifact(artifact)
+
+
 def test_missing_and_explicit_invalidation_have_safe_recovery_only():
     missing = validate_artifact(None, _context())
     stale = validate_artifact(_artifact(), _context(invalidated=True))

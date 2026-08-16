@@ -328,8 +328,10 @@ def _artifact_from_dict(value: Mapping[str, object], *, verify_digest: bool) -> 
     if "revision" in source:
         normalized_source["revision"] = _normalized_text(source["revision"], "source.revision")
     result_state = _normalized_text(value["result_state"], "result_state")
-    if result_state not in ResultState:
-        raise ValueError("unsupported result_state")
+    try:
+        ResultState(result_state)
+    except ValueError as exc:
+        raise ValueError("unsupported result_state") from exc
     completeness = _normalized_text(value["completeness"], "completeness")
     if completeness not in {"complete", "partial", "unknown"}:
         raise ValueError("unsupported completeness")
