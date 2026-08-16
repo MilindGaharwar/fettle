@@ -128,13 +128,14 @@ class TestAgentDetection:
         (Path.home() / ".codex").mkdir()
         named = _by_name(run_init(repo)[0])
         assert named["codex"].status == "created"
-        assert named["codex-enable"].status == "action"  # features.hooks toggle
+        assert named["codex-trust"].status == "action"
+        assert "/hooks" in named["codex-trust"].detail
         config = json.loads((Path.home() / ".codex" / "hooks.json").read_text())
         for event in ("PreToolUse", "PostToolUse", "Stop"):
             groups = config["hooks"][event]
             assert any("dispatcher.py" in h["command"]
                        for g in groups for h in g["hooks"])
-        assert config["hooks"]["PreToolUse"][0]["matcher"] == "Write|Edit|Bash"
+        assert config["hooks"]["PreToolUse"][0]["matcher"] == "shell|local_shell|apply_patch"
 
     def test_codex_idempotent_and_preserves_existing(self, repo) -> None:
         codex_dir = Path.home() / ".codex"
@@ -150,6 +151,36 @@ class TestAgentDetection:
         pre = config["hooks"]["PreToolUse"]
         assert any(h["command"] == "other-hook" for g in pre for h in g["hooks"])
         assert any("dispatcher.py" in h["command"] for g in pre for h in g["hooks"])
+
+    def test_codex_upgrades_fettle_matcher_without_changing_foreign_hook(self, repo) -> None:
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir()
+        old_command = "/old/venv/bin/python -m fettle.dispatcher"
+        old_events = {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-hook"}]},
+                {"matcher": "Write|Edit|Bash", "hooks": [
+                    {"type": "command", "command": old_command},
+                ]},
+            ],
+            "PostToolUse": [{"matcher": "Write|Edit|Bash|Read", "hooks": [
+                {"type": "command", "command": old_command},
+            ]}],
+        }
+        (codex_dir / "hooks.json").write_text(json.dumps({"hooks": old_events}))
+
+        run_init(repo)
+
+        groups = json.loads((codex_dir / "hooks.json").read_text())["hooks"]["PreToolUse"]
+        assert groups[0]["matcher"] == "Bash"
+        assert groups[0]["hooks"][0]["command"] == "other-hook"
+        fettle_group = next(
+            group for group in groups
+            if any("dispatcher.py" in hook["command"] for hook in group["hooks"])
+        )
+        assert fettle_group["matcher"] == "shell|local_shell|apply_patch"
+        post = json.loads((codex_dir / "hooks.json").read_text())["hooks"]["PostToolUse"]
+        assert post[0]["matcher"] == "shell|local_shell|apply_patch"
 
     def test_codex_malformed_config_is_action_not_crash(self, repo) -> None:
         codex_dir = Path.home() / ".codex"
@@ -281,6 +312,47 @@ class TestAgentDetection:
             assert old_command not in text
             assert "foreign-hook" in text
             assert text.count("-m fettle.dispatcher") == 3
+
+    @pytest.mark.parametrize("prior_state", ["dangling", "missing-manifest", "malformed-manifest"])
+    def test_wheel_mode_preserves_unverified_prior_registrations(
+        self, repo, monkeypatch, tmp_path, prior_state
+    ) -> None:
+        from fettle import bridge
+
+        claude_dir = Path.home() / ".claude"
+        claude_dir.mkdir()
+        opencode_dir = Path.home() / ".config" / "opencode"
+        opencode_dir.mkdir(parents=True)
+        base = tmp_path / "bridge"
+        prior = base / "1.11.0"
+        if prior_state != "dangling":
+            prior.mkdir(parents=True)
+            if prior_state == "malformed-manifest":
+                (prior / "manifest.json").write_text("{not json")
+        plugins = claude_dir / "plugins"
+        plugins.mkdir()
+        link = plugins / "fettle"
+        link.symlink_to(prior)
+        prior_uri = (prior / "opencode" / "fettle.ts").as_uri()
+        foreign_uri = "file:///foreign.ts"
+        config_path = opencode_dir / "config.json"
+        config_path.write_text(json.dumps({
+            "theme": "dark", "plugin": [foreign_uri, prior_uri],
+        }))
+        monkeypatch.setattr(init_cmd, "_is_clone_mode", lambda: False)
+        monkeypatch.setattr(bridge, "bridge_base", lambda: base)
+
+        named = _by_name(run_init(repo)[0])
+
+        config = json.loads(config_path.read_text())
+        assert named["bridge"].status == "created"
+        assert named["claude-code"].status == "action"
+        assert link.is_symlink()
+        assert link.readlink() == prior
+        assert config["theme"] == "dark"
+        assert foreign_uri in config["plugin"]
+        assert prior_uri in config["plugin"]
+        assert (bridge.bridge_dir() / "opencode" / "fettle.ts").as_uri() in config["plugin"]
 
 
 class TestPreCommit:

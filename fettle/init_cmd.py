@@ -219,6 +219,9 @@ def _merge_hook_events(existing: dict, events: dict[str, dict]) -> bool:
                 if hook.get("command") != command:
                     hook["command"] = command
                     changed = True
+                if "matcher" in entry and group.get("matcher") != entry["matcher"]:
+                    group["matcher"] = entry["matcher"]
+                    changed = True
                 retained_hooks.append(hook)
             if retained_hooks or not original_hooks:
                 if retained_hooks != original_hooks:
@@ -247,8 +250,8 @@ def init_codex(dry_run: bool) -> list[Step]:
 
     Codex's hook wire is Claude-compatible; hooks.json uses the same
     event/matcher schema as the inline [hooks] table in config.toml.
-    JSON is used because the stdlib cannot write TOML. Hooks only fire
-    when `features.hooks = true` in config.toml — reported as an action.
+    JSON is used because the stdlib cannot write TOML. Interactive Codex
+    requires users to review and trust newly registered hooks via `/hooks`.
     """
     codex_dir = Path.home() / ".codex"
     if not codex_dir.is_dir():
@@ -267,14 +270,14 @@ def init_codex(dry_run: bool) -> list[Step]:
     if not isinstance(hooks, dict):
         hooks = {}
     events = {
-        "PreToolUse": {"matcher": "Write|Edit|Bash",
-                       "hooks": [{"type": "command", "command": command, "timeout": 10}]},
-        "PostToolUse": {"matcher": "Write|Edit|Bash|Read",
-                        "hooks": [{"type": "command", "command": command, "timeout": 15}]},
+        "PreToolUse": {"matcher": "shell|local_shell|apply_patch",
+                        "hooks": [{"type": "command", "command": command, "timeout": 10}]},
+        "PostToolUse": {"matcher": "shell|local_shell|apply_patch",
+                         "hooks": [{"type": "command", "command": command, "timeout": 15}]},
         "Stop": {"hooks": [{"type": "command", "command": command, "timeout": 60}]},
     }
-    action = Step("codex-enable", "action",
-                  "ensure `[features] hooks = true` in ~/.codex/config.toml — hooks are off by default")
+    action = Step("codex-trust", "action",
+                  "open Codex and use `/hooks` to review and trust the registered hooks")
     if not _merge_hook_events(hooks, events):
         return [Step("codex", "ok", f"hooks already registered in {hooks_path}"), action]
     if dry_run:

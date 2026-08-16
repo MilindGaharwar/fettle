@@ -117,6 +117,50 @@ class TestRobustness:
                    "tool_input": {"command": "ls"}, "cwd": "/r"}
         assert normalize(payload, fallback_cwd="/fb").tool_name == "Bash"
 
+    def test_codex_single_file_patch_exposes_target_path(self) -> None:
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "turn_id": "t",
+            "tool_name": "apply_patch",
+            "tool_input": {"command": "*** Begin Patch\n*** Add File: app/new.py\n+x = 1\n*** End Patch"},
+            "cwd": "/r",
+        }
+
+        hook_input = normalize(payload, fallback_cwd="/fb")
+
+        assert hook_input.tool_name == "Edit"
+        assert hook_input.tool_input["file_path"] == "app/new.py"
+
+    def test_codex_multi_file_patch_does_not_guess_target_path(self) -> None:
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "turn_id": "t",
+            "tool_name": "apply_patch",
+            "tool_input": {"command": (
+                "*** Begin Patch\n*** Update File: app/a.py\n@@\n-a = 1\n+a = 2\n"
+                "*** Update File: app/b.py\n@@\n-b = 1\n+b = 2\n*** End Patch"
+            )},
+            "cwd": "/r",
+        }
+
+        hook_input = normalize(payload, fallback_cwd="/fb")
+
+        assert "file_path" not in hook_input.tool_input
+
+    def test_codex_malformed_patch_does_not_guess_target_path(self) -> None:
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "turn_id": "t",
+            "tool_name": "apply_patch",
+            "tool_input": {"command": "*** Begin Patch\n*** End Patch"},
+            "cwd": "/r",
+        }
+
+        hook_input = normalize(payload, fallback_cwd="/fb")
+
+        assert hook_input.tool_name == "Edit"
+        assert "file_path" not in hook_input.tool_input
+
 
 class TestDispatcherEndToEnd:
     """The dispatcher accepts NATIVE payloads from every agent.
