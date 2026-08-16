@@ -1,11 +1,16 @@
 """WP-F — Diff Coverage Gate tests."""
 
+import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from fettle.dispatcher_types import Decision, HookContext, HookInput
+from fettle.evidence import parse_artifact
 
 
 def _make_ctx(cwd: Path, session_id: str = "test-cov", mode: str = "advisory",
@@ -223,3 +228,157 @@ def test_stale_coverage_warns(tmp_path):
         result = run_check(ctx)
     assert result.decision == Decision.ADVISORY
     assert "stale" in result.message
+
+
+def test_passing_coverage_writes_complete_portable_canonical_sidecar(tmp_path):
+    from fettle.coverage_gate import EVIDENCE_RELPATH, RECOVERY_COMMAND, run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\nb\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1, 2]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    ctx = _make_ctx(tmp_path)
+
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2})):
+        result = run_check(ctx)
+
+    artifact_bytes = (tmp_path / EVIDENCE_RELPATH).read_bytes()
+    artifact = parse_artifact(artifact_bytes)
+    report_digest = "sha256:" + hashlib.sha256(
+        (tmp_path / "coverage.json").read_bytes()
+    ).hexdigest()
+    assert result.decision == Decision.ALLOW
+    assert artifact.kind == "fettle.coverage"
+    assert artifact.result_state == "pass"
+    assert artifact.completeness == "complete"
+    assert artifact.payload["coverage_report"] == {
+        "digest": report_digest,
+        "path": "coverage.json",
+    }
+    assert artifact.payload["edited_line_scope"] == (
+        {"lines": (1, 2), "path": "app.py"},
+    )
+    assert artifact.payload["recovery_command"] == RECOVERY_COMMAND
+    assert str(tmp_path).encode() not in artifact_bytes
+
+
+def test_violation_retains_legacy_reference_and_adds_bound_canonical_reference(tmp_path):
+    from fettle.coverage_gate import EVIDENCE_RELPATH, run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\nb\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    ctx = _make_ctx(tmp_path, threshold=80)
+
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2})):
+        result = run_check(ctx)
+
+    artifact = parse_artifact((tmp_path / EVIDENCE_RELPATH).read_bytes())
+    assert result.decision == Decision.ADVISORY
+    assert result.message == "Diff coverage below threshold:\napp.py: 50% (1/2 lines)"
+    assert result.evidence[0].evidence_id.startswith("ev-")
+    assert result.evidence[0].kind == "coverage"
+    assert result.evidence[1].artifact_digest == artifact.artifact_digest
+    assert result.evidence[1].expected == {
+        "source_snapshot_digest": artifact.source["snapshot_digest"],
+        "policy_digest": artifact.policy_digest,
+        "scope_digest": artifact.scope_digest,
+        "producer_id": "fettle.coverage",
+    }
+    assert artifact.result_state == "violation"
+
+
+def test_stale_coverage_writes_recoverable_non_pass_evidence(tmp_path):
+    from fettle.coverage_gate import EVIDENCE_RELPATH, RECOVERY_COMMAND, run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    coverage_path = tmp_path / "coverage.json"
+    edits_path = state_dir / "test-cov" / "edits.jsonl"
+    old = time.time() - 60
+    os.utime(coverage_path, (old, old))
+    os.utime(edits_path, None)
+
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1})):
+        result = run_check(_make_ctx(tmp_path))
+
+    artifact = parse_artifact((tmp_path / EVIDENCE_RELPATH).read_bytes())
+    assert result.decision == Decision.ADVISORY
+    assert result.message == "Coverage data is stale — re-run tests to enable the coverage gate"
+    assert artifact.result_state == "unknown"
+    assert artifact.payload["stale"] is True
+    assert artifact.payload["recovery_command"] == RECOVERY_COMMAND
+
+
+def test_canonical_evidence_false_rolls_back_without_changing_result(tmp_path):
+    from fettle.coverage_gate import EVIDENCE_RELPATH, run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\nb\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    ctx = _make_ctx(tmp_path)
+    ctx.config["gates"]["coverage"]["canonical_evidence"] = False
+
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1, 2})):
+        result = run_check(ctx)
+
+    assert result.decision == Decision.ADVISORY
+    assert result.message == "Diff coverage below threshold:\napp.py: 50% (1/2 lines)"
+    assert len(result.evidence) == 1
+    assert result.evidence[0].evidence_id.startswith("ev-")
+    assert not (tmp_path / EVIDENCE_RELPATH).exists()
+
+
+def test_canonical_coverage_sidecar_detects_tampering(tmp_path):
+    from fettle.coverage_gate import EVIDENCE_RELPATH, run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    (tmp_path / "coverage.json").touch()
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1})):
+        run_check(_make_ctx(tmp_path))
+    sidecar = tmp_path / EVIDENCE_RELPATH
+    artifact = json.loads(sidecar.read_text())
+    artifact["payload"]["stale"] = True
+    sidecar.write_text(json.dumps(artifact, sort_keys=True, separators=(",", ":")))
+
+    with pytest.raises(ValueError, match="digest does not match"):
+        parse_artifact(sidecar.read_bytes())
+
+
+def test_canonical_coverage_write_failure_is_logged_without_changing_result(tmp_path, caplog):
+    from fettle.coverage_gate import run_check
+
+    src = tmp_path / "app.py"
+    src.write_text("a\n")
+    _write_coverage_json(tmp_path, {str(src): {"executed_lines": [1]}})
+    state_dir = tmp_path / "state"
+    _write_edits_jsonl(state_dir, "test-cov", [str(src)])
+    (tmp_path / "coverage.json").touch()
+
+    with (patch("fettle.config.state_dir", return_value=state_dir / "test-cov"),
+          patch("fettle.coverage_gate._get_changed_lines", return_value={1}),
+          patch("fettle.coverage_gate._write_bytes_atomic", side_effect=OSError("full"))):
+        result = run_check(_make_ctx(tmp_path))
+
+    assert result.decision == Decision.ALLOW
+    assert "canonical coverage evidence unavailable" in caplog.text

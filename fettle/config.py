@@ -217,6 +217,7 @@ DEFAULTS: dict[str, Any] = {
         },
         "coverage": {
             "enabled": False,
+            "canonical_evidence": True,
             "threshold": 80,
             "minimum_branch_percent": 0,
             "mode": "advisory",
@@ -354,6 +355,7 @@ DEFAULTS: dict[str, Any] = {
     "integrations": {
         "sonarqube": {
             "enabled": False,
+            "canonical_evidence": True,
             "endpoint": "",           # https:// required unless allow_insecure
             "project_key": "",
             "token_env": "SONAR_TOKEN",
@@ -361,12 +363,14 @@ DEFAULTS: dict[str, Any] = {
         },
         "blackduck": {
             "enabled": False,
+            "canonical_evidence": True,
             "cli_path": "polaris",
             "token_env": "POLARIS_TOKEN",
             "scan_timeout_s": 300,
         },
         "pact": {
             "enabled": False,
+            "canonical_evidence": True,
             "broker_url": "",         # https:// required unless allow_insecure
             "token_env": "PACT_BROKER_TOKEN",
             "allow_insecure": False,
@@ -387,6 +391,7 @@ DEFAULTS: dict[str, Any] = {
     # report-only in this stage.
     "uat": {
         "surfaces": ["auto"],
+        "canonical_evidence": True,
         "app_url": "",
         "start_command": "",
         "runner": "claude",

@@ -13,7 +13,16 @@ from pathlib import Path
 
 import fcntl
 
-from fettle.mutation_test import MUTMUT_VERSION, _STATES, _TEST_RUNNER, _validate_report_schema, compute_score
+from fettle import __version__
+from fettle.evidence import EvidenceArtifact
+from fettle.mutation_test import (
+    MUTMUT_VERSION,
+    _STATES,
+    _TEST_RUNNER,
+    _validate_report_schema,
+    build_mutation_report_artifact,
+    compute_score,
+)
 from fettle.overrides import OverrideContext, OverrideRecord, select_override
 
 BASELINE_SCHEMA_VERSION = "1"
@@ -81,20 +90,46 @@ def _canonical_report_identity(report: dict) -> dict:
     }
 
 
+def _mutation_artifact(report: dict, run_ids: list[str]) -> EvidenceArtifact:
+    return build_mutation_report_artifact(
+        report, ".fettle/mutation-report.json", run_ids=run_ids,
+        calibration_ids=[report["calibration_id"]] if report.get("calibration_id") else [],
+    )
+
+
+def _mutation_override_context(
+    *, check_id: str, scope: str, report: dict, artifact: EvidenceArtifact,
+) -> OverrideContext:
+    return OverrideContext(
+        check_id=check_id,
+        scope=scope,
+        revision=report["revision"],
+        policy_digest=artifact.policy_digest,
+        evidence_id=artifact.artifact_digest,
+        surface="ci",
+        source_snapshot_digest=artifact.source["snapshot_digest"],
+        expected_artifact_kind=artifact.kind,
+        scope_digest=artifact.scope_digest,
+        producer_id=artifact.producer["id"],
+        producer_versions=frozenset({__version__}),
+        producer_implementation_digest=artifact.producer["implementation_digest"],
+    )
+
+
 def _floor_override(
     records: list[OverrideRecord] | tuple[OverrideRecord, ...],
     report: dict,
+    run_ids: list[str],
     now: datetime | None,
 ) -> bool:
-    context = OverrideContext(
+    artifact = _mutation_artifact(report, run_ids)
+    context = _mutation_override_context(
         check_id="mutation.baseline",
         scope=report["files_tested"][0] if len(report["files_tested"]) == 1 else ".",
-        revision=report["revision"],
-        policy_digest=report["policy_digest"],
-        evidence_id="baseline-floor",
-        surface="ci",
+        report=report,
+        artifact=artifact,
     )
-    return select_override(records, context, now=now).status == "overridden"
+    return select_override(records, context, now=now, artifact=artifact).status == "overridden"
 
 
 def establish_baseline(
@@ -122,7 +157,7 @@ def establish_baseline(
     first = reports[0]
     if previous is not None:
         validate_baseline(previous)
-        if floor < previous["floor"] and not _floor_override(overrides, first, now):
+        if floor < previous["floor"] and not _floor_override(overrides, first, run_ids, now):
             raise ValueError("baseline floor cannot decrease without a mutation.baseline override")
     created = (now or datetime.now(UTC)).astimezone(UTC).isoformat().replace("+00:00", "Z")
     survivor_fingerprints = sorted(
@@ -328,6 +363,7 @@ def compare_report(
     now: datetime | None = None,
     max_findings_per_line: int = 1,
     max_findings_per_file: int = 7,
+    run_id: str = "comparison",
 ) -> dict:
     try:
         _validate_report_schema(report)
@@ -335,6 +371,7 @@ def compare_report(
     except ValueError as exc:
         return {"status": "unknown", "passed": False, "message": str(exc)}
     evaluation_time = (now or datetime.now(UTC)).astimezone(UTC)
+    artifact = _mutation_artifact(report, [run_id])
     baseline_survivors = set(baseline["survivor_fingerprints"])
     current_survivors = {record["fingerprint"] for record in report["non_killed"] if record["state"] == "survived"}
     classifications_by_id = {item["fingerprint"]: item for item in (classifications or [])}
@@ -353,11 +390,13 @@ def compare_report(
                 and classification["source_context_digest"] == record.get("source_context_digest")
             ):
                 disposition = "non_actionable"
-        context = OverrideContext(
-            check_id="mutation.survivor", scope=record["file"], revision=report["revision"],
-            policy_digest=report["policy_digest"], evidence_id=fingerprint, surface="ci",
+        context = _mutation_override_context(
+            check_id="mutation.survivor", scope=record["file"], report=report,
+            artifact=artifact,
         )
-        if disposition == "new" and select_override(overrides, context, now=evaluation_time).status == "overridden":
+        if disposition == "new" and select_override(
+            overrides, context, now=evaluation_time, artifact=artifact,
+        ).status == "overridden":
             disposition = "waived"
         compared.append({**record, "disposition": disposition})
     preview: list[dict] = []

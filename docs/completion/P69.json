@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "milestone": "P69",
+  "revision": "p69-2026-08-16",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "producer-contracts-and-parity",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p69-producer-migration.json",
+        "sha256": "33527f6451691157c94127633e677d828ac5d0a0a498e6430cb57924631b8150",
+        "revision": "p69-2026-08-16"
+      },
+      "recovery": "Rerun the focused P69 producer and parity suites"
+    },
+    {
+      "id": "strict-override-and-rollback",
+      "kind": "error_path",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p69-override-rejection.json",
+        "sha256": "3b5eaa0c7584f5a4e3d1f5a2a6619926bcec826e9c24ab3091b3735177d547c4",
+        "revision": "p69-2026-08-16"
+      },
+      "recovery": "Rerun wrong-binding, malformed evidence, and rollback tests"
+    },
+    {
+      "id": "full-regression-suite",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p69-producer-migration.json",
+        "sha256": "33527f6451691157c94127633e677d828ac5d0a0a498e6430cb57924631b8150",
+        "revision": "p69-2026-08-16"
+      },
+      "recovery": "Run the unexcluded full pytest suite and fix every failure"
+    }
+  ]
+}

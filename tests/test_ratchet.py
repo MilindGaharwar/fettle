@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from fettle.ratchet import (
+    RuleEvidenceStats,
     aggregate_evidence,
     demote_rule,
     load_ratchet,
@@ -15,7 +16,7 @@ from fettle.ratchet import (
     ratchet_status,
     save_ratchet,
 )
-from fettle.overrides import OverrideRecord, save_override_ledger
+from fettle.overrides import OverrideRecord, _identity, save_override_ledger
 
 
 # --- Fixtures ---
@@ -120,6 +121,13 @@ def test_aggregate_evidence_empty(tmp_path, monkeypatch):
     assert evidence == {}
 
 
+def test_aggregate_type_renamed_without_old_alias():
+    import fettle.ratchet as ratchet
+
+    assert RuleEvidenceStats.__name__ == "RuleEvidenceStats"
+    assert not hasattr(ratchet, "Evidence")
+
+
 def test_aggregate_evidence_from_trace(tmp_path, monkeypatch):
     """Counts fires from relevant trace entries."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
@@ -165,6 +173,10 @@ def test_aggregate_evidence_from_trace(tmp_path, monkeypatch):
     assert evidence["F401"].last_fire == "2026-07-10T10:01:00"
     assert "E501" in evidence
     assert evidence["E501"].total_fires == 1
+    assert evidence["F401"].source_window_start == "2026-07-10T10:00:00"
+    assert evidence["F401"].source_window_end == "2026-07-10T10:01:00"
+    assert len(evidence["F401"].source_digest) == 64
+    assert evidence["F401"].source_complete is True
 
 
 def test_aggregate_evidence_with_fp_stamps(tmp_path, monkeypatch):
@@ -232,6 +244,34 @@ def test_aggregate_evidence_fp_rate(tmp_path, monkeypatch):
     assert evidence["SEC001"].fp_rate == pytest.approx(0.4)
 
 
+def test_aggregate_evidence_digest_is_order_independent(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    entries = [
+        {"timestamp": "2026-07-10T10:01:00", "hook": "post_edit", "status": "violation", "findings": [{"code": "F401"}]},
+        {"timestamp": "2026-07-10T10:00:00", "hook": "post_edit", "status": "violation", "findings": [{"code": "F401"}]},
+    ]
+    _write_trace(tmp_path, entries)
+    first = aggregate_evidence(tmp_path)["F401"].source_digest
+    (tmp_path / "fettle" / "trace.jsonl").unlink()
+    _write_trace(tmp_path, reversed(entries))
+
+    assert aggregate_evidence(tmp_path)["F401"].source_digest == first
+
+
+def test_aggregate_evidence_surfaces_malformed_source(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    _write_trace(tmp_path, [
+        {"timestamp": "2026-07-10T10:00:00", "hook": "post_edit", "status": "violation", "findings": [{"code": "F401"}]},
+    ])
+    with open(tmp_path / "fettle" / "trace.jsonl", "a") as f:
+        f.write("{malformed\n")
+
+    evidence = aggregate_evidence(tmp_path)["F401"]
+
+    assert evidence.source_complete is False
+    assert evidence.malformed_source_records == 1
+
+
 # --- promote_rule ---
 
 
@@ -259,6 +299,7 @@ def test_promote_rule_sufficient_evidence(tmp_path, monkeypatch):
     data = load_ratchet(tmp_path)
     assert data["rules"]["F401"]["mode"] == "enforce"
     assert data["rules"]["F401"]["promoted_at"] is not None
+    assert len(data["rules"]["F401"]["evidence"]["source_digest"]) == 64
 
 
 def test_promote_rule_too_few_fires(tmp_path, monkeypatch):
@@ -343,12 +384,15 @@ def test_promote_rule_already_enforced(tmp_path, monkeypatch):
 
 
 def _demotion_override(tmp_path, rule_id="F401"):
-    record = OverrideRecord.create(
-        actor="maintainer", reason="Too many false positives in new codebase",
-        timestamp="2026-08-01T00:00:00Z", expiry="2099-08-01T00:00:00Z",
-        check_id="ratchet.demote", scope=f"rules/{rule_id}", revision="a" * 40,
-        policy_digest="b" * 64, evidence_id="ev-ratchet", surface="ci",
-    )
+    payload = {
+        "schema_version": "1", "actor": "maintainer",
+        "reason": "Too many false positives in new codebase",
+        "timestamp": "2026-08-01T00:00:00Z", "expiry": "2099-08-01T00:00:00Z",
+        "check_id": "ratchet.demote", "scope": f"rules/{rule_id}",
+        "revision": "a" * 40, "policy_digest": "b" * 64,
+        "evidence_id": "ev-ratchet", "surface": "ci",
+    }
+    record = OverrideRecord.from_dict({**payload, "override_id": _identity(payload)})
     save_override_ledger(tmp_path, [record])
     return record
 
@@ -452,6 +496,10 @@ def test_ratchet_status_format(tmp_path, monkeypatch):
     assert f401_row["false_positives"] == 1
     assert f401_row["true_positives"] == 5
     assert f401_row["fp_rate"] == pytest.approx(1 / 6)
+    assert f401_row["source_window_start"] == "2026-07-10T10:00:00"
+    assert f401_row["source_window_end"] == "2026-07-11T09:00:00"
+    assert len(f401_row["source_digest"]) == 64
+    assert f401_row["source_complete"] is True
     assert f401_row["eligible_promote"] is True  # 6 fires, FP rate ~17% < 20%
     assert f401_row["eligible_demote"] is False
 

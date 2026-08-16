@@ -7,6 +7,7 @@ Data stored at {project_root}/.fettle/ratchet.json.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -20,7 +21,7 @@ SCHEMA_VERSION = "1"
 
 
 @dataclass
-class Evidence:
+class RuleEvidenceStats:
     """Aggregated evidence for a single rule."""
 
     total_fires: int = 0
@@ -28,6 +29,11 @@ class Evidence:
     false_positives: int = 0
     last_fire: str | None = None
     last_fp_stamp: str | None = None
+    source_window_start: str | None = None
+    source_window_end: str | None = None
+    source_digest: str = ""
+    source_complete: bool = True
+    malformed_source_records: int = 0
 
     @property
     def fp_rate(self) -> float:
@@ -87,23 +93,38 @@ def _get_fp_path() -> str:
     return os.path.join(state_dir, "fettle", "false-positives.jsonl")
 
 
-def _read_jsonl(path: str) -> list[dict]:
-    """Read a JSONL file, skipping malformed lines."""
+def _read_jsonl(path: str) -> tuple[list[dict], int]:
+    """Read JSON object lines and report records that could not be used."""
     if not os.path.isfile(path):
-        return []
+        return [], 0
     entries = []
+    malformed = 0
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line:
                 try:
-                    entries.append(json.loads(line))
+                    entry = json.loads(line)
                 except json.JSONDecodeError:
+                    malformed += 1
                     continue
-    return entries
+                if not isinstance(entry, dict):
+                    malformed += 1
+                    continue
+                entries.append(entry)
+    return entries, malformed
 
 
-def aggregate_evidence(project_root: Path) -> dict[str, Evidence]:
+def _source_digest(records: list[dict]) -> str:
+    canonical_records = sorted(
+        json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        for record in records
+    )
+    canonical = "[" + ",".join(canonical_records) + "]"
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def aggregate_evidence(project_root: Path) -> dict[str, RuleEvidenceStats]:
     """Scan trace and FP files to compute per-rule evidence.
 
     Counts findings from trace entries where hook is post_edit or quality_gate
@@ -113,55 +134,88 @@ def aggregate_evidence(project_root: Path) -> dict[str, Evidence]:
     trace_path = _get_trace_path()
     fp_path = _get_fp_path()
 
+    trace_entries, malformed_trace = _read_jsonl(trace_path)
+    fp_entries, malformed_fp = _read_jsonl(fp_path)
+    malformed_records = malformed_trace + malformed_fp
+
     # Count fires per rule from trace
     rule_fires: dict[str, int] = {}
     rule_last_fire: dict[str, str] = {}
+    rule_source_records: dict[str, list[dict]] = {}
+    rule_source_timestamps: dict[str, list[str]] = {}
 
     relevant_hooks = {"post_edit", "quality_gate"}
     relevant_statuses = {"violation", "advisory"}
 
-    for entry in _read_jsonl(trace_path):
+    for entry in trace_entries:
         hook = entry.get("hook", "")
         status = entry.get("status", "")
         if hook not in relevant_hooks or status not in relevant_statuses:
             continue
         findings = entry.get("findings", [])
         timestamp = entry.get("timestamp", "")
+        if not isinstance(findings, list):
+            malformed_records += 1
+            continue
+        if not isinstance(timestamp, str):
+            malformed_records += 1
+            timestamp = ""
+        included_rules: set[str] = set()
         for finding in findings:
+            if not isinstance(finding, dict):
+                malformed_records += 1
+                continue
             code = finding.get("code", "")
-            if not code:
+            if not isinstance(code, str) or not code:
+                malformed_records += 1
                 continue
             rule_fires[code] = rule_fires.get(code, 0) + 1
+            included_rules.add(code)
             if timestamp:
-                rule_last_fire[code] = timestamp
+                rule_last_fire[code] = max(rule_last_fire.get(code, timestamp), timestamp)
+                rule_source_timestamps.setdefault(code, []).append(timestamp)
+        for code in included_rules:
+            rule_source_records.setdefault(code, []).append({"source": "trace", "record": entry})
 
     # Count FP stamps per rule
     rule_fps: dict[str, int] = {}
     rule_last_fp: dict[str, str] = {}
 
-    for entry in _read_jsonl(fp_path):
+    for entry in fp_entries:
         rule = entry.get("rule", "")
-        if not rule:
-            continue
-        rule_fps[rule] = rule_fps.get(rule, 0) + 1
         timestamp = entry.get("timestamp", "")
+        if not isinstance(rule, str) or not rule:
+            malformed_records += 1
+            continue
+        if not isinstance(timestamp, str):
+            malformed_records += 1
+            timestamp = ""
+        rule_fps[rule] = rule_fps.get(rule, 0) + 1
+        rule_source_records.setdefault(rule, []).append({"source": "false_positive", "record": entry})
         if timestamp:
-            rule_last_fp[rule] = timestamp
+            rule_last_fp[rule] = max(rule_last_fp.get(rule, timestamp), timestamp)
+            rule_source_timestamps.setdefault(rule, []).append(timestamp)
 
-    # Merge into Evidence objects
+    # Merge into RuleEvidenceStats objects
     all_rules = set(rule_fires.keys()) | set(rule_fps.keys())
-    result: dict[str, Evidence] = {}
+    result: dict[str, RuleEvidenceStats] = {}
 
     for rule in all_rules:
         fires = rule_fires.get(rule, 0)
         fps = rule_fps.get(rule, 0)
         tps = max(fires - fps, 0)
-        result[rule] = Evidence(
+        timestamps = rule_source_timestamps.get(rule, [])
+        result[rule] = RuleEvidenceStats(
             total_fires=fires,
             true_positives=tps,
             false_positives=fps,
             last_fire=rule_last_fire.get(rule),
             last_fp_stamp=rule_last_fp.get(rule),
+            source_window_start=min(timestamps) if timestamps else None,
+            source_window_end=max(timestamps) if timestamps else None,
+            source_digest=_source_digest(rule_source_records.get(rule, [])),
+            source_complete=malformed_records == 0,
+            malformed_source_records=malformed_records,
         )
 
     return result
@@ -225,11 +279,11 @@ def promote_rule(
 
 
 def demote_rule(project_root: Path, rule_id: str, override_id: str) -> str:
-    """Demote enforce -> advisory through an active canonical override.
+    """Demote enforce -> advisory through the explicit legacy rollback path.
 
     Returns status message.
     """
-    from fettle.overrides import load_override_ledger
+    from fettle.overrides import OverrideContext, load_override_ledger, select_override
 
     if not override_id.strip():
         return "Refused: a recorded override ID is required for demotion"
@@ -241,14 +295,26 @@ def demote_rule(project_root: Path, rule_id: str, override_id: str) -> str:
     )
     if override is None:
         return f"Refused: override '{override_id}' was not found"
-    if override.is_expired():
-        return f"Refused: override '{override_id}' is expired"
     if not (
         override.check_id == "ratchet.demote"
         and override.scope == f"rules/{rule_id}"
         and override.surface == "ci"
     ):
         return f"Refused: override '{override_id}' does not authorize demotion of '{rule_id}'"
+    selection = select_override(
+        [override],
+        OverrideContext(
+            check_id="ratchet.demote",
+            scope=f"rules/{rule_id}",
+            revision=override.revision,
+            policy_digest=override.policy_digest,
+            evidence_id=override.evidence_id,
+            surface="ci",
+            legacy_rollback=True,
+        ),
+    )
+    if selection.status != "overridden":
+        return f"Refused: override '{override_id}' is not active legacy rollback evidence"
 
     data = load_ratchet(project_root)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -258,7 +324,7 @@ def demote_rule(project_root: Path, rule_id: str, override_id: str) -> str:
             "mode": "advisory",
             "promoted_at": None,
             "demoted_at": None,
-            "evidence": asdict(Evidence()),
+            "evidence": asdict(RuleEvidenceStats(source_digest=_source_digest([]))),
         }
 
     rule_data = data["rules"][rule_id]
@@ -294,7 +360,7 @@ def ratchet_status(project_root: Path) -> list[dict]:
 
     for rule_id in sorted(all_rules):
         rule_data = data.get("rules", {}).get(rule_id, {})
-        rule_ev = evidence.get(rule_id, Evidence())
+        rule_ev = evidence.get(rule_id, RuleEvidenceStats(source_digest=_source_digest([])))
 
         mode = rule_data.get("mode", "advisory")
         fires = rule_ev.total_fires
@@ -317,6 +383,11 @@ def ratchet_status(project_root: Path) -> list[dict]:
             "true_positives": rule_ev.true_positives,
             "false_positives": rule_ev.false_positives,
             "fp_rate": fp_rate,
+            "source_window_start": rule_ev.source_window_start,
+            "source_window_end": rule_ev.source_window_end,
+            "source_digest": rule_ev.source_digest,
+            "source_complete": rule_ev.source_complete,
+            "malformed_source_records": rule_ev.malformed_source_records,
             "eligible_promote": eligible_promote,
             "eligible_demote": eligible_demote,
             "promoted_at": rule_data.get("promoted_at"),

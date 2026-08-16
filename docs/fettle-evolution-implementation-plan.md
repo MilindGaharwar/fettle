@@ -176,7 +176,7 @@ and are planning ranges, not commitments.
 | P66 | Inventory evidence surfaces and freeze the portable artifact contract | immediate, P0 | P6, P8, P33, P44 contracts | 3-5 days | Complete |
 | P67 | Implement the canonical evidence kernel and pilot verification | next minor, P0 | P66 | 5-8 days | Complete |
 | P68 | Bind CI, trace, and inspection to canonical evidence | next minor, P0 | P33, P67 | 5-8 days | Complete |
-| P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Proposed |
+| P69 | Migrate assurance producers and strengthen override binding | following minor, P1 | P35, P62 where applicable, P68 | 7-12 days | Complete |
 | P70 | Run advisory evidence migration and graduate producers independently | after P69, P2 | P37, P69 | 30 qualifying runs | Evidence-gated |
 | P71 | Connect canonical evidence to change-integrity and evaluate persistence | after P45-P50 as applicable, P3 | P45, P49, P70 | 5-10 days | Evidence-gated |
 
@@ -793,26 +793,28 @@ p95 0.359 ms and maximum 3.29 ms against the existing 100 ms budget. See
 Goal: converge assurance producers incrementally without flattening stronger
 domain contracts or changing policy unexpectedly.
 
-24. [ ] Migrate coverage and UAT evidence first; retain their domain payloads,
+24. [x] Migrate coverage and UAT evidence first; retain their domain payloads,
     output states, recovery guidance, and existing acceptance semantics.
-25. [ ] Migrate integration and adapter evidence; map provider trust,
+25. [x] Migrate integration and adapter evidence; map provider trust,
     completeness, determinism, applicability, and tool identity explicitly.
-26. [ ] Integrate mutation by referencing its complete schema-v2 report and
+26. [x] Integrate mutation by referencing its complete schema-v2 report and
     calibration identities. Never replace mutant fingerprints, shard manifests,
     outcome counts, or reproducibility checks with a generic payload.
 27. [ ] Bind state-consistency evidence to the canonical envelope when P53-P60
     execute, while preserving canonical-read, observer, cleanup, and consistency
     semantics as domain records.
-28. [ ] Strengthen overrides so accepted evidence matches revision/source,
+    Deferred from this producer slice because the state-consistency migration
+    remains separately gated by P53-P60 and P70.
+28. [x] Strengthen overrides so accepted evidence matches revision/source,
     policy, scope, surface, check, validity period, and expected artifact kind.
     Missing resolution is non-pass where an override is authoritative, but no
     global evidence database is required.
-29. [ ] Rename `ratchet.Evidence` and `ControlEvidence`; link aggregates to their
+29. [x] Rename `ratchet.Evidence` and `ControlEvidence`; link aggregates to their
     source window/digests where reproducibility is required, without pretending
     each aggregate is a primary observation.
-30. [ ] Add per-producer compatibility and rollback switches. Existing producers
+30. [x] Add per-producer compatibility and rollback switches. Existing producers
     remain authoritative until their canonical path passes parity and review.
-31. [ ] Document producer-specific payload schemas, retention, invalidation,
+31. [x] Document producer-specific payload schemas, retention, invalidation,
     recovery, and any stronger guarantees layered above the common artifact.
 
 Primary files:
@@ -830,6 +832,12 @@ Primary files:
 P69 completion evidence: producer contract matrices, old/new parity fixtures,
 wrong-binding override rejection, migration rollback tests, and complete
 domain-specific reports reachable from each canonical reference.
+
+Status 2026-08-16: complete for the scoped coverage, UAT, integration,
+mutation, override, ratchet, and compliance producers. Focused P69 tests pass
+(462), the repaired BDD gate passes (10), and the unexcluded full repository
+suite passes (2,631). Ruff, config validation, completion validation, and diff
+checks also pass. See `docs/uat/p69-producer-migration.md`.
 
 ##### P70: Advisory Migration And Independent Graduation (P2)
 

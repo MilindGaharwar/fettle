@@ -9,12 +9,22 @@ reconciler (S5.3). Failures return, never raise (D-S4.1 posture).
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
+import os
+import tempfile
 import time
+import uuid
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from fettle import __version__
+from fettle.evidence import EvidenceArtifact
+
 CHECKPOINT_NAME = "uat-session.json"
+SESSION_EVIDENCE_NAME = "uat-session.evidence.json"
 
 #: Surfaces the session core can always drive. web needs playwright (S5.5).
 DRIVABLE_SURFACES = frozenset({"cli", "api", "library"})
@@ -124,6 +134,99 @@ def _write_checkpoint(worktree: str, data: dict) -> str:
         return f"cannot write checkpoint: {exc}"
 
 
+def _digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _file_digest(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _producer_digest() -> str:
+    return "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = ""
+    finally:
+        if temporary:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+
+
+def _artifact_reference(artifact: EvidenceArtifact) -> dict:
+    return {
+        "artifact_digest": artifact.artifact_digest,
+        "kind": artifact.kind,
+        "schema_version": artifact.schema_version,
+        "expected": {
+            "source_snapshot_digest": artifact.source["snapshot_digest"],
+            "policy_digest": artifact.policy_digest,
+            "scope_digest": artifact.scope_digest,
+            "producer_id": artifact.producer["id"],
+        },
+    }
+
+
+def _write_session_evidence(worktree: str, checkpoint: dict, uat_cfg: dict) -> dict:
+    transcript = Path(str(checkpoint.get("transcript") or ""))
+    status = str(checkpoint.get("status") or "error")
+    if status == "completed":
+        result_state, completeness = "pass", "complete"
+    elif status == "timeout":
+        result_state, completeness = "unknown", "partial"
+    else:
+        result_state, completeness = "tool_error", "partial"
+    artifact = EvidenceArtifact.create(
+        kind="fettle.uat.session",
+        producer={
+            "id": "fettle.uat.session",
+            "version": __version__,
+            "implementation_digest": _producer_digest(),
+        },
+        result_state=result_state,
+        completeness=completeness,
+        trust_class="derived",
+        source={"snapshot_digest": _digest({
+            "session_id": checkpoint.get("session_id", ""),
+            "transcript_digest": _file_digest(transcript),
+        })},
+        policy_digest=_digest(uat_cfg),
+        scope_digest=_digest({
+            "surface": checkpoint.get("surface", ""),
+            "scenario_ids": checkpoint.get("scenario_ids", []),
+        }),
+        observation_id="uat-session-" + uuid.uuid4().hex,
+        observed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        payload={
+            "session_id": str(checkpoint.get("session_id") or ""),
+            "surface": str(checkpoint.get("surface") or ""),
+            "status": status,
+            "scenario_ids": list(checkpoint.get("scenario_ids") or []),
+            "redacted_lines": int(checkpoint.get("redacted_lines") or 0),
+            "transcript": {
+                "path": transcript.name,
+                "digest": _file_digest(transcript),
+            },
+        },
+    )
+    _write_bytes_atomic(
+        Path(worktree) / ".fettle" / SESSION_EVIDENCE_NAME, artifact.to_bytes(),
+    )
+    return _artifact_reference(artifact)
+
+
 def _redact_secrets(transcript: str) -> tuple[str, int]:
     """Secrets never persist through the transcript (doc 10 §4)."""
     from fettle.boundary_scan import scan_text
@@ -206,6 +309,7 @@ def run_session(root: str, config: dict, surface: str,
         "session_id": session_id, "surface": surface,
         "scenario_ids": result.scenario_ids, "status": "running",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "canonical_evidence": bool(uat_cfg.get("canonical_evidence", True)),
     }
     err = _write_checkpoint(str(wt_path), checkpoint)
     if err:
@@ -245,5 +349,14 @@ def run_session(root: str, config: dict, surface: str,
     )
     result.evidence_id = artifact["evidence_id"]
     checkpoint["evidence_id"] = result.evidence_id
-    _write_checkpoint(str(wt_path), checkpoint)
+    if checkpoint["canonical_evidence"] and result.transcript_path:
+        try:
+            checkpoint["canonical_evidence_reference"] = _write_session_evidence(
+                str(wt_path), checkpoint, uat_cfg,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            checkpoint["canonical_evidence_error"] = str(exc) or type(exc).__name__
+    checkpoint_err = _write_checkpoint(str(wt_path), checkpoint)
+    if checkpoint_err and not result.error:
+        result.error = checkpoint_err
     return result

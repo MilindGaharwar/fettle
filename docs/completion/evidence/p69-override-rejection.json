@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "milestone": "P69",
+  "revision": "p69-2026-08-16",
+  "observations": {
+    "missing_evidence": "rejected",
+    "malformed_evidence": "rejected",
+    "tampered_evidence": "rejected",
+    "wrong_source": "rejected",
+    "wrong_policy": "rejected",
+    "wrong_scope": "rejected",
+    "wrong_kind": "rejected",
+    "legacy_without_rollback": "rejected"
+  },
+  "recovery": "Regenerate canonical evidence or use the explicit legacy rollback path"
+}

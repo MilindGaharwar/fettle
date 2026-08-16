@@ -6,14 +6,26 @@ coverage of edited lines. Does NOT generate coverage data in the hook.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import subprocess
+import tempfile
+import unicodedata
+import uuid
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 
+from fettle import __version__
+from fettle.evidence import EvidenceArtifact
+
 logger = logging.getLogger(__name__)
+
+EVIDENCE_RELPATH = os.path.join(".fettle", "coverage-evidence.json")
+RECOVERY_COMMAND = "pytest --cov --cov-report=json"
 
 
 def _get_edited_py_files(edits_path: Path) -> dict[str, set[int]]:
@@ -152,6 +164,171 @@ def _check_branch_coverage(
     return [f"Branch coverage: {pct:.0f}% ({total_covered}/{total} branches from edited lines)"]
 
 
+def _json_digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    )
+    normalized = unicodedata.normalize("NFC", encoded).encode("utf-8")
+    return "sha256:" + hashlib.sha256(normalized).hexdigest()
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _relative_scope(cwd: Path, edited_files: dict[str, set[int]]) -> list[dict[str, object]]:
+    root = cwd.resolve()
+    scope = []
+    for file_path, lines in edited_files.items():
+        relative = Path(file_path).resolve().relative_to(root).as_posix()
+        scope.append({"path": relative, "lines": sorted(lines)})
+    return sorted(scope, key=lambda item: str(item["path"]))
+
+
+def _git_revision(cwd: Path) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True,
+            text=True, timeout=0.5,
+        )
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def _producer_digest() -> str:
+    return _file_digest(Path(__file__))
+
+
+def _effective_policy(cfg: dict) -> dict[str, object]:
+    return {
+        "max_staleness_seconds": str(float(cfg.get("max_staleness_seconds", 0))),
+        "minimum_branch_percent": str(float(cfg.get("minimum_branch_percent", 0))),
+        "mode": str(cfg.get("mode", "advisory")),
+        "scope": str(cfg.get("scope", "changed_lines")),
+        "threshold": str(float(cfg.get("threshold", 80))),
+    }
+
+
+def _coverage_artifact(
+    cwd: Path,
+    coverage_path: Path,
+    edited_files: dict[str, set[int]],
+    cfg: dict,
+    *,
+    result_state: str,
+    stale: bool,
+) -> EvidenceArtifact:
+    scope = _relative_scope(cwd, edited_files)
+    report_digest = _file_digest(coverage_path)
+    revision = _git_revision(cwd)
+    source_files = []
+    for item in scope:
+        path = cwd / str(item["path"])
+        source_files.append({
+            "path": item["path"],
+            "digest": _file_digest(path),
+        })
+    source_projection = {"files": source_files, "revision": revision}
+    source = {"snapshot_digest": _json_digest(source_projection)}
+    if revision:
+        source["revision"] = revision
+    try:
+        report = json.loads(coverage_path.read_text())
+        complete = isinstance(report, dict) and isinstance(report.get("files"), dict)
+    except (json.JSONDecodeError, OSError):
+        complete = False
+    branch_available = bool(complete and any(
+        "executed_branches" in entry or "missing_branches" in entry
+        for entry in report["files"].values()
+        if isinstance(entry, dict)
+    ))
+    policy = _effective_policy(cfg)
+    return EvidenceArtifact.create(
+        kind="fettle.coverage",
+        producer={
+            "id": "fettle.coverage",
+            "version": __version__,
+            "implementation_digest": _producer_digest(),
+        },
+        result_state=result_state,
+        completeness="complete" if complete else "unknown",
+        trust_class="authoritative",
+        source=source,
+        policy_digest=_json_digest(policy),
+        scope_digest=_json_digest(scope),
+        observation_id="coverage-" + uuid.uuid4().hex,
+        observed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        payload={
+            "branch_data_available": branch_available,
+            "coverage_report": {
+                "digest": report_digest,
+                "path": "coverage.json",
+            },
+            "edited_line_scope": scope,
+            "policy": policy,
+            "recovery_command": RECOVERY_COMMAND,
+            "stale": stale,
+        },
+    )
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = ""
+    finally:
+        if temporary:
+            with suppress(OSError):
+                os.unlink(temporary)
+
+
+def _emit_canonical_evidence(
+    cwd: Path,
+    coverage_path: Path,
+    edited_files: dict[str, set[int]],
+    cfg: dict,
+    *,
+    result_state: str,
+    stale: bool = False,
+):
+    if not cfg.get("canonical_evidence", True):
+        return None
+    try:
+        artifact = _coverage_artifact(
+            cwd, coverage_path, edited_files, cfg,
+            result_state=result_state, stale=stale,
+        )
+        _write_bytes_atomic(cwd / EVIDENCE_RELPATH, artifact.to_bytes())
+    except (OSError, TypeError, ValueError):
+        logger.exception("fettle: canonical coverage evidence unavailable")
+        return None
+    from fettle.finding import EvidenceReference
+    return EvidenceReference(
+        None,
+        artifact.kind,
+        artifact_digest=artifact.artifact_digest,
+        schema_version=artifact.schema_version,
+        expected={
+            "source_snapshot_digest": artifact.source["snapshot_digest"],
+            "policy_digest": artifact.policy_digest,
+            "scope_digest": artifact.scope_digest,
+            "producer_id": artifact.producer["id"],
+        },
+    )
+
+
 def run_check(ctx):
     """Stop hook — check diff coverage of edited files."""
     from fettle.dispatcher_types import CheckResult
@@ -179,6 +356,11 @@ def run_check(ctx):
         coverage_mtime = coverage_path.stat().st_mtime
         edits_mtime = edits_path.stat().st_mtime
         if coverage_mtime < edits_mtime - max_staleness:
+            edited_files = _get_edited_py_files(edits_path)
+            _emit_canonical_evidence(
+                cwd, coverage_path, edited_files, cfg,
+                result_state="unknown", stale=True,
+            )
             return CheckResult.advisory(
                 "Coverage data is stale — re-run tests to enable the coverage gate",
                 hook_specific_output={
@@ -215,6 +397,9 @@ def run_check(ctx):
         failures.extend(branch_failures)
 
     if not failures:
+        _emit_canonical_evidence(
+            cwd, coverage_path, edited_files, cfg, result_state="pass",
+        )
         return CheckResult.allow()
 
     msg = "Diff coverage below threshold:\n" + "\n".join(failures[:5])
@@ -222,6 +407,11 @@ def run_check(ctx):
         "coverage", scope="changed_lines", workspace=str(cwd),
     )
     evidence = [EvidenceReference(evidence_data["evidence_id"], "coverage")]
+    canonical = _emit_canonical_evidence(
+        cwd, coverage_path, edited_files, cfg, result_state="violation",
+    )
+    if canonical is not None:
+        evidence.append(canonical)
     mode = cfg.get("mode", "advisory")
     if mode == "enforce":
         return CheckResult.block(msg, hook_specific_output={
