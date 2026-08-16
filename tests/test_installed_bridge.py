@@ -70,6 +70,20 @@ def test_bridge_commands_quote_interpreter_path(tmp_path, monkeypatch):
     assert command.endswith(" -m fettle.dispatcher")
 
 
+def test_bridge_command_preserves_virtualenv_interpreter_symlink(tmp_path, monkeypatch):
+    base_python = tmp_path / "base" / "python"
+    base_python.parent.mkdir()
+    base_python.touch()
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base_python)
+    monkeypatch.setattr(bridge.sys, "executable", str(venv_python))
+
+    command = bridge.dispatcher_command()
+
+    assert command == f"{venv_python} -m fettle.dispatcher"
+
+
 def test_shell_command_uses_windows_serializer(monkeypatch):
     monkeypatch.setattr(bridge.os, "name", "nt")
 

@@ -24,6 +24,7 @@ import subprocess
 import sys
 import shlex
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
 from fettle.install import DEFAULT_FETTLE_TOML, DEFAULT_IGNORE  # noqa: E402
@@ -95,6 +96,13 @@ def init_claude_code(dry_run: bool) -> list[Step]:
         try:
             if link.resolve() == root.resolve():
                 return [Step("claude-code", "ok", f"plugin already linked: {link} -> {root}")]
+            if not _is_clone_mode() and _is_owned_bridge(link.resolve()):
+                if dry_run:
+                    detail = "(dry-run) would update " + str(link) + " -> " + str(root)
+                    return [Step("claude-code", "created", detail)]
+                link.unlink()
+                link.symlink_to(root)
+                return [Step("claude-code", "created", f"updated {link} -> {root}")]
         except OSError:
             pass
         return [Step("claude-code", "action",
@@ -128,11 +136,14 @@ def init_opencode(dry_run: bool) -> list[Step]:
     plugins = config.get("plugin")
     if not isinstance(plugins, list):
         plugins = []
-    if plugin_uri in plugins:
+    previous = [uri for uri in plugins if uri != plugin_uri and _is_owned_bridge_uri(uri)]
+    if plugin_uri in plugins and not previous:
         return [Step("opencode", "ok", "plugin already registered")]
     if dry_run:
         return [Step("opencode", "created", f"(dry-run) would register {plugin_uri}")]
-    plugins.append(plugin_uri)
+    plugins = [uri for uri in plugins if uri not in previous]
+    if plugin_uri not in plugins:
+        plugins.append(plugin_uri)
     config["plugin"] = plugins
     config_path.write_text(json.dumps(config, indent=2) + "\n")
     return [Step("opencode", "created", f"registered plugin in {config_path} — restart OpenCode")]
@@ -144,6 +155,36 @@ def _dispatcher_command() -> str:
         return f"bash {shlex.quote(str(_plugin_root() / 'fettle' / 'run.sh'))} dispatcher.py"
     from fettle.bridge import dispatcher_command
     return dispatcher_command()
+
+
+def _is_owned_bridge(path: Path) -> bool:
+    """Return whether path belongs to a manifest-owned versioned bridge."""
+    from fettle.bridge import bridge_base
+
+    try:
+        path.resolve().relative_to(bridge_base().resolve())
+        root = path if path.is_dir() else path.parents[1]
+        manifest = json.loads((root / "manifest.json").read_text())
+        return manifest.get("schema_version") == 1 and bool(manifest.get("fettle_version"))
+    except (OSError, ValueError, IndexError, json.JSONDecodeError):
+        return False
+
+
+def _is_owned_bridge_uri(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme == "file" and _is_owned_bridge(Path(unquote(parsed.path)))
+
+
+def _is_dispatcher_command(command: object) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        arguments = shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        return False
+    return len(arguments) == 3 and arguments[1:] == ["-m", "fettle.dispatcher"]
 
 
 def _merge_hook_events(existing: dict, events: dict[str, dict]) -> bool:
@@ -159,6 +200,33 @@ def _merge_hook_events(existing: dict, events: dict[str, dict]) -> bool:
         groups = existing.get(event)
         if not isinstance(groups, list):
             groups = []
+        dispatcher_seen = False
+        retained_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                retained_groups.append(group)
+                continue
+            original_hooks = group.get("hooks") or []
+            retained_hooks = []
+            for hook in original_hooks:
+                if not isinstance(hook, dict) or not _is_dispatcher_command(hook.get("command")):
+                    retained_hooks.append(hook)
+                    continue
+                if dispatcher_seen:
+                    changed = True
+                    continue
+                dispatcher_seen = True
+                if hook.get("command") != command:
+                    hook["command"] = command
+                    changed = True
+                retained_hooks.append(hook)
+            if retained_hooks or not original_hooks:
+                if retained_hooks != original_hooks:
+                    group["hooks"] = retained_hooks
+                retained_groups.append(group)
+        if retained_groups != groups:
+            groups = retained_groups
+            existing[event] = groups
         already = any(
             isinstance(g, dict) and any(
                 isinstance(h, dict) and command == h.get("command")

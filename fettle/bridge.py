@@ -60,7 +60,7 @@ def _is_link_like(path: Path) -> bool:
 
 def dispatcher_command() -> str:
     """Return a shell-safe command containing no event-controlled data."""
-    executable = str(Path(sys.executable).resolve())
+    executable = os.path.abspath(sys.executable)
     return _shell_command([executable, "-m", "fettle.dispatcher"])
 
 
@@ -77,7 +77,7 @@ def _commands_source() -> Path:
 
 
 def _opencode_transport() -> str:
-    executable = json.dumps(str(Path(sys.executable).resolve()))
+    executable = json.dumps(os.path.abspath(sys.executable))
     return f'''import {{ spawn }} from "node:child_process"
 
 import type {{ Plugin }} from "@opencode-ai/plugin"
@@ -171,7 +171,7 @@ def _write_tree(root: Path, published_root: Path) -> None:
     manifest = {
         "schema_version": _SCHEMA_VERSION,
         "fettle_version": __version__,
-        "python": str(Path(sys.executable).resolve()),
+        "python": os.path.abspath(sys.executable),
         "files": files,
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -186,7 +186,7 @@ def validate_bridge() -> BridgeValidation:
         manifest = json.loads((root / "manifest.json").read_text())
         if manifest.get("schema_version") != _SCHEMA_VERSION or manifest.get("fettle_version") != __version__:
             raise ValueError("manifest version mismatch")
-        if manifest.get("python") != str(Path(sys.executable).resolve()):
+        if manifest.get("python") != os.path.abspath(sys.executable):
             raise ValueError("Python environment changed")
         files = manifest.get("files")
         if not isinstance(files, dict) or not files:
