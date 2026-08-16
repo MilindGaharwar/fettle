@@ -223,6 +223,65 @@ class TestAgentDetection:
         assert named["bridge"].status == "created"
         assert not tmp_path.joinpath("bridge").exists()
 
+    def test_wheel_mode_upgrades_owned_bridge_registrations(
+        self, repo, monkeypatch, tmp_path
+    ) -> None:
+        from fettle import bridge
+
+        for directory in (".claude", ".codex", ".gemini"):
+            (Path.home() / directory).mkdir()
+        opencode_dir = Path.home() / ".config" / "opencode"
+        opencode_dir.mkdir(parents=True)
+        base = tmp_path / "bridge"
+        old = base / "1.11.0"
+        old.mkdir(parents=True)
+        (old / "manifest.json").write_text(json.dumps({
+            "schema_version": 1, "fettle_version": "1.11.0", "files": {"old": "digest"},
+        }))
+        plugins = Path.home() / ".claude" / "plugins"
+        plugins.mkdir()
+        (plugins / "fettle").symlink_to(old)
+        old_uri = (old / "opencode" / "fettle.ts").as_uri()
+        current_uri = (base / bridge.__version__ / "opencode" / "fettle.ts").as_uri()
+        (opencode_dir / "config.json").write_text(json.dumps({
+            "theme": "dark", "plugin": ["file:///foreign.ts", old_uri, current_uri],
+        }))
+        old_command = "/old/venv/bin/python -m fettle.dispatcher"
+        current_command = f"{sys.executable} -m fettle.dispatcher"
+        codex_config = {"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": "foreign-hook"}]},
+            {"matcher": "Write|Edit|Bash", "hooks": [{"type": "command", "command": old_command}]},
+            {"matcher": "Write|Edit|Bash", "hooks": [{"type": "command", "command": current_command}]},
+        ]}}
+        gemini_config = {"hooks": {"BeforeTool": [
+            {"matcher": "run_shell_command", "hooks": [{"type": "command", "command": "foreign-hook"}]},
+            {"matcher": "run_shell_command|write_file|replace",
+             "hooks": [{"type": "command", "command": old_command}]},
+            {"matcher": "run_shell_command|write_file|replace",
+             "hooks": [{"type": "command", "command": current_command}]},
+        ]}}
+        (Path.home() / ".codex" / "hooks.json").write_text(json.dumps(codex_config))
+        (Path.home() / ".gemini" / "settings.json").write_text(json.dumps(gemini_config))
+        monkeypatch.setattr(init_cmd, "_is_clone_mode", lambda: False)
+        monkeypatch.setattr(bridge, "bridge_base", lambda: base)
+
+        named = _by_name(run_init(repo)[0])
+
+        current = bridge.bridge_dir()
+        assert named["claude-code"].status == "created"
+        assert (plugins / "fettle").resolve() == current.resolve()
+        config = json.loads((opencode_dir / "config.json").read_text())
+        assert config["theme"] == "dark"
+        assert "file:///foreign.ts" in config["plugin"]
+        assert old_uri not in config["plugin"]
+        assert sum("fettle.ts" in uri for uri in config["plugin"]) == 1
+        for path in (Path.home() / ".codex" / "hooks.json",
+                     Path.home() / ".gemini" / "settings.json"):
+            text = path.read_text()
+            assert old_command not in text
+            assert "foreign-hook" in text
+            assert text.count("-m fettle.dispatcher") == 3
+
 
 class TestPreCommit:
     def test_writes_config(self, repo) -> None:

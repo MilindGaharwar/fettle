@@ -50,7 +50,7 @@ inherits the user's profile ACL because POSIX mode bits do not enforce a DACL.
 
 - schema version;
 - Fettle package version;
-- normalized Python executable;
+- absolute Python executable, preserving virtual-environment identity;
 - SHA-256 digest for every bridge-owned file.
 
 Publication never follows an existing bridge symlink or a junction detectable
