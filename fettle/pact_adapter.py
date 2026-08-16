@@ -11,7 +11,9 @@ import os
 import urllib.request
 import urllib.error
 
-from fettle.integration_base import IntegrationFinding, IntegrationReport, IntegrationStatus
+from fettle.integration_base import (
+    IntegrationFinding, IntegrationReport, IntegrationStatus, integration_binding,
+)
 
 
 class PactAdapter:
@@ -30,9 +32,19 @@ class PactAdapter:
 
     def run(self, cwd: str, config: dict) -> IntegrationReport:
         cfg = config.get("integrations", {}).get("pact", {})
+        report_options = {
+            "provider": self.name,
+            "tool_identity": "pact-broker-api",
+            "path_context": cwd,
+            "policy_binding": integration_binding(cfg),
+            "scope_binding": integration_binding({"provider": self.name}),
+            "canonical_evidence": cfg.get("canonical_evidence", True),
+        }
         availability = self.is_available(config)
         if availability != IntegrationStatus.PASS:
-            return IntegrationReport(status=availability, summary=availability.value)
+            return IntegrationReport(
+                status=availability, summary=availability.value, **report_options,
+            )
 
         broker_url = cfg["broker_url"].rstrip("/")
         token_env = cfg.get("token_env", "PACT_BROKER_TOKEN")
@@ -44,6 +56,7 @@ class PactAdapter:
                 return IntegrationReport(
                     status=IntegrationStatus.MISCONFIGURED,
                     summary="HTTPS required for Pact broker",
+                    **report_options,
                 )
 
         try:
@@ -52,12 +65,14 @@ class PactAdapter:
             return IntegrationReport(
                 status=IntegrationStatus.UNAVAILABLE,
                 summary="Pact broker unreachable: " + str(e)[:200],
+                **report_options,
             )
 
         if not pacts:
             return IntegrationReport(
                 status=IntegrationStatus.PASS,
                 summary="No contracts found",
+                **report_options,
             )
 
         findings: list[IntegrationFinding] = []
@@ -81,6 +96,7 @@ class PactAdapter:
             status=status,
             findings=findings[:20],
             summary=str(len(pacts)) + " contracts, " + str(failed_count) + " unverified/failed",
+            **report_options,
         )
 
     def _get_pacts(self, broker_url: str, token: str) -> list[dict]:

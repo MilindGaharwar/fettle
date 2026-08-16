@@ -217,7 +217,10 @@ def test_override_is_recorded_distinctly_and_bounded(tmp_path, monkeypatch):
     record = OverrideRecord.create(
         actor="maintainer", reason="accepted risk", timestamp="2026-08-07T10:00:00Z",
         expiry="2026-08-08T10:00:00Z", check_id="gate", scope="src/app.py",
-        revision="a" * 40, policy_digest="b" * 64, evidence_id="ev-prior", surface="ci",
+        revision="a" * 40, policy_digest="sha256:" + "b" * 64,
+        evidence_id="sha256:" + "c" * 64, surface="ci",
+        source_snapshot_digest="sha256:" + "d" * 64,
+        expected_artifact_kind="fettle.test",
     )
 
     log_decision(hook="gate", status="overridden", overrides=[record.to_dict()])

@@ -12,6 +12,7 @@ import yaml
 
 from fettle.compliance import (
     RULE_COMPLIANCE,
+    ControlCoverageSummary,
     ControlMapping,
     compute_compliance_report,
     full_mapping,
@@ -106,6 +107,12 @@ def _fake_entries():
 
 
 class TestComputeReport:
+    def test_aggregate_type_renamed_without_old_alias(self):
+        import fettle.compliance as compliance
+
+        assert ControlCoverageSummary.__name__ == "ControlCoverageSummary"
+        assert not hasattr(compliance, "ControlEvidence")
+
     def test_counts_and_unmapped(self, monkeypatch):
         monkeypatch.setattr(
             "fettle.trace.get_recent_decisions", lambda limit=20: _fake_entries()
@@ -121,6 +128,9 @@ class TestComputeReport:
         assert data["unmapped_fired_rules"] == ["custom-org-rule"]
         assert data["period_days"] == 30
         assert data["mapped_rules"] == len(full_mapping())
+        assert data["source_window_start"] < data["source_window_end"]
+        assert len(data["source_digest"]) == 64
+        assert data["source_complete"] is True
 
     def test_empty_trace_still_reports_coverage(self, monkeypatch):
         monkeypatch.setattr(
@@ -129,6 +139,30 @@ class TestComputeReport:
         data = compute_compliance_report(days=7)
         assert data["frameworks"]["asvs"]["V5.3.4"]["findings"] == 0
         assert data["unmapped_fired_rules"] == []
+        assert data["source_window_start"] is None
+        assert data["source_window_end"] is None
+        assert len(data["source_digest"]) == 64
+
+    def test_digest_is_deterministic_and_order_independent(self, monkeypatch):
+        entries = _fake_entries()[:3]
+        monkeypatch.setattr(
+            "fettle.trace.get_recent_decisions", lambda limit=20: entries
+        )
+        first = compute_compliance_report(days=30)["source_digest"]
+        entries.reverse()
+
+        assert compute_compliance_report(days=30)["source_digest"] == first
+
+    def test_malformed_source_is_not_reported_complete(self, monkeypatch):
+        entries = _fake_entries()[:1] + [{"ts": time.time(), "findings": "invalid"}]
+        monkeypatch.setattr(
+            "fettle.trace.get_recent_decisions", lambda limit=20: entries
+        )
+
+        data = compute_compliance_report(days=30)
+
+        assert data["source_complete"] is False
+        assert data["malformed_source_records"] == 1
 
     def test_json_serializable(self, monkeypatch):
         monkeypatch.setattr(

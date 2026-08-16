@@ -11,7 +11,9 @@ import os
 import shutil
 import subprocess
 
-from fettle.integration_base import IntegrationFinding, IntegrationReport, IntegrationStatus
+from fettle.integration_base import (
+    IntegrationFinding, IntegrationReport, IntegrationStatus, integration_binding,
+)
 
 
 _SEVERITY_MAP = {
@@ -39,9 +41,19 @@ class BlackDuckAdapter:
 
     def run(self, cwd: str, config: dict) -> IntegrationReport:
         cfg = config.get("integrations", {}).get("blackduck", {})
+        report_options = {
+            "provider": self.name,
+            "tool_identity": os.path.basename(str(cfg.get("cli_path", "polaris"))),
+            "path_context": cwd,
+            "policy_binding": integration_binding(cfg),
+            "scope_binding": integration_binding({"provider": self.name, "workspace": "."}),
+            "canonical_evidence": cfg.get("canonical_evidence", True),
+        }
         availability = self.is_available(config)
         if availability != IntegrationStatus.PASS:
-            return IntegrationReport(status=availability, summary=availability.value)
+            return IntegrationReport(
+                status=availability, summary=availability.value, **report_options,
+            )
 
         cli_path = cfg.get("cli_path", "polaris")
         timeout_s = int(cfg.get("scan_timeout_s", 300))
@@ -59,19 +71,23 @@ class BlackDuckAdapter:
             return IntegrationReport(
                 status=IntegrationStatus.UNAVAILABLE,
                 summary="Scan timed out after " + str(timeout_s) + "s",
+                **report_options,
             )
         except (FileNotFoundError, OSError) as e:
             return IntegrationReport(
                 status=IntegrationStatus.UNAVAILABLE,
                 summary="CLI error: " + str(e)[:200],
+                **report_options,
             )
 
         stdout = result.stdout[:1048576]
-        return self._parse_sarif(stdout)
+        return self._parse_sarif(stdout, **report_options)
 
-    def _parse_sarif(self, output: str) -> IntegrationReport:
+    def _parse_sarif(self, output: str, **report_options: object) -> IntegrationReport:
         if not output.strip():
-            return IntegrationReport(status=IntegrationStatus.PASS, summary="No findings")
+            return IntegrationReport(
+                status=IntegrationStatus.PASS, summary="No findings", **report_options,
+            )
 
         try:
             data = json.loads(output)
@@ -79,6 +95,7 @@ class BlackDuckAdapter:
             return IntegrationReport(
                 status=IntegrationStatus.UNAVAILABLE,
                 summary="Failed to parse SARIF output",
+                **report_options,
             )
 
         findings: list[IntegrationFinding] = []
@@ -109,6 +126,7 @@ class BlackDuckAdapter:
             status=status,
             findings=findings[:50],
             summary=str(len(findings)) + " finding(s)",
+            **report_options,
         )
 
 

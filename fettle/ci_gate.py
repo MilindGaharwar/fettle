@@ -658,7 +658,10 @@ def run_check(ctx: HookContext) -> CheckResult:
         "additionalContext": msg,
     }
     if cfg.get("mode", "advisory") == "enforce":
-        evidence_id = str((stamp or {}).get("evidence_id", "")).strip()
+        reference = (stamp or {}).get("canonical_evidence")
+        evidence_id = str(
+            reference.get("artifact_digest", "") if isinstance(reference, dict) else ""
+        ).strip()
         if (
             isinstance(stamp, dict)
             and stamp.get("sha") == push.get("sha")
@@ -673,14 +676,27 @@ def run_check(ctx: HookContext) -> CheckResult:
                 msg += "\nCanonical override ledger is invalid; override evaluation failed closed."
                 hso["additionalContext"] = msg
             else:
+                artifact_path = ctx.cwd / EVIDENCE_RELPATH
+                try:
+                    artifact_value = artifact_path.read_bytes()
+                except OSError:
+                    artifact_value = None
+                revision = str(push.get("sha", ""))
                 selection = select_override(ledger.records, OverrideContext(
                     check_id="ci.verdict",
                     scope=".",
-                    revision=str(push.get("sha", "")),
+                    revision=revision,
                     policy_digest=policy_digest(ctx.config),
                     evidence_id=evidence_id,
                     surface="ci",
-                ))
+                    source_snapshot_digest=_json_digest({"revision": revision}),
+                    expected_artifact_kind="fettle.ci",
+                    scope_digest=_json_digest(_scope_projection(stamp)),
+                    producer_id="fettle.ci",
+                    producer_versions=frozenset({__version__}),
+                    producer_implementation_digest=_producer_digest(),
+                    allowed_trust_classes=frozenset({"external"}),
+                ), artifact=artifact_value)
                 if selection.status == "overridden" and selection.record is not None:
                     record = selection.record
                     override_msg = (
@@ -704,6 +720,9 @@ def run_check(ctx: HookContext) -> CheckResult:
                             result_state=ResultState.OVERRIDDEN,
                         )
                     msg += "\nOverride audit write failed; override evaluation failed closed."
+                    hso["additionalContext"] = msg
+                elif selection.status.startswith("evidence_"):
+                    msg += f"\nOverride evidence is invalid ({selection.status}); failed closed."
                     hso["additionalContext"] = msg
         return CheckResult.block(msg, hook_specific_output=hso)
     return CheckResult.advisory(msg, hook_specific_output=hso)

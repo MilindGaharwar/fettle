@@ -19,8 +19,13 @@ import sys
 import tempfile
 import time
 import unicodedata
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from fettle import __version__
+from fettle.evidence import EvidenceArtifact
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -1364,6 +1369,86 @@ def _validate_report_schema(report: dict) -> None:
     fingerprints = [record["fingerprint"] for record in records]
     if len(fingerprints) != len(set(fingerprints)):
         raise ValueError("schema v2 requires unique mutant fingerprints")
+
+
+def build_mutation_report_artifact(
+    report: dict,
+    report_location: str,
+    *,
+    run_ids: list[str],
+    calibration_ids: list[str] | None = None,
+    expected_report_digest: str | None = None,
+    observation_id: str | None = None,
+    observed_at: str | None = None,
+) -> EvidenceArtifact:
+    """Reference a complete schema-v2 report without replacing domain evidence."""
+    _validate_report_schema(report)
+    if report.get("status") != "completed":
+        raise ValueError("mutation artifact requires a completed report")
+    if not isinstance(report.get("passed"), bool):
+        raise ValueError("completed mutation report requires a boolean policy result")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
+        raise ValueError("completed mutation report revision is invalid")
+    digest_fields = (
+        "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest",
+    )
+    if any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in digest_fields):
+        raise ValueError("completed mutation report identity digests are invalid")
+    if (
+        not isinstance(run_ids, list) or not run_ids or run_ids != list(dict.fromkeys(run_ids))
+        or any(not isinstance(item, str) or not item for item in run_ids)
+    ):
+        raise ValueError("mutation artifact run IDs are invalid")
+    calibration_ids = calibration_ids or []
+    if (
+        not isinstance(calibration_ids, list)
+        or calibration_ids != list(dict.fromkeys(calibration_ids))
+        or any(not isinstance(item, str) or not item for item in calibration_ids)
+    ):
+        raise ValueError("mutation artifact calibration IDs are invalid")
+    report_calibration = report.get("calibration_id")
+    if report_calibration is not None and report_calibration not in calibration_ids:
+        raise ValueError("mutation artifact calibration identity differs from the report")
+
+    location = _canonical_path(report_location)
+    report_digest = "sha256:" + _canonical_digest(report)
+    if expected_report_digest is not None and expected_report_digest != report_digest:
+        raise ValueError("mutation report digest does not match retained content")
+    source_digest = "sha256:" + report["source_scope_digest"]
+    policy_digest = "sha256:" + report["policy_digest"]
+    scope_digest = "sha256:" + _canonical_digest({
+        "selection": report.get("selection"),
+        "files_tested": report.get("files_tested"),
+        "tests_run": report.get("tests_run"),
+        "line_ranges": report.get("line_ranges"),
+    })
+    return EvidenceArtifact.create(
+        kind="fettle.mutation.report",
+        producer={
+            "id": "fettle.mutation",
+            "version": __version__,
+            "implementation_digest": "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        },
+        result_state="pass" if report["passed"] else "violation",
+        completeness="complete",
+        trust_class="authoritative",
+        source={"snapshot_digest": source_digest, "revision": report["revision"]},
+        policy_digest=policy_digest,
+        scope_digest=scope_digest,
+        observation_id=observation_id or "mutation-" + uuid.uuid4().hex,
+        observed_at=observed_at or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        payload={
+            "report": {
+                "location": location,
+                "digest": report_digest,
+                "schema_version": report["schema_version"],
+            },
+            "identity_digests": {field: report[field] for field in digest_fields},
+            "counts": {state: report[state] for state in _STATES},
+            "run_ids": run_ids,
+            "calibration_ids": calibration_ids,
+        },
+    )
 
 
 def _rerun_mutant(root: str, record: dict, current_ids: dict[str, list[str]], timeout: int) -> dict:

@@ -3,6 +3,7 @@
 import json
 import importlib.metadata
 import re
+from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sqlite3
@@ -13,6 +14,7 @@ import pytest
 from fettle.mutation_baseline import establish_baseline
 from fettle.mutation_test import (
     build_mutation_cache_identity,
+    build_mutation_report_artifact,
     collect_mutation_dependency_identities,
     restore_mutation_native_cache,
     save_mutation_native_cache,
@@ -754,6 +756,79 @@ def test_schema_v2_accepts_deletion_mutants():
     report["non_killed"][0] = {**report["non_killed"][0], "before": ""}
     with pytest.raises(ValueError, match="malformed"):
         _validate_report_schema(report)
+
+
+def test_mutation_artifact_references_complete_report_without_flattening_evidence():
+    report = _stable_report(
+        untested=0,
+        non_killed=[_stable_report()["non_killed"][0]],
+        passed=True,
+        policy_digest="1" * 64,
+        source_scope_digest="2" * 64,
+        test_mapping_digest="3" * 64,
+        line_range_digest="4" * 64,
+        manifest_digests=["5" * 64, "6" * 64],
+    )
+    original = deepcopy(report)
+
+    artifact = build_mutation_report_artifact(
+        report,
+        ".fettle/mutation-report.json",
+        run_ids=["run-42"],
+        calibration_ids=["calibration-a", "calibration-b"],
+        observation_id="mutation-run-42",
+        observed_at="2026-08-16T12:00:00Z",
+    )
+
+    payload = artifact.to_dict()["payload"]
+    assert artifact.kind == "fettle.mutation.report"
+    assert artifact.completeness == "complete"
+    assert artifact.result_state == "pass"
+    assert payload["report"]["schema_version"] == "2"
+    assert payload["report"]["location"] == ".fettle/mutation-report.json"
+    assert payload["report"]["digest"].startswith("sha256:")
+    assert payload["identity_digests"] == {
+        "line_range_digest": "4" * 64,
+        "policy_digest": "1" * 64,
+        "source_scope_digest": "2" * 64,
+        "test_mapping_digest": "3" * 64,
+    }
+    assert payload["counts"] == {state: report[state] for state in (
+        "killed", "survived", "timeout", "suspicious", "untested", "skipped",
+    )}
+    assert payload["run_ids"] == ["run-42"]
+    assert payload["calibration_ids"] == ["calibration-a", "calibration-b"]
+    assert "non_killed" not in payload
+    assert "manifest_digests" not in payload
+    assert report == original
+
+
+def test_mutation_artifact_rejects_incomplete_tampered_or_misbound_report():
+    report = _stable_report(
+        untested=0,
+        non_killed=[_stable_report()["non_killed"][0]],
+        passed=False,
+        policy_digest="1" * 64,
+        source_scope_digest="2" * 64,
+        test_mapping_digest="3" * 64,
+        line_range_digest="4" * 64,
+        calibration_id="calibration-a",
+    )
+
+    with pytest.raises(ValueError, match="completed"):
+        build_mutation_report_artifact(
+            {**report, "status": "tool_error"}, ".fettle/report.json", run_ids=["run-1"],
+        )
+    with pytest.raises(ValueError, match="digest"):
+        build_mutation_report_artifact(
+            report, ".fettle/report.json", run_ids=["run-1"],
+            calibration_ids=["calibration-a"], expected_report_digest="sha256:" + "f" * 64,
+        )
+    with pytest.raises(ValueError, match="calibration"):
+        build_mutation_report_artifact(
+            report, ".fettle/report.json", run_ids=["run-1"],
+            calibration_ids=["calibration-b"],
+        )
 
 
 def test_rerun_mutant_executes_exact_current_engine_id_and_rejects_stale_id():

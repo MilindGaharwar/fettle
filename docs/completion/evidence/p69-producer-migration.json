@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "milestone": "P69",
+  "revision": "p69-2026-08-16",
+  "observations": {
+    "focused_tests": "462 passed",
+    "bdd_regression_tests": "10 passed",
+    "full_tests": "2631 passed",
+    "ruff": "passed",
+    "config_validation": "passed",
+    "diff_check": "passed"
+  },
+  "contracts": [
+    "producer-domain-parity",
+    "strict-wrong-binding-rejection",
+    "independent-rollback",
+    "visible-write-failure",
+    "aggregate-source-window"
+  ],
+  "uat_decision": "SHIP"
+}

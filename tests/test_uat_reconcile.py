@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from fettle.evidence import parse_artifact
 from fettle.uat.reconcile import (
     format_verdicts,
     parse_transcript,
@@ -103,6 +104,47 @@ class TestArtifactsAndSummary:
             "required_total": 2,
             "required_confirmed": 0,
         }
+
+    def test_canonical_report_references_full_report_without_transcript(self, tmp_path):
+        verdicts = reconcile(SCENARIOS, "")
+        path, err = write_report(str(tmp_path), {
+            "session_id": "uat-x", "surface": "cli", "redacted_lines": 2,
+        }, verdicts)
+        assert err == ""
+        report = json.loads(Path(path).read_text())
+        artifact = parse_artifact(
+            (tmp_path / ".fettle" / "uat-report.evidence.json").read_bytes()
+        )
+        assert "canonical_evidence" not in report
+        assert artifact.payload["report"]["path"] == "uat-report.json"
+        assert artifact.payload["report"]["digest"] == (
+            "sha256:" + __import__("hashlib").sha256(Path(path).read_bytes()).hexdigest()
+        )
+        assert artifact.payload["redacted_lines"] == 2
+        assert artifact.payload["completion"]["required_total"] == 2
+        assert artifact.payload["verdicts"] == (
+            {"scenario_id": "greeter/S1", "verdict": "UNOBSERVED"},
+            {"scenario_id": "greeter/S2", "verdict": "UNOBSERVED"},
+        )
+        assert "observed" not in str(artifact.payload)
+
+    def test_canonical_report_sidecar_can_be_rolled_back(self, tmp_path):
+        verdicts = reconcile(SCENARIOS, "")
+        path, err = write_report(str(tmp_path), {
+            "session_id": "uat-x", "surface": "cli", "canonical_evidence": False,
+        }, verdicts)
+        assert err == ""
+        assert "canonical_evidence" not in json.loads(Path(path).read_text())
+        assert not (tmp_path / ".fettle" / "uat-report.evidence.json").exists()
+
+    def test_canonical_write_failure_preserves_report_and_returns_diagnostic(self, tmp_path):
+        verdicts = reconcile(SCENARIOS, "")
+        with patch("fettle.uat.reconcile._write_bytes_atomic", side_effect=OSError("full")):
+            path, err = write_report(
+                str(tmp_path), {"session_id": "uat-x", "surface": "cli"}, verdicts,
+            )
+        assert err == "canonical UAT report evidence unavailable: full"
+        assert json.loads(Path(path).read_text())["completion"]["complete"] is False
 
     def test_format_verdicts_expands_problems(self):
         text = ("SCENARIO: greeter/S1\nOBSERVED: Hola\nOUTCOME: differs\n"

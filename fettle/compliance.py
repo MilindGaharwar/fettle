@@ -15,6 +15,8 @@ Aligned with the v1.1 governance arc (WP-127..132): one mapping, one report.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -98,11 +100,20 @@ def full_mapping() -> dict[str, ControlMapping]:
 
 
 @dataclass
-class ControlEvidence:
+class ControlCoverageSummary:
     control: str
     rules: list[str] = field(default_factory=list)
     findings: int = 0
     blocked: int = 0
+
+
+def _source_digest(records: list[dict]) -> str:
+    canonical_records = sorted(
+        json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        for record in records
+    )
+    canonical = "[" + ",".join(canonical_records) + "]"
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def compute_compliance_report(days: int = 30) -> dict:
@@ -116,28 +127,51 @@ def compute_compliance_report(days: int = 30) -> dict:
     cutoff = time.time() - days * 86400
     fired: Counter[str] = Counter()
     blocked: Counter[str] = Counter()
+    source_records: list[dict] = []
+    source_timestamps: list[float] = []
+    malformed_source_records = 0
     for entry in get_recent_decisions(limit=10000):
-        if entry.get("ts", 0) <= cutoff:
+        if not isinstance(entry, dict):
+            malformed_source_records += 1
+            continue
+        timestamp = entry.get("ts")
+        if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
+            malformed_source_records += 1
+            continue
+        if timestamp <= cutoff:
+            continue
+        findings = entry.get("findings")
+        if not isinstance(findings, list):
+            malformed_source_records += 1
             continue
         # Status vocabulary matches report.py: dispatcher writes
         # "blocked"/"block" for enforced denials, "violation" for findings.
         is_block = entry.get("status") in ("blocked", "block")
-        for f in entry.get("findings", []):
-            code = f.get("code", "")
-            if not code:
+        included = False
+        for f in findings:
+            if not isinstance(f, dict):
+                malformed_source_records += 1
                 continue
+            code = f.get("code", "")
+            if not isinstance(code, str) or not code:
+                malformed_source_records += 1
+                continue
+            included = True
             fired[code] += 1
             if is_block:
                 blocked[code] += 1
+        if included:
+            source_records.append(entry)
+            source_timestamps.append(timestamp)
 
-    frameworks: dict[str, dict[str, ControlEvidence]] = {
+    frameworks: dict[str, dict[str, ControlCoverageSummary]] = {
         "cwe": {}, "asvs": {}, "soc2": {},
     }
     for rule_id, cm in sorted(mapping.items()):
         for framework, control in (("cwe", cm.cwe), ("asvs", cm.asvs), ("soc2", cm.soc2)):
             if not control:
                 continue
-            ev = frameworks[framework].setdefault(control, ControlEvidence(control))
+            ev = frameworks[framework].setdefault(control, ControlCoverageSummary(control))
             ev.rules.append(rule_id)
             ev.findings += fired.get(rule_id, 0)
             ev.blocked += blocked.get(rule_id, 0)
@@ -145,6 +179,11 @@ def compute_compliance_report(days: int = 30) -> dict:
     unmapped = sorted(code for code in fired if code not in mapping)
     return {
         "period_days": days,
+        "source_window_start": min(source_timestamps) if source_timestamps else None,
+        "source_window_end": max(source_timestamps) if source_timestamps else None,
+        "source_digest": _source_digest(source_records),
+        "source_complete": malformed_source_records == 0,
+        "malformed_source_records": malformed_source_records,
         "frameworks": {
             fw: {
                 control: {

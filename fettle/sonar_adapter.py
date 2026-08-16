@@ -11,7 +11,9 @@ import os
 import urllib.request
 import urllib.error
 
-from fettle.integration_base import IntegrationFinding, IntegrationReport, IntegrationStatus
+from fettle.integration_base import (
+    IntegrationFinding, IntegrationReport, IntegrationStatus, integration_binding,
+)
 
 
 class SonarQubeAdapter:
@@ -30,9 +32,22 @@ class SonarQubeAdapter:
 
     def run(self, cwd: str, config: dict) -> IntegrationReport:
         cfg = config.get("integrations", {}).get("sonarqube", {})
+        report_options = {
+            "provider": self.name,
+            "tool_identity": "sonarqube-api",
+            "path_context": cwd,
+            "policy_binding": integration_binding(cfg),
+            "scope_binding": integration_binding({
+                "project_key": cfg.get("project_key", ""),
+                "provider": self.name,
+            }),
+            "canonical_evidence": cfg.get("canonical_evidence", True),
+        }
         availability = self.is_available(config)
         if availability != IntegrationStatus.PASS:
-            return IntegrationReport(status=availability, summary=availability.value)
+            return IntegrationReport(
+                status=availability, summary=availability.value, **report_options,
+            )
 
         endpoint = cfg["endpoint"].rstrip("/")
         project_key = cfg["project_key"]
@@ -44,6 +59,7 @@ class SonarQubeAdapter:
             return IntegrationReport(
                 status=IntegrationStatus.MISCONFIGURED,
                 summary="HTTPS required (set allow_insecure=true to override)",
+                **report_options,
             )
 
         try:
@@ -53,6 +69,7 @@ class SonarQubeAdapter:
             return IntegrationReport(
                 status=IntegrationStatus.UNAVAILABLE,
                 summary="SonarQube unreachable: " + str(e)[:200],
+                **report_options,
             )
 
         findings = [
@@ -71,6 +88,7 @@ class SonarQubeAdapter:
             status=status,
             findings=findings,
             summary="Quality gate: " + gate_status + " (" + str(len(issues)) + " issues)",
+            **report_options,
         )
 
     def _get_quality_gate(self, endpoint: str, project_key: str, token: str) -> str:

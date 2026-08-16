@@ -50,6 +50,8 @@ class TestSonarQube:
         with patch.dict("os.environ", {"SQ_TOK": "fake"}):
             report = adapter.run(".", cfg)
         assert report.status == IntegrationStatus.UNAVAILABLE
+        assert report.provider == "sonarqube"
+        assert report.canonical_artifact is not None
 
     def test_http_rejected(self):
         adapter = SonarQubeAdapter()
@@ -94,6 +96,21 @@ class TestBlackDuck:
         adapter = BlackDuckAdapter()
         report = adapter._parse_sarif("NOT JSON{{{")
         assert report.status == IntegrationStatus.UNAVAILABLE
+
+    def test_config_can_roll_back_canonical_evidence(self):
+        adapter = BlackDuckAdapter()
+        cfg = {"integrations": {"blackduck": {
+            "enabled": True,
+            "cli_path": "nonexistent_binary",
+            "canonical_evidence": False,
+        }}}
+
+        report = adapter.run(".", cfg)
+
+        assert report.status == IntegrationStatus.UNAVAILABLE
+        assert report.canonical_artifact is None
+        assert report.canonical_reference is None
+        assert report.evidence_id.startswith("ev-")
 
 
 class TestPact:

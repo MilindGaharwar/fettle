@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fettle.runners import RunnerResult
+from fettle.evidence import parse_artifact
 from fettle.uat.session import (
     build_prompt,
     collect_scenarios,
@@ -133,6 +134,40 @@ class TestRunSession:
         assert cp["transcript"] == result.transcript_path
         assert cp["evidence_id"].startswith("ev-")
         assert result.evidence_id == cp["evidence_id"]
+
+    def test_canonical_session_sidecar_is_additive_and_portable(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        result = self._run(repo)
+        cp = load_checkpoint(result.worktree)
+        artifact = parse_artifact(
+            (Path(result.worktree) / ".fettle" / "uat-session.evidence.json").read_bytes()
+        )
+        assert cp["canonical_evidence_reference"]["artifact_digest"] == artifact.artifact_digest
+        assert artifact.kind == "fettle.uat.session"
+        assert artifact.payload["scenario_ids"] == ("greeter/S1",)
+        assert artifact.payload["transcript"]["path"].endswith("-transcript.txt")
+        assert result.worktree not in str(artifact.to_dict())
+
+    def test_canonical_session_sidecar_can_be_rolled_back(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        config = _cfg()
+        config["uat"]["canonical_evidence"] = False
+        with patch("fettle.runners.claude.shutil.which", return_value="/usr/bin/claude"):
+            result = run_session(str(repo), config, "cli", runner=FakeRunner(), consent=True)
+        cp = load_checkpoint(result.worktree)
+        assert cp["canonical_evidence"] is False
+        assert "canonical_evidence_reference" not in cp
+        assert not (Path(result.worktree) / ".fettle" / "uat-session.evidence.json").exists()
+
+    def test_canonical_session_write_failure_is_recorded(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        with patch("fettle.uat.session._write_bytes_atomic", side_effect=OSError("full")):
+            result = self._run(repo)
+
+        cp = load_checkpoint(result.worktree)
+        assert result.status == "completed"
+        assert cp["canonical_evidence_error"] == "full"
+        assert "canonical_evidence_reference" not in cp
 
     def test_worktree_is_claimed(self, tmp_path):
         from fettle.work_items import claim_for_worktree

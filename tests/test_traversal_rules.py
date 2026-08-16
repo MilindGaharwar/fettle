@@ -127,9 +127,12 @@ def test_override_resolution_is_bound_to_actor_policy_graph_and_expiry():
 
     override = OverrideRecord.create(
         actor="maintainer", reason="accepted risk", timestamp="2026-08-01T00:00:00Z",
-        expiry="2026-09-01T00:00:00Z", revision="abc123", policy_digest="policy",
-        evidence_id="prior-evidence", check_id="change-integrity.obligation",
+        expiry="2026-09-01T00:00:00Z", revision="abc123",
+        policy_digest="sha256:" + "a" * 64,
+        evidence_id="sha256:" + "b" * 64, check_id="change-integrity.obligation",
         scope="obligations/obligation", surface="ci",
+        source_snapshot_digest="sha256:" + "c" * 64,
+        expected_artifact_kind="fettle.change-integrity",
     )
     decision = ObligationDecision.create(
         "obligation", ObligationResolution.OVERRIDDEN, override=override, graph_digest="graph",

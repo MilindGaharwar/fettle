@@ -11,12 +11,22 @@ Verdicts: CONFIRMED | CONTRADICTED | BLOCKED | UNOBSERVED | INDETERMINATE
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
+import os
 import re
+import tempfile
+import uuid
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 
+from fettle import __version__
+from fettle.evidence import EvidenceArtifact
+
 REPORT_NAME = "uat-report.json"
+REPORT_EVIDENCE_NAME = "uat-report.evidence.json"
 
 VERDICTS = ("CONFIRMED", "CONTRADICTED", "BLOCKED", "UNOBSERVED", "INDETERMINATE")
 
@@ -122,9 +132,86 @@ def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        if session.get("canonical_evidence", True):
+            try:
+                _write_report_evidence(worktree, session, data)
+            except (OSError, TypeError, ValueError) as exc:
+                return str(path), (
+                    "canonical UAT report evidence unavailable: "
+                    + (str(exc) or type(exc).__name__)
+                )
         return str(path), ""
     except OSError as exc:
         return "", f"cannot write UAT report: {exc}"
+
+
+def _digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _producer_digest() -> str:
+    return "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = ""
+    finally:
+        if temporary:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+
+
+def _write_report_evidence(worktree: str, session: dict, report: dict) -> None:
+    report_path = Path(worktree) / ".fettle" / REPORT_NAME
+    report_digest = "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest()
+    completion = report["completion"]
+    verdicts = [
+        {"scenario_id": item["scenario_id"], "verdict": item["verdict"]}
+        for item in report["verdicts"]
+    ]
+    artifact = EvidenceArtifact.create(
+        kind="fettle.uat.report",
+        producer={
+            "id": "fettle.uat.report",
+            "version": __version__,
+            "implementation_digest": _producer_digest(),
+        },
+        result_state="pass" if completion["complete"] else "violation",
+        completeness="complete",
+        trust_class="derived",
+        source={"snapshot_digest": _digest({
+            "session_id": report["session_id"],
+            "session_evidence": session.get("canonical_evidence_reference"),
+        })},
+        policy_digest=_digest({"canonical_evidence": True}),
+        scope_digest=_digest({
+            "surface": report["surface"],
+            "scenario_ids": [item["scenario_id"] for item in verdicts],
+        }),
+        observation_id="uat-report-" + uuid.uuid4().hex,
+        observed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        payload={
+            "session_id": str(report["session_id"]),
+            "surface": str(report["surface"]),
+            "report": {"path": REPORT_NAME, "digest": report_digest},
+            "verdicts": verdicts,
+            "completion": completion,
+            "redacted_lines": int(session.get("redacted_lines") or 0),
+        },
+    )
+    evidence_path = Path(worktree) / ".fettle" / REPORT_EVIDENCE_NAME
+    _write_bytes_atomic(evidence_path, artifact.to_bytes())
 
 
 def format_verdicts(verdicts: list[Verdict]) -> str:

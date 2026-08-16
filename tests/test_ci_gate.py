@@ -313,10 +313,17 @@ def _override(
     repo: Path,
     sha: str,
     config: dict,
-    evidence_id: str = "ev-ci-red",
+    evidence_id: str | None = None,
     *,
     expired: bool = False,
 ) -> OverrideRecord:
+    stamp_path = repo / ci_gate.STAMP_RELPATH
+    stamp = json.loads(stamp_path.read_text())
+    artifact = ci_gate._ci_artifact(stamp, config)
+    (repo / ci_gate.EVIDENCE_RELPATH).write_bytes(artifact.to_bytes())
+    stamp["canonical_evidence"] = ci_gate._artifact_reference(artifact)
+    stamp["canonical_observation_id"] = artifact.observation_id
+    stamp_path.write_text(json.dumps(stamp))
     now = datetime.now(UTC).replace(microsecond=0)
     timestamp = now - timedelta(hours=2) if expired else now - timedelta(minutes=1)
     expiry = now - timedelta(hours=1) if expired else now + timedelta(hours=1)
@@ -329,8 +336,10 @@ def _override(
         scope=".",
         revision=sha,
         policy_digest=ci_gate.policy_digest(config),
-        evidence_id=evidence_id,
+        evidence_id=evidence_id or artifact.artifact_digest,
         surface="ci",
+        source_snapshot_digest=artifact.source["snapshot_digest"],
+        expected_artifact_kind=artifact.kind,
     )
     save_override_ledger(repo, [record])
     return record
@@ -526,7 +535,7 @@ class TestStopGate:
         sha = "a" * 40
         config = _cfg(mode="enforce")
         _record(state, sha, ts=time.time() - 60)
-        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _stamp(tmp_path, sha, ok=False, error="CI failed")
         override = _override(tmp_path, sha, config)
 
         with patch("fettle.config.state_dir", return_value=state), \
@@ -545,7 +554,7 @@ class TestStopGate:
         sha = "a" * 40
         config = _cfg(mode="enforce")
         _record(state, sha, ts=time.time() - 60)
-        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _stamp(tmp_path, sha, ok=False, error="CI failed")
         _override(tmp_path, sha, config)
 
         with patch("fettle.config.state_dir", return_value=state), \
@@ -561,8 +570,8 @@ class TestStopGate:
         sha = "a" * 40
         config = _cfg(mode="enforce")
         _record(state, sha, ts=time.time() - 60)
-        _stamp(tmp_path, sha, ok=False, evidence_id="ev-current", error="CI failed")
-        _override(tmp_path, sha, config, evidence_id="ev-prior")
+        _stamp(tmp_path, sha, ok=False, error="CI failed")
+        _override(tmp_path, sha, config, evidence_id="sha256:" + "f" * 64)
 
         with patch("fettle.config.state_dir", return_value=state):
             result = ci_gate.run_check(_ctx(tmp_path, config))
@@ -575,7 +584,7 @@ class TestStopGate:
         sha = "a" * 40
         config = _cfg(mode="enforce")
         _record(state, sha, ts=time.time() - 60)
-        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _stamp(tmp_path, sha, ok=False, error="CI failed")
         _override(tmp_path, sha, config, expired=True)
 
         with patch("fettle.config.state_dir", return_value=state):
@@ -588,7 +597,7 @@ class TestStopGate:
         state.mkdir()
         sha = "a" * 40
         _record(state, sha, ts=time.time() - 60)
-        _stamp(tmp_path, sha, ok=False, evidence_id="ev-ci-red", error="CI failed")
+        _stamp(tmp_path, sha, ok=False, error="CI failed")
         ledger = tmp_path / ".fettle" / "overrides.json"
         ledger.write_text("not json")
 
@@ -596,7 +605,7 @@ class TestStopGate:
             result = ci_gate.run_check(_ctx(tmp_path, _cfg(mode="enforce")))
 
         assert result.decision.value == "block"
-        assert "override ledger is invalid" in result.message
+        assert "remote CI is not green" in result.message
 
     def test_corrupt_stamp_is_a_problem_not_a_pass(self, tmp_path: Path) -> None:
         state = tmp_path / "state"

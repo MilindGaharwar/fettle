@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from fettle.mutation_baseline import (
+    _mutation_artifact,
     compare_report,
     establish_baseline,
     load_baseline,
@@ -36,6 +37,7 @@ def _report(**changes):
         "test_mapping_digest": "d" * 64, "line_range_digest": "e" * 64,
         "killed": 9, "survived": 1, "timeout": 0, "suspicious": 0,
         "untested": 0, "skipped": 0, "score": 90.0, "duration_ms": 100,
+        "passed": True,
         "total_duration_ms": 250,
         "non_killed": [_record()],
     }
@@ -44,11 +46,17 @@ def _report(**changes):
 
 
 def _override(check_id, fingerprint, **changes):
+    report = changes.pop("report", _report())
+    run_ids = changes.pop("run_ids", ["comparison"])
+    artifact = _mutation_artifact(report, run_ids)
     fields = {
         "actor": "owner", "reason": "temporary", "timestamp": "2026-08-01T00:00:00Z",
         "expiry": "2026-09-01T00:00:00Z", "check_id": check_id,
-        "scope": "src/a.py", "revision": "a" * 40, "policy_digest": "b" * 64,
-        "evidence_id": fingerprint, "surface": "ci",
+        "scope": "src/a.py", "revision": report["revision"],
+        "policy_digest": artifact.policy_digest,
+        "evidence_id": artifact.artifact_digest, "surface": "ci",
+        "source_snapshot_digest": artifact.source["snapshot_digest"],
+        "expected_artifact_kind": artifact.kind,
     }
     fields.update(changes)
     return OverrideRecord.create(**fields)
@@ -137,10 +145,10 @@ def test_floor_reduction_requires_exact_baseline_override():
     reports = [_report(score=80.0, killed=8, survived=2, non_killed=[_record(), _record("f" * 64, "2")])] * 2
     with pytest.raises(ValueError, match="floor"):
         establish_baseline(reports, ["3", "4"], floor=80, previous=old)
-    survivor_override = _override("mutation.survivor", "baseline-floor")
+    survivor_override = _override("mutation.survivor", "baseline-floor", report=reports[0], run_ids=["3", "4"])
     with pytest.raises(ValueError, match="floor"):
         establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[survivor_override])
-    baseline_override = _override("mutation.baseline", "baseline-floor")
+    baseline_override = _override("mutation.baseline", "baseline-floor", report=reports[0], run_ids=["3", "4"])
     result = establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[baseline_override])
     assert result["floor"] == 80
 
@@ -149,7 +157,7 @@ def test_compare_labels_new_existing_resolved_and_waived_without_changing_counts
     baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
     new = _record("f" * 64, "2")
     current = _report(selection="changed", survived=1, killed=9, non_killed=[new])
-    waiver = _override("mutation.survivor", new["fingerprint"])
+    waiver = _override("mutation.survivor", new["fingerprint"], report=current)
     result = compare_report(
         current, baseline, overrides=[waiver], now=datetime(2026, 8, 8, tzinfo=UTC)
     )
@@ -231,18 +239,19 @@ def test_tiny_scope_new_actionable_survivor_still_fails_comparison():
         {"timestamp": "2026-08-08T00:00:01Z"},
         {"expiry": "2026-08-08T00:00:00Z"},
         {"revision": "c" * 40},
-        {"policy_digest": "c" * 64},
-        {"evidence_id": "e" * 64},
+        {"policy_digest": "sha256:" + "c" * 64},
+        {"evidence_id": "sha256:" + "e" * 64},
         {"surface": "local"},
     ],
 )
 def test_survivor_override_requires_active_exact_context(changes):
     baseline = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
     new = _record("f" * 64, "2")
-    override = _override("mutation.survivor", new["fingerprint"], **changes)
+    current = _report(selection="changed", non_killed=[new])
+    override = _override("mutation.survivor", new["fingerprint"], report=current, **changes)
 
     result = compare_report(
-        _report(selection="changed", non_killed=[new]), baseline,
+        current, baseline,
         overrides=[override], now=datetime(2026, 8, 8, tzinfo=UTC),
     )
 

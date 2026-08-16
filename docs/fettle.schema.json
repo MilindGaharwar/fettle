@@ -806,6 +806,10 @@
               "type": "boolean",
               "default": false
             },
+            "canonical_evidence": {
+              "type": "boolean",
+              "default": true
+            },
             "threshold": {
               "type": "integer",
               "default": 80,
@@ -1364,6 +1368,10 @@
               "type": "boolean",
               "default": false
             },
+            "canonical_evidence": {
+              "type": "boolean",
+              "default": true
+            },
             "endpoint": {
               "type": "string",
               "default": ""
@@ -1390,6 +1398,10 @@
               "type": "boolean",
               "default": false
             },
+            "canonical_evidence": {
+              "type": "boolean",
+              "default": true
+            },
             "cli_path": {
               "type": "string",
               "default": "polaris"
@@ -1411,6 +1423,10 @@
             "enabled": {
               "type": "boolean",
               "default": false
+            },
+            "canonical_evidence": {
+              "type": "boolean",
+              "default": true
             },
             "broker_url": {
               "type": "string",
@@ -1465,6 +1481,10 @@
           "default": [
             "auto"
           ]
+        },
+        "canonical_evidence": {
+          "type": "boolean",
+          "default": true
         },
         "app_url": {
           "type": "string",

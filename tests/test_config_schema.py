@@ -89,6 +89,24 @@ class TestValidate:
         assert mutation["max_suspicious_mutants"] is None
         assert mutation["full_shards"] == 1
 
+    @pytest.mark.parametrize("path", [
+        ("gates", "coverage"),
+        ("integrations", "sonarqube"),
+        ("integrations", "blackduck"),
+        ("integrations", "pact"),
+        ("uat",),
+    ])
+    def test_canonical_evidence_rollback_switches_are_validated(self, path) -> None:
+        config = node = {}
+        for part in path:
+            node[part] = {}
+            node = node[part]
+        node["canonical_evidence"] = False
+
+        errors, warnings = validate_config(config)
+
+        assert errors == [] and warnings == []
+
     def test_mutation_mapping_tables_allow_project_paths(self) -> None:
         config = {"mutation": {
             "test_mappings": {"src/shared.py": ["tests/test_shared.py"]},

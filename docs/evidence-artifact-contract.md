@@ -1,9 +1,10 @@
 # Portable Evidence Artifact Contract
 
-Status: P66 contract frozen, 2026-08-09; P67 verification pilot implemented,
-2026-08-15. The schema remains the frozen portable contract. Runtime adoption
-is currently limited to `fettle verify`; CI, trace, and other producers retain
-their existing authority boundaries until P68-P70.
+Status: P66 contract frozen, 2026-08-09; P67-P68 verification, CI, trace, and
+inspection bindings implemented by 2026-08-15; P69 producer migration
+implemented on 2026-08-16 pending clean full-suite verification. The schema
+remains the frozen portable contract, and each migrated domain report retains
+its existing authority boundary.
 
 P66 itself does not change any current writer, reader, policy decision, or
 authority boundary; the active verification behavior is the separately tested
@@ -38,13 +39,13 @@ consequential consumer.
 | Trace | `build_evidence` and audit entries in `fettle/trace.py` | Trace v1 tolerated, writer v2; truncated `ev-` hash over a small projection | JSONL under `XDG_STATE_HOME`; rotates near 5 MiB / 5,000 entries | Audit/diagnostic only; local trace is not attestation | Read-only legacy input; P68 may retain artifact references additively |
 | Verify | Stamp in `fettle/verify_gate.py` | Unversioned `evidence_id`; session, HEAD, dirty digest, scope | `.fettle/verify.json`, replaced per run | Fresh matching stamp can satisfy verify gate | Read-only until P67 pilot; migrate only after exact source/policy/scope binding exists |
 | CI | Stamp and GitHub run records in `fettle/ci_gate.py` | Unversioned `evidence_id`; SHA and timestamp; CI policy digest calculated separately | `.fettle/ci-status.json`, replaced per query; remote retention is provider-owned | Fresh SHA-bound stamp informs CI gate and exact override lookup | Read-only until P68; canonical artifact must remain independently recomputed from local evidence |
-| Coverage | `coverage.json` plus bounded reference in `fettle/coverage_gate.py` | Tool format is external; current reference is opaque | Project tool output; retention is project-owned | Fresh changed-line result may advise or block | Domain report referenced by artifact after P69; never flatten line/branch data |
-| UAT | Session checkpoint/transcript and operator records in `fettle/uat/` | Unversioned `evidence_id`; scenario IDs and labeled source | Worktree `.fettle/uat-session.json`, transcript, `.fettle/uat-attestations.json` | UAT reconciliation and operator attestation remain distinct | Wrap outcomes after P69; preserve scenario, source, redaction, and could-not-attempt semantics |
-| Integrations | `IntegrationReport` in `fettle/integration_base.py` | Five-state domain enum and opaque evidence reference | Usually transient/host output | Adapter policy maps availability and result | Preserve report; artifact records producer, trust, completeness, and bindings after P69 |
-| Mutation | Schema-v2 report and baseline in `fettle/mutation_test.py` and `fettle/mutation_baseline.py` | Full SHA-256 fingerprints and report digests; exact run-pair identity | Retained CI artifacts; committed accepted baseline | Complete reports and independent calibration pair are authoritative | Reference complete report after P69; never replace fingerprints, manifests, counts, or calibration |
-| Overrides | `OverrideRecord` in `fettle/overrides.py` | Strict schema v1; content-derived `ov-` ID; exact revision/policy/evidence/scope/surface match | Committed/project `.fettle/overrides.json`; explicit expiry | An exact active record changes disposition, never raw result | Keep strict v1 until P69 adds expected artifact kind and full binding migration |
-| Ratchet | Aggregate `Evidence` in `fettle/ratchet.py` | Ratchet schema v1; mutable counters, no source-window digest | `.fettle/ratchet.json` plus trace/FP windows | Supports rule promotion/demotion | Remains aggregate statistics; rename to `RuleEvidenceStats` during P69, not P66 |
-| Compliance | `ControlEvidence` in `fettle/compliance.py` | Unversioned 30-day aggregate over trace | Computed on demand | Explicitly not a certification or primary observation | Remains aggregate; rename to `ControlCoverageSummary` during P69 |
+| Coverage | `coverage.json` plus `fettle.coverage` sidecar | Full report, source, policy, and edited-line scope digests | Project-owned report and `.fettle/coverage-evidence.json` | Legacy changed-line decision remains authoritative | Additive canonical reference; line and branch data stay in `coverage.json` |
+| UAT | Session checkpoint/transcript, report, attestations, and two sidecars | `fettle.uat.session` and `fettle.uat.report`; scenario and report bindings | Worktree `.fettle`; sidecars follow their domain records | Reconciliation and operator attestation remain distinct | Transcript content is referenced by digest, never embedded |
+| Integrations | `IntegrationReport` plus in-memory `fettle.integration` artifact/reference | Five-state enum plus provider, trust, completeness, applicability, and bindings | Transient with the report unless the caller retains it | Adapter policy remains authoritative | Canonical wrapping does not change any adapter status |
+| Mutation | Schema-v2 report plus consumer-local `fettle.mutation.report` artifact | Full report and identity digests; exact run/calibration identities | Retained report/baseline under existing policy | Complete reports and independent calibration remain authoritative | Strict consumers wrap the report without flattening mutant records |
+| Overrides | `OverrideRecord` schemas v1 and v2 | V2 binds full artifact, source, revision, policy, scope, surface, check, and kind | Project `.fettle/overrides.json`; explicit activation and expiry | Only resolved, valid v2 evidence authorizes canonical consumers | V1 is readable and selectable only through explicit legacy rollback |
+| Ratchet | Aggregate `RuleEvidenceStats` | Source window, digest, and completeness metadata | `.fettle/ratchet.json` plus trace/FP windows | Supports rule promotion/demotion | Aggregate only; never primary observation |
+| Compliance | Aggregate `ControlCoverageSummary` | Source window, digest, and completeness metadata | Computed on demand | Not a certification or primary observation | Aggregate only; malformed source evidence remains visible |
 | Provider facts | `ProviderFactSet` in `fettle/provider_contract.py` | Canonical full digest; producer/config/input, state, completeness, trust | In-memory contract today | Future graph consumers must validate stronger provider invariants | Domain report referenced by artifact; provider trust never upgrades artifact authority |
 | Graph | Immutable records in `fettle/graph_types.py` | Graph/canonicalization v1; full canonical SHA-256 identities | Ephemeral by default; any future store is untrusted derived cache | Advisory contracts only until consumer graduation | Graph records reference accepted artifacts under P71; graph confidence cannot grant authority |
 | Dispatcher | `CheckResult` in `fettle/dispatcher_types.py` | Canonical state, decision, findings, references | Host response and trace | Current hook authority boundary | Keep wire format unchanged in P66; P67 compatibility tests gate additive v2 transport |
@@ -167,6 +168,21 @@ state and recovery action. CI and other consequential boundaries fail closed.
 A generic age TTL cannot establish freshness; the consumer evaluates exact
 source, policy, scope, producer, and kind-specific invalidation inputs.
 
+## P69 Producer Payloads And Operations
+
+| Kind | Payload and stronger guarantee | Invalidation and recovery | Rollback |
+|---|---|---|---|
+| `fettle.coverage` | References complete `coverage.json`; carries edited lines, effective thresholds, branch availability, stale state, and recovery command | Source edit, policy/scope change, stale report, missing/tampered report, or write failure invalidates it; run `pytest --cov --cov-report=json` | `gates.coverage.canonical_evidence = false` |
+| `fettle.uat.session` | References the redacted transcript by portable name and digest; carries surface, scenario IDs, status, and redaction count | Transcript/checkpoint change or sidecar failure invalidates it; rerun `fettle uat run` | `uat.canonical_evidence = false` |
+| `fettle.uat.report` | References the complete report by digest; carries all scenario verdicts and completion counts without transcript observations | Session/report change or sidecar failure invalidates it; rerun reconciliation | `uat.canonical_evidence = false` |
+| `fettle.integration` | Embeds the bounded domain report and records provider, tool identity, trust, determinism, applicability, and explicit bindings | Any provider result or effective config/scope change invalidates it; rerun the named integration | Per-adapter `canonical_evidence = false` |
+| `fettle.mutation.report` | References a complete schema-v2 report and carries identity digests, counts, and run/calibration IDs; mutant records remain in the report | Incomplete/tampered report, report digest mismatch, or calibration mismatch rejects construction; rerun mutation/calibration | No producer writer is replaced; consumers may stop requesting the wrapper |
+
+Sidecars have the same retention horizon as the domain records they reference.
+They are written atomically where persisted. A failed additive write never
+changes the legacy domain result, but it is recorded or logged and cannot be
+used by a consequential canonical consumer.
+
 ## Compatibility Matrix
 
 | Existing representation | P66/P67 handling | Authority and expiry |
@@ -176,12 +192,12 @@ source, policy, scope, producer, and kind-specific invalidation inputs.
 | Finding bare `evidence_id` and reference v1 | Read-only on existing host wires | No independent artifact validation; new consequential uses require v2 |
 | Verify stamp | P67 writes and validates a canonical artifact alongside it; legacy-only stamps remain readable for rollback | A stamp claiming canonical evidence must pass digest, occurrence, source, policy, scope, producer, completeness, and trust validation; invalid claimed evidence is non-pass |
 | CI status stamp | Read-only until P68 | Existing SHA/timestamp gate remains authoritative; local verify evidence cannot substitute |
-| Coverage and UAT records | Read-only until per-producer P69 migration | Existing domain semantics and retention remain |
-| Integration report | Read-only until P69 | Existing adapter policy remains; unavailable cannot become pass |
-| Override schema v1 | Strict read as today; no automatic rewrite | Exact current matching remains; P69 must migrate expected kind/bindings explicitly |
+| Coverage and UAT records | Additive P69 sidecars; legacy records unchanged | Existing domain semantics and retention remain; switches independently disable sidecars |
+| Integration report | Additive in-memory P69 artifact/reference | Existing adapter policy remains; unavailable cannot become pass |
+| Override schema v1 | Strict read with no automatic rewrite | Selectable only through explicit legacy rollback; canonical consumers require v2 |
 | Mutation report schema v2 and baseline v1 | Reference, never flatten or migrate in P66 | Existing report/baseline validators remain authoritative |
 | Provider fact sets and graph records v1 | Reference after producer/consumer graduation | Current contracts remain advisory; cache presence grants no authority |
-| Ratchet `Evidence` / compliance `ControlEvidence` | Keep as aggregate; planned names only | Never accepted as primary observations; rename only in P69 implementation |
+| Ratchet `RuleEvidenceStats` / compliance `ControlCoverageSummary` | Aggregate with source-window metadata | Never accepted as primary observations |
 | Unknown future schema/version | Reject for consequential use; retain bytes only when transport policy permits | No compatibility by guess, coercion, or field-name similarity |
 
 Legacy compatibility has no calendar-based implicit expiry. A writer is removed
