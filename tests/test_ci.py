@@ -241,6 +241,13 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "if: always()" in workflow
 
 
+def test_mutation_workflow_creates_required_check_for_every_pull_request():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    pull_request_trigger = workflow.split("  pull_request:", 1)[1].split("  schedule:", 1)[0]
+
+    assert "paths:" not in pull_request_trigger
+
+
 def test_changed_mutation_workflow_fans_out_bounded_exact_scope():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
@@ -249,22 +256,41 @@ def test_changed_mutation_workflow_fans_out_bounded_exact_scope():
     assert "--manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json" in workflow
     assert "--manifest-scope mutation-changed-manifests" in workflow
     assert "--aggregate mutation-changed-shards --aggregate-scope mutation-changed-manifests" in workflow
-    assert "needs: [changed-prepare, changed-shard]" in workflow
+    assert "needs: [changed-prepare, changed-shard, changed-replay-prepare, changed-replay]" in workflow
     assert "if: needs.changed-prepare.outputs.shard_count == '0'" in workflow
     assert "if: needs.changed-prepare.result != 'success'" in workflow
+    assert "needs.changed-replay-prepare.outputs.shard_count == ''" in workflow
 
 
 def test_changed_mutation_workflow_preseeds_timeout_evidence_and_truthful_summary():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "--initialize-timeout-report mutation-report.json" in workflow
-    assert "--initialize-timeout-report mutation-report.json --timeout 1800" in workflow
+    assert "--manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json --timeout 1800" in workflow
     assert "name: Bounded changed-scope mutation evidence\n        timeout-minutes: 30" in workflow
     assert "--timeout 1740" in workflow
     assert workflow.index("--initialize-timeout-report") < workflow.index("Bounded changed-scope mutation evidence")
     assert "--github-summary mutation-report.json" in workflow
     assert "mutation-evidence-${{ github.run_id }}" in workflow
     assert "if-no-files-found: error" in workflow
+
+
+def test_changed_mutation_workflow_replays_only_incomplete_shards_before_aggregate():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "changed-replay-prepare:" in workflow
+    assert "--prepare-replay-matrix mutation-changed-initial" in workflow
+    assert "fromJSON(needs.changed-replay-prepare.outputs.matrix)" in workflow
+    assert "--timeout 3540" in workflow
+    assert "mutation-changed-replay-${{ github.run_id }}-${{ matrix.shard }}" in workflow
+    assert workflow.index("changed-replay:") < workflow.index("\n  changed:")
+
+
+def test_changed_mutation_workflow_has_one_authoritative_pr_check():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert workflow.count("continue-on-error: true") >= 4
+    assert "name: mutation evidence" in workflow
 
 
 def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
@@ -323,20 +349,20 @@ def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
     assert '"fettle/mutation_test.py" = 5' in config
     assert '"fettle/post_edit.py" = 20' in config
     assert '"fettle/project_rules.py" = 10' in config
-    assert '"fettle/quality_scan.py" = 5' in config
+    assert '"fettle/quality_scan.py" = 2' in config
     assert '"fettle/ratchet.py" = 20' in config
     assert '"fettle/result.py" = 20' in config
     assert '"fettle/security_review.py" = 20' in config
-    assert '"fettle/semgrep_util.py" = 5' in config
+    assert '"fettle/semgrep_util.py" = 1' in config
     assert '"fettle/tool_runner.py" = 10' in config
 
 
-def test_authoritative_mutation_runs_are_serialized_without_cancelling_evidence():
+def test_pr_mutation_runs_cancel_stale_work_but_authoritative_runs_remain_durable():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "concurrency:" in workflow
     assert "mutation-authoritative" in workflow
-    assert "cancel-in-progress: false" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
 
 
 def test_mutation_calibration_checkpoints_are_explicit_and_isolated():

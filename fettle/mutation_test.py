@@ -761,9 +761,17 @@ def run_resumable_mutation_shard(
         return _error("unknown", f"Cannot resume mutation shard: {exc}")
 
 
-def write_timeout_evidence(path: Path, timeout_s: int) -> None:
+def write_timeout_evidence(path: Path, timeout_s: int, manifest: dict | None = None) -> None:
+    identity = {}
+    if manifest is not None:
+        identity = {
+            "revision": manifest["revision"],
+            "shard_index": manifest["shard_index"],
+            "shard_count": manifest["shard_count"],
+        }
     _write_json_atomic(path, _error(
-        "tool_error", f"Mutation execution exceeded its {timeout_s}s deadline", partial=True,
+        "tool_error", f"Mutation execution exceeded its {timeout_s}s deadline",
+        partial=True, **identity,
     ))
 
 
@@ -1941,6 +1949,52 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     }
 
 
+def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
+    """Select one completed report per shard while rejecting conflicting retries."""
+    attempts: dict[int, list[dict]] = {index: [] for index in range(shard_count)}
+    for report in reports:
+        index = report.get("shard_index") if isinstance(report, dict) else None
+        if (
+            not isinstance(index, int) or isinstance(index, bool)
+            or index not in attempts or report.get("shard_count") != shard_count
+        ):
+            raise ValueError("shard attempt has invalid topology")
+        attempts[index].append(report)
+    selected = []
+    for index in range(shard_count):
+        completed = [report for report in attempts[index] if report.get("status") == "completed"]
+        if not completed:
+            raise ValueError(f"shard {index} has no completed attempt")
+        canonical = {_canonical_digest(report) for report in completed}
+        if len(canonical) != 1:
+            raise ValueError(f"shard {index} has conflicting completed attempts")
+        selected.append(completed[0])
+    return selected
+
+
+def prepare_shard_replay_matrix(reports: list[dict], shard_count: int) -> dict:
+    """Derive a bounded retry matrix from exactly one initial attempt per shard."""
+    if len(reports) != shard_count:
+        raise ValueError(f"replay preparation requires exactly {shard_count} initial reports")
+    by_index: dict[int, dict] = {}
+    revisions = set()
+    for report in reports:
+        index = report.get("shard_index") if isinstance(report, dict) else None
+        if (
+            not isinstance(index, int) or isinstance(index, bool)
+            or not 0 <= index < shard_count or index in by_index
+            or report.get("shard_count") != shard_count
+            or not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", "")))
+        ):
+            raise ValueError("initial shard reports have invalid or duplicated identity")
+        by_index[index] = report
+        revisions.add(report["revision"])
+    if set(by_index) != set(range(shard_count)) or len(revisions) != 1:
+        raise ValueError("initial shard reports have incomplete or conflicting identity")
+    replay = [index for index in range(shard_count) if by_index[index].get("status") != "completed"]
+    return {"status": "completed", "passed": True, "matrix": {"shard": replay}, "shard_count": len(replay)}
+
+
 def aggregate_shards(
     root: str,
     reports: list[dict],
@@ -2428,6 +2482,7 @@ def main() -> int:
     parser.add_argument("--manifest-scope", metavar="DIRECTORY", help="Complete manifest set defining execution scope")
     parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
     parser.add_argument("--prepare-changed-manifests", metavar="DIRECTORY", help="Write bounded changed-scope manifests")
+    parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
@@ -2447,7 +2502,8 @@ def main() -> int:
 
     mutation = load_config(args.root)["mutation"]
     if args.initialize_timeout_report:
-        write_timeout_evidence(Path(args.initialize_timeout_report), args.timeout or 720)
+        manifest = load_partition_manifest(Path(args.manifest)) if args.manifest else None
+        write_timeout_evidence(Path(args.initialize_timeout_report), args.timeout or 720, manifest)
         return 0
     if args.github_summary:
         try:
@@ -2462,6 +2518,17 @@ def main() -> int:
             print(f"Cannot write mutation summary: {exc}", file=sys.stderr)
             return 2
         return 0
+    if args.prepare_replay_matrix:
+        try:
+            if args.shard_count is None or args.shard_count < 1:
+                raise ValueError("--prepare-replay-matrix requires a positive --shard-count")
+            report_paths = sorted(Path(args.prepare_replay_matrix).rglob("mutation-report.json"))
+            reports = [json.loads(path.read_text(encoding="utf-8")) for path in report_paths]
+            report = prepare_shard_replay_matrix(reports, args.shard_count)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot prepare mutation replay: {exc}")
+        print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0 if report["status"] == "completed" else 2
     if args.prepare_manifests or args.prepare_changed_manifests:
         try:
             if args.prepare_changed_manifests:
@@ -2548,6 +2615,13 @@ def main() -> int:
             except ValueError as exc:
                 report = _error("unknown", f"Cannot verify aggregate scope: {exc}")
             else:
+                try:
+                    reports = select_shard_attempts(reports, args.shard_count)
+                except ValueError as exc:
+                    report = _error("unknown", f"Cannot reconcile shard attempts: {exc}")
+                    output = json.dumps(report, indent=2) if args.json else format_report(report)
+                    sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
+                    return 2
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
                     mutation["test_mappings"], mutation,
