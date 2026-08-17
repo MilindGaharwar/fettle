@@ -105,4 +105,5 @@ def test_ci_runs_blocking_windows_bridge_publication_uat():
     assert "fettle init --json" in windows
     assert "fettle doctor --json" in windows
     assert 'from fettle.bridge import bridge_dir; print(bridge_dir())' in windows
+    assert 'Write-Host ($doctor | ConvertTo-Json -Depth 6)' in windows
     assert 'Add-Content (Join-Path $bridgeVersion "opencode\\fettle.ts")' in windows
