@@ -191,10 +191,12 @@ jobs:
 
             $init = & $python -m fettle init --json | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or ($init | Where-Object name -eq "bridge").status -ne "created") { throw "bridge publication failed" }
+            $bridgeVersion = & $python -c "from fettle.bridge import bridge_dir; print(bridge_dir())"
             $doctor = & $python -m fettle doctor --json | ConvertFrom-Json
+            Write-Host "Bridge path: $bridgeVersion"
+            Write-Host ($doctor | ConvertTo-Json -Depth 6)
             if ($LASTEXITCODE -ne 0 -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
 
-            $bridgeVersion = & $python -c "from fettle.bridge import bridge_dir; print(bridge_dir())"
             Add-Content (Join-Path $bridgeVersion "opencode\fettle.ts") "tampered"
             $stale = & $python -m fettle doctor --json | ConvertFrom-Json
             if ($stale.checks | Where-Object { $_.name -eq "bridge" -and $_.ok }) { throw "doctor accepted tampered bridge" }
