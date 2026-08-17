@@ -279,6 +279,7 @@ def test_changed_mutation_workflow_replays_only_incomplete_shards_before_aggrega
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "changed-replay-prepare:" in workflow
+    assert "needs: [changed-prepare, changed-shard]" in workflow
     assert "--prepare-replay-matrix mutation-changed-initial" in workflow
     assert "fromJSON(needs.changed-replay-prepare.outputs.matrix)" in workflow
     assert "--timeout 3540" in workflow

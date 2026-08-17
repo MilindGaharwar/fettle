@@ -1973,9 +1973,9 @@ def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
 
 
 def prepare_shard_replay_matrix(reports: list[dict], shard_count: int) -> dict:
-    """Derive a bounded retry matrix from exactly one initial attempt per shard."""
-    if len(reports) != shard_count:
-        raise ValueError(f"replay preparation requires exactly {shard_count} initial reports")
+    """Derive a bounded retry matrix after the initial shard matrix is terminal."""
+    if len(reports) > shard_count:
+        raise ValueError(f"replay preparation accepts at most {shard_count} initial reports")
     by_index: dict[int, dict] = {}
     revisions = set()
     for report in reports:
@@ -1989,9 +1989,12 @@ def prepare_shard_replay_matrix(reports: list[dict], shard_count: int) -> dict:
             raise ValueError("initial shard reports have invalid or duplicated identity")
         by_index[index] = report
         revisions.add(report["revision"])
-    if set(by_index) != set(range(shard_count)) or len(revisions) != 1:
-        raise ValueError("initial shard reports have incomplete or conflicting identity")
-    replay = [index for index in range(shard_count) if by_index[index].get("status") != "completed"]
+    if len(revisions) > 1:
+        raise ValueError("initial shard reports have conflicting identity")
+    replay = [
+        index for index in range(shard_count)
+        if index not in by_index or by_index[index].get("status") != "completed"
+    ]
     return {"status": "completed", "passed": True, "matrix": {"shard": replay}, "shard_count": len(replay)}
 
 

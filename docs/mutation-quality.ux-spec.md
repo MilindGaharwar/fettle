@@ -199,6 +199,14 @@ When CI prepares the retry matrix
 Then it retries only that shard from the original manifest with a bounded
 recovery budget and evaluates policy only after complete aggregation.
 
+### Scenario: PR worker fails before retaining evidence
+
+Given the initial changed-scope matrix is terminal and one worker failed during
+job setup before it could retain a report
+When CI prepares the retry matrix
+Then it retries the missing shard from the original manifest and still refuses
+to evaluate policy unless the replay produces compatible completed evidence.
+
 ### Scenario: Conflicting PR replay fails closed
 
 Given two completed attempts for one shard report different mutation outcomes

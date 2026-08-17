@@ -2681,9 +2681,25 @@ def test_replay_matrix_selects_only_incomplete_initial_shards():
     assert result["shard_count"] == 1
 
 
-def test_replay_matrix_rejects_missing_initial_shard():
-    with pytest.raises(ValueError, match="exactly 2"):
-        prepare_shard_replay_matrix([_shard_report(0, ["fettle/a.py"])], 2)
+def test_replay_matrix_selects_missing_initial_shard_after_terminal_matrix():
+    result = prepare_shard_replay_matrix([_shard_report(0, ["fettle/a.py"])], 2)
+
+    assert result["matrix"] == {"shard": [1]}
+    assert result["shard_count"] == 1
+
+
+def test_replay_matrix_selects_all_shards_when_setup_retains_no_reports():
+    result = prepare_shard_replay_matrix([], 2)
+
+    assert result["matrix"] == {"shard": [0, 1]}
+    assert result["shard_count"] == 2
+
+
+def test_replay_matrix_rejects_duplicate_report_when_other_shards_are_missing():
+    report = _shard_report(0, ["fettle/a.py"], shard_count=3)
+
+    with pytest.raises(ValueError, match="duplicated identity"):
+        prepare_shard_replay_matrix([report, report], 3)
 
 
 def test_aggregate_shards_rejects_overlapping_source_ranges(tmp_path):

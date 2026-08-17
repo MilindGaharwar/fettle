@@ -12,11 +12,13 @@ debugging loop.
 4. Replay the smallest changed scope.
 5. Use a full run only after preflight and narrow replay succeed.
 
-PR orchestration retains every initial shard, derives a retry matrix from
-non-completed reports, and retries only those original manifests. The aggregate
-must select exactly one compatible completed attempt per shard. A retry timeout,
-missing attempt, or conflicting completed attempt remains exit 2 and cannot
-establish a score or pass.
+PR orchestration waits for the initial shard matrix, derives a retry matrix from
+non-completed or missing reports, and retries only those original manifests. A
+missing report at that boundary means the terminal worker failed before retaining
+evidence; replay identity still comes from the original digest-bound manifest.
+The aggregate must select exactly one compatible completed attempt per shard. A
+retry timeout, missing attempt, or conflicting completed attempt remains exit 2
+and cannot establish a score or pass.
 
 ```bash
 uv sync --extra dev
