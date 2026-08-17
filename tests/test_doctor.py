@@ -42,6 +42,16 @@ def test_missing_required_tool_fails(monkeypatch):
     assert "disabled" in next(c for c in checks if c["name"] == "ruff")["detail"]
 
 
+def test_tool_installed_beside_interpreter_is_available(monkeypatch, tmp_path):
+    executable = tmp_path / ("ruff.exe" if os.name == "nt" else "ruff")
+    executable.write_text("")
+    executable.chmod(0o755)
+    monkeypatch.setattr("fettle.tool_paths.shutil.which", lambda _name: None)
+    monkeypatch.setattr("fettle.tool_paths.sys.executable", str(tmp_path / "python"))
+
+    assert package_doctor._which("ruff") == str(executable)
+
+
 def test_json_mode_shape_and_exit_code():
     proc = subprocess.run(
         [sys.executable, SCRIPT, "--json"],

@@ -11,7 +11,6 @@ Usage:
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +31,11 @@ def _version_of(binary: str, args: list[str] | None = None) -> str | None:
 
 
 def _which(name: str) -> str | None:
-    """Find a tool on PATH, including ~/.local/bin (uv tool install location)."""
+    """Find a tool available to Fettle, including common user install locations."""
     import os
-    path = shutil.which(name)
+    from fettle.tool_paths import resolve_tool
+
+    path = resolve_tool(name)
     if path:
         return path
     local_bin = os.path.expanduser(f"~/.local/bin/{name}")
