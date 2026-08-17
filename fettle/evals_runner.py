@@ -31,10 +31,9 @@ from pathlib import Path
 
 try:
     import yaml
-except ImportError:  # WP-11 (audit M-07): pyyaml ships in the `evals` extra
+except ImportError:
     sys.stderr.write(
-        "fettle evals requires PyYAML — install with: "
-        "pip install 'finefettle[evals]'\n"
+        "fettle evals requires PyYAML — reinstall finefettle\n"
     )
     sys.exit(2)
 

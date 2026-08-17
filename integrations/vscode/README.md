@@ -23,7 +23,7 @@ configuration but do not yet run an identical set of gates.
 
 - Python >= 3.11
 - Fettle installed at `~/.claude/plugins/fettle` (or set `fettle.pluginPath`)
-- `ruff` and optionally `semgrep` on PATH or at `~/.local/bin`
+- `ruff` and `semgrep` from the default Fettle installation, or compatible tools on PATH
 
 ## Installation
 

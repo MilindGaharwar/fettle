@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MilindGaharwar/fettle/schemas/installed-artifact-contract-v1.json",
+  "title": "Fettle installed artifact contract report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "package", "environment", "bridge", "doctor", "hosts"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "stage": {"enum": ["candidate", "public"]},
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "wheel"],
+      "properties": {
+        "name": {"const": "finefettle"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "wheel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["filename", "sha256", "size"],
+          "properties": {
+            "filename": {"type": "string", "pattern": "\\.whl$", "maxLength": 256},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "os", "architecture", "pipx", "checkout_independent"],
+      "properties": {
+        "python": {"type": "string", "minLength": 1, "maxLength": 256},
+        "os": {"type": "string", "minLength": 1, "maxLength": 256},
+        "architecture": {"type": "string", "minLength": 1, "maxLength": 256},
+        "pipx": {"type": "string", "minLength": 1, "maxLength": 256},
+        "checkout_independent": {"const": true}
+      }
+    },
+    "bridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "version", "manifest_sha256"],
+      "properties": {
+        "state": {"const": "pass"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "doctor": {"const": "pass"},
+    "hosts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["registration", "transport", "live_evidence"],
+        "properties": {
+          "registration": {"const": "pass"},
+          "transport": {"const": "pass"},
+          "live_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "observed_at", "host_version", "reference"],
+            "properties": {
+              "state": {"enum": ["pass", "blocked"]},
+              "observed_at": {
+                "type": ["string", "null"],
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+              },
+              "host_version": {"type": "string", "minLength": 1, "maxLength": 256},
+              "reference": {"type": "string", "minLength": 1, "maxLength": 512}
+            }
+          }
+        }
+      }
+    }
+  }
+}

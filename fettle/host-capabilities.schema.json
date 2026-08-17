@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MilindGaharwar/fettle/schemas/host-capabilities-v1.json",
+  "title": "Fettle host capability policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "hosts"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "hosts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim",
+          "candidate_contract",
+          "public_canary",
+          "live_evidence",
+          "live_evidence_max_age_days"
+        ],
+        "properties": {
+          "claim": {
+            "enum": ["supported-installed", "contract-tested", "clone-only", "blocked", "unsupported"]
+          },
+          "candidate_contract": {"const": "required"},
+          "public_canary": {"const": "required"},
+          "live_evidence": {"enum": ["required-for-claim", "not-required-for-claim"]},
+          "live_evidence_max_age_days": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

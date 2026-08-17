@@ -8,8 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
-import shutil
 import subprocess
 from typing import Protocol
 
@@ -27,6 +25,7 @@ from fettle.finding import (
 from fettle.paths import FileKind
 from fettle.project_rules import extra_rule_configs
 from fettle.semgrep_util import anchored_semgrep_args
+from fettle.tool_paths import resolve_tool
 from fettle.trace import build_evidence
 from fettle.workspace import Workspace
 
@@ -131,10 +130,7 @@ def semgrep_findings(
 
 
 def _resolve_tool(name: str) -> str | None:
-    local = Path.home() / ".local" / "bin" / name
-    if local.is_file() and os.access(local, os.X_OK):
-        return str(local)
-    return shutil.which(name)
+    return resolve_tool(name)
 
 
 def _adapter_error(message: str) -> CheckFinding:

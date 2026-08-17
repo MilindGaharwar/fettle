@@ -13,7 +13,7 @@ Date: 2026-08-16
 | Preserve wheel virtual-environment interpreter | Python 3.14 virtual environment | PASS; manifest and transports retain the absolute virtualenv path |
 | Detect and repair a tampered bridge | Modified `opencode/fettle.ts` | PASS; `stale` with `run: fettle init`, then `supported-installed` |
 | OpenCode real session invokes governance | OpenCode 1.18.15 | PASS; host wrote the requested file, surfaced F401, and recorded session-linked trace evidence |
-| Claude Code real session | Claude Code 2.1.233, managed Bedrock authentication | BLOCKED; candidate plugin loaded, but the provider returned HTTP 429 before a tool call |
+| Claude Code real session | Claude Code 2.1.233, managed Bedrock authentication | PASS; host wrote the requested file, surfaced F401, and recorded session-linked trace evidence |
 | Codex CLI real session | Codex CLI 0.147.0, isolated ChatGPT authentication | PASS; native tool matchers invoked governance and recorded session-linked F401 evidence |
 | Gemini CLI real session | Gemini CLI 0.55.1, Google OAuth | BLOCKED; Google rejected the retired client for the account tier with `UNSUPPORTED_CLIENT` |
 
@@ -43,9 +43,12 @@ Date: 2026-08-16
   session `01a009e9-61bc-7252-ad78-9783a23aab14` wrote
   `app/codex-fettle-final.py` and produced a session-linked `adapter_check`
   violation for Ruff F401.
-- Claude session `b17b927a-2f3a-49e9-98bb-4cedf4a2debe` loaded the candidate
-  `1.11.1` bridge plugin under managed Bedrock authentication, then stopped on
-  HTTP 429 before any tool call.
+- Claude session `814af671-9267-4f8b-83ba-405c63cd76c4` loaded the candidate
+  `1.11.1` bridge under managed Bedrock authentication and used the native
+  `Write` tool to create `app/claude-installed-python.py`. The PostToolUse hook
+  surfaced Ruff F401 to Claude, Claude reported the finding to the user, and
+  the audit trace recorded matching `adapter_check` violations with the same
+  session ID.
 - Gemini OAuth reached the provider, which rejected CLI `0.55.1` with
   `UNSUPPORTED_CLIENT` and directed individual-tier users to Antigravity.
 
@@ -53,7 +56,6 @@ Date: 2026-08-16
 
 | Host | Blocker | Recovery |
 |---|---|---|
-| Claude Code | Managed Bedrock provider returned HTTP 429 before a tool call | Repeat when provider capacity is available |
 | Gemini CLI | OAuth rejected retired client `0.55.1` with `UNSUPPORTED_CLIENT` | Use an eligible API/Workspace path if available; Antigravity remains gated on live CLI conformance |
 
 The Codex lifecycle sentinel was intentionally a foreign top-level field.
@@ -73,6 +75,6 @@ hook invocation separately.
 
 CONDITIONAL PASS. Installed artifact publication, upgrade convergence,
 configuration preservation, stale recovery, and OpenCode real-session
-and Codex CLI governance are observed. Authentication was established for
-Claude Code and Gemini CLI, but their success criteria remain non-pass because
-of provider throttling and upstream Gemini client retirement respectively.
+and Claude Code and Codex CLI governance are observed. Gemini CLI
+authentication reached its provider, but its success criterion remains
+non-pass because of upstream client retirement.

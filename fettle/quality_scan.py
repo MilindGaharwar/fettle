@@ -14,7 +14,6 @@ import fnmatch
 import hashlib
 import json
 import os
-import shutil
 import sys
 from dataclasses import dataclass, field
 
@@ -24,6 +23,7 @@ from fettle._resources import rules_dir  # noqa: E402
 from fettle.result import ResultStatus  # noqa: E402
 from fettle.spec_audit import scan_spec_audit  # noqa: E402
 from fettle.tool_runner import ToolRunner  # noqa: E402
+from fettle.tool_paths import resolve_tool  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -57,11 +57,7 @@ class ToolScanResult:
 
 def _resolve_tool(name: str) -> str | None:
     """Return absolute path to *name* or None."""
-    local = os.path.expanduser(f"~/.local/bin/{name}")
-    if os.path.isfile(local) and os.access(local, os.X_OK):
-        return local
-    found = shutil.which(name)
-    return found
+    return resolve_tool(name)
 
 
 def _load_ignore(root: str) -> list[str]:

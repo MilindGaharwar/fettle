@@ -10,7 +10,7 @@ OpenCode's **native** event shapes (`tool.execute.before/after`,
 conformance-tested in Python, and the TypeScript shim is a thin transport.
 
 Run `fettle init --dry-run`, inspect the proposed plugin registration, then run
-`fettle init`. The v1.11.0 wheel materializes a versioned, digest-checked
+`fettle init`. The v1.11.1 wheel materializes a versioned, digest-checked
 TypeScript transport and preserves existing OpenCode config. Restart OpenCode
 after installation. Manual checkout registration, if you prefer:
 

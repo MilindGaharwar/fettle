@@ -37,7 +37,14 @@ _CACHE_STATES = {
     "untested": "untested",
     "skipped": "skipped",
 }
-_ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")}
+_ENV = {
+    **os.environ,
+    "PATH": os.pathsep.join((
+        str(Path(sys.executable).parent),
+        os.path.expanduser("~/.local/bin"),
+        os.environ.get("PATH", ""),
+    )),
+}
 _STABILITY_RUNTIME_MS = 35 * 60 * 1000
 _TEST_RUNNER = "python -m pytest -x --assert=plain {mapped_tests}"
 _MAX_SHOW_BYTES = 50 * 1024 * 1024
@@ -1107,6 +1114,38 @@ def write_partition_manifests(root: str, cfg: dict, output_dir: Path) -> list[Pa
     return paths
 
 
+def write_changed_partition_manifests(
+    root: str,
+    cfg: dict,
+    output_dir: Path,
+    base: str,
+) -> tuple[list[Path], list[str]]:
+    """Write bounded manifests that exactly cover the current changed-file scope."""
+    selection = _get_changed_py_files(root, cfg.get("paths", ["src/"]), base)
+    if selection["status"] != "completed":
+        raise ValueError(selection["message"])
+    files = [
+        path for path in selection["files"]
+        if not any(path.startswith(item) for item in cfg.get("exclude", ["tests/", "migrations/"]))
+    ]
+    if not files:
+        return [], []
+    default_chunk_lines = int(cfg.get("default_chunk_lines", 60))
+    chunk_lines = cfg.get("chunk_lines", {})
+    chunk_count = sum(
+        (len((Path(root) / file).read_text(encoding="utf-8").splitlines()) + chunk_lines.get(file, default_chunk_lines) - 1)
+        // chunk_lines.get(file, default_chunk_lines)
+        for file in files
+    )
+    changed_cfg = {
+        **cfg,
+        "paths": files,
+        "exclude": [],
+        "full_shards": min(256, chunk_count),
+    }
+    return write_partition_manifests(root, changed_cfg, output_dir), files
+
+
 def _canonical_mutant(
     root: str,
     file: str,
@@ -2001,6 +2040,7 @@ def aggregate_shards(
         key=lambda item: (item["file"], item["start"]),
     )
     policy = policy_config or {"score_target": threshold}
+    policy_result = evaluate_policy(counts, policy)
     evidence_identity = {
         "policy_digest": _canonical_digest({
             key: policy.get(key) for key in (
@@ -2033,9 +2073,8 @@ def aggregate_shards(
         "non_killed": records,
         "survivor_preview": [record for record in records if record["state"] == "survived"][:20],
         "survivors": survivors,
-        "score": round(score, 1),
+        **policy_result,
         "threshold": threshold,
-        "passed": score >= threshold,
         "duration_ms": max(report["duration_ms"] for report in reports),
         "total_duration_ms": sum(report["duration_ms"] for report in reports),
     }
@@ -2386,8 +2425,11 @@ def main() -> int:
     parser.add_argument("--shard-index", type=int)
     parser.add_argument("--shard-count", type=int)
     parser.add_argument("--manifest", help="Digest-bound full-run partition manifest")
+    parser.add_argument("--manifest-scope", metavar="DIRECTORY", help="Complete manifest set defining execution scope")
     parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
+    parser.add_argument("--prepare-changed-manifests", metavar="DIRECTORY", help="Write bounded changed-scope manifests")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
+    parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
@@ -2420,12 +2462,19 @@ def main() -> int:
             print(f"Cannot write mutation summary: {exc}", file=sys.stderr)
             return 2
         return 0
-    if args.prepare_manifests:
+    if args.prepare_manifests or args.prepare_changed_manifests:
         try:
-            paths = write_partition_manifests(args.root, mutation, Path(args.prepare_manifests))
+            if args.prepare_changed_manifests:
+                paths, changed_files = write_changed_partition_manifests(
+                    args.root, mutation, Path(args.prepare_changed_manifests), args.base or mutation["base"],
+                )
+            else:
+                paths = write_partition_manifests(args.root, mutation, Path(args.prepare_manifests))
+                changed_files = []
             report = {
                 "status": "completed", "passed": True, "shard_count": len(paths),
                 "matrix": {"shard": list(range(len(paths)))},
+                **({"files": changed_files} if args.prepare_changed_manifests else {}),
             }
         except (OSError, ValueError) as exc:
             report = _error("unknown", f"Cannot prepare mutation manifests: {exc}")
@@ -2477,20 +2526,54 @@ def main() -> int:
             report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
             try:
                 reports = [json.loads(path.read_text()) for path in report_paths]
+                if args.aggregate_scope:
+                    manifests = [
+                        load_partition_manifest(path)
+                        for path in sorted(Path(args.aggregate_scope).glob("partition-*.json"))
+                    ]
+                    if len(manifests) != args.shard_count:
+                        raise ValueError("aggregate scope manifests are incomplete")
+                    paths = sorted({file for manifest in manifests for file in manifest["files"]})
+                    selection = _get_changed_py_files(args.root, mutation["paths"], args.base or mutation["base"])
+                    if selection["status"] != "completed":
+                        raise ValueError(selection["message"])
+                    expected = [
+                        file for file in selection["files"]
+                        if not any(file.startswith(item) for item in excluded)
+                    ]
+                    if paths != expected:
+                        raise ValueError("aggregate manifests do not match changed-file scope")
             except (OSError, json.JSONDecodeError) as exc:
                 report = _error("unknown", f"Cannot read shard reports: {exc}")
+            except ValueError as exc:
+                report = _error("unknown", f"Cannot verify aggregate scope: {exc}")
             else:
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
                     mutation["test_mappings"], mutation,
                 )
     else:
+        if args.manifest_scope:
+            try:
+                scope_manifests = [
+                    load_partition_manifest(path)
+                    for path in sorted(Path(args.manifest_scope).glob("partition-*.json"))
+                ]
+                if args.shard_count is None or len(scope_manifests) != args.shard_count:
+                    raise ValueError("execution scope manifests are incomplete")
+                paths = sorted({file for manifest in scope_manifests for file in manifest["files"]})
+            except (OSError, ValueError) as exc:
+                report = _error("unknown", f"Cannot verify execution scope: {exc}")
+                output = json.dumps(report, indent=2) if args.json else format_report(report)
+                sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
+                return 2
         report = run_mutation_test(args.root, {
             **mutation,
             "paths": paths, "exclude": excluded, "base": base, "all": args.all,
             "timeout_s": timeout, "score_target": threshold,
             "shard_index": args.shard_index, "shard_count": args.shard_count,
             "manifest": args.manifest,
+            **({"full_shards": args.shard_count} if args.manifest and args.shard_count is not None else {}),
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))

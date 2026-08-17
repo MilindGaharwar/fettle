@@ -12,7 +12,6 @@ Usage:
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,13 +20,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from fettle.config import load_config
 from fettle.paths import find_repo_root
 from fettle.trace import log_decision
+from fettle.tool_paths import resolve_tool
 
 
 def _resolve_ruff() -> str | None:
-    local = os.path.expanduser("~/.local/bin/ruff")
-    if os.path.isfile(local) and os.access(local, os.X_OK):
-        return local
-    return shutil.which("ruff")
+    return resolve_tool("ruff")
 
 
 def fix_file(file_path: str, cfg: dict, unsafe: bool = False) -> dict:

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Installation And Documentation
+
+- The default `finefettle` installation now includes Fettle's Python analyzers,
+  test and mutation runners, commit-hook support, behavioral-evaluation parser,
+  and browser-automation library. `pipx install finefettle` is the single
+  supported Python installer command; browser binaries, agent hosts, Git, and
+  non-Python language toolchains remain explicit external runtimes.
+- Refreshed the README and active guides around a two-minute proof, safe agent
+  activation, capability boundaries, recovery, and independently bound evidence.
+- Graduated Claude Code to `supported-installed` after a live candidate-wheel
+  session surfaced Ruff F401 through its native `Write` lifecycle and recorded
+  matching session-linked audit evidence.
+
 ## v1.11.1 — Python 3.11 Evidence Compatibility
 
 **Released 2026-08-15**

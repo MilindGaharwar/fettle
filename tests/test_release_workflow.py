@@ -20,6 +20,8 @@ def test_release_preflight_blocks_build_and_publish():
     assert "conclusion" in workflow
     assert "build:\n    needs: preflight" in workflow
     assert "publish:\n    needs: build" in workflow
+    assert "public-canary:\n    needs: publish" in workflow
+    assert "release:\n    needs: public-canary" in workflow
 
 
 def test_release_prerequisites_are_checked_before_publication():
@@ -37,14 +39,70 @@ def test_release_candidate_runs_on_minimum_supported_python():
     assert 'python-version: "3.11"' in build
 
 
+def test_release_tests_exact_wheel_through_pipx_and_retains_digest():
+    workflow = _workflow()
+    build = workflow[workflow.index("  build:"):workflow.index("  publish:")]
+
+    assert "pipx==1.7.1" in build
+    assert "pipx install \"$WHEEL\"" in build
+    assert "sha256sum \"$WHEEL\"" in build
+    assert "name: artifact-contract" in build
+    assert "fettle.installed_artifact_canary" in build
+    assert "cd /tmp" in build
+    assert '--output "$GITHUB_WORKSPACE/artifact-contract/candidate.json"' in build
+    assert "relative_to(Path('/tmp/candidate-pipx/venvs/finefettle').resolve())" in build
+
+
+def test_release_smoke_requires_default_runtime_dependencies():
+    workflow = _workflow()
+    build = workflow[workflow.index("  build:"):workflow.index("  publish:")]
+
+    assert "import fettle.evals_runner, playwright, pytest, yaml" in build
+    assert "bindir = Path(os.path.dirname(os.path.realpath('/tmp/smoke/bin/python')))" in build
+    assert "('mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep')" in build
+    assert "finefettle\\[evals\\]" not in build
+
+
+def test_public_canary_verifies_digest_and_installed_behavior():
+    workflow = _workflow()
+    canary = workflow[workflow.index("  public-canary:"):workflow.index("  release:")]
+
+    assert "pip download" in canary
+    assert "sha256sum -c" in canary
+    assert "pipx install \"$PUBLIC_WHEEL\"" in canary
+    assert "fettle.installed_artifact_canary" in canary
+    assert "cd /tmp" in canary
+    assert '--output "$GITHUB_WORKSPACE/artifact-contract/public.json"' in canary
+    assert "fettle.installed_artifact_contract" in canary
+    assert '"$GITHUB_WORKSPACE/artifact-contract/candidate.json" "$GITHUB_WORKSPACE/artifact-contract/public.json"' in canary
+    assert "name: public-artifact-contract" in canary
+    assert "relative_to(Path('/tmp/public-pipx/venvs/finefettle').resolve())" in canary
+    assert "actions/checkout" not in canary
+
+
 def test_ci_exposes_one_stable_required_check():
     workflow = CI_WORKFLOW.read_text()
 
     assert "  required:\n" in workflow
     assert "name: CI required" in workflow
-    assert "needs: [lint, test, coverage]" in workflow
+    assert "needs: [lint, test, coverage, windows-bridge]" in workflow
     assert "if: always()" in workflow
     assert "LINT_RESULT: ${{ needs.lint.result }}" in workflow
     assert "TEST_RESULT: ${{ needs.test.result }}" in workflow
     assert "COVERAGE_RESULT: ${{ needs.coverage.result }}" in workflow
-    assert workflow.count('!= "success"') == 3
+    assert "WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}" in workflow
+    assert workflow.count('!= "success"') == 4
+
+
+def test_ci_runs_blocking_windows_bridge_publication_uat():
+    workflow = CI_WORKFLOW.read_text()
+    windows = workflow[workflow.index("  windows-bridge:"):workflow.index("  required:")]
+
+    assert "runs-on: windows-latest" in windows
+    assert '"fettle python"' in windows
+    assert "$env:LOCALAPPDATA" in windows
+    assert "fettle init --dry-run --json" in windows
+    assert "fettle init --json" in windows
+    assert "fettle doctor --json" in windows
+    assert 'from fettle.bridge import bridge_dir; print(bridge_dir())' in windows
+    assert 'Add-Content (Join-Path $bridgeVersion "opencode\\fettle.ts")' in windows

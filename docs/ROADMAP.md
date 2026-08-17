@@ -6,7 +6,7 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-The released package is v1.11.0. It includes the R1 evidence contract, the
+The released package is v1.11.1. It includes the R1 evidence contract, the
 graduated R2 canonical workspace/adapter substrate, scanner and CI result
 integrity, deterministic change-integrity contracts, P62's reproducible
 full-repository mutation calibration and accepted baseline, and wheel-native

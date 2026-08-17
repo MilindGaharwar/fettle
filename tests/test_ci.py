@@ -231,7 +231,7 @@ def test_integration_run_ci_end_to_end():
 def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert "timeout-minutes: 12" in workflow
+    assert "timeout-minutes: 35" in workflow
     assert "prepare:" in workflow
     assert "fromJSON(needs.prepare.outputs.matrix)" in workflow
     assert "--resume-manifest" in workflow
@@ -241,25 +241,27 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "if: always()" in workflow
 
 
-def test_changed_mutation_workflow_transports_non_authoritative_native_cache():
+def test_changed_mutation_workflow_fans_out_bounded_exact_scope():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert "actions/cache/restore@" in workflow
-    assert "actions/cache/save@" in workflow
-    assert "path: .fettle/mutation-cache" in workflow
-    assert "restore-keys:" in workflow
-    assert "fettle mutation run --changed" in workflow
-    assert workflow.index("actions/cache/restore@") < workflow.index("fettle mutation run --changed")
-    assert workflow.index("fettle mutation run --changed") < workflow.index("actions/cache/save@")
+    assert "--prepare-changed-manifests mutation-changed-manifests" in workflow
+    assert "fromJSON(needs.changed-prepare.outputs.matrix)" in workflow
+    assert "--manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json" in workflow
+    assert "--manifest-scope mutation-changed-manifests" in workflow
+    assert "--aggregate mutation-changed-shards --aggregate-scope mutation-changed-manifests" in workflow
+    assert "needs: [changed-prepare, changed-shard]" in workflow
+    assert "if: needs.changed-prepare.outputs.shard_count == '0'" in workflow
+    assert "if: needs.changed-prepare.result != 'success'" in workflow
 
 
 def test_changed_mutation_workflow_preseeds_timeout_evidence_and_truthful_summary():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "--initialize-timeout-report mutation-report.json" in workflow
-    assert "--initialize-timeout-report mutation-report.json --timeout 600" in workflow
-    assert "name: Changed-scope mutation evidence\n        timeout-minutes: 10" in workflow
-    assert workflow.index("--initialize-timeout-report") < workflow.index("fettle mutation run --changed")
+    assert "--initialize-timeout-report mutation-report.json --timeout 1800" in workflow
+    assert "name: Bounded changed-scope mutation evidence\n        timeout-minutes: 30" in workflow
+    assert "--timeout 1740" in workflow
+    assert workflow.index("--initialize-timeout-report") < workflow.index("Bounded changed-scope mutation evidence")
     assert "--github-summary mutation-report.json" in workflow
     assert "mutation-evidence-${{ github.run_id }}" in workflow
     assert "if-no-files-found: error" in workflow

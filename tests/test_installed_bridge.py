@@ -11,6 +11,27 @@ import pytest
 from fettle import bridge
 
 
+@pytest.mark.parametrize(
+    ("xdg_value", "expected"),
+    [
+        (None, Path("home") / ".local" / "share" / "fettle" / "bridge"),
+        ("", Path("home") / ".local" / "share" / "fettle" / "bridge"),
+        ("custom data", Path("custom data") / "fettle" / "bridge"),
+    ],
+)
+def test_bridge_base_honors_xdg_data_home_on_linux(tmp_path, monkeypatch, xdg_value, expected):
+    home = tmp_path / "home"
+    monkeypatch.setattr(bridge.sys, "platform", "linux")
+    monkeypatch.setattr(bridge.os, "name", "posix")
+    monkeypatch.setenv("HOME", str(home))
+    if xdg_value is None:
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    else:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / xdg_value) if xdg_value else "")
+
+    assert bridge.bridge_base() == tmp_path / expected
+
+
 def test_publish_bridge_is_atomic_and_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(bridge, "bridge_base", lambda: tmp_path / "data" / "bridge")
 
