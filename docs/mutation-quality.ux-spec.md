@@ -71,6 +71,9 @@ seconds, excluding mutation execution time.
 - Interrupted calibration: completed mutant outcomes are retained under one
   calibration ID, unfinished mutants remain pending, and the next attempt
   reports how many outcomes were reused and how many will execute.
+- Interrupted PR evidence: completed shard reports remain immutable, only
+  incomplete shard indexes receive one bounded retry, and the aggregate remains
+  unusable until every index has one compatible completed report.
 - Stale or conflicting checkpoint: evidence from another calibration or input
   identity is rejected without executing or scoring it; conflicting terminal
   outcomes require a fresh calibration rather than majority voting.
@@ -187,6 +190,28 @@ Given a worker times out, mutmut changes output grammar, a shard is omitted, or
 execution uses a different revision
 When Fettle evaluates the report
 Then it returns `tool_error` or `unknown`, score `null`, and exit code 2.
+
+### Scenario: Timed-out PR shard receives a narrow replay
+
+Given a changed-scope run retained compatible reports for every shard but one
+worker reached its execution deadline
+When CI prepares the retry matrix
+Then it retries only that shard from the original manifest with a bounded
+recovery budget and evaluates policy only after complete aggregation.
+
+### Scenario: PR worker fails before retaining evidence
+
+Given the initial changed-scope matrix is terminal and one worker failed during
+job setup before it could retain a report
+When CI prepares the retry matrix
+Then it retries the missing shard from the original manifest and still refuses
+to evaluate policy unless the replay produces compatible completed evidence.
+
+### Scenario: Conflicting PR replay fails closed
+
+Given two completed attempts for one shard report different mutation outcomes
+When CI reconciles retained attempts
+Then it rejects the aggregate as conflicting evidence and produces no score.
 
 ### Scenario: Interrupted calibration resumes pending work
 

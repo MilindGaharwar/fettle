@@ -46,7 +46,7 @@ repos:
       # Pushes are batch events; a red CI costs more than the wait.
       - id: fettle-full-suite
         name: fettle full test suite (pre-push)
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m pytest tests/ -q --no-header -p no:cacheprovider'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; unset $(git rev-parse --local-env-vars); PRE_COMMIT_ALLOW_NO_CONFIG=1 "$PY" -m pytest tests/ -q --no-header -p no:cacheprovider'
         language: system
         pass_filenames: false
         always_run: true

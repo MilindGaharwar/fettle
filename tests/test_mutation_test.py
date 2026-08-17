@@ -54,6 +54,8 @@ from fettle.mutation_test import (
     pending_mutation_records,
     execute_pending_mutations,
     report_from_mutation_checkpoint,
+    prepare_shard_replay_matrix,
+    select_shard_attempts,
     run_resumable_mutation_shard,
     write_changed_partition_manifests,
 )
@@ -1345,6 +1347,18 @@ def test_timeout_evidence_is_atomic_fail_closed_json(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_timeout_evidence_preserves_shard_identity(tmp_path):
+    path = tmp_path / "mutation-report.json"
+    manifest = {"revision": "a" * 40, "shard_index": 3, "shard_count": 8}
+
+    write_timeout_evidence(path, 1800, manifest)
+
+    report = json.loads(path.read_text())
+    assert report["revision"] == "a" * 40
+    assert report["shard_index"] == 3
+    assert report["shard_count"] == 8
+
+
 def test_changed_selection_uses_merge_base_and_handles_renames_and_deletes(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src/new.py").write_text("")
@@ -2621,6 +2635,71 @@ def test_aggregate_shards_rejects_incomplete_evidence(tmp_path, reports, message
 
     assert result["status"] in {"unknown", "tool_error"}
     assert message in result["message"]
+
+
+def test_shard_attempt_selection_replaces_timeout_with_completed_replay():
+    timeout = {
+        "status": "tool_error", "shard_index": 0, "shard_count": 2,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+    completed = _shard_report(0, ["fettle/a.py"])
+    other = _shard_report(1, ["fettle/b.py"])
+
+    selected = select_shard_attempts([timeout, completed, other], 2)
+
+    assert selected == [completed, other]
+
+
+def test_shard_attempt_selection_rejects_conflicting_completed_replays():
+    first = _shard_report(0, ["fettle/a.py"], shard_count=1)
+    conflicting = _shard_report(0, ["fettle/a.py"], shard_count=1, killed=7, survived=2)
+
+    with pytest.raises(ValueError, match="conflicting completed attempts"):
+        select_shard_attempts([first, conflicting], 1)
+
+
+def test_shard_attempt_selection_requires_one_completed_attempt_per_index():
+    timeout = {
+        "status": "tool_error", "shard_index": 0, "shard_count": 1,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+
+    with pytest.raises(ValueError, match="no completed attempt"):
+        select_shard_attempts([timeout], 1)
+
+
+def test_replay_matrix_selects_only_incomplete_initial_shards():
+    completed = _shard_report(0, ["fettle/a.py"])
+    timeout = {
+        "status": "tool_error", "shard_index": 1, "shard_count": 2,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+
+    result = prepare_shard_replay_matrix([completed, timeout], 2)
+
+    assert result["matrix"] == {"shard": [1]}
+    assert result["shard_count"] == 1
+
+
+def test_replay_matrix_selects_missing_initial_shard_after_terminal_matrix():
+    result = prepare_shard_replay_matrix([_shard_report(0, ["fettle/a.py"])], 2)
+
+    assert result["matrix"] == {"shard": [1]}
+    assert result["shard_count"] == 1
+
+
+def test_replay_matrix_selects_all_shards_when_setup_retains_no_reports():
+    result = prepare_shard_replay_matrix([], 2)
+
+    assert result["matrix"] == {"shard": [0, 1]}
+    assert result["shard_count"] == 2
+
+
+def test_replay_matrix_rejects_duplicate_report_when_other_shards_are_missing():
+    report = _shard_report(0, ["fettle/a.py"], shard_count=3)
+
+    with pytest.raises(ValueError, match="duplicated identity"):
+        prepare_shard_replay_matrix([report, report], 3)
 
 
 def test_aggregate_shards_rejects_overlapping_source_ranges(tmp_path):

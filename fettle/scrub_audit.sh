@@ -14,7 +14,7 @@ HITS=$(grep -riE "$PATTERN" . \
   --exclude-dir=.venv --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache \
   --exclude-dir=.state --exclude-dir=build --exclude-dir=dist \
   --exclude-dir=node_modules --exclude-dir=.opencode --exclude-dir=.claude \
-  --exclude=scrub_audit.sh || true)
+  --exclude=.git --exclude=scrub_audit.sh || true)
 if [ -n "$HITS" ]; then
   echo "SCRUB AUDIT FAILED — private strings found:" >&2
   echo "$HITS" >&2

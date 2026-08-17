@@ -69,3 +69,12 @@ def test_git_dir_is_excluded():
     )
     assert rc == 0
     assert "scrub audit clean" in stdout
+
+
+def test_linked_worktree_git_file_is_excluded():
+    """Linked worktrees store their private common-dir path in a .git file."""
+    stdout, stderr, rc = run_scrub_in(
+        {".git": f"gitdir: /private/{PRIVATE_STRING}/worktrees/feature\n"}
+    )
+    assert rc == 0
+    assert "scrub audit clean" in stdout
