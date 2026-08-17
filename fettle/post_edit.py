@@ -5,7 +5,6 @@ import contextlib
 import fnmatch
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -14,13 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from fettle.config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
 from fettle.project_rules import extra_rule_configs  # noqa: E402
 from fettle.semgrep_util import anchored_semgrep_args  # noqa: E402
+from fettle.tool_paths import resolve_tool  # noqa: E402
 
 
 def _resolve_tool(name: str) -> str | None:
-    local = os.path.expanduser(f"~/.local/bin/{name}")
-    if os.path.isfile(local) and os.access(local, os.X_OK):
-        return local
-    return shutil.which(name)
+    return resolve_tool(name)
 
 
 def main() -> None:

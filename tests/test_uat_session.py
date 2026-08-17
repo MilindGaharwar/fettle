@@ -195,12 +195,13 @@ class TestRunSession:
         assert result.status == "error"
         assert "--yes" in result.error and "permission checks disabled" in result.error
 
-    def test_web_without_playwright_points_to_extra_and_manual(self, tmp_path):
+    def test_web_without_playwright_points_to_reinstall_and_manual(self, tmp_path):
         repo = _git_repo(tmp_path)
         with patch("fettle.uat.doctor._playwright_available", return_value=False):
             result = self._run(repo, surface="web")
         assert result.status == "error"
-        assert "finefettle[uat]" in result.error and "uat manual" in result.error
+        assert "reinstall finefettle" in result.error and "playwright install" in result.error
+        assert "uat manual" in result.error
 
     def test_secret_redacted_from_transcript(self, tmp_path):
         repo = _git_repo(tmp_path)

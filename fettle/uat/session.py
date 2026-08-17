@@ -267,7 +267,7 @@ def run_session(root: str, config: dict, surface: str,
         from fettle.uat.doctor import _playwright_available
         if not _playwright_available():
             result.error = ("web surface needs browser automation: "
-                            "pip install 'finefettle[uat]' — or run "
+                            "reinstall finefettle, then run 'playwright install' — or run "
                             "'fettle uat manual' for hand-testing steps")
             return result
     elif surface not in DRIVABLE_SURFACES:

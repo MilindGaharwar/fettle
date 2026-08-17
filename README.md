@@ -60,11 +60,11 @@ authoritative.
 
 | Built for the agentic change loop | Current, reproducible scope |
 |---|---|
-| Agent hosts | Claude Code, Codex CLI, Gemini CLI, OpenCode |
+| Agent hosts | Claude Code, Codex CLI, OpenCode; Gemini CLI contract-tested |
 | Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
 | Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
 | Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Runtime footprint | Python 3.11+, zero package runtime dependencies |
+| Runtime footprint | Python 3.11+; Python analyzers and automation libraries included |
 
 ## Start in Two Minutes
 
@@ -72,25 +72,27 @@ Choose the smallest path that proves value for your job.
 
 ### Evaluate the CLI
 
-Use the zero-runtime-dependency wheel for local scans, CI, reports, and policy
-inspection:
+Install one isolated Python environment for local scans, CI, reports, mutation
+testing, and browser automation:
 
 ```bash
 pipx install finefettle
-pipx inject finefettle ruff       # analyzer remains explicit and user-controlled
 cd your-project
-fettle check --changed
+fettle init --dry-run
+fettle init
 fettle doctor
+fettle check --changed
 ```
 
-The PyPI package is `finefettle`; the installed command is `fettle`.
-This path does not modify agent settings.
+The PyPI package is `finefettle`; the installed command is `fettle`. Installation
+does not modify agent settings. `fettle init --dry-run` previews repository and
+host changes, and `fettle init` applies them explicitly.
 
 ### Add Live Agent Governance
 
-The v1.11.0 wheel includes a versioned installed-package bridge for Claude Code,
-Codex CLI, Gemini CLI, and OpenCode. Preview every repository and host mutation
-before applying it:
+The wheel includes a versioned installed-package bridge for Claude Code, Codex
+CLI, Gemini CLI, and OpenCode. Preview every repository and host mutation before
+applying it:
 
 ```bash
 cd your-project
@@ -99,9 +101,11 @@ fettle init
 fettle doctor
 ```
 
-`fettle init` detects Claude Code, Codex CLI, Gemini CLI, and OpenCode, preserves
-unrelated host settings, creates an advisory-first project configuration, and
-installs guided workflows. Use `--dry-run` to inspect changes first.
+`fettle init` detects the four hosts, preserves unrelated host settings, creates
+an advisory-first project configuration, and installs guided workflows. Claude
+Code, Codex CLI, and OpenCode have current installed-host evidence. Gemini CLI's
+installed transport is contract-tested, but its live OAuth verification is
+blocked upstream by `UNSUPPORTED_CLIENT`.
 
 ```bash
 fettle init --interactive
@@ -199,11 +203,12 @@ quarantine. A human reviews and promotes it; evidence and false-positive data
 drive later ratcheting. The model may propose policy, but it cannot silently
 activate it.
 
-### Small Runtime, Strong Release Evidence
+### One Python Install, Strong Release Evidence
 
-The core package has no runtime dependencies. External analyzers remain
-explicit and user-controlled. Releases use PyPI Trusted Publishing, GitHub build
-provenance attestations, pinned workflow actions, and a CycloneDX SBOM.
+The default package includes Fettle's Python analyzers, test and mutation runners,
+commit-hook support, evaluation parser, and browser-automation library. Releases
+use PyPI Trusted Publishing, GitHub build provenance attestations, pinned
+workflow actions, and a CycloneDX SBOM.
 
 ### Acceptance Is Tested From the User's Side
 
@@ -218,7 +223,7 @@ Support is described by surface, not by one broad "polyglot" claim.
 
 | Surface | Current scope |
 |---|---|
-| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, OpenCode |
+| Agent lifecycle | Claude Code, Codex CLI, OpenCode live-verified; Gemini CLI contract-tested |
 | Post-edit workspace adapters | Python, JavaScript/TypeScript, Go, Rust |
 | `fettle check` | Python Ruff and bundled Semgrep rules |
 | `fettle verify` | Affected discovered workspaces; Python can narrow to impacted tests |
@@ -341,8 +346,8 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 - Python 3.11 or newer is required.
 - Agent transports can run from the v1.11.0 wheel or a source checkout. Installed
   bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
-- External analyzers and language toolchains must be installed when their
-  checks are enabled.
+- Browser engines require an explicit `playwright install`. Agent CLIs, Git,
+  shellcheck, and JavaScript/TypeScript, Go, and Rust toolchains remain external.
 - Hooks favor session continuity and visible degradation; CI is the independent
   fail-closed boundary.
 - Shell mediation, capsules, worktrees, and role gates are defense in depth,

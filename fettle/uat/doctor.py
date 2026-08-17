@@ -72,8 +72,8 @@ def probe(root: str, config: dict) -> tuple[list[Capability], str]:
                 caps.append(Capability(
                     surface="web", ready=False,
                     detail="browser automation unavailable",
-                    why="playwright is not installed (optional extra — core stays stdlib-only)",
-                    fix="pip install 'finefettle[uat]'  — then re-run",
+                    why="playwright is missing from this Fettle environment",
+                    fix="reinstall finefettle, then run: playwright install",
                     manual=["start the app and walk each spec scenario in a browser",
                             "record what you saw: fettle uat attest <spec-id>/<S-n>"],
                 ))

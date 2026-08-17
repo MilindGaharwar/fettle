@@ -1,0 +1,33 @@
+{
+  "schema_version": "1",
+  "hosts": {
+    "claude-code": {
+      "claim": "supported-installed",
+      "candidate_contract": "required",
+      "public_canary": "required",
+      "live_evidence": "required-for-claim",
+      "live_evidence_max_age_days": 90
+    },
+    "codex-cli": {
+      "claim": "supported-installed",
+      "candidate_contract": "required",
+      "public_canary": "required",
+      "live_evidence": "required-for-claim",
+      "live_evidence_max_age_days": 90
+    },
+    "gemini-cli": {
+      "claim": "contract-tested",
+      "candidate_contract": "required",
+      "public_canary": "required",
+      "live_evidence": "not-required-for-claim",
+      "live_evidence_max_age_days": 90
+    },
+    "opencode": {
+      "claim": "supported-installed",
+      "candidate_contract": "required",
+      "public_canary": "required",
+      "live_evidence": "required-for-claim",
+      "live_evidence_max_age_days": 90
+    }
+  }
+}

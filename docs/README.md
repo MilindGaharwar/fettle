@@ -8,7 +8,7 @@ than reading every subsystem.
 
 | I want to... | Start here | Expected result |
 |---|---|---|
-| Evaluate Fettle without changing agent settings | `pipx install finefettle`, then `fettle check --changed` | A local quality report |
+| Evaluate Fettle without changing agent settings | `pipx install finefettle`, then `fettle check --changed` | A local quality report with bundled Python analyzers |
 | Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
 | Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
@@ -63,7 +63,7 @@ than reading every subsystem.
 
 | Surface | Current scope | Important boundary |
 |---|---|---|
-| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, OpenCode | Host transports differ; normalized policy is shared |
+| Agent lifecycle | Claude Code, Codex CLI, OpenCode live-verified; Gemini CLI contract-tested | Host transports differ; normalized policy is shared |
 | Post-edit adapters | Python, JavaScript/TypeScript, Go, Rust | Native tools must be available |
 | `fettle check` | Python Ruff and bundled Semgrep rules | Not the full polyglot adapter surface |
 | `fettle verify` | Every affected discovered workspace with a test command | Impacted-test narrowing is Python-specific |

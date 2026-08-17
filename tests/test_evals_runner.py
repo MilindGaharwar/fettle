@@ -264,14 +264,14 @@ def test_missing_pyyaml_exits_with_install_hint(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         importlib.import_module("fettle.evals_runner")
     assert exc.value.code == 2
-    assert "finefettle[evals]" in capsys.readouterr().err
+    assert "reinstall finefettle" in capsys.readouterr().err
 
 
-def test_evals_extra_declared_in_pyproject():
+def test_pyyaml_declared_in_default_install():
     pyproject = os.path.join(PLUGIN_DIR, "pyproject.toml")
     with open(pyproject, "rb") as fh:
         import tomllib
 
         data = tomllib.load(fh)
-    extras = data["project"]["optional-dependencies"]
-    assert any(dep.startswith("pyyaml") for dep in extras.get("evals", []))
+    dependencies = data["project"]["dependencies"]
+    assert any(dep.startswith("pyyaml") for dep in dependencies)

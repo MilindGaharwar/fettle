@@ -55,6 +55,7 @@ from fettle.mutation_test import (
     execute_pending_mutations,
     report_from_mutation_checkpoint,
     run_resumable_mutation_shard,
+    write_changed_partition_manifests,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
@@ -1445,6 +1446,115 @@ def test_line_ranges_distribute_same_file_chunks_before_reusing_shards(tmp_path)
     assert sorted(len(shard) for shard in shards) == [1, 1, 1, 2]
 
 
+def test_changed_manifests_cover_only_selected_files_with_bounded_fanout(tmp_path, monkeypatch):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/a.py").write_text("\n".join(["x = 1"] * 11))
+    (tmp_path / "src/b.py").write_text("\n".join(["y = 1"] * 3))
+    (tmp_path / "src/unchanged.py").write_text("z = 1\n")
+    (tmp_path / "tests/test_a.py").write_text("import src.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import src.b\n")
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "b" * 40,
+        "files": ["src/a.py", "src/b.py"], "deleted": [],
+    })
+
+    paths, files = write_changed_partition_manifests(
+        str(tmp_path), {"paths": ["src/"], "default_chunk_lines": 5},
+        tmp_path / "manifests", "origin/main",
+    )
+    manifests = [json.loads(path.read_text()) for path in paths]
+
+    assert files == ["src/a.py", "src/b.py"]
+    assert len(paths) == 4
+    assert {item["file"] for manifest in manifests for item in manifest["ranges"]} == set(files)
+    assert sum(item["end"] - item["start"] + 1 for manifest in manifests for item in manifest["ranges"]) == 14
+
+
+def test_changed_manifest_preparation_preserves_selection_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "unknown", "message": "Cannot resolve merge base", "passed": False,
+    })
+
+    with pytest.raises(ValueError, match="merge base"):
+        write_changed_partition_manifests(str(tmp_path), {}, tmp_path / "manifests", "missing")
+
+
+def test_aggregate_scope_rejects_incomplete_or_tampered_manifests(tmp_path, monkeypatch, capsys):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    payload = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 2, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    (manifests / "partition-0.json").write_text(json.dumps({
+        **payload, "digest": "b" * 64,
+    }))
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--aggregate", str(tmp_path / "reports"),
+        "--aggregate-scope", str(manifests), "--shard-count", "2", "--json",
+    ])
+
+    assert main() == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "unknown"
+    assert "digest" in report["message"]
+
+
+def test_aggregate_scope_rejects_manifest_files_outside_changed_selection(tmp_path, monkeypatch, capsys):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    payload = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    digest = __import__("fettle.mutation_test", fromlist=["_canonical_digest"])._canonical_digest(payload)
+    (manifests / "partition-0.json").write_text(json.dumps({**payload, "digest": digest}))
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "b" * 40,
+        "files": ["src/b.py"], "deleted": [],
+    })
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--aggregate", str(tmp_path / "reports"),
+        "--aggregate-scope", str(manifests), "--shard-count", "1", "--json",
+    ])
+
+    assert main() == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "unknown"
+    assert "changed-file scope" in report["message"]
+
+
+def test_manifest_scope_supplies_complete_changed_file_set(tmp_path, monkeypatch, capsys):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    for index, file in enumerate(("src/a.py", "src/b.py")):
+        payload = {
+            "schema_version": "1", "revision": "a" * 40, "shard_index": index,
+            "shard_count": 2, "files": [file],
+            "ranges": [{"file": file, "start": 1, "end": 1}],
+        }
+        (manifests / f"partition-{index}.json").write_text(json.dumps({
+            **payload, "digest": __import__("fettle.mutation_test", fromlist=["_canonical_digest"])._canonical_digest(payload),
+        }))
+    captured = {}
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", lambda root, cfg: captured.update(cfg) or {
+        "status": "not_applicable", "passed": True,
+    })
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--manifest", str(manifests / "partition-0.json"),
+        "--manifest-scope", str(manifests), "--shard-count", "2", "--json",
+    ])
+
+    assert main() == 0
+    capsys.readouterr()
+    assert captured["paths"] == ["src/a.py", "src/b.py"]
+    assert captured["full_shards"] == 2
+
+
 def test_patch_for_ranges_marks_only_selected_lines_as_added(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src/a.py").write_text("one\ntwo\nthree\n")
@@ -2441,6 +2551,30 @@ def test_aggregate_shards_produces_baseline_compatible_identity(tmp_path):
     assert baseline["policy_digest"] == result["policy_digest"]
     assert baseline["survived"] == 2
     assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2"]
+
+
+def test_aggregate_shards_honors_advisory_policy(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(index, [file]) for index, file in enumerate(("fettle/a.py", "fettle/b.py"))]
+    for report in reports:
+        report.update(killed=0, survived=1, untested=0)
+        report["non_killed"] = [record for record in report["non_killed"] if record["state"] == "survived"]
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 80,
+            policy_config={"mode": "advisory", "score_target": 80},
+        )
+
+    assert result["score"] == 0.0
+    assert result["passed"] is True
+    assert result["eligible"] is False
+    assert result["reasons"] == ["mutation score below target: 0.0 < 80.0"]
 
 
 def test_aggregate_shards_uses_configured_test_mappings(tmp_path):

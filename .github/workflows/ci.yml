@@ -157,10 +157,58 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  windows-bridge:
+    name: Windows installed bridge
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Publish, diagnose, and recover installed bridge
+        shell: pwsh
+        run: |
+          $homeRoot = Join-Path $env:RUNNER_TEMP "fettle home"
+          $env:HOME = $homeRoot
+          $env:USERPROFILE = $homeRoot
+          $env:LOCALAPPDATA = Join-Path $homeRoot "Local App Data"
+          $project = Join-Path $env:RUNNER_TEMP "fettle project"
+          $venv = Join-Path $env:RUNNER_TEMP "fettle python"
+          New-Item -ItemType Directory -Force $project | Out-Null
+          git init -q $project
+          python -m venv $venv
+          $python = Join-Path $venv "Scripts\python.exe"
+          & $python -m pip install --quiet $env:GITHUB_WORKSPACE
+          $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"
+
+          Push-Location $project
+          try {
+            $dryRun = & $python -m fettle init --dry-run --json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or (Test-Path $bridgeRoot)) { throw "dry-run wrote the bridge" }
+            if (($dryRun | Where-Object name -eq "bridge").status -ne "created") { throw "dry-run omitted bridge publication" }
+
+            $init = & $python -m fettle init --json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or ($init | Where-Object name -eq "bridge").status -ne "created") { throw "bridge publication failed" }
+            $doctor = & $python -m fettle doctor --json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
+
+            $bridgeVersion = & $python -c "from fettle.bridge import bridge_dir; print(bridge_dir())"
+            Add-Content (Join-Path $bridgeVersion "opencode\fettle.ts") "tampered"
+            $stale = & $python -m fettle doctor --json | ConvertFrom-Json
+            if ($stale.checks | Where-Object { $_.name -eq "bridge" -and $_.ok }) { throw "doctor accepted tampered bridge" }
+            & $python -m fettle init --json | Out-Null
+            $recovered = & $python -m fettle doctor --json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not ($recovered.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "bridge recovery failed" }
+          } finally {
+            Pop-Location
+          }
+
   required:
     name: CI required
     if: always()
-    needs: [lint, test, coverage]
+    needs: [lint, test, coverage, windows-bridge]
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking CI job
@@ -168,10 +216,12 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
+          WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}
         run: |
           if [ "$LINT_RESULT" != "success" ] || \
              [ "$TEST_RESULT" != "success" ] || \
-             [ "$COVERAGE_RESULT" != "success" ]; then
-            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT"
+             [ "$COVERAGE_RESULT" != "success" ] || \
+             [ "$WINDOWS_BRIDGE_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT"
             exit 1
           fi

@@ -127,7 +127,7 @@ class TestProbe:
             caps, _ = probe(str(repo), _cfg(app_url="http://localhost:3000"))
         web = next(c for c in caps if c.surface == "web")
         assert not web.ready
-        assert "finefettle[uat]" in web.fix
+        assert "reinstall finefettle" in web.fix and "playwright install" in web.fix
         assert any("attest" in step for step in web.manual)
 
     def test_web_no_reachability_gap(self, tmp_path):

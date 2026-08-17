@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "hosts": {
+    "claude-code": {
+      "state": "pass",
+      "observed_at": "2026-08-17T03:30:06Z",
+      "host_version": "2.1.233",
+      "reference": "docs/uat/installed-bridge-v1.11.1.md"
+    },
+    "codex-cli": {
+      "state": "pass",
+      "observed_at": "2026-08-16T00:00:00Z",
+      "host_version": "0.147.0",
+      "reference": "docs/uat/installed-bridge-v1.11.1.md"
+    },
+    "gemini-cli": {
+      "state": "blocked",
+      "observed_at": null,
+      "host_version": "0.55.1",
+      "reference": "docs/uat/installed-bridge-v1.11.1.md"
+    },
+    "opencode": {
+      "state": "pass",
+      "observed_at": "2026-08-16T00:00:00Z",
+      "host_version": "1.18.15",
+      "reference": "docs/uat/installed-bridge-v1.11.1.md"
+    }
+  }
+}

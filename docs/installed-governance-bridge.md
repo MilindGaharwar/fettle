@@ -47,9 +47,8 @@ Files are generated in a sibling temporary directory, assigned user-only write
 permissions where supported, and atomically published. On Windows, the bridge
 inherits the user's profile ACL because POSIX mode bits do not enforce a DACL.
 Windows command serialization and junction detection are covered by portable
-contract tests, but real Windows publication remains unverified because the
-current UAT environment has no Windows runner. Windows support therefore retains
-this explicit platform-verification blocker.
+contract tests. Blocking CI also publishes and repairs the bridge on a native
+`windows-latest` runner from a Python path containing spaces.
 `manifest.json` records:
 
 - schema version;
@@ -78,9 +77,34 @@ only a verified manifest-owned bridge.
 Downgrades use the same explicit `fettle init` action and replace only a valid,
 manifest-owned bridge. They never rewrite foreign content.
 
+## Windows Verification And Recovery
+
+Run these commands in PowerShell from a Git repository:
+
+```powershell
+pipx install finefettle
+fettle init --dry-run --json
+fettle init --json
+fettle doctor --json
+```
+
+The dry run must report the bridge as `created` without creating
+`$env:LOCALAPPDATA\fettle\bridge`. Initialization then publishes the bridge,
+and doctor reports its bridge check with `"ok": true` (`supported-installed`).
+
+If doctor reports `stale`, preserve the reported path and run `fettle init`
+again. Fettle replaces only a manifest-owned bridge and doctor must then return
+`"ok": true`. If initialization reports `conflict`, do not delete or overwrite
+the path: inspect the foreign or malformed content and move it aside manually
+before retrying. A missing `fettle` executable requires reinstalling with
+`pipx install --force finefettle`, followed by `fettle init` and `fettle doctor`.
+
 ## Capability States
 
-- `supported-installed`: bridge and host registration validate.
+- `supported-installed`: installed bridge, host registration, transport contract,
+  public artifact canary, and fresh real-host evidence validate.
+- `contract-tested`: installed bridge, registration, transport contract, and
+  public artifact canary validate, but real-host evidence is blocked or absent.
 - `clone-supported`: checkout transport validates.
 - `manual-action`: a documented host toggle or restart remains.
 - `conflict`: foreign or malformed state prevents safe registration.
@@ -89,6 +113,11 @@ manifest-owned bridge. They never rewrite foreign content.
 
 Aggregate output cannot convert `conflict`, `stale`, or `manual-action` into a
 clean host result.
+
+The reviewed authority for release claims is
+`fettle/host-capabilities.json`. `supported-installed` currently applies to
+Claude Code, Codex CLI, and OpenCode. Gemini CLI remains `contract-tested`
+because its live OAuth path is blocked upstream by `UNSUPPORTED_CLIENT`.
 
 ## Threat Review
 

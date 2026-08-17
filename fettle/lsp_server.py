@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -28,6 +27,7 @@ from fettle.config import load_config  # noqa: E402
 from fettle._resources import rules_dir  # noqa: E402
 from fettle.finding import CheckFinding, FindingSeverity  # noqa: E402
 from fettle.semgrep_util import anchored_semgrep_args  # noqa: E402
+from fettle.tool_paths import resolve_tool  # noqa: E402
 
 
 # ── LSP constants ────────────────────────────────────────────────────────────
@@ -87,10 +87,7 @@ def read_message(stream) -> dict[str, Any] | None:
 
 def _resolve_tool(name: str) -> str | None:
     """Find a tool binary."""
-    local = os.path.expanduser(f"~/.local/bin/{name}")
-    if os.path.isfile(local) and os.access(local, os.X_OK):
-        return local
-    return shutil.which(name)
+    return resolve_tool(name)
 
 
 def run_checks(file_path: str, workspace_root: str) -> list[CheckFinding]:

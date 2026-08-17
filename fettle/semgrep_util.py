@@ -20,10 +20,14 @@ import shutil
 import subprocess
 import tempfile
 
+from fettle.tool_paths import resolve_tool
+
 
 def validate_rule_pack(config_path: str, timeout: int = 60) -> tuple[bool, str]:
     """Offline-safe rule-pack validation. Returns (valid, error_text)."""
-    semgrep_bin = shutil.which("semgrep") or os.path.expanduser("~/.local/bin/semgrep")
+    semgrep_bin = resolve_tool("semgrep")
+    if semgrep_bin is None:
+        return False, "semgrep not found"
     empty_dir = tempfile.mkdtemp(prefix="fettle-validate-")
     try:
         proc = subprocess.run(

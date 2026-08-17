@@ -44,11 +44,46 @@ permissions:
   contents: read
 
 jobs:
-  changed:
+  changed-prepare:
     if: github.event_name == 'pull_request'
-    name: mutation (changed, advisory)
+    name: mutation (prepare changed scope)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    outputs:
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      shard_count: ${{ steps.prepare.outputs.shard_count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+      - name: Prepare bounded changed-scope partitions
+        id: prepare
+        run: |
+          uv run --no-sync python -m fettle.mutation_test --root . --base origin/${{ github.base_ref }} --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
+          {
+            echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"], separators=(",", ":")))')"
+            echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.prepare.outputs.shard_count != '0'
+        with:
+          name: mutation-changed-manifests-${{ github.run_id }}
+          path: mutation-changed-manifests
+          if-no-files-found: error
+
+  changed-shard:
+    if: github.event_name == 'pull_request' && needs.changed-prepare.outputs.shard_count != '0'
+    needs: changed-prepare
+    name: mutation (changed shard ${{ matrix.shard }}, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changed-prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,30 +97,77 @@ jobs:
           uv venv --python 3.12
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
-      - name: Restore non-authoritative mutation cache
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: .fettle/mutation-cache
-          key: mutation-native-${{ runner.os }}-py312-${{ github.sha }}
-          restore-keys: |
-            mutation-native-${{ runner.os }}-py312-
+          name: mutation-changed-manifests-${{ github.run_id }}
+          path: mutation-changed-manifests
       - name: Initialize fail-closed timeout evidence
         run: >-
           uv run --no-sync python -m fettle.mutation_test
-          --initialize-timeout-report mutation-report.json --timeout 600
-      - name: Changed-scope mutation evidence
-        timeout-minutes: 10
+          --initialize-timeout-report mutation-report.json --timeout 1800
+      - name: Bounded changed-scope mutation evidence
+        timeout-minutes: 30
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json
+          --manifest-scope mutation-changed-manifests
+          --shard-count ${{ needs.changed-prepare.outputs.shard_count }} --timeout 1740
+          --json > mutation-report.json
+      - name: Retain changed-scope shard
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutation-changed-${{ github.run_id }}-${{ matrix.shard }}
+          path: mutation-report.json
+          if-no-files-found: error
+
+  changed:
+    if: github.event_name == 'pull_request' && always()
+    needs: [changed-prepare, changed-shard]
+    name: mutation (changed, advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - name: Initialize fail-closed aggregate evidence
+        run: uv run --no-sync python -m fettle.mutation_test --initialize-timeout-report mutation-report.json --timeout 1800
+      - name: Reject incomplete changed-scope preparation
+        if: needs.changed-prepare.result != 'success'
+        run: exit 1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.changed-prepare.outputs.shard_count != '0'
+        with:
+          pattern: mutation-changed-${{ github.run_id }}-*
+          path: mutation-changed-shards
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.changed-prepare.outputs.shard_count != '0'
+        with:
+          name: mutation-changed-manifests-${{ github.run_id }}
+          path: mutation-changed-manifests
+      - name: Aggregate complete changed-scope evidence
+        if: needs.changed-prepare.outputs.shard_count != '0'
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --aggregate mutation-changed-shards --aggregate-scope mutation-changed-manifests
+          --base origin/${{ github.base_ref }}
+          --shard-count ${{ needs.changed-prepare.outputs.shard_count }} --json > mutation-report.json
+      - name: Record non-applicable changed scope
+        if: needs.changed-prepare.outputs.shard_count == '0'
         run: >-
           uv run --no-sync fettle mutation run --changed --base origin/${{ github.base_ref }}
           --json --output mutation-report.json
-      - name: Save non-authoritative mutation cache
-        if: always() && hashFiles('.fettle/mutation-cache/identity.json') != ''
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
-        with:
-          path: .fettle/mutation-cache
-          key: mutation-native-${{ runner.os }}-py312-${{ github.sha }}
       - name: Mutation summary
-        if: always() && hashFiles('mutation-report.json') != ''
+        if: always()
         run: >-
           uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json
           --artifact-name mutation-evidence-${{ github.run_id }}
