@@ -1986,7 +1986,7 @@ def prepare_shard_replay_matrix(reports: list[dict], shard_count: int) -> dict:
             or report.get("shard_count") != shard_count
             or not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", "")))
         ):
-            raise ValueError("initial shard reports have invalid or duplicated identity")
+            raise ValueError(f"initial shard report {index!r} has invalid or duplicated identity")
         by_index[index] = report
         revisions.add(report["revision"])
     if len(revisions) > 1:

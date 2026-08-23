@@ -2698,7 +2698,7 @@ def test_replay_matrix_selects_all_shards_when_setup_retains_no_reports():
 def test_replay_matrix_rejects_duplicate_report_when_other_shards_are_missing():
     report = _shard_report(0, ["fettle/a.py"], shard_count=3)
 
-    with pytest.raises(ValueError, match="duplicated identity"):
+    with pytest.raises(ValueError, match=r"shard report 0 has invalid or duplicated identity"):
         prepare_shard_replay_matrix([report, report], 3)
 
 
