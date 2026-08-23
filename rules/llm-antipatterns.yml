@@ -311,5 +311,5 @@ rules:
     metadata:
       origin: fettle-v1.11.1
       citation: "Shard-201: mutated cfg default deleted the live runner cache at the repository root during self-mutation"
-      compliance: {cwe: CWE-362}
+      compliance: {cwe: CWE-362, asvs: V14.3.2, soc2: CC8.1}
       fix: "Pass str(tmp_path) as the root argument instead of '.'."
