@@ -854,7 +854,7 @@ def test_rerun_mutant_executes_exact_current_engine_id_and_rejects_stale_id():
     run.assert_not_called()
 
 
-def test_completed_report_includes_policy_and_scope_identity_digests():
+def test_completed_report_includes_policy_and_scope_identity_digests(tmp_path):
     engine = {
         "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
         "tests_run": ["tests/test_app.py"], "line_ranges": [], "run_exit_code": 0,
@@ -872,7 +872,7 @@ def test_completed_report_includes_policy_and_scope_identity_digests():
         monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
         monkeypatch.setattr(Path, "read_bytes", lambda self: b"source")
         monkeypatch.setattr(Path, "read_text", lambda self, **kwargs: "x = 1\n")
-        result = run_mutation_test(".", {"paths": ["src/"]})
+        result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
     assert all(len(result[field]) == 64 for field in (
         "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest"
     ))
@@ -2319,13 +2319,13 @@ def test_timeout_is_tool_error():
     assert result["status"] == "tool_error"
 
 
-def test_zero_mutants_is_unknown_not_perfect():
+def test_zero_mutants_is_unknown_not_perfect(tmp_path):
     engine = {"status": "completed", "engine_version": "2.5.1", "run_exit_code": 0, "results_exit_code": 0,
               "killed": 0, "survived": 0, "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
               "survivors": []}
     selection = {"status": "completed", "merge_base": "abc", "files": ["src/app.py"], "deleted": []}
     with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection), patch("fettle.mutation_test._run_mutmut", return_value=engine):
-        result = run_mutation_test(".", {"paths": ["src/"]})
+        result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
     assert result["status"] == "unknown"
     assert result["passed"] is False
 
@@ -2359,23 +2359,23 @@ def test_zero_mutant_line_shard_is_completed_for_aggregate_coverage(tmp_path):
     assert result["passed"] is True
 
 
-def test_no_files_is_distinct_from_missing_tool():
+def test_no_files_is_distinct_from_missing_tool(tmp_path):
     with patch("fettle.mutation_test._has_mutmut", return_value=False):
-        assert run_mutation_test(".", {})["status"] == "tool_error"
+        assert run_mutation_test(str(tmp_path), {})["status"] == "tool_error"
     selection = {"status": "completed", "merge_base": "abc", "files": [], "deleted": []}
-    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection):
-        result = run_mutation_test(".", {})
+    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection), patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40)):
+        result = run_mutation_test(str(tmp_path), {})
     assert result["status"] == "not_applicable"
     assert result["passed"] is True
 
 
 @pytest.mark.parametrize("failure", [OSError("git missing"), subprocess.TimeoutExpired([], 10)])
-def test_revision_resolution_failure_is_tool_error(failure):
+def test_revision_resolution_failure_is_tool_error(tmp_path, failure):
     with (
         patch("fettle.mutation_test._has_mutmut", return_value=True),
         patch("fettle.mutation_test._run", side_effect=failure),
     ):
-        result = run_mutation_test(".", {})
+        result = run_mutation_test(str(tmp_path), {})
 
     assert result["status"] == "tool_error"
     assert result["passed"] is False
