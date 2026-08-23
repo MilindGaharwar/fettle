@@ -71,10 +71,15 @@ def _test_to_key(test_path: str) -> str:
 
 
 def trace_requirements(root: str, cfg: dict) -> dict:
-    """Run traceability analysis. Returns structured report."""
+    """Run traceability analysis. Returns structured report.
+
+    Canonical linking uses explicit ``# traces: <spec-id>/<scenario-id>``
+    markers only (P38). Filename-substring inference is deprecated: enabling
+    ``naming_convention`` still works but marks the report as deprecated.
+    """
     spec_patterns = cfg.get("spec_patterns", ["docs/**/*spec*.md", "docs/**/*requirements*.md"])
     test_roots = cfg.get("test_roots", ["tests/"])
-    use_naming = cfg.get("naming_convention", True)
+    use_naming = bool(cfg.get("naming_convention", False))
 
     specs = _find_specs(root, spec_patterns)
     tests = _find_tests(root, test_roots)
@@ -136,6 +141,11 @@ def trace_requirements(root: str, cfg: dict) -> dict:
 
     return {
         "status": "completed",
+        "deprecated": use_naming,
+        "deprecation": (
+            "filename-substring inference is deprecated; declare "
+            "'# traces: <spec-id>/<scenario-id>' markers instead"
+        ) if use_naming else "",
         "specs_total": total,
         "specs_covered": covered,
         "coverage_percent": round(coverage_pct, 1),
