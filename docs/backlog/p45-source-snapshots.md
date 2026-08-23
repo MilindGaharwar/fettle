@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: p45-source-snapshots
-status: open
+status: done
 scope:
   - fettle/source_snapshot.py
   - fettle/paths.py
@@ -34,4 +34,16 @@ is canonical non-pass with user files preserved — each proven in
 
 ## Resolution
 
-Record how it was resolved.
+Delivered `fettle/source_snapshot.py`: committed manifests from
+`git ls-tree -r` (modes, symlink blobs, gitlinks), working manifests that
+content-hash index/tracked/untracked plus required-ignored inputs with LFS-
+pointer flagging and merge-conflict non-pass, restrictive-temp-dir
+materialization with per-byte post-write verification (symlinks self-verify
+at write time; regular files re-hash through `git hash-object`),
+`revalidate_read_set` for transient edit/restore races, and policy-provenance
+identity binding. All four §5.P45 acceptance criteria are proven in
+`tests/test_source_snapshot.py` (9 tests).
+
+Note: sparse-checkout/LFS *smudge* environments were exercised via pointer
+flagging only; full smudged-LFS and submodule-dirty matrices still need a
+CI matrix before P46 consumes snapshots in enforcement contexts.
