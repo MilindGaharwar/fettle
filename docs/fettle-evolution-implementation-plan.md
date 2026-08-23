@@ -145,18 +145,18 @@ and are planning ranges, not commitments.
 | P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Complete |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
 | P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
-| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Proposed |
+| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Authorized (enables P46, P60) |
 | P39 | Operationalize static and supply-chain controls | following minor | P33, P35 | 4–7 days | Proposed |
 | P40 | Add invariant properties and flake detection selectively | following minor | P33, P37 | 4–7 days | Proposed |
 | P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
 | P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | In progress (2 of 5 models) |
 | P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Complete |
-| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Proposed |
-| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Proposed |
-| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Proposed |
-| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Proposed |
-| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Proposed |
+| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Authorized (2026-08-23) |
+| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Approved in principle; start after P38 |
+| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Approved in principle |
+| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Approved in principle |
+| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Deferred on P41 + P48 |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
 | P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | In progress |
