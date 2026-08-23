@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Mutation Evidence
+
+- Added bounded automatic replay for incomplete changed-scope mutation shards
+  behind one authoritative required `mutation evidence` PR check. Missing or
+  non-completed initial shards retry only their original digest-bound
+  manifests, and aggregation still fails closed on missing, conflicting, or
+  timed-out evidence with the offending shard named.
+- Isolated Fettle's own mutation-flow tests from the repository root so a
+  mutated configuration default can no longer delete the live runner cache
+  during self-mutation.
+
 ### Installation And Documentation
 
 - The default `finefettle` installation now includes Fettle's Python analyzers,
