@@ -26,6 +26,10 @@ auto-promoted into specs.
   an attestation record.
 - Charter coverage accounting reports which routes/states the agent
   touched versus total discovered surface.
+- Coverage accounting succeeds only when the discovered-surface inventory
+  is non-empty and touched-surface counts reproduce deterministically from
+  retained evidence; enumeration failure exits non-zero instead of
+  reporting empty coverage.
 
 ## Resolution
 

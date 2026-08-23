@@ -9,7 +9,7 @@ spec: plan-uat-strength
 
 # P76 — Judgment layer: evaluator-optimizer pass
 
-Plan: `docs/hypothesis-tree-uat.md`
+Plan: `docs/uat-strength-plan.md` · Research tree: `docs/hypothesis-tree-uat.md`
 
 Add an independent second-pass reviewer that reads transcript *plus* P72
 artifacts and hunts specifically for passes-for-the-wrong-reason, missed

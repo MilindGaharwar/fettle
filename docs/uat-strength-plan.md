@@ -1,3 +1,7 @@
+---
+id: plan-uat-strength
+---
+
 # UAT Strength Plan — Agent Acceptance At Par With, Then Stronger Than, Human UAT
 
 Status: proposed (P72–P77) · Research basis: `docs/hypothesis-tree-uat.md` ·
@@ -76,6 +80,15 @@ mutation, or completion gates except additive references. Existing
 | P77 | Seeded-defect parity benchmark ("mutation testing for UX") over ≥10 seeds with recorded human baseline | success: metrics reproduce from canonical retained evidence; gate: zero false-verdicts and agreed discovery threshold unblocks enforcement mode | P73, P74, P75, P76 |
 
 Estimates follow the house pattern of 3–8 days each; P77 is the largest.
+
+## Sequencing and concurrency
+
+P72 first — every later phase consumes its artifact contract. P73–P75 may
+then proceed in any order, but they share session/reconcile cores: concurrent
+execution is coordinated through distinct `fettle work` claims (one claim per
+milestone; same-file edits serialize under claim-before-work). P76 builds on
+the P72 artifact contract; P77 is last because its instrument needs
+P73–P76 capabilities to be meaningful.
 
 ## Task decomposition contract
 

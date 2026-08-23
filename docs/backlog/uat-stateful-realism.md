@@ -4,6 +4,7 @@ id: uat-p75-statefulness
 status: open
 scope:
   - fettle/uat/session.py
+  - fettle/uat/reconcile.py
 spec: plan-uat-strength
 ---
 
@@ -20,8 +21,9 @@ and seeded realistic data generation instead of placeholder strings.
 
 - A session executes at least one restart probe and its persistence verdict
   reconciles against artifacts.
-- Generated data diversity is measured (distinct-shape count) rather than
-  asserted.
+- On a seeded fixture, generated data yields at least 8 distinct input
+  equivalence classes (SHA-256-set cardinality), proven by a regression
+  test; fewer classes fails the criterion.
 
 ## Resolution
 
