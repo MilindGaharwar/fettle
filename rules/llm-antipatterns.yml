@@ -285,3 +285,31 @@ rules:
       Direct file write is not atomic — crash produces corrupt output.
       Fix: import tempfile, os; fd, tmp = tempfile.mkstemp(dir=path.parent);
       os.write(fd, content.encode()); os.close(fd); os.replace(tmp, path)
+
+  - id: test-flow-root-cwd
+    patterns:
+      - pattern-either:
+          - pattern: run_mutation_test(".", $CFG)
+          - pattern: aggregate_shards(".", ...)
+          - pattern: write_timeout_evidence(".", ...)
+          - pattern: save_mutation_native_cache(".", $ID)
+          - pattern: restore_mutation_native_cache(".", $ID)
+          - pattern: prepare_shard_replay_matrix(".", $N)
+          - pattern: run_resumable_mutation_shard(".", ...)
+      - pattern-inside: |
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^test_
+    message: >-
+      Mutation flow invoked with cwd-relative root '.' inside a test —
+      isolate with str(tmp_path); a mutated default can touch the repository
+      root (shard-201 incident).
+    languages: [python]
+    severity: ERROR
+    metadata:
+      origin: fettle-v1.11.1
+      citation: "Shard-201: mutated cfg default deleted the live runner cache at the repository root during self-mutation"
+      compliance: {cwe: CWE-362}
+      fix: "Pass str(tmp_path) as the root argument instead of '.'."
