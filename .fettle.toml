@@ -64,11 +64,11 @@ full_shards = 256
 "fettle/mutation_test.py" = 5
 "fettle/post_edit.py" = 20
 "fettle/project_rules.py" = 10
-"fettle/quality_scan.py" = 5
+"fettle/quality_scan.py" = 2
 "fettle/ratchet.py" = 20
 "fettle/result.py" = 20
 "fettle/security_review.py" = 20
-"fettle/semgrep_util.py" = 5
+"fettle/semgrep_util.py" = 1
 "fettle/tool_runner.py" = 10
 
 [boundary]

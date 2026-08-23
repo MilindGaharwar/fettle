@@ -54,6 +54,8 @@ from fettle.mutation_test import (
     pending_mutation_records,
     execute_pending_mutations,
     report_from_mutation_checkpoint,
+    prepare_shard_replay_matrix,
+    select_shard_attempts,
     run_resumable_mutation_shard,
     write_changed_partition_manifests,
 )
@@ -852,7 +854,7 @@ def test_rerun_mutant_executes_exact_current_engine_id_and_rejects_stale_id():
     run.assert_not_called()
 
 
-def test_completed_report_includes_policy_and_scope_identity_digests():
+def test_completed_report_includes_policy_and_scope_identity_digests(tmp_path):
     engine = {
         "status": "completed", "engine_version": "2.5.1", "test_runner": "runner",
         "tests_run": ["tests/test_app.py"], "line_ranges": [], "run_exit_code": 0,
@@ -870,7 +872,7 @@ def test_completed_report_includes_policy_and_scope_identity_digests():
         monkeypatch.setattr("fettle.mutation_test._run", lambda *args: _proc(out="a" * 40 + "\n"))
         monkeypatch.setattr(Path, "read_bytes", lambda self: b"source")
         monkeypatch.setattr(Path, "read_text", lambda self, **kwargs: "x = 1\n")
-        result = run_mutation_test(".", {"paths": ["src/"]})
+        result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
     assert all(len(result[field]) == 64 for field in (
         "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest"
     ))
@@ -1343,6 +1345,18 @@ def test_timeout_evidence_is_atomic_fail_closed_json(tmp_path):
         "partial": True,
     }
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_timeout_evidence_preserves_shard_identity(tmp_path):
+    path = tmp_path / "mutation-report.json"
+    manifest = {"revision": "a" * 40, "shard_index": 3, "shard_count": 8}
+
+    write_timeout_evidence(path, 1800, manifest)
+
+    report = json.loads(path.read_text())
+    assert report["revision"] == "a" * 40
+    assert report["shard_index"] == 3
+    assert report["shard_count"] == 8
 
 
 def test_changed_selection_uses_merge_base_and_handles_renames_and_deletes(tmp_path):
@@ -2305,13 +2319,13 @@ def test_timeout_is_tool_error():
     assert result["status"] == "tool_error"
 
 
-def test_zero_mutants_is_unknown_not_perfect():
+def test_zero_mutants_is_unknown_not_perfect(tmp_path):
     engine = {"status": "completed", "engine_version": "2.5.1", "run_exit_code": 0, "results_exit_code": 0,
               "killed": 0, "survived": 0, "timeout": 0, "suspicious": 0, "untested": 0, "skipped": 0,
               "survivors": []}
     selection = {"status": "completed", "merge_base": "abc", "files": ["src/app.py"], "deleted": []}
     with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection), patch("fettle.mutation_test._run_mutmut", return_value=engine):
-        result = run_mutation_test(".", {"paths": ["src/"]})
+        result = run_mutation_test(str(tmp_path), {"paths": ["src/"]})
     assert result["status"] == "unknown"
     assert result["passed"] is False
 
@@ -2345,23 +2359,23 @@ def test_zero_mutant_line_shard_is_completed_for_aggregate_coverage(tmp_path):
     assert result["passed"] is True
 
 
-def test_no_files_is_distinct_from_missing_tool():
+def test_no_files_is_distinct_from_missing_tool(tmp_path):
     with patch("fettle.mutation_test._has_mutmut", return_value=False):
-        assert run_mutation_test(".", {})["status"] == "tool_error"
+        assert run_mutation_test(str(tmp_path), {})["status"] == "tool_error"
     selection = {"status": "completed", "merge_base": "abc", "files": [], "deleted": []}
-    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection):
-        result = run_mutation_test(".", {})
+    with patch("fettle.mutation_test._has_mutmut", return_value=True), patch("fettle.mutation_test._get_changed_py_files", return_value=selection), patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40)):
+        result = run_mutation_test(str(tmp_path), {})
     assert result["status"] == "not_applicable"
     assert result["passed"] is True
 
 
 @pytest.mark.parametrize("failure", [OSError("git missing"), subprocess.TimeoutExpired([], 10)])
-def test_revision_resolution_failure_is_tool_error(failure):
+def test_revision_resolution_failure_is_tool_error(tmp_path, failure):
     with (
         patch("fettle.mutation_test._has_mutmut", return_value=True),
         patch("fettle.mutation_test._run", side_effect=failure),
     ):
-        result = run_mutation_test(".", {})
+        result = run_mutation_test(str(tmp_path), {})
 
     assert result["status"] == "tool_error"
     assert result["passed"] is False
@@ -2621,6 +2635,71 @@ def test_aggregate_shards_rejects_incomplete_evidence(tmp_path, reports, message
 
     assert result["status"] in {"unknown", "tool_error"}
     assert message in result["message"]
+
+
+def test_shard_attempt_selection_replaces_timeout_with_completed_replay():
+    timeout = {
+        "status": "tool_error", "shard_index": 0, "shard_count": 2,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+    completed = _shard_report(0, ["fettle/a.py"])
+    other = _shard_report(1, ["fettle/b.py"])
+
+    selected = select_shard_attempts([timeout, completed, other], 2)
+
+    assert selected == [completed, other]
+
+
+def test_shard_attempt_selection_rejects_conflicting_completed_replays():
+    first = _shard_report(0, ["fettle/a.py"], shard_count=1)
+    conflicting = _shard_report(0, ["fettle/a.py"], shard_count=1, killed=7, survived=2)
+
+    with pytest.raises(ValueError, match="conflicting completed attempts"):
+        select_shard_attempts([first, conflicting], 1)
+
+
+def test_shard_attempt_selection_requires_one_completed_attempt_per_index():
+    timeout = {
+        "status": "tool_error", "shard_index": 0, "shard_count": 1,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+
+    with pytest.raises(ValueError, match="no completed attempt"):
+        select_shard_attempts([timeout], 1)
+
+
+def test_replay_matrix_selects_only_incomplete_initial_shards():
+    completed = _shard_report(0, ["fettle/a.py"])
+    timeout = {
+        "status": "tool_error", "shard_index": 1, "shard_count": 2,
+        "revision": "a" * 40, "message": "Mutation run timed out",
+    }
+
+    result = prepare_shard_replay_matrix([completed, timeout], 2)
+
+    assert result["matrix"] == {"shard": [1]}
+    assert result["shard_count"] == 1
+
+
+def test_replay_matrix_selects_missing_initial_shard_after_terminal_matrix():
+    result = prepare_shard_replay_matrix([_shard_report(0, ["fettle/a.py"])], 2)
+
+    assert result["matrix"] == {"shard": [1]}
+    assert result["shard_count"] == 1
+
+
+def test_replay_matrix_selects_all_shards_when_setup_retains_no_reports():
+    result = prepare_shard_replay_matrix([], 2)
+
+    assert result["matrix"] == {"shard": [0, 1]}
+    assert result["shard_count"] == 2
+
+
+def test_replay_matrix_rejects_duplicate_report_when_other_shards_are_missing():
+    report = _shard_report(0, ["fettle/a.py"], shard_count=3)
+
+    with pytest.raises(ValueError, match=r"shard report 0 has invalid or duplicated identity"):
+        prepare_shard_replay_matrix([report, report], 3)
 
 
 def test_aggregate_shards_rejects_overlapping_source_ranges(tmp_path):
