@@ -67,3 +67,16 @@ uv run fettle config --explain | grep mutation   # confirm effective keys
 # edit .fettle.toml: [mutation] mode = "enforce"
 git commit -am "policy: enforce changed-scope survivor gate"
 ```
+
+## First enforced-week triage checklist
+
+Run after ~5 enforced PRs (or 14 days, whichever first):
+
+- [ ] Any false-positive survivor blocks? Record each: shard, mutant id,
+      whether tests genuinely missed it, and suppress-or-fix outcome.
+- [ ] Median added wall-clock per PR acceptable? (gate adds ~60–90 min
+      fan-out; if unacceptable, narrow `paths` before demoting mode.)
+- [ ] Zero silent passes: confirm every changed-scope PR produced a report
+      artifact (docs-claims predicate + workflow artifacts).
+- [ ] If all clean → propose full-scope (all-files) survivor consideration
+      as the next ratchet step; if not → rollback line above.
