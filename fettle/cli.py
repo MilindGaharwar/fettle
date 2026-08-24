@@ -1326,6 +1326,31 @@ def cmd_graph(args: argparse.Namespace) -> None:
     raise SystemExit(graph_main(argv))
 
 
+def cmd_ledger(args: argparse.Namespace) -> None:
+    """P41 governance ledger: status, verify, anchor."""
+    from fettle import evidence_ledger as ledger
+
+    root = args.root
+    if args.ledger_action == "status":
+        records = ledger.read_ledger(root)
+        anchor_state = ledger.verify_anchor(root)
+        print(json.dumps({
+            "records": len(records),
+            "anchor": anchor_state,
+        }, indent=2))
+        sys.exit(0)
+
+    if args.ledger_action == "verify":
+        state = ledger.verify_chain(root)
+        print(json.dumps(state, indent=2))
+        sys.exit(0 if state["status"] == "verified" else 1)
+
+    if args.ledger_action == "anchor":
+        result = ledger.anchor(root)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["status"] == "completed" else 1)
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1859,6 +1884,17 @@ def main() -> None:
     g_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
     g_impact.add_argument("--json", action="store_true")
 
+    p_ledger = subparsers.add_parser(
+        "ledger", help="Governance evidence ledger (P41)")
+    ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
+    for name, help_text in (
+        ("status", "Record count + anchor state"),
+        ("verify", "Full hash-chain verification"),
+        ("anchor", "Bind terminal digest to current commit"),
+    ):
+        sub = ledger_sub.add_parser(name, help=help_text)
+        sub.add_argument("--root", default=".")
+
     p_verify = subparsers.add_parser(
         "verify", help="Run the test suite and record a verification stamp")
     p_verify.add_argument("--full", action="store_true",
@@ -1936,6 +1972,7 @@ def main() -> None:
         "work": cmd_work,
         "links": cmd_links,
         "graph": cmd_graph,
+        "ledger": cmd_ledger,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }

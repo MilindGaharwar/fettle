@@ -190,7 +190,6 @@ class TestAdversarialPaths:
     """P52 graduation: symlink, traversal, and normalization bypass attempts."""
 
     def _ctx(self, tmp_path, file_path, role="implementer"):
-        import os
         from tests.test_tla_sync import FakeContext, FakeInput
 
         cfg = {"gates": {"authorship": {"enabled": True, "mode": "enforce"}}}
