@@ -47,6 +47,8 @@ RULE_COMPLIANCE: dict[str, ControlMapping] = {
     "broad-except-no-reraise": ControlMapping(cwe="CWE-390", asvs="V7.4.2", soc2="CC7.2"),
     "empty-error-swallow-go": ControlMapping(cwe="CWE-390", asvs="V7.4.2", soc2="CC7.2"),
     "empty-catch-block": ControlMapping(cwe="CWE-390", asvs="V7.4.2", soc2="CC7.2"),
+    # Test-isolation: cwd-relative mutation-flow roots in tests (shard-201)
+    "test-flow-root-cwd": ControlMapping(cwe="CWE-362", asvs="V14.3.2", soc2="CC8.1"),
     # Active debug code
     "debug-breakpoint": ControlMapping(cwe="CWE-489", asvs="V14.3.2", soc2="CC8.1"),
     "debug-pdb": ControlMapping(cwe="CWE-489", asvs="V14.3.2", soc2="CC8.1"),
