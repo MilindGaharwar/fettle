@@ -25,12 +25,19 @@ lists its verdict from the GLM review and its persistence location
 - GIF capture requires an operator terminal session; Fettle side prepares
   scripted replay commands only.
 
+## Hazard note (item 4)
+
+Never run lint autofixes over `examples/` — violating fixtures are
+intentional (e.g., assurance-loop `broken.py`). The guard is
+`tests/test_assurance_loop_example.py`, which caught exactly this on
+2026-08-23 after a bulk `ruff --fix`.
+
 ## Status
 
-- [ ] 1 Docs-claims gate (first predicates: S5.5/web, replay-gate↔README)
-- [ ] 2 Graduation triage recorded in evolution plan §17
-- [ ] 3 Profiles advertised in README quick start
-- [ ] 4 Corpus growth seeded (assurance-loop promoted, polyglot fixture added)
+- [x] 1 Docs-claims gate (first predicates: S5.5/web, replay-gate↔README)
+- [x] 2 Graduation triage recorded in evolution plan §17
+- [x] 3 Profiles advertised in README quick start
+- [x] 4 Corpus growth seeded (assurance-loop promoted, polyglot fixture added)
 - [ ] 5 Evolution plan split
-- [ ] 6 P47 CLI shipped
+- [x] 6 P47 CLI shipped
 - [ ] 8 Positioning pass

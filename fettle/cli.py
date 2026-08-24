@@ -1314,6 +1314,18 @@ def cmd_work(args: argparse.Namespace) -> None:
     sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
 
 
+def cmd_graph(args: argparse.Namespace) -> None:
+    """Advisory ephemeral graph: status or impact (P47)."""
+    from fettle.graph_cli import main as graph_main
+
+    argv = [args.graph_action, "--root", args.root]
+    if args.json:
+        argv.append("--json")
+    if args.graph_action == "impact":
+        argv.extend(args.paths)
+    raise SystemExit(graph_main(argv))
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1836,6 +1848,17 @@ def main() -> None:
                          help="Report broken evidence chains")
     p_links.add_argument("--json", action="store_true", help="JSON output")
 
+    p_graph = subparsers.add_parser(
+        "graph", help="Advisory ephemeral graph: status or impact (P47)")
+    graph_sub = p_graph.add_subparsers(dest="graph_action", required=True)
+    g_status = graph_sub.add_parser("status", help="Digest, counts, provider completeness")
+    g_status.add_argument("--root", default=".")
+    g_status.add_argument("--json", action="store_true")
+    g_impact = graph_sub.add_parser("impact", help="Advisory blast-radius closure")
+    g_impact.add_argument("--root", default=".")
+    g_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
+    g_impact.add_argument("--json", action="store_true")
+
     p_verify = subparsers.add_parser(
         "verify", help="Run the test suite and record a verification stamp")
     p_verify.add_argument("--full", action="store_true",
@@ -1912,6 +1935,7 @@ def main() -> None:
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
+        "graph": cmd_graph,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }

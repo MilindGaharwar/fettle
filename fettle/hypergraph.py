@@ -38,16 +38,19 @@ class EphemeralGraph:
         results: tuple[ProviderResult, ...],
     ):
         self._generation = generation
-        self._nodes = dict(nodes)
+        # Keyed by canonical node id; stable-key access goes through
+        # find_by_stable_key / stable_keys().
+        self._nodes = {node.id: node for node in nodes.values()}
         self._edges = dict(edges)
-        self._node_to_edges: dict[str, list[str]] = {}
-        self._edge_to_nodes: dict[str, list[tuple[str, str]]] = {}
+        self._node_to_edges: dict[str, list[tuple[str, str]]] = {}
+        self._edge_endpoints: dict[str, list[tuple[str, str, str]]] = {}
         for inc in incidences:
             self._node_to_edges.setdefault(
                 inc.node_id, []
             ).append((inc.edge_id, inc.direction))
-            role = (inc.edge_id, inc.role, inc.direction)
-            self._edge_to_nodes.setdefault(inc.edge_id, []).append(role)
+            self._edge_endpoints.setdefault(
+                inc.edge_id, []
+            ).append((inc.node_id, inc.role, inc.direction))
 
     @property
     def generation(self) -> GraphGeneration:
@@ -74,7 +77,7 @@ class EphemeralGraph:
     def endpoints(self, edge_id: str) -> list[tuple[str, str]]:
         return [
             (node_id, direction)
-            for node_id, direction, _role in self._edge_to_nodes.get(edge_id, [])
+            for node_id, _role, direction in self._edge_endpoints.get(edge_id, [])
         ]
 
     def find_by_stable_key(self, stable_key: str) -> Node | None:
@@ -82,6 +85,39 @@ class EphemeralGraph:
             if node.stable_key == stable_key:
                 return node
         return None
+
+    def stable_keys(self) -> dict[str, str]:
+        """stable_key -> node_id map for seed resolution."""
+        return {node.stable_key: node.id for node in self._nodes.values()}
+
+    def stable_keys_with_attribute(self, name: str, value: str) -> list[str]:
+        """Stable keys whose attributes carry ``name == value`` (exact match)."""
+        import json as _json
+
+        matches = []
+        for node in self._nodes.values():
+            try:
+                attrs = _json.loads(node.attributes_json)
+            except ValueError:
+                continue
+            if attrs.get(name) == value:
+                matches.append(node.stable_key)
+        return matches
+
+    def closure(self, seed_node_ids: set[str]) -> set[str]:
+        """Undirected blast-radius closure over incidences (advisory)."""
+        seen: set[str] = set(seed_node_ids)
+        frontier = list(seed_node_ids)
+        while frontier:
+            node_id = frontier.pop()
+            for edge_id, _direction in self._node_to_edges.get(node_id, []):
+                for neighbor_id, _role, _direction in self._edge_endpoints.get(
+                    edge_id, []
+                ):
+                    if neighbor_id not in seen:
+                        seen.add(neighbor_id)
+                        frontier.append(neighbor_id)
+        return seen
 
 
 def assemble(
