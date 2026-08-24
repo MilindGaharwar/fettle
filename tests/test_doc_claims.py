@@ -24,9 +24,9 @@ def test_todo_s55_web_claim_matches_drivable_surfaces():
     if not claim_done:
         return  # claim amended or removed; nothing to validate
 
-    from fettle.uat.session import DRIVABLE_SURFACES
+    from fettle.uat.session import drivable_surfaces
 
-    assert "web" in DRIVABLE_SURFACES, (
+    assert "web" in drivable_surfaces(), (
         "TODO marks S5.5 web surface [x] but session.py excludes 'web' "
         "from DRIVABLE_SURFACES — ship the driver or amend the claim."
     )

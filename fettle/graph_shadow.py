@@ -128,3 +128,118 @@ def shadow_semantic(root: str) -> dict:
             for label in sorted({label for label, _s, _d in documented_legacy})
         ],
     }
+
+
+# ── P48 slice 2: topology footprint parity ────────────────────────────────
+
+
+def shadow_topology(root: str) -> dict:
+    """Compare graph-expanded item footprints with predict_footprint."""
+    from fettle.topology import predict_footprint
+    from fettle.work_items import discover_work_items
+
+    built = build_ephemeral_graph(root, snapshot=_snapshot_envelope(root))
+    if built["status"] != "completed":
+        return {"status": "tool_error", "message": built["message"]}
+    graph = built["graph"]
+    keys = graph.stable_keys()
+
+    items = []
+    for item, _ in discover_work_items(root):
+        if item and item.status == "open":
+            items.append(item)
+
+    per_item = []
+    unknown_scope = []
+    for item in items:
+        legacy = predict_footprint(root, item.item_id, list(item.scope))
+        if getattr(legacy, "unknown", False):
+            unknown_scope.append(item.item_id)
+            continue
+        seed_key = f"work_item:{item.item_id}"
+        node_id = keys.get(seed_key)
+        if node_id is None:
+            # Unlinked items have no graph footprint by construction.
+            continue
+        closure_ids = graph.closure({node_id})
+        graph_modules = sorted(
+            keys[k].removeprefix("module:")
+            for k, nid in keys.items()
+            if nid in closure_ids and k.startswith("module:")
+        )
+        legacy_expanded = set(legacy.expanded)
+        graph_set = set(graph_modules)
+        per_item.append({
+            "item_id": item.item_id,
+            "matched": sorted(legacy_expanded & graph_set),
+            "legacy_only": sorted(legacy_expanded - graph_set),
+            "graph_only": sorted(graph_set - legacy_expanded),
+        })
+
+    unexplained = [
+        {"item_id": entry["item_id"], "missing": entry["legacy_only"]}
+        for entry in per_item if entry["legacy_only"]
+    ]
+    return {
+        "status": "completed",
+        "advisory": True,
+        "digest": graph.generation.digest,
+        "items": per_item,
+        "unknown_scope_conservative": unknown_scope,
+        "unexplained_narrower": unexplained,
+    }
+
+
+# ── P48 slice 3: verify-selection parity (documented-incomplete v1) ──────
+
+
+def shadow_verify(root: str) -> dict:
+    """Graph test selection vs naming-convention selection.
+
+    v1 is a documented-incomplete comparison: the graph reaches tests only
+    through explicit trace markers (scenario links), while the legacy gate
+    uses filename convention. Structural module↔scenario bridging arrives
+    later in P48; until then this comparator reports both selections and
+    classifies the delta as expected-unsupported.
+    """
+
+    built = build_ephemeral_graph(root, snapshot=_snapshot_envelope(root))
+    if built["status"] != "completed":
+        return {"status": "tool_error", "message": built["message"]}
+    graph = built["graph"]
+    keys = graph.stable_keys()
+
+    module_nodes = {
+        k.removeprefix("module:"): nid
+        for k, nid in keys.items()
+        if k.startswith("module:")
+    }
+    from fettle.verify_gate import impacted_tests
+
+    marker_tests = sorted(
+        k.removeprefix("test:") for k in keys if k.startswith("test:")
+    )
+    legacy_impacted = impacted_tests(
+        root, sorted(module_nodes), ["tests"],
+    )
+    return {
+        "status": "completed",
+        "advisory": True,
+        "digest": graph.generation.digest,
+        "consumer": "verify_gate",
+        "classification": "expected_unsupported",
+        "reason": ("structural module↔scenario bridge lands later in P48; "
+                   "graph test selection currently requires explicit markers"),
+        "graph_marker_tests": marker_tests,
+        "legacy_naming_convention_tests": sorted(legacy_impacted),
+    }
+
+
+def run_shadow(root: str, consumer: str) -> dict:
+    runners = {"semantic": shadow_semantic, "topology": shadow_topology,
+               "verify": shadow_verify}
+    if consumer not in runners:
+        return {"status": "config_error",
+                "message": f"unknown consumer {consumer!r}; "
+                           f"choose from {sorted(runners)}"}
+    return runners[consumer](root)

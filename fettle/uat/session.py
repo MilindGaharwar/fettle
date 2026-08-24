@@ -29,6 +29,16 @@ SESSION_EVIDENCE_NAME = "uat-session.evidence.json"
 #: Surfaces the session core can always drive. web needs playwright (S5.5).
 DRIVABLE_SURFACES = frozenset({"cli", "api", "library"})
 
+
+def drivable_surfaces() -> frozenset[str]:
+    """Surfaces this installation can drive right now (P74: web via playwright)."""
+    try:
+        import playwright  # noqa: F401
+
+        return DRIVABLE_SURFACES | {"web"}
+    except ImportError:
+        return DRIVABLE_SURFACES
+
 _CONSENT_TEXT = (
     "UAT sessions launch an autonomous agent with permission checks disabled "
     "inside an isolated worktree. It will run commands and, for web surfaces, "
@@ -298,9 +308,9 @@ def run_session(root: str, config: dict, surface: str,
                             "reinstall finefettle, then run 'playwright install' — or run "
                             "'fettle uat manual' for hand-testing steps")
             return result
-    elif surface not in DRIVABLE_SURFACES:
+    elif surface not in drivable_surfaces():
         result.error = (f"surface '{surface}' is not drivable "
-                        f"(supported: {', '.join(sorted(DRIVABLE_SURFACES | {'web'}))}); "
+                        f"(supported: {', '.join(sorted(drivable_surfaces()))}); "
                         "run 'fettle uat doctor' for manual steps")
         return result
 
@@ -376,6 +386,15 @@ def run_session(root: str, config: dict, surface: str,
             wt_path, clean, scenarios, surface,
         )
         checkpoint["artifact_dir"] = result.artifact_dir
+        if surface == "web" and uat_cfg.get("app_url"):
+            from fettle.uat.artifacts import capture_web_page
+
+            web = capture_web_page(str(uat_cfg["app_url"]),
+                                   str(Path(wt_path) / ".fettle" / "uat-artifacts"))
+            checkpoint["web_capture"] = (
+                web if web["status"] == "completed"
+                else {"status": "tool_error", "message": web.get("message", "")}
+            )
     except (OSError, TypeError, ValueError) as exc:
         # Capture must never crash a run, but the failure stays visible.
         checkpoint["artifact_error"] = f"{type(exc).__name__}: {exc}"
