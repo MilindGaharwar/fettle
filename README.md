@@ -78,11 +78,15 @@ runners, hooks, browser automation, and the mutation engine:
 ```bash
 pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
 cd your-project
-fettle init --dry-run
-fettle init
+fettle init --profile solo   # presets: solo | team | enterprise
 fettle doctor
 fettle check --changed
 ```
+
+Presets generate an advisory-first `.fettle.toml` non-interactively —
+`solo` for individual repos, `team` adds delegation gates, `enterprise`
+adds strict mode and compliance evidence. Omit `--profile` for the guided
+interview.
 
 The PyPI package is `finefettle`; the installed command is `fettle`. Installation
 does not modify agent settings. `fettle init --dry-run` previews repository and

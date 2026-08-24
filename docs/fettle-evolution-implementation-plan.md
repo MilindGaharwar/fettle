@@ -2452,6 +2452,24 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
 
 ## 17. Planning Gate Status
 
+### Graduation-debt rule (2026-08-23)
+
+Any milestone remaining `In progress` for more than 30 days must record one
+of three dispositions here — close-by-date, cut scope, or park with reason.
+Dispositions are proposed by the acting engineer and stand unless the
+operator objects.
+
+Current dispositions:
+
+- **P52 authorship separation** — CLOSE-BY-DATE next working session;
+  only TLA+ role invariants, adversarial path coverage, and one evidenced
+  multi-agent flow remain (est. 2–3 days).
+- **P43 narrow formal verification** — PARK remaining three models
+  (Verify Gate, Dispatcher, TDD Gate) pending measured demand; Policy
+  Capsule and Work Item Claims models are verified and maintained.
+- **P34 ratchet graduation** — no triage required; awaiting qualifying runs,
+  now accumulating automatically through the required PR mutation gate.
+
 - Phase 0 UX: complete in `docs/polyglot-governance.ux-spec.md`.
 - Phase 0.5 UI: not applicable; this plan changes CLI, hook, LSP, and protocol
   behavior but introduces no visual interface.

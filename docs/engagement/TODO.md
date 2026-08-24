@@ -47,7 +47,8 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S5.2 session core (worktree isolation, persona prompt, runner)
   - [x] S5.3 reconciler (CONFIRMED/CONTRADICTED/BLOCKED/UNOBSERVED verdicts)
   - [x] S5.4 manual fallback walkthroughs + `fettle uat attest`
-  - [x] S5.5 web surface (playwright extra) + consent + redaction
+  - [~] S5.5 web surface — consent + redaction shipped; browser driver NOT in
+        DRIVABLE_SURFACES yet, scheduled as P74 (see docs/uat-strength-plan.md)
   - [x] S5.6 docs + work note
 - [x] C6. Stage 6 — semantic layer thin slice
   - [x] S6.1 link fusion + `fettle links <id>|--orphans`

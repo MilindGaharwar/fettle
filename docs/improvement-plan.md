@@ -1,0 +1,36 @@
+# Improvement Plan — Audit Recommendations (Ordered)
+
+Status: active · Source: full project audit 2026-08-23, revised after GLM
+review · Supersedes: none · Review trigger: on completion of all items
+
+Order below is by value-per-effort with dependencies resolved. Each item
+lists its verdict from the GLM review and its persistence location
+(plan section here + claimable work item where applicable).
+
+| # | Item | Effort | GLM verdict |
+|---|---|---|---|
+| 1 | Docs-claims gate: executable predicates validating doc/TODO claims against code reality; first case = S5.5-web discrepancy | 1–2 d | KEEP, strengthened (double-confirmed drift) |
+| 2 | Graduation-debt triage: plan §17 amendment + dispositions for P43, P52, P34 | 0.5 d | KEEP |
+| 3 | Advertise + extend `fettle init --profile` presets (exists; undocumented) | 0.5 d | MODIFY (already ships) |
+| 4 | Grow examples/assurance-loop into the demo corpus (polyglot fixtures; feeds budgets, P77 seeds, screenshots) | ongoing | MODIFY (grow, don't create) |
+| 5 | Split fettle-evolution-implementation-plan per program; thin index + core-vs-cockpit docs entry page | 2–3 d | KEEP, verified 2,476 lines |
+| 6 | P47 advisory `fettle graph impact/status` CLI (deps met: P46 closed this week) | 3–5 d | KEEP pending deps (met) |
+| 7 | P77 seeded-defect benchmark remains gated before further UAT advertising | per UAT plan | KEEP |
+| 8 | Positioning/motion (trust-first one-liner everywhere; loop capture as GIF) | operator-assisted | KEEP |
+
+## Non-goals
+
+- No new preset machinery beyond extending `--profile` (GLM: already exists).
+- No enforcement mode for the docs-claims gate until predicates mature.
+- GIF capture requires an operator terminal session; Fettle side prepares
+  scripted replay commands only.
+
+## Status
+
+- [ ] 1 Docs-claims gate (first predicates: S5.5/web, replay-gate↔README)
+- [ ] 2 Graduation triage recorded in evolution plan §17
+- [ ] 3 Profiles advertised in README quick start
+- [ ] 4 Corpus growth seeded (assurance-loop promoted, polyglot fixture added)
+- [ ] 5 Evolution plan split
+- [ ] 6 P47 CLI shipped
+- [ ] 8 Positioning pass
