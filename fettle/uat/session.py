@@ -88,6 +88,31 @@ def collect_scenarios(root: str) -> list[dict]:
     return out
 
 
+_CHARTER_SECTION = """
+
+## Exploration Charter (P73)
+
+After the scenarios above, spend the remaining session exploring beyond
+them. Work through these tours and report anything surprising:
+
+1. SABOTEUR — try to break it: malformed input, huge values, unicode,
+   empty fields, repeated submissions, back/forward mid-flow.
+2. MONEY TOUR — exercise the critical path end-to-end; anything confusing,
+   slow, or ambiguous on the main journey is a finding.
+3. SUPERMODEL — probe data boundaries: maximum lengths, boundary numbers,
+   unusual-but-valid formats.
+
+Report discoveries as separate blocks (they are candidate findings for
+human review, NOT scenario verdicts):
+
+CANDIDATE: <short-id>
+OBSERVED: <what actually happened, verbatim where possible>
+WHY-INTERESTING: <why a human should look at this>
+
+Do not invent failures; if a tour finds nothing, say so in NOTES.
+"""
+
+
 def build_prompt(surface: str, scenarios: list[dict], uat_cfg: dict) -> str:
     """Persona prompt (doc 10 §3 Explore): real-user framing + GWT scenarios."""
     if uat_cfg.get("app_url"):
@@ -110,6 +135,8 @@ def build_prompt(surface: str, scenarios: list[dict], uat_cfg: dict) -> str:
     for s in scenarios:
         parts.append(f"\n### {s['id']}: {s['title']}")
         parts.extend(f"- {step}" for step in s["steps"])
+    if uat_cfg.get("explore"):
+        parts.append(_CHARTER_SECTION)
     return "\n".join(parts) + "\n"
 
 

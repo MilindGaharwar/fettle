@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Governance Operations
+
+- Published the mutation ratchet decision memo: ≥10 qualifying retained
+  runs since the required gate launched (trigger was three); recommends
+  operator ratification to flip changed-scope survivor enforcement.
+- Added `docs/plan-index.md` as the navigation layer across all program
+  plans; the master evolution plan remains the canonical decision record.
+
+### Change Integrity (P48)
+
+- Shadow parity engine (`fettle/graph_shadow.py`, `fettle graph shadow`):
+  runs the ephemeral graph beside the legacy semantic layer and classifies
+  every difference. Acceptance enforced: zero unexplained narrower results
+  on maintained fixtures; `traces`/`scopes`/`observes` differences are
+  declared with reasons, never silent.
+
+### State Consistency (P53/SC1)
+
+- Froze the canonical contract schema (`fettle/state_consistency.py`):
+  `ConsistencyContract` identity via canonical digest excluding runtime and
+  redaction keys; header/scope/consistency/comparator/observer validation
+  rejecting unknown keys; `TEMPLATE_V1`; `lint_contract_text`. No execution
+  code — runners arrive in SC3+ only after these contracts hold.
+
 ### Authorship Separation (P52) — Graduated
 
 - Hardened the authorship gate against adversarial targets: symlink aliases,

@@ -61,6 +61,8 @@ def parse_transcript(text: str) -> dict[str, dict]:
         entry = {"observed": "", "outcome": "", "notes": ""}
         current: str | None = None
         for line in text[m.end():end].splitlines():
+            if _CANDIDATE_RE.match(line.strip()):
+                break  # P73: charter findings start a new section
             f = _FIELD_RE.match(line.strip())
             if f:
                 current = f.group(1).lower()
@@ -149,8 +151,61 @@ def _confirm_gate(
     return None
 
 
-def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple[str, str]:
-    """Persist the evidence artifact. Returns (path, error)."""
+_CANDIDATE_RE = re.compile(r"^CANDIDATE:\s*(.+)$")
+
+
+def _outside_scenario_blocks(transcript: str) -> str:
+    """Mask SCENARIO verdict blocks so candidate scanning skips them."""
+    matches = list(_BLOCK_RE.finditer(transcript))
+    if not matches:
+        return transcript
+    parts: list[str] = []
+    last = 0
+    for m in matches:
+        parts.append(transcript[last:m.start()])
+        last = m.end()
+    parts.append(transcript[last:])
+    return "\n".join(parts)
+
+
+def parse_candidates(transcript: str) -> list[dict]:
+    """P73: exploration findings for human review — never verdicts."""
+    candidates: list[dict] = []
+    current: dict | None = None
+    for raw in _outside_scenario_blocks(transcript).splitlines():
+        stripped = raw.strip()
+        m = _CANDIDATE_RE.match(stripped)
+        if m:
+            if current:
+                candidates.append(current)
+            current = {"candidate_id": m.group(1).strip(),
+                       "observed": "", "why_interesting": ""}
+            continue
+        if current is None or not stripped:
+            continue
+        low = stripped.lower()
+        if low.startswith("observed:"):
+            current["observed"] = stripped[len("observed:"):].strip()
+        elif low.startswith("why-interesting:"):
+            current["why_interesting"] = stripped[16:].strip()
+        elif current.get("observed"):
+            current["observed"] += " " + stripped
+    if current:
+        candidates.append(current)
+    return candidates
+
+
+def write_report(
+    worktree: str,
+    session: dict,
+    verdicts: list[Verdict],
+    candidates: list[dict] | None = None,
+) -> tuple[str, str]:
+    """Persist the evidence artifact. Returns (path, error).
+
+    P73: ``candidates`` are exploration findings recorded verbatim for human
+    review; they never influence verdicts.
+    """
     path = Path(worktree) / ".fettle" / REPORT_NAME
     from fettle.trace import build_evidence
     evidence_id = build_evidence(
@@ -161,6 +216,7 @@ def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple
         "session_id": session.get("session_id", ""),
         "surface": session.get("surface", ""),
         "evidence_id": evidence_id,
+        "candidate_scenarios": candidates or [],
         "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
                        "observed": v.observed, "note": v.note} for v in verdicts],
         "completion": {
@@ -299,5 +355,6 @@ def reconcile_session(root: str, worktree: str) -> tuple[list[Verdict], dict, st
         artifacts=load_scenario_artifacts(worktree),
         require_artifacts=True,
     )
-    _, err = write_report(worktree, cp, verdicts)
+    _, err = write_report(worktree, cp, verdicts,
+                          candidates=parse_candidates(transcript))
     return verdicts, cp, err
