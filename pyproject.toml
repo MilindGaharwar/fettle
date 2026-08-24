@@ -35,11 +35,20 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = []
-semgrep = []
+# The core wheel already bundles every runtime capability: analyzers,
+# test/mutation runners, hooks, browser automation, and the mutation engine.
+# Extras exist as stable install targets for teams that pin by capability;
+# `all` composes them so one command installs everything.
+dev = ["pre-commit>=4.4"]
+semgrep = ["semgrep>=1.168"]
 evals = []
 uat = []
-all = []
+all = [
+    "finefettle[dev]",
+    "finefettle[semgrep]",
+    "finefettle[evals]",
+    "finefettle[uat]",
+]
 
 [project.scripts]
 fettle = "fettle.cli:main"

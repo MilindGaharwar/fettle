@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Change Integrity (P38, P45)
+
+- Added canonical specification traceability (`fettle.trace_canonical`):
+  stable-ID marker index, marker validation against active scenarios,
+  executed-result binding where declaration is linked but only a passing run
+  verifies, and drift evidence separating uncovered scenarios, unknown
+  markers, orphan tests, governed changes without review, and executed
+  coverage. Filename-substring inference in `trace_requirements` is now
+  deprecated.
+- Added graph-independent source snapshots (`fettle.source_snapshot`):
+  deterministic committed manifests from Git tree objects, content-hashed
+  working manifests covering tracked, untracked, and required-ignored inputs,
+  merge-conflict non-pass detection, LFS pointer flagging, restrictive
+  temporary materialization with per-byte verification, read-set
+  revalidation for transient edit/restore races, and policy-provenance
+  identity binding.
+
+### Rules
+
+- New enforced rule `test-flow-root-cwd` forbids cwd-relative roots in
+  mutation-flow calls inside test functions (shard-201 lesson), with
+  compliance mapping to CWE-362.
+
+### Packaging
+
+- Extras are real install targets now; `pip install "finefettle[all]"`
+  composes every capability in one command on top of the already
+  batteries-included core wheel.
+
 ### Mutation Evidence
 
 - Added bounded automatic replay for incomplete changed-scope mutation shards
