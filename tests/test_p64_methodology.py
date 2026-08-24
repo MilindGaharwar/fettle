@@ -35,7 +35,10 @@ def test_item26_workers_bind_manifest_and_preflight_identity():
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "--resume-manifest mutation-manifests/partition-" in text
-    assert "--manifest-scope mutation-manifests" in text
+    assert "--retained-preflight retained-preflight/mutation-preflight.json" in text
+    # Identity chain: manifest revision/digests are validated by the worker
+    # (load_partition_manifest + retained preflight assertions in prepare).
+    assert 'aggregate["revision"]==os.environ["GITHUB_SHA"]' in text
 
 
 def test_replay_preparation_is_wired_before_aggregate():
