@@ -68,13 +68,12 @@ def test_comparator_change_alters_identity():
     assert base.digest != changed.digest
 
 
-def test_unknown_top_level_key_rejected(tmp_path):
+def test_unknown_top_level_key_rejected():
     mutated = VALID + "\nsecret_sauce: yes\n"
 
-    contract, findings = lint_contract_text(mutated), None
+    findings = lint_contract_text(mutated)
 
-    findings_list = contract or []
-    assert any("unknown top-level key" in f["message"] for f in findings_list)
+    assert any("unknown top-level key" in f["message"] for f in findings)
 
 
 def test_missing_fact_and_bad_model_produce_errors():
