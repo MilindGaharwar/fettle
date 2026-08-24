@@ -134,16 +134,29 @@ def verify_chain(root: str) -> dict:
     return {"status": "verified", "records": len(records), "terminal_hash": prev}
 
 
-def anchor(root: str, commit: str | None = None) -> dict:
-    """Bind the terminal digest to a repository commit."""
+def anchor(root: str, commit: str | None = None,
+           artifact_url: str | None = None) -> dict:
+    """Bind the terminal digest to a repository commit or CI artifact URL."""
     state = verify_chain(root)
     if state["status"] != "verified":
         return {"status": "refused", "reason": "cannot anchor a broken chain"}
     if commit is None:
-        done = _rev_parse(root)
-        if done is None:
-            return {"status": "tool_error", "message": "not a git repository"}
-        commit = done
+        commit = _rev_parse(root)
+        if commit is None:
+            if not artifact_url:
+                return {"status": "tool_error",
+                        "message": "not a git repository; pass artifact_url "
+                                   "to anchor against a CI artifact"}
+            # Externally owned commits: coverage is explicitly unknown.
+            return _write_anchor(root, state, commit=None,
+                                 artifact_url=artifact_url,
+                                 coverage="unknown")
+    return _write_anchor(root, state, commit=commit,
+                         artifact_url=artifact_url, coverage="known")
+
+
+def _write_anchor(root: str, state: dict, commit: str | None,
+                  artifact_url: str | None, coverage: str) -> dict:
     path, anchor_path = _paths(root)
     terminal = state["terminal_hash"]
     anchor_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,10 +164,13 @@ def anchor(root: str, commit: str | None = None) -> dict:
         "schema_version": SCHEMA_VERSION,
         "anchored_at": round(time.time(), 3),
         "commit": commit,
+        "artifact_url": artifact_url,
+        "coverage": coverage,
         "records": state["records"],
         "terminal_hash": terminal,
     }, indent=2) + "\n", encoding="utf-8")
     return {"status": "completed", "commit": commit,
+            "artifact_url": artifact_url, "coverage": coverage,
             "records": state["records"], "terminal_hash": terminal}
 
 
@@ -173,13 +189,15 @@ def verify_anchor(root: str) -> dict:
     anchor_data = json.loads(anchor_path.read_text(encoding="utf-8"))
     state = verify_chain(root)
     if state["status"] != "verified":
-        return {**state, "anchored_commit": anchor_data.get("commit")}
+        return {**state, "anchored_commit": anchor_data.get("commit"),
+                "coverage": anchor_data.get("coverage", "unknown")}
     records_now = state["records"]
     anchored_records = anchor_data.get("records", 0)
     if records_now < anchored_records:
         return {
             "status": "tampered", "reason": "ledger shorter than its anchor",
             "anchored_commit": anchor_data.get("commit"),
+            "coverage": anchor_data.get("coverage", "unknown"),
         }
     terminal_now = terminal_hash_at(root, anchored_records)
     if terminal_now != anchor_data["terminal_hash"]:
@@ -187,10 +205,12 @@ def verify_anchor(root: str) -> dict:
             "status": "tampered",
             "reason": "prefix diverges from anchored terminal digest",
             "anchored_commit": anchor_data.get("commit"),
+            "coverage": anchor_data.get("coverage", "unknown"),
         }
     return {
         "status": "anchored",
         "anchored_commit": anchor_data.get("commit"),
+        "coverage": anchor_data.get("coverage", "unknown"),
         "records_since_anchor": records_now - anchored_records,
         "total_records": records_now,
     }
