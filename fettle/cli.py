@@ -1883,6 +1883,10 @@ def main() -> None:
     g_impact.add_argument("--root", default=".")
     g_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
     g_impact.add_argument("--json", action="store_true")
+    g_shadow = graph_sub.add_parser(
+        "shadow", help="P48 parity report vs the legacy semantic layer")
+    g_shadow.add_argument("--root", default=".")
+    g_shadow.add_argument("--json", action="store_true")
 
     p_ledger = subparsers.add_parser(
         "ledger", help="Governance evidence ledger (P41)")
