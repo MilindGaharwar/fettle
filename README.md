@@ -72,17 +72,21 @@ Choose the smallest path that proves value for your job.
 
 ### Evaluate the CLI
 
-Install one isolated Python environment for local scans, CI, reports, mutation
-testing, and browser automation:
+One package installs the complete toolkit — analyzers, test and mutation
+runners, hooks, browser automation, and the mutation engine:
 
 ```bash
-pipx install finefettle
+pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
 cd your-project
-fettle init --dry-run
-fettle init
+fettle init --profile solo   # presets: solo | team | enterprise
 fettle doctor
 fettle check --changed
 ```
+
+Presets generate an advisory-first `.fettle.toml` non-interactively —
+`solo` for individual repos, `team` adds delegation gates, `enterprise`
+adds strict mode and compliance evidence. Omit `--profile` for the guided
+interview.
 
 The PyPI package is `finefettle`; the installed command is `fettle`. Installation
 does not modify agent settings. `fettle init --dry-run` previews repository and
@@ -189,8 +193,11 @@ verification evidence does not substitute for it or become an attestation.
 
 Python mutation preflight canonicalizes the engine corpus before expensive
 execution. Full runs can resume by stable fingerprint, reject incompatible
-checkpoints, and aggregate only complete ledgers. Two independent calibrations
-established Fettle's own 28,723-mutant baseline with zero untested outcomes.
+checkpoints, and aggregate only complete ledgers. On pull requests, a required
+`mutation evidence` check fans out bounded shards, automatically replays any
+shard that timed out or lost its runner, and fails closed when evidence is
+missing, conflicting, or stale. Two independent calibrations established
+Fettle's own 28,723-mutant baseline with zero untested outcomes.
 Changed-scope survivor enforcement remains advisory until runtime and reviewer
 feedback satisfy the published graduation criteria.
 Use the [mutation quality playbook](docs/mutation-quality-playbook.md) for setup,
@@ -231,9 +238,9 @@ Support is described by surface, not by one broad "polyglot" claim.
 | External integrations | SonarQube, Black Duck/Polaris, Pact; opt-in |
 | Guided workflows | 17 quality, security, planning, learning, and readiness workflows |
 | Multi-agent controls | Worktrees, claims, topology, spawn, capsules, role authority, reports |
-| Living specifications | Spec lint, scenario inventory, scenario-to-test trace coverage |
+| Living specifications | Spec lint, scenario inventory, trace coverage, canonical drift evidence between specs, tests, and governed code |
 | User acceptance | Agent-driven or manual CLI, API, web, and library scenarios; report-only |
-| Mutation quality | Python preflight, changed/full runs, retained reports, canonical baseline comparison |
+| Mutation quality | Python preflight, changed/full runs, required-PR replay gate, retained reports, canonical baseline comparison |
 | Assurance | Canonical result states, behavioral evals, compliance/lineage reports, TLA+ models for selected protocols |
 
 ### Quality and Security Gates

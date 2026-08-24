@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -140,6 +142,60 @@ def _trace_risk(days: int = 30) -> tuple[bool, str]:
         return False, "trace unreadable — risk unknown"
 
 
+def _role_separated(item) -> bool:
+    """True when an item's scope spans both test and implementation files —
+    the writer and reviewer should be different agents (P52)."""
+    from fettle.paths import classify_file
+
+    kinds: set[str] = set()
+    for pattern in getattr(item, "scope", []) or []:
+        if "test" in pattern.lower():
+            kinds.add("test")
+            continue
+        sample = re.sub(r"[*?\[\]]+", "x", pattern)
+        if not Path(sample).suffix:
+            sample += ".py"
+        kinds.add(str(classify_file(sample)))
+    return {"test", "implementation"} <= kinds
+
+
+def _advise_single(item, days: int) -> dict:
+    rationale = [f"one open work item: {item.item_id}"]
+    if item.spec:
+        rationale.append(f"item links spec '{item.spec}' — scenario-driven "
+                         f"pipeline (plan → implement → fettle uat) fits")
+    if _role_separated(item):
+        rationale.append(
+            "scope spans tests and implementation — separate tester/"
+            "implementer agents under the authorship gate (P52)"
+        )
+        return {"topology": "writer-reviewer", "items": [item.item_id],
+                "conflicts": [], "rationale": rationale,
+                "commands": [
+                    f"fettle spawn claude --role tester --task 'write tests for "
+                    f"{item.item_id}' --worktree {item.item_id}-tests",
+                    f"fettle spawn codex --role implementer --task 'implement "
+                    f"{item.item_id} against the tests' --worktree {item.item_id}",
+                ]}
+    risky, risk_note = _trace_risk(days)
+    rationale.append(risk_note)
+    if item.spec:
+        return {"topology": "pipeline", "items": [item.item_id],
+                "conflicts": [], "rationale": rationale,
+                "commands": [f"fettle spawn claude --task 'implement {item.item_id}' "
+                             f"--worktree {item.item_id}",
+                             "fettle uat run --surface auto"]}
+    if risky:
+        return {"topology": "writer-reviewer", "items": [item.item_id],
+                "conflicts": [], "rationale": rationale,
+                "commands": [f"fettle spawn claude --task 'implement {item.item_id}' "
+                             f"--worktree {item.item_id}",
+                             f"fettle spawn codex --task 'review the changes for {item.item_id} "
+                             f"with fresh context'"]}
+    return {"topology": "solo", "items": [item.item_id], "conflicts": [],
+            "rationale": rationale, "commands": []}
+
+
 def advise(root: str, days: int = 30) -> dict:
     """Recommend a topology for the repo's open work items, with rationale."""
     from fettle.work_items import discover_work_items
@@ -154,28 +210,12 @@ def advise(root: str, days: int = 30) -> dict:
                 "commands": []}
 
     if len(items) == 1:
-        item = items[0]
-        risky, risk_note = _trace_risk(days)
-        rationale.append(f"one open work item: {item.item_id}")
-        rationale.append(risk_note)
-        if item.spec:
-            rationale.append(f"item links spec '{item.spec}' — scenario-driven "
-                             f"pipeline (plan → implement → fettle uat) fits")
-            return {"topology": "pipeline", "items": [item.item_id],
-                    "conflicts": [], "rationale": rationale,
-                    "commands": [f"fettle spawn claude --task 'implement {item.item_id}' "
-                                 f"--worktree {item.item_id}",
-                                 "fettle uat run --surface auto"]}
-        if risky:
-            return {"topology": "writer-reviewer", "items": [item.item_id],
-                    "conflicts": [], "rationale": rationale,
-                    "commands": [f"fettle spawn claude --task 'implement {item.item_id}' "
-                                 f"--worktree {item.item_id}",
-                                 f"fettle spawn codex --task 'review the changes for {item.item_id} "
-                                 f"with fresh context'"]}
-        return {"topology": "solo", "items": [item.item_id], "conflicts": [],
-                "rationale": rationale, "commands": []}
+        return _advise_single(items[0], days)
 
+    return _advise_multi(root, items, rationale)
+
+
+def _advise_multi(root: str, items: list, rationale: list[str]) -> dict:
     footprints = [predict_footprint(root, i.item_id, i.scope) for i in items]
     conflicts = find_conflicts(footprints)
     item_ids = [i.item_id for i in items]

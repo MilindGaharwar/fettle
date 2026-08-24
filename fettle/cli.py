@@ -1314,6 +1314,43 @@ def cmd_work(args: argparse.Namespace) -> None:
     sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
 
 
+def cmd_graph(args: argparse.Namespace) -> None:
+    """Advisory ephemeral graph: status or impact (P47)."""
+    from fettle.graph_cli import main as graph_main
+
+    argv = [args.graph_action, "--root", args.root]
+    if args.json:
+        argv.append("--json")
+    if args.graph_action == "impact":
+        argv.extend(args.paths)
+    raise SystemExit(graph_main(argv))
+
+
+def cmd_ledger(args: argparse.Namespace) -> None:
+    """P41 governance ledger: status, verify, anchor."""
+    from fettle import evidence_ledger as ledger
+
+    root = args.root
+    if args.ledger_action == "status":
+        records = ledger.read_ledger(root)
+        anchor_state = ledger.verify_anchor(root)
+        print(json.dumps({
+            "records": len(records),
+            "anchor": anchor_state,
+        }, indent=2))
+        sys.exit(0)
+
+    if args.ledger_action == "verify":
+        state = ledger.verify_chain(root)
+        print(json.dumps(state, indent=2))
+        sys.exit(0 if state["status"] == "verified" else 1)
+
+    if args.ledger_action == "anchor":
+        result = ledger.anchor(root)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["status"] == "completed" else 1)
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1836,6 +1873,28 @@ def main() -> None:
                          help="Report broken evidence chains")
     p_links.add_argument("--json", action="store_true", help="JSON output")
 
+    p_graph = subparsers.add_parser(
+        "graph", help="Advisory ephemeral graph: status or impact (P47)")
+    graph_sub = p_graph.add_subparsers(dest="graph_action", required=True)
+    g_status = graph_sub.add_parser("status", help="Digest, counts, provider completeness")
+    g_status.add_argument("--root", default=".")
+    g_status.add_argument("--json", action="store_true")
+    g_impact = graph_sub.add_parser("impact", help="Advisory blast-radius closure")
+    g_impact.add_argument("--root", default=".")
+    g_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
+    g_impact.add_argument("--json", action="store_true")
+
+    p_ledger = subparsers.add_parser(
+        "ledger", help="Governance evidence ledger (P41)")
+    ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
+    for name, help_text in (
+        ("status", "Record count + anchor state"),
+        ("verify", "Full hash-chain verification"),
+        ("anchor", "Bind terminal digest to current commit"),
+    ):
+        sub = ledger_sub.add_parser(name, help=help_text)
+        sub.add_argument("--root", default=".")
+
     p_verify = subparsers.add_parser(
         "verify", help="Run the test suite and record a verification stamp")
     p_verify.add_argument("--full", action="store_true",
@@ -1912,6 +1971,8 @@ def main() -> None:
         "worktree": cmd_worktree,
         "work": cmd_work,
         "links": cmd_links,
+        "graph": cmd_graph,
+        "ledger": cmd_ledger,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }

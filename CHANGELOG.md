@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Authorship Separation (P52) — Graduated
+
+- Hardened the authorship gate against adversarial targets: symlink aliases,
+  traversal segments, and absolute paths outside the repository now resolve
+  to their real classification before the role check.
+- Topology advisor recommends separate tester/implementer agents when an
+  item's scope spans both file kinds.
+- Evidenced two-role sessions: paired tester/implementer runs record
+  allow/block verdicts as bounded evidence artifacts.
+
+### Change Integrity (P38, P45, P46, P47)
+
+- Canonical specification traceability (`fettle.trace_canonical`): stable-ID
+  marker index, marker validation, executed-result binding (declaration is
+  linked; only a pass verifies), and drift evidence separating uncovered
+  scenarios, unknown markers, orphan tests, governed changes without review,
+  and executed coverage. Filename-substring inference deprecated.
+- Graph-independent source snapshots (`fettle.source_snapshot`):
+  deterministic committed manifests, content-hashed working manifests,
+  merge-conflict non-pass, LFS flagging, verified materialization,
+  read-set revalidation, policy identity binding.
+- Deterministic ephemeral hypergraph (`fettle/providers`,
+  `fettle/hypergraph.py`, `fettle/graph_builder.py`): five native providers
+  over content-addressed types, atomic frozen publication, snapshot-bound
+  digests, advisory `fettle graph status|impact` CLI with fail-closed exits.
+
+### Rules
+
+- New enforced rule `test-flow-root-cwd` forbids cwd-relative roots in
+  mutation-flow calls inside test functions (shard-201 lesson), with
+  compliance mapping to CWE-362.
+
+### Packaging
+
+- Extras are real install targets now; `pip install "finefettle[all]"`
+  composes every capability in one command on top of the already
+  batteries-included core wheel.
+
 ### Mutation Evidence
 
 - Added bounded automatic replay for incomplete changed-scope mutation shards

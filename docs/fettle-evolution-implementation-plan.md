@@ -1,5 +1,8 @@
 # Fettle Evolution Implementation Plan
 
+> Navigation: per-program plans and current next-actions are indexed in
+> `docs/plan-index.md`. This document remains the canonical decision record.
+
 Status: APPROVED for completed activities; P33, P35, and P44 complete; P34,
 P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed,
 blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning
@@ -145,21 +148,21 @@ and are planning ranges, not commitments.
 | P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Complete |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
 | P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
-| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Proposed |
+| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Authorized (enables P46, P60) |
 | P39 | Operationalize static and supply-chain controls | following minor | P33, P35 | 4–7 days | Proposed |
 | P40 | Add invariant properties and flake detection selectively | following minor | P33, P37 | 4–7 days | Proposed |
 | P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
 | P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | In progress (2 of 5 models) |
 | P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Complete |
-| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Proposed |
-| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Proposed |
-| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Proposed |
-| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Proposed |
-| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Proposed |
+| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Authorized (2026-08-23) |
+| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Approved in principle; start after P38 |
+| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Approved in principle |
+| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Approved in principle |
+| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Deferred on P41 + P48 |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
-| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | In progress |
+| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Graduated |
 | P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Proposed |
 | P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Proposed |
 | P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Proposed |
@@ -2451,6 +2454,30 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
 ---
 
 ## 17. Planning Gate Status
+
+### Graduation-debt rule (2026-08-23)
+
+Any milestone remaining `In progress` for more than 30 days must record one
+of three dispositions here — close-by-date, cut scope, or park with reason.
+Dispositions are proposed by the acting engineer and stand unless the
+operator objects.
+
+Current dispositions:
+
+- **P52 authorship separation** — GRADUATED 2026-08-23. Evidence: TLC
+  verified S6 RoleMonotonicity + S7 RoleFileAuthority (tla-verify run
+  2026-08-15 post-dates the spec commit); adversarial path coverage
+  (symlink alias, traversal segments, absolute-outside-repo) blocks via
+  hardened `_classify_target`; topology advisor recommends tester/
+  implementer separation for mixed-scope items; evidenced two-role session
+  records allow/block verdicts as bounded evidence artifacts
+  (`tests/test_authorship_gate.py::TestAdversarialPaths`,
+  `tests/test_authorship_e2e.py::TestRoleSeparatedTopologyAndEvidence`).
+- **P43 narrow formal verification** — PARK remaining three models
+  (Verify Gate, Dispatcher, TDD Gate) pending measured demand; Policy
+  Capsule and Work Item Claims models are verified and maintained.
+- **P34 ratchet graduation** — no triage required; awaiting qualifying runs,
+  now accumulating automatically through the required PR mutation gate.
 
 - Phase 0 UX: complete in `docs/polyglot-governance.ux-spec.md`.
 - Phase 0.5 UI: not applicable; this plan changes CLI, hook, LSP, and protocol

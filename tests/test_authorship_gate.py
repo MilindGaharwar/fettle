@@ -184,3 +184,60 @@ class TestRoleRank:
 
     def test_implementer_and_tester_same_rank(self):
         assert ROLE_RANK["implementer"] == ROLE_RANK["tester"]
+
+
+class TestAdversarialPaths:
+    """P52 graduation: symlink, traversal, and normalization bypass attempts."""
+
+    def _ctx(self, tmp_path, file_path, role="implementer"):
+        from tests.test_tla_sync import FakeContext, FakeInput
+
+        cfg = {"gates": {"authorship": {"enabled": True, "mode": "enforce"}}}
+        ctx = FakeContext(
+            input=FakeInput(
+                hook_event_name="PreToolUse",
+                tool_input={"file_path": file_path},
+                cwd=tmp_path,
+            ),
+            config=cfg,
+        )
+        ctx.config["role"] = role
+        return ctx
+
+    def test_symlink_named_like_impl_targeting_tests_blocked(self, tmp_path):
+        real = tmp_path / "tests" / "test_secret.py"
+        real.parent.mkdir(parents=True)
+        real.write_text("def test_x():\n    pass\n")
+        link = tmp_path / "impl_pkg" / "helper.py"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+
+        result = run_check(self._ctx(tmp_path, "impl_pkg/helper.py"))
+
+        assert result.decision.value == "block"
+
+    def test_traversal_segment_cannot_escape_classification(self, tmp_path):
+        result = run_check(
+            self._ctx(tmp_path, "src/../tests/test_evade.py")
+        )
+
+        assert result.decision.value == "block"
+
+    def test_absolute_path_outside_repo_still_classified(self, tmp_path):
+        outside = tmp_path / ".." / "elsewhere_test.py"
+        result = run_check(self._ctx(tmp_path, str(outside)))
+
+        assert result.decision.value == "block"
+
+    def test_hardened_normalizer_resolves_symlinks_directly(self, tmp_path):
+        from fettle.authorship_gate import _classify_target
+        real = tmp_path / "tests" / "test_real.py"
+        real.parent.mkdir(parents=True)
+        real.write_text("")
+        link = tmp_path / "pkg" / "fake_impl.py"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+
+        rel = _classify_target(link, str(tmp_path))
+
+        assert rel.startswith("tests")

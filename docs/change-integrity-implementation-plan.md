@@ -631,5 +631,18 @@ The program is complete only when:
 - Phase 1 plan: complete in this document.
 - Phase 3.5 UAT: adversarial BDD scenarios are defined in the UX specification;
   executable automation is required in each authorized package.
-- Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: granted for P44; not granted for P45-P51.
+
+### Staged authorization decision (2026-08-23)
+
+Program direction approved with per-package authorization retained:
+
+- **P45 authorized** to start (sole dependency P44 is complete).
+- **P38 promoted** to next-up enabling work: its completion (deps P33, P35
+  both complete) unlocks P46 here and state-consistency P60 in the evolution
+  plan. P46 may start only after P38 closes.
+- **P46-P48, P50** approved in principle; each still requires its own package
+  proposal review plus current impact analysis at start time.
+- **P49 deferred**: requires P41 or an approved successor before durable
+  graph-bound attestations may be relied upon, and P48 must graduate first.
+- **P51** remains evidence-gated by construction; a no-go close is acceptable.
