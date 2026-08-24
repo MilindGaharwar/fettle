@@ -1,0 +1,6 @@
+{
+  "name": "ledger-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Demo web surface for workspace routing fixtures"
+}
