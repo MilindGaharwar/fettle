@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finefettle"
 version = "1.11.1"
-description = "Assurance and evidence for AI coding agents across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
+description = "Trust layer for agentic software engineering: policy that survives delegation, evidence that cannot become clean by accident, and verdicts bound to artifacts across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
 readme = "README.md"
 license = "MIT"
 authors = [{name = "Milind"}]

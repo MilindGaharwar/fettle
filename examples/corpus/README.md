@@ -11,9 +11,10 @@ claims. Consumers:
 | UAT fixtures (P72–P77) | CLI surface with active specs and manual fallbacks |
 
 Layout: Python ledger service (`src/fettle_demo/`), web surface
-(`web/`), living specification (`specs/ledger-core.md`), trace-marked
-tests (`tests/`). The corpus is fixture data — do not add real secrets,
-dependencies, or production code here.
+(`web/`), Go CLI (`go-service/`), living specification
+(`specs/ledger-core.md`), trace-marked tests (`tests/`). The corpus is
+fixture data — do not add real secrets, dependencies, or production code
+here.
 
 Rebuild the graph over it:
 

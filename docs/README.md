@@ -1,8 +1,12 @@
 # Fettle Documentation
 
-Fettle is the assurance layer between an AI coding agent's authority, actions,
-evidence, and independent verification. Start with the outcome you need rather
-than reading every subsystem.
+Fettle is the trust layer between an AI coding agent's authority, actions,
+evidence, and independent verification: policy that survives delegation,
+evidence that cannot become clean by accident, and verdicts bound to
+artifacts. Start with the outcome you need rather than reading every
+subsystem.
+
+Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
 ## Choose Your Path
 

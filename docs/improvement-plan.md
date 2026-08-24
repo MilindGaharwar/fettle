@@ -37,7 +37,9 @@ intentional (e.g., assurance-loop `broken.py`). The guard is
 - [x] 1 Docs-claims gate (first predicates: S5.5/web, replay-gate↔README)
 - [x] 2 Graduation triage recorded in evolution plan §17
 - [x] 3 Profiles advertised in README quick start
-- [x] 4 Corpus growth seeded (assurance-loop promoted, polyglot fixture added)
-- [ ] 5 Evolution plan split
+- [x] 4 Corpus growth seeded (Python + web + Go workspaces, spec-linked)
+- [~] 5 Evolution plan split — delivered as plan-index navigation layer;
+      physical extraction deferred to avoid link rot
 - [x] 6 P47 CLI shipped
-- [ ] 8 Positioning pass
+- [~] 8 Positioning pass — PyPI/docs/About copy updated trust-first;
+      loop motion capture remains an operator task

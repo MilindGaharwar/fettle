@@ -1,5 +1,8 @@
 # Fettle Evolution Implementation Plan
 
+> Navigation: per-program plans and current next-actions are indexed in
+> `docs/plan-index.md`. This document remains the canonical decision record.
+
 Status: APPROVED for completed activities; P33, P35, and P44 complete; P34,
 P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed,
 blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning

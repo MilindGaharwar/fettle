@@ -41,9 +41,11 @@ def test_corpus_contains_import_and_verify_edges():
     assert {"imports", "verifies", "contains"} <= edge_types
 
 
-def test_workspace_routing_sees_python_and_web_workspaces():
+def test_workspace_routing_sees_python_web_and_go_workspaces():
     from fettle.workspace import discover_workspaces
 
     names = {ws.name for ws in discover_workspaces(str(CORPUS))}
+    languages = {ws.language for ws in discover_workspaces(str(CORPUS))}
 
     assert any("web" in name.lower() or name == "ledger-web" for name in names), names
+    assert "go" in languages, (names, languages)
