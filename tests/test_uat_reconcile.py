@@ -165,6 +165,10 @@ class TestReconcileSession:
         (wt / ".fettle" / "uat-session.json").write_text(json.dumps({
             "session_id": "uat-x", "surface": "cli", "status": "completed",
             "scenario_ids": ["greeter/S1"], "transcript": str(transcript)}))
+        from fettle.uat.artifacts import write_scenario_artifacts
+
+        write_scenario_artifacts(str(wt), transcript.read_text(encoding="utf-8"),
+                                 SCENARIOS, surface="cli")
         with patch("fettle.uat.session.collect_scenarios",
                    return_value=SCENARIOS):
             verdicts, cp, err = reconcile_session(str(tmp_path), str(wt))

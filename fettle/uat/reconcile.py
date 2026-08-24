@@ -84,9 +84,21 @@ def _looks_parroted(observed: str, scenario: dict) -> bool:
     return False
 
 
-def reconcile(scenarios: list[dict], transcript: str) -> list[Verdict]:
-    """One verdict per scenario. `scenarios` as from collect_scenarios()."""
+def reconcile(
+    scenarios: list[dict],
+    transcript: str,
+    artifacts: dict[str, dict] | None = None,
+    require_artifacts: bool = False,
+) -> list[Verdict]:
+    """One verdict per scenario. `scenarios` as from collect_scenarios().
+
+    P72: when ``require_artifacts`` is set (session reconciliation), a
+    CONFIRMED verdict must be backed by a captured observation artifact
+    whose block hash still matches the transcript — otherwise it degrades
+    to INDETERMINATE. Missing artifact or drift is never read as success.
+    """
     blocks = parse_transcript(transcript)
+    artifacts = artifacts or {}
     verdicts: list[Verdict] = []
     for s in scenarios:
         sid = s["id"]
@@ -99,7 +111,13 @@ def reconcile(scenarios: list[dict], transcript: str) -> list[Verdict]:
         if mapped is None:
             verdicts.append(Verdict(sid, "INDETERMINATE", observed=block["observed"],
                                     note=f"unrecognized outcome {block['outcome']!r}"))
-        elif mapped == "CONFIRMED" and _looks_parroted(block["observed"], s):
+            continue
+        if mapped == "CONFIRMED":
+            gate = _confirm_gate(sid, block, s, artifacts, require_artifacts)
+            if gate is not None:
+                verdicts.append(gate)
+                continue
+        if mapped == "CONFIRMED" and _looks_parroted(block["observed"], s):
             verdicts.append(Verdict(sid, "INDETERMINATE", observed=block["observed"],
                                     note="claimed match without independent evidence "
                                          "(auto-answer suspected)"))
@@ -107,6 +125,28 @@ def reconcile(scenarios: list[dict], transcript: str) -> list[Verdict]:
             verdicts.append(Verdict(sid, mapped, observed=block["observed"],
                                     note=block["notes"]))
     return verdicts
+
+
+def _confirm_gate(
+    sid: str, block: dict, scenario: dict,
+    artifacts: dict[str, dict], require_artifacts: bool,
+) -> Verdict | None:
+    """P72: CONFIRMED must survive artifact verification; None = pass through."""
+    artifact = artifacts.get(sid)
+    if require_artifacts and artifact is None:
+        return Verdict(
+            sid, "INDETERMINATE", observed=block["observed"],
+            note="claimed match but no observation artifact was retained",
+        )
+    if artifact is not None:
+        from fettle.uat.artifacts import block_sha
+
+        if artifact.get("block_sha") != block_sha(block):
+            return Verdict(
+                sid, "INDETERMINATE", observed=block["observed"],
+                note="transcript drifted from the captured observation artifact",
+            )
+    return None
 
 
 def write_report(worktree: str, session: dict, verdicts: list[Verdict]) -> tuple[str, str]:
@@ -252,6 +292,12 @@ def reconcile_session(root: str, worktree: str) -> tuple[list[Verdict], dict, st
         return [], cp, f"cannot read transcript: {exc}"
     scenarios = [s for s in collect_scenarios(root)
                  if s["id"] in set(cp.get("scenario_ids", []))]
-    verdicts = reconcile(scenarios, transcript)
+    from fettle.uat.artifacts import load_scenario_artifacts
+
+    verdicts = reconcile(
+        scenarios, transcript,
+        artifacts=load_scenario_artifacts(worktree),
+        require_artifacts=True,
+    )
     _, err = write_report(worktree, cp, verdicts)
     return verdicts, cp, err

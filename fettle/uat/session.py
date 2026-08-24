@@ -63,6 +63,7 @@ class SessionResult:
     surface: str
     worktree: str = ""
     transcript_path: str = ""
+    artifact_dir: str = ""
     scenario_ids: list[str] = field(default_factory=list)
     status: str = "error"  # completed | error | timeout
     error: str = ""
@@ -334,6 +335,23 @@ def run_session(root: str, config: dict, surface: str,
             checkpoint["redacted_lines"] = redacted
     except OSError as exc:
         result.error = f"cannot persist transcript: {exc}"
+
+    # P72-A: retain a per-scenario observation artifact bundle so the
+    # reconciler can verify verdicts against captured evidence instead of
+    # trusting self-reported transcript text alone.
+    try:
+        from fettle.uat.artifacts import write_scenario_artifacts
+
+        scenario_ids = list(checkpoint.get("scenario_ids", []))
+        scenarios = [s for s in (collect_scenarios(root)
+                     if root else []) if s["id"] in set(scenario_ids)]
+        result.artifact_dir = write_scenario_artifacts(
+            wt_path, clean, scenarios, surface,
+        )
+        checkpoint["artifact_dir"] = result.artifact_dir
+    except (OSError, TypeError, ValueError) as exc:
+        # Capture must never crash a run, but the failure stays visible.
+        checkpoint["artifact_error"] = f"{type(exc).__name__}: {exc}"
 
     if run.error:
         result.status = "timeout" if "timed out" in run.error else "error"
