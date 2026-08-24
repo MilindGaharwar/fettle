@@ -1,7 +1,7 @@
 # Mutation Ratchet Decision Memo — Changed-Scope Survivor Enforcement
 
 Date: 2026-08-24 · Author: engineering session (agent) · Decision owner: Milind
-Status: PROPOSED — config flip awaits operator ratification
+Status: RATIFIED 2026-08-24 — enforced via .fettle.toml mode="enforce"
 
 ## Question
 
