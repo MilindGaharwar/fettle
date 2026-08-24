@@ -162,7 +162,7 @@ and are planning ranges, not commitments.
 | P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Deferred on P41 + P48 |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
-| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | In progress |
+| P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Graduated |
 | P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Proposed |
 | P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Proposed |
 | P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Proposed |
@@ -2464,9 +2464,15 @@ operator objects.
 
 Current dispositions:
 
-- **P52 authorship separation** — CLOSE-BY-DATE next working session;
-  only TLA+ role invariants, adversarial path coverage, and one evidenced
-  multi-agent flow remain (est. 2–3 days).
+- **P52 authorship separation** — GRADUATED 2026-08-23. Evidence: TLC
+  verified S6 RoleMonotonicity + S7 RoleFileAuthority (tla-verify run
+  2026-08-15 post-dates the spec commit); adversarial path coverage
+  (symlink alias, traversal segments, absolute-outside-repo) blocks via
+  hardened `_classify_target`; topology advisor recommends tester/
+  implementer separation for mixed-scope items; evidenced two-role session
+  records allow/block verdicts as bounded evidence artifacts
+  (`tests/test_authorship_gate.py::TestAdversarialPaths`,
+  `tests/test_authorship_e2e.py::TestRoleSeparatedTopologyAndEvidence`).
 - **P43 narrow formal verification** — PARK remaining three models
   (Verify Gate, Dispatcher, TDD Gate) pending measured demand; Policy
   Capsule and Work Item Claims models are verified and maintained.

@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fettle.authorship_gate import run_check as authorship_check
+from fettle.authorship_gate import run_check, run_check as authorship_check
 from fettle.policy_capsule import (
     merge_for_child,
     resolve_env_capsule,
@@ -268,3 +268,123 @@ class TestFullSpawnToGateFlow:
         assert result.decision.value == "block"
         assert "implementer" in result.message
         assert "test" in result.message.lower()
+
+
+class TestRoleSeparatedTopologyAndEvidence:
+    """P52 graduation: advisor recommends separation; session leaves evidence."""
+
+    def _write_item(self, root):
+        item_dir = root / ".fettle"
+        item_dir.mkdir(parents=True, exist_ok=True)
+        (item_dir / "item.md").write_text(
+            "---\nfettle-work-item: true\nid: full-stack\nstatus: open\n"
+            "scope:\n  - \"src/**\"\n  - \"tests/**\"\n---\n\nbody\n",
+            encoding="utf-8",
+        )
+
+    def test_advisor_recommends_role_separation_for_mixed_scope(self, tmp_path):
+        from fettle.topology import advise
+
+        self._write_item(tmp_path)
+        advice = advise(str(tmp_path))
+
+        assert advice["topology"] == "writer-reviewer"
+        joined = " ".join(advice["commands"])
+        assert "--role tester" in joined and "--role implementer" in joined
+
+    def test_two_role_session_records_evidence_for_both_verdicts(self, tmp_path):
+        import json
+
+        from fettle.trace import build_evidence
+
+        capsules = tmp_path / "capsules"
+        capsules.mkdir(parents=True)
+
+        sessions = []
+        for role, target in (
+            ("tester", "tests/test_pair.py"),
+            ("implementer", "src/pair.py"),
+        ):
+            with patch("fettle.policy_capsule._capsules_dir", return_value=capsules):
+                path = write_capsule(
+                    {"role": role,
+                     "gates": {"authorship": {"enabled": True, "mode": "enforce"}}},
+                    origin={"session_id": f"parent-{role}"},
+                )
+            with patch.dict(os.environ, {"FETTLE_POLICY_CAPSULE": str(path)}):
+                doc, err = resolve_env_capsule()
+                assert err == ""
+            effective, _ = merge_for_child(doc["policy"], {"role": role})
+            sessions.append((role, target, effective))
+
+        evidence_path = tmp_path / ".fettle" / "pair-session.evidence.json"
+        records = []
+        for role, target, effective in sessions:
+            ctx = self._ctx_for(tmp_path, target, effective)
+            result = run_check(ctx)
+            records.append(build_evidence(
+                kind="authorship_verdict",
+                scope=role,
+                command=f"{role} edits {target}",
+                exit_code=0 if result.decision.value == "allow" else 1,
+            ))
+        evidence_path.parent.mkdir(exist_ok=True)
+        evidence_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+
+        stored = json.loads(evidence_path.read_text(encoding="utf-8"))
+        by_role = {r["scope"]: r for r in stored}
+        assert by_role["tester"]["exit_code"] == 0
+        assert by_role["implementer"]["exit_code"] == 0
+        # cross-attempt: each role forbidden on the other's file kind
+        cross = []
+        for role, target, effective in (
+            ("tester", "src/other.py", sessions[0][2]),
+            ("implementer", "tests/test_other.py", sessions[1][2]),
+        ):
+            ctx = self._ctx_for(tmp_path, target, effective)
+            result = run_check(ctx)
+            cross.append(build_evidence(
+                kind="authorship_verdict",
+                scope=role,
+                command=f"cross {role} edits {target}",
+                exit_code=0 if result.decision.value == "allow" else 1,
+            ))
+        assert all(r["exit_code"] == 1 for r in cross)
+
+    def _ctx_for(self, root, file_path, config):
+        from dataclasses import dataclass
+        from pathlib import Path as P
+
+        @dataclass
+        class Input:
+            hook_event_name: str = "PreToolUse"
+            tool_name: str = "Write"
+            tool_input: dict = None
+            cwd: P = None
+            session_id: str = "s"
+            def __post_init__(self):
+                self.tool_input = {"file_path": file_path}
+        @dataclass
+        class Ctx:
+            input: Input
+            config: dict
+            plugin_root: P = P("/p")
+            hook_start_monotonic: float = 0.0
+            global_deadline_monotonic: float = 1.0
+            check_deadline_monotonic: float = 1.0
+            @property
+            def event(self): return self.input.hook_event_name
+            @property
+            def tool_name(self): return self.input.tool_name
+            @property
+            def tool_input(self): return self.input.tool_input
+            @property
+            def cwd(self): return self.input.cwd
+            @property
+            def session_id(self): return self.input.session_id
+            @property
+            def target_path(self):
+                fp = self.input.tool_input.get("file_path", "")
+                return self.input.cwd / fp if fp else None
+
+        return Ctx(input=Input(cwd=P(root)), config=config)

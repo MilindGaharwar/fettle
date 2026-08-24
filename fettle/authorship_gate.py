@@ -19,11 +19,24 @@ and blocking if the session's role forbids that file category.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fettle.dispatcher_types import CheckResult, HookContext
 from fettle.paths import classify_file
 
 VALID_ROLES = frozenset({"solo", "implementer", "tester", "reviewer"})
+
+
+def _classify_target(target: Path, cwd: str) -> str:
+    """Adversarial hardening (P52): normalize traversal segments and resolve
+    symlinks so a link named like an allowed file cannot smuggle edits to a
+    forbidden category (or vice versa)."""
+    resolved = Path(os.path.normpath(str(target)))
+    if resolved.exists() or resolved.is_symlink():
+        resolved = Path(os.path.realpath(resolved))
+    if resolved.is_absolute():
+        return os.path.relpath(str(resolved), cwd)
+    return str(resolved)
 
 # Strictness ladder: higher = more restricted.
 ROLE_RANK: dict[str, int] = {
@@ -60,8 +73,10 @@ def run_check(ctx: HookContext) -> CheckResult:
     if role == "solo":
         return CheckResult.allow()
 
-    cwd = str(ctx.cwd)
-    rel_path = os.path.relpath(str(target), cwd) if target.is_absolute() else str(target)
+    # Adversarial hardening (P52): normalize traversal segments and resolve
+    # symlinks so a link named like an allowed file cannot smuggle edits to
+    # a forbidden category (or vice versa).
+    rel_path = _classify_target(target, str(ctx.cwd))
     file_kind = classify_file(rel_path)
 
     if role == "reviewer":
