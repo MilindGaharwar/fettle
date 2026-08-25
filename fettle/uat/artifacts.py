@@ -85,15 +85,16 @@ def load_scenario_artifacts(worktree_or_dir: str) -> dict[str, dict]:
 def capture_web_page(app_url: str, dest_dir: str) -> dict:
     """Full-page screenshot + accessibility tree for one web state (P74).
 
-    Best-effort by contract: any failure returns a tool_error envelope
-    instead of raising, so session completion is never masked.
+    Best-effort by contract: any failure — including playwright being
+    absent entirely — returns a tool_error envelope instead of raising,
+    so session completion is never masked.
     """
-    from playwright.sync_api import sync_playwright
-
-    Path(dest_dir).mkdir(parents=True, exist_ok=True)
-    shot = Path(dest_dir) / "_page.png"
-    a11y_path = Path(dest_dir) / "_a11y.json"
     try:
+        from playwright.sync_api import sync_playwright
+
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        shot = Path(dest_dir) / "_page.png"
+        a11y_path = Path(dest_dir) / "_a11y.json"
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             page = browser.new_page(viewport={"width": 1280, "height": 720})
