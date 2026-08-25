@@ -195,11 +195,11 @@ Python mutation preflight canonicalizes the engine corpus before expensive
 execution. Full runs can resume by stable fingerprint, reject incompatible
 checkpoints, and aggregate only complete ledgers. On pull requests, a required
 `mutation evidence` check fans out bounded shards, automatically replays any
-shard that timed out or lost its runner, and fails closed when evidence is
-missing, conflicting, or stale. Two independent calibrations established
-Fettle's own 28,723-mutant baseline with zero untested outcomes.
-Changed-scope survivor enforcement remains advisory until runtime and reviewer
-feedback satisfy the published graduation criteria.
+shard that timed out or lost its runner, and — as of v1.12 — **blocks merges
+when changed-scope survivors go unaddressed**: missing, conflicting, or stale
+evidence fails closed with the offending shard named. Two independent
+calibrations established Fettle's own 28,723-mutant baseline with zero
+untested outcomes.
 Use the [mutation quality playbook](docs/mutation-quality-playbook.md) for setup,
 the validation funnel, exit semantics, cache isolation, and recovery.
 
@@ -239,8 +239,11 @@ Support is described by surface, not by one broad "polyglot" claim.
 | Guided workflows | 17 quality, security, planning, learning, and readiness workflows |
 | Multi-agent controls | Worktrees, claims, topology, spawn, capsules, role authority, reports |
 | Living specifications | Spec lint, scenario inventory, trace coverage, canonical drift evidence between specs, tests, and governed code |
-| User acceptance | Agent-driven or manual CLI, API, web, and library scenarios; report-only |
-| Mutation quality | Python preflight, changed/full runs, required-PR replay gate, retained reports, canonical baseline comparison |
+| User acceptance | Agent-driven CLI, API, **web**, and library scenarios with artifact-bound verdicts; exploration charters propose candidate findings for human review |
+| Mutation quality | Python preflight, changed/full runs, **enforced survivor gate**, replay machinery, canonical baseline comparison |
+| Governance ledger | Tamper-evident hash-chained records anchored to commits (`fettle ledger`) |
+| Graph intelligence | Advisory ephemeral hypergraph: `fettle graph status\|impact\|shadow` with digest-bound generations |
+| Consistency contracts | Frozen cross-view divergence contracts (schema + lint + template; runners next) |
 | Assurance | Canonical result states, behavioral evals, compliance/lineage reports, TLA+ models for selected protocols |
 
 ### Quality and Security Gates
