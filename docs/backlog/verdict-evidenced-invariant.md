@@ -14,10 +14,12 @@ decision surfaced to an agent or operator must be reconstructable from
 retained evidence (artifact path/digest/ledger record). Encode as a house
 test, generalizing the P72 UAT rule to all surfaces.
 
-MVP scope: for a fixture session, assert every authorship-gate block,
-verify stamp, and UAT report verdict logged via `fettle.trace` has a
-corresponding evidence artifact reference (report JSON, ledger record, or
-EvidenceArtifact file) recoverable from disk.
+MVP scope: for the `examples/assurance-loop/` fixture session (and one UAT
+session fixture), assert every authorship-gate block, verify stamp, and UAT
+report verdict logged via `fettle.trace` has a corresponding evidence
+reference recoverable from disk — checking all three verdict sources:
+trace JSONL entries, `.fettle/uat-report.json`, and evidence ledger
+records.
 
 ## Done when
 

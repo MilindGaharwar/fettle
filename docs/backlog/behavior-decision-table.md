@@ -21,8 +21,9 @@ removing the biggest onboarding unknown.
   transport, add a workspace adapter, add a mutation provider target, add a
   UAT surface driver, add an evidence consumer, add a consistency contract
   type.
-- Drift predicate: every command in the CLI dispatch registry appears in
-  the table (doc-claims pattern).
+- Drift predicate (scoped): every CLI dispatch-registry command with a
+  public help string appears in the table; internal/infrastructure commands
+  are covered by an explicit whitelist constant in the drift test.
 - Linked from docs/README.md and AGENTS.md.
 
 ## Resolution

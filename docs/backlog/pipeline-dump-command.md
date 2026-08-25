@@ -15,8 +15,8 @@ Adopted from DeepSeek Harness's `--dump-config` pattern: a single command
 that boots the real composition and prints every effective row with its
 source layer, so the onboarding cliff becomes visible instead of hidden.
 
-Deliverable: `fettle doctor --pipeline` (or standalone) printing one row per
-active check/gate/hook binding:
+Deliverable: `fettle doctor --pipeline` printing one row per active
+check/gate/hook binding:
 
 ```
 check/gate   events                    hosts            enabled  mode      source
@@ -24,6 +24,12 @@ authorship   PreToolUse                claude,codex,…   true     advisory  rep
 verify       Stop                      *                false    advisory  defaults
 …
 ```
+
+Differentiation from `config --explain` (which prints effective config
+*values* with provenance): `--pipeline` answers the runtime question —
+*given a HookContext (event, host), which checks select, in what order,
+and why*. The dispatcher CHECKS registry is static, so "wired host" means:
+transports whose KNOWN_EVENTS intersect the check's event set.
 
 ## Done when
 
