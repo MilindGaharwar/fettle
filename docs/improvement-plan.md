@@ -43,3 +43,26 @@ intentional (e.g., assurance-loop `broken.py`). The guard is
 - [x] 6 P47 CLI shipped
 - [~] 8 Positioning pass — PyPI/docs/About copy updated trust-first;
       loop motion capture remains an operator task
+
+## Wave 3 — dsh-informed adoptions (2026-08-25 review of DeepSeek Harness)
+
+Source: independent review of DeepSeek Harness (everything-is-a-plugin agent
+harness). Patterns adopted, not the Cordis framework — stdlib-only core is a
+constraint and a strength.
+
+| # | Item | Work item | Effort |
+|---|---|---|---|
+| 9 | Pipeline dump: composed gate/hook pipeline with per-row source provenance | `pipeline-dump-command` | 1–2 d |
+| 10 | Canonical producer→consumer event map + drift predicate | `event-map-doc` | 1 d |
+| 11 | House invariant: verdict-visible means evidenced | `verdict-evidenced-invariant` | 1–2 d |
+| 12 | "Where new behavior goes" decision table + drift predicate | `behavior-decision-table` | 0.5–1 d |
+
+Deferred from the same review: capability-seam graph doc (lands with SC
+adapters), BENCHMARK.md placeholder (owned by P77), i18n docs (demand-gated),
+knip/jscpd analogs (deptry covers dead-code; copy-paste detector proposed as
+a future rule).
+
+- [ ] 9 Pipeline dump
+- [ ] 10 Event map
+- [ ] 11 Verdict-evidenced invariant
+- [ ] 12 Behavior decision table
