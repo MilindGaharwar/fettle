@@ -1351,6 +1351,24 @@ def cmd_ledger(args: argparse.Namespace) -> None:
         sys.exit(0 if result["status"] == "completed" else 1)
 
 
+def cmd_pipeline(args: argparse.Namespace) -> None:
+    """Item 9: dump the composed gate/check pipeline with provenance."""
+    import json as _json
+
+    from fettle.pipeline_dump import dump_pipeline
+
+    result = dump_pipeline(args.root)
+    if args.json:
+        print(_json.dumps(result, indent=2))
+    else:
+        layers = ", ".join(layer["name"] for layer in result["layers"])
+        print(f"pipeline @ {result['root']}  layers: {layers}")
+        for row in result["rows"]:
+            state = "on" if row["enabled"] else "off"
+            print(f"  {row['name']:<28} {','.join(row['events']):<32} "
+                  f"{state:<4} {row['mode']:<9} <- {row['source']}")
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1891,6 +1909,11 @@ def main() -> None:
     p_ledger = subparsers.add_parser(
         "ledger", help="Governance evidence ledger (P41)")
     ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
+    p_pipeline = subparsers.add_parser(
+        "pipeline", help="Composed gate/check pipeline with provenance (item 9)")
+    p_pipeline.add_argument("--root", default=".")
+    p_pipeline.add_argument("--json", action="store_true")
+
     for name, help_text in (
         ("status", "Record count + anchor state"),
         ("verify", "Full hash-chain verification"),
@@ -1977,6 +2000,7 @@ def main() -> None:
         "links": cmd_links,
         "graph": cmd_graph,
         "ledger": cmd_ledger,
+        "pipeline": cmd_pipeline,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }
