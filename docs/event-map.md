@@ -60,9 +60,20 @@ contract and remote-CI binding before a session may claim completion.
 | | |
 |---|---|
 | **Producers** | Claude Code |
-| **Host support** | Claude Code |
+| **Host support** | **Claude Code only** — enforced by `tests/test_host_event_parity.py` and the capability matrix (`fettle/host_capabilities.py`) |
 | **Durability** | Live (routing only) |
 | **Consumers** | Dispatcher routing; capsule/worktree context injection for spawned children |
+
+**Why not the other hosts?** Their extension APIs expose no subagent-start
+signal: Codex's hook feature and Gemini's event set (BeforeTool/AfterTool/
+AfterAgent) have no such event, and OpenCode's plugin API v1 offers
+tool/session events only. This is a host capability, not a Fettle gap.
+
+**Delegation is still host-equal.** `fettle spawn` works identically on all
+four hosts through env lineage (`FETTLE_POLICY_CAPSULE` +
+`FETTLE_PARENT_SESSION`), which the dispatcher reads host-agnostically.
+If a future host version emits a subagent-start signal, the parity test
+fails and demands a matrix + translator update before it can be used.
 
 Fires when a subagent session starts. Carries capsule lineage so delegated
 children inherit tightened policy (never loosened).
