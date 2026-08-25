@@ -197,7 +197,6 @@ def test_commit_anchor_reports_known_coverage(tmp_path):
 
 
 def test_anchor_writes_to_exact_governance_path(tmp_path):
-    import json as j
 
     root = _init_repo(tmp_path)
     (tmp_path / "f.txt").write_text("x\n")
