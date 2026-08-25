@@ -83,7 +83,8 @@ def test_impact_closure_reaches_spec_scenarios_and_tests(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     keys = {a["stable_key"] for a in out["affected"]}
     assert "module:src/fettle_demo/ledger.py" in keys
-    assert "spec:ledger-core" not in keys  # spec governs; closure is structural
+    # P46+ governs edges make the governing spec part of the advisory superset.
+    assert "spec:ledger-core" in keys
 
 
 def test_impact_from_spec_reaches_governed_modules_and_tests(tmp_path, capsys):

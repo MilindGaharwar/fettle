@@ -1,6 +1,94 @@
 # Changelog
 
-## Unreleased
+## v1.12.0 — Enforced Mutation Gate, Governance Ledger, Graph Intelligence
+
+**Released 2026-08-24**
+
+### Governance Operations
+
+- Ratified and **enforced** changed-scope survivor blocking on Fettle's own
+  pull requests, backed by >=10 qualifying retained mutation-evidence runs
+  (decision memo: docs/mutation-ratchet-decision.md).
+- Added the commit-linked governance evidence ledger (`fettle ledger
+  status|verify|anchor`): tamper-evident hash chain with precise break
+  localization, commit/CI-artifact anchoring with explicit coverage
+  (known/unknown), rotation checkpoints, and default secret redaction.
+- Published `docs/plan-index.md` as the navigation layer across program
+  plans; ratchet first-week triage checklist recorded.
+
+### Change Integrity (P38, P45, P46, P47, P48)
+
+- Canonical specification traceability (`fettle.trace_canonical`): stable-ID
+  marker index, marker validation, executed-result binding (declaration is
+  linked; only a pass verifies), and drift evidence separating uncovered
+  scenarios, unknown markers, orphan tests, governed changes without review,
+  and executed coverage. Filename-substring inference deprecated.
+- Graph-independent source snapshots (`fettle.source_snapshot`):
+  deterministic committed manifests, content-hashed working manifests,
+  merge-conflict non-pass detection, LFS flagging, verified materialization,
+  read-set revalidation, and policy identity binding.
+- Deterministic ephemeral hypergraph (`fettle/providers`,
+  `fettle/hypergraph.py`, `fettle/graph_builder.py`): five native providers,
+  atomic frozen publication bound to snapshot digests.
+- Advisory graph CLI (`fettle graph status|impact|shadow`) plus P48 shadow
+  parity for the semantic consumer (zero unexplained narrower results on
+  maintained fixtures), topology/verify comparators, and scope `governs`
+  edges.
+
+### State Consistency (P53/SC1)
+
+- Froze the canonical contract schema (`fettle/state_consistency.py`):
+  identity via canonical digest excluding runtime/redaction keys, unknown-key
+  rejection, comparator/model validation, TEMPLATE_V1, lint. No execution
+  code - runners arrive in SC3+ after contracts hold.
+
+### Authorship Separation (P52) - Graduated
+
+- Adversarial hardening of the authorship gate (symlink aliases, traversal,
+  absolute paths); topology advisor recommends tester/implementer separation
+  for mixed-scope items; evidenced two-role sessions record allow/block
+  verdicts as bounded artifacts.
+
+### User Acceptance (P72, P73, P74)
+
+- Artifact-bound reconciliation: sessions retain per-scenario observation
+  bundles; CONFIRMED verdicts without retained artifacts degrade to
+  INDETERMINATE, and transcript drift from captured hashes is detected.
+- Exploration charters ([uat].explore) append Saboteur/Money/Supermodel
+  tours; CANDIDATE findings are recorded verbatim for human review and never
+  become verdicts.
+- Web surface driving (playwright) with full-page screenshot +
+  accessibility-tree capture as bounded best-effort artifacts.
+
+### Rules
+
+- New enforced rule `test-flow-root-cwd` forbids cwd-relative roots in
+  mutation-flow calls inside test functions (shard-201 lesson), mapped to
+  CWE-362.
+
+### Installation And Documentation
+
+- Published the mutation ratchet decision memo: ≥10 qualifying retained
+  runs since the required gate launched (trigger was three); recommends
+  operator ratification to flip changed-scope survivor enforcement.
+- Added `docs/plan-index.md` as the navigation layer across all program
+  plans; the master evolution plan remains the canonical decision record.
+
+### Change Integrity (P48)
+
+- Shadow parity engine (`fettle/graph_shadow.py`, `fettle graph shadow`):
+  runs the ephemeral graph beside the legacy semantic layer and classifies
+  every difference. Acceptance enforced: zero unexplained narrower results
+  on maintained fixtures; `traces`/`scopes`/`observes` differences are
+  declared with reasons, never silent.
+
+### State Consistency (P53/SC1)
+
+- Froze the canonical contract schema (`fettle/state_consistency.py`):
+  `ConsistencyContract` identity via canonical digest excluding runtime and
+  redaction keys; header/scope/consistency/comparator/observer validation
+  rejecting unknown keys; `TEMPLATE_V1`; `lint_contract_text`. No execution
+  code — runners arrive in SC3+ only after these contracts hold.
 
 ### Authorship Separation (P52) — Graduated
 

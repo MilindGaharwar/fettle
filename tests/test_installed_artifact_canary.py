@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from fettle import __version__
 from fettle import installed_artifact_canary as canary
 
 
 def _wheel(tmp_path: Path) -> Path:
-    wheel = tmp_path / "finefettle-1.11.1-py3-none-any.whl"
+    wheel = tmp_path / f"finefettle-{__version__}-py3-none-any.whl"
     wheel.write_bytes(b"wheel bytes")
     return wheel
 

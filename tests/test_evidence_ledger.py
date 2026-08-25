@@ -162,3 +162,30 @@ def test_read_ledger_round_trips_payloads(tmp_path):
     records = read_ledger(root)
 
     assert records[0]["payload"]["detail"] == {"nested": True}
+
+
+def test_artifact_url_anchor_reports_unknown_coverage(tmp_path):
+    root = _init_repo(tmp_path)  # repo WITHOUT commits
+    _seed(root, 2)
+
+    result = anchor(root, artifact_url="https://ci/artifact/123")
+
+    assert result["status"] == "completed"
+    assert result["coverage"] == "unknown"
+    check = verify_anchor(root)
+    assert check["status"] == "anchored"
+    assert check["coverage"] == "unknown"
+
+
+def test_commit_anchor_reports_known_coverage(tmp_path):
+    root = _init_repo(tmp_path)
+    (tmp_path / "f.txt").write_text("x\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "init"])
+    _seed(root, 1)
+
+    result = anchor(root)
+    check = verify_anchor(root)
+
+    assert result["coverage"] == "known"
+    assert check["coverage"] == "known"

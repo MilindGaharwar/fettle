@@ -114,6 +114,31 @@ def cmd_impact(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_shadow(args: argparse.Namespace) -> int:
+    from fettle.graph_shadow import shadow_semantic
+
+    result = shadow_semantic(args.root)
+    print(json.dumps(result, indent=2) if args.json else _render_shadow(result))
+    return 0 if result["status"] == "completed" and not result["unexplained_narrower"] else 2
+
+
+def _render_shadow(result: dict) -> str:
+    lines = [
+        f"shadow parity ({result['digest'][:12]}): "
+        f"{result['matched_count']} matched links",
+    ]
+    if result["unexplained_narrower"]:
+        lines.append(f"UNEXPLAINED NARROWER RESULTS: "
+                     f"{len(result['unexplained_narrower'])}")
+        lines.extend(f"  - {p}" for p in result["unexplained_narrower"][:10])
+    else:
+        lines.append("no unexplained narrower results")
+    lines.append("documented differences:")
+    lines.extend(f"  [{d['label']}] {d['reason']}"
+                 for d in result["documented_differences"])
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Advisory ephemeral graph (P47)")
     subparsers = parser.add_subparsers(dest="graph_action", required=True)
@@ -127,8 +152,14 @@ def main(argv: list[str] | None = None) -> int:
     p_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
     p_impact.add_argument("--json", action="store_true")
 
+    p_shadow = subparsers.add_parser(
+        "shadow", help="P48: parity report vs the legacy semantic layer")
+    p_shadow.add_argument("--root", default=".")
+    p_shadow.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
-    actions = {"status": cmd_status, "impact": cmd_impact}
+    actions = {"status": cmd_status, "impact": cmd_impact,
+               "shadow": cmd_shadow}
     return actions[args.graph_action](args)
 
 

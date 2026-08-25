@@ -18,18 +18,37 @@ def _read(rel: str) -> str:
 
 
 def test_todo_s55_web_claim_matches_drivable_surfaces():
-    """TODO claims Stage-5 S5.5 (web surface) done only if web is drivable."""
+    """TODO claims the web *driver* shipped (P74).
+
+    The claim is about the code path existing and degrading honestly, not
+    about every environment carrying browser binaries: mutation-worker
+    venvs install with --no-deps and legitimately exclude web. So assert
+    the contract, not the environment.
+    """
     todo = _read("docs/engagement/TODO.md")
-    claim_done = re.search(r"- \[x\] .*S5\.5\b.*", todo)
-    if not claim_done:
+    if not re.search(r"- \[x\] .*S5\.5\b.*", todo):
         return  # claim amended or removed; nothing to validate
 
-    from fettle.uat.session import DRIVABLE_SURFACES
+    from fettle.uat.session import drivable_surfaces
 
-    assert "web" in DRIVABLE_SURFACES, (
-        "TODO marks S5.5 web surface [x] but session.py excludes 'web' "
-        "from DRIVABLE_SURFACES — ship the driver or amend the claim."
-    )
+    try:
+        import playwright  # noqa: F401
+
+        browsers_available = True
+    except ImportError:
+        browsers_available = False
+
+    surfaces = drivable_surfaces()
+    if browsers_available:
+        assert "web" in surfaces, (
+            "playwright is installed but session.py excludes 'web' from "
+            "drivable surfaces — the S5.5 driver path is broken."
+        )
+    else:
+        assert "web" not in surfaces, (
+            "playwright absent yet 'web' reported drivable — capability "
+            "probe is lying about browser availability."
+        )
 
 
 def test_readme_replay_gate_claim_matches_workflow():

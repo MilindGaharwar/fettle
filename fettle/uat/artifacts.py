@@ -80,3 +80,34 @@ def load_scenario_artifacts(worktree_or_dir: str) -> dict[str, dict]:
         if sid:
             out[sid] = record
     return out
+
+
+def capture_web_page(app_url: str, dest_dir: str) -> dict:
+    """Full-page screenshot + accessibility tree for one web state (P74).
+
+    Best-effort by contract: any failure — including playwright being
+    absent entirely — returns a tool_error envelope instead of raising,
+    so session completion is never masked.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        shot = Path(dest_dir) / "_page.png"
+        a11y_path = Path(dest_dir) / "_a11y.json"
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.goto(app_url, wait_until="networkidle", timeout=30_000)
+            page.screenshot(path=str(shot), full_page=True)
+            a11y_path.write_text(json.dumps(page.accessibility.snapshot(),
+                                            indent=2), encoding="utf-8")
+            url = page.url
+            browser.close()
+        return {"status": "completed", "screenshot": str(shot),
+                "a11y": str(a11y_path), "url": url}
+    except Exception as exc:  # noqa: BLE001 - bounded best-effort by contract
+        import logging
+        logging.warning("web capture failed: %s: %s", type(exc).__name__, exc)
+        return {"status": "tool_error",
+                "message": f"web capture failed: {type(exc).__name__}: {exc}"}
