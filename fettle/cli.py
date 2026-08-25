@@ -1361,7 +1361,7 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
     if args.json:
         print(_json.dumps(result, indent=2))
     else:
-        layers = ", ".join(l["name"] for l in result["layers"])
+        layers = ", ".join(layer["name"] for layer in result["layers"])
         print(f"pipeline @ {result['root']}  layers: {layers}")
         for row in result["rows"]:
             state = "on" if row["enabled"] else "off"
