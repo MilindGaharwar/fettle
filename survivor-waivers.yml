@@ -1,0 +1,12 @@
+# Mutation survivor waiver registry — P48 follow-on / ratchet enforcement bar
+#
+# Key: mutant fingerprint (64-hex, from mutation-report non_killed entries).
+# Classification must be one of: equivalent | implementation_detail
+# Every waiver requires a reason and a decider. Unwaived survivors are
+# treated as behavioral and block the enforcement flip
+# (see docs/mutation-ratchet-decision.md).
+#
+# Worklist source: docs/mutation-survivor-worklist.json
+# (run 32806910288 — 2,470 unique survivors across 69/71 shards)
+schema_version: v1
+waivers: {}
