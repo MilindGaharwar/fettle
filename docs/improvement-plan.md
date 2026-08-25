@@ -62,7 +62,7 @@ adapters), BENCHMARK.md placeholder (owned by P77), i18n docs (demand-gated),
 knip/jscpd analogs (deptry covers dead-code; copy-paste detector proposed as
 a future rule).
 
-- [ ] 9 Pipeline dump
-- [ ] 10 Event map
-- [ ] 11 Verdict-evidenced invariant
-- [ ] 12 Behavior decision table
+- [x] 9 Pipeline dump (`fettle pipeline`)
+- [x] 10 Event map (docs/event-map.md + drift predicate)
+- [x] 11 Verdict-evidenced invariant (tests/test_invariants.py)
+- [x] 12 Behavior decision table (docs/behavior-map.md + drift predicate)
