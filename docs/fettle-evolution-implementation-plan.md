@@ -2453,6 +2453,28 @@ Full specifications: [`docs/tla-plus-formal-verification.md`](tla-plus-formal-ve
 
 ---
 
+## 16b. Assurance Record Program (P80–P83)
+
+New program from the 2026-08-25 strategic review. One primitive: the
+canonical, digest-bound **Assurance Record** answering "can we prove this
+agent-generated change deserves trust?" All existing artifacts (verify
+stamps, mutation reports, UAT reports, governance ledger, CI binding, spec
+coverage) become inputs; the record is the output. Release policies are
+machine-checkable rules over the record's assurance vector.
+
+- **P80** Assurance Record v1 (aggregation of existing artifacts):
+  AUTHORIZED, in progress. Plan: docs/assurance-record-plan.md.
+- **P81** Assurance vector + sufficiency policies: after P80.
+- **P82** Independence computation (P52 roles x spawn lineage join):
+  after P80.
+- **P83** Assurance Adversary v1 (codified tamper/adversary suite): after
+  P80. Feeds the P77 benchmark.
+
+The assurance chain is stored as ordered digest-bound stage references
+inside the record — not a persistent graph store. P51's measured-admission
+gate remains the decision path if aggregation performance ever demands
+persistence.
+
 ## 17. Planning Gate Status
 
 ### Graduation-debt rule (2026-08-23)

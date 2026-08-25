@@ -12,8 +12,9 @@ this index is the navigation layer.
 | Mutation quality | `mutation-quality-implementation-plan.md` + playbook | Baseline complete; advisory graduation | P64 methodology automation; ratchet decision after qualifying runs |
 | Change integrity (hypergraph) | `change-integrity-implementation-plan.md` (+ architecture, UX spec) | P44–P46 complete; P47 shipped advisory; P48 next | Shadow parity for semantic/topology/verify consumers; P49 deferred on P41 |
 | State consistency | `state-consistency-implementation-plan.md` (+ UX spec) | Contracts proposed; P38 prerequisite now closed | Review/authorize P53 contract package |
-| Agentic UAT strengthening | `uat-strength-plan.md` + hypothesis tree | P72–P77 planned | Claim `docs/backlog/uat-evidence-hardening.md` |
-| Improvement program (audit) | `improvement-plan.md` | Items 1–4, 6 done; 5 index done; 8 partial | Positioning motion capture (operator) |
+| Agentic UAT strengthening | `uat-strength-plan.md` + hypothesis tree | P72–P74 done; P75–P77 planned | Claim `docs/backlog/uat-evidence-hardening.md` (done) → P73 charters (done) → P75/P76 |
+| **Assurance Record** | `assurance-record-plan.md` | **P80 authorized, in progress** | Build `fettle/assurance.py` v1: aggregate existing artifacts into the canonical record |
+| Improvement program (audit) | `improvement-plan.md` | Items 1–6 done; 5 index done; 8 partial | Positioning motion capture (operator) |
 
 ## Standing rules
 

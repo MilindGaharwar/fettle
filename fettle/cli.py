@@ -1369,6 +1369,28 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
                   f"{state:<4} {row['mode']:<9} <- {row['source']}")
 
 
+def cmd_assurance(args: argparse.Namespace) -> None:
+    """P80: canonical Assurance Record for this change."""
+    import json as _json
+
+    from fettle.assurance import build_assurance_record
+
+    result = build_assurance_record(args.root)
+    record = result["record"]
+    if args.json:
+        print(_json.dumps(result, indent=2))
+    else:
+        print(f"Assurance Record {record['digest'][:16]} · "
+              f"{record['completeness']} · commit "
+              f"{(record['subject'].get('commit') or 'unknown')[:12]}")
+        for name, dim in record["dimensions"].items():
+            mark = {"PASS": "✓", "FAIL": "✗"}.get(dim["status"], "~")
+            line = f"  {mark} {name:<20} {dim['status']}"
+            if dim.get("reason"):
+                line += f" — {dim['reason']}"
+            print(line)
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1914,6 +1936,11 @@ def main() -> None:
     p_pipeline.add_argument("--root", default=".")
     p_pipeline.add_argument("--json", action="store_true")
 
+    p_assurance = subparsers.add_parser(
+        "assurance", help="Canonical Assurance Record (P80)")
+    p_assurance.add_argument("--root", default=".")
+    p_assurance.add_argument("--json", action="store_true")
+
     for name, help_text in (
         ("status", "Record count + anchor state"),
         ("verify", "Full hash-chain verification"),
@@ -2001,6 +2028,7 @@ def main() -> None:
         "graph": cmd_graph,
         "ledger": cmd_ledger,
         "pipeline": cmd_pipeline,
+        "assurance": cmd_assurance,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }
