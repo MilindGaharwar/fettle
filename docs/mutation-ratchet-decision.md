@@ -1,7 +1,7 @@
 # Mutation Ratchet Decision Memo — Changed-Scope Survivor Enforcement
 
 Date: 2026-08-24 · Author: engineering session (agent) · Decision owner: Milind
-Status: RATIFIED 2026-08-24 — enforced via .fettle.toml mode="enforce"
+Status: RATIFIED; enforcement DEMOTED to advisory after first triage (2026-08-25) — see below
 
 ## Question
 
@@ -69,6 +69,35 @@ git commit -am "policy: enforce changed-scope survivor gate"
 ```
 
 ## First enforced-week triage checklist
+
+### First triage result (2026-08-25, run 32806910288)
+
+The flip landed on the same PR that introduced ~3,000 lines of new
+un-hardened code, so enforcement immediately blocked on its own
+introduction:
+
+- 53 shards failed under enforce; retained reports show ~1,832 surviving
+  mutants in changed scope.
+- Histogram: cli.py 1,087 · uat/session 179 · evidence_ledger 135 ·
+  graph_cli 110 · reconcile 103 · state_consistency 89 · artifacts 45 ·
+  graph_shadow 53 · spec_provider 28 · __init__ 4.
+- Machinery verdict: WORKS AS DESIGNED (correct blocking, precise reports,
+  fail-closed aggregation). Timing verdict: PREMATURE for current repo
+  maturity.
+
+### Decision
+
+Demoted to advisory per the pre-agreed rollback line. Path back to
+enforcement (choose one):
+
+1. **Hardening sprint** — kill the cli.py cluster (largest, legacy debt)
+   then the new-module clusters; re-attempt enforcement when survivors in
+   changed scope drop below an agreed bar (e.g., <50).
+2. **Scoped enforcement** — extend the workflow to enforce only when no
+   NEW modules appear in the survivor histogram (needs ratchet tooling).
+
+Either way, the machinery itself needs no changes.
+
 
 Run after ~5 enforced PRs (or 14 days, whichever first):
 

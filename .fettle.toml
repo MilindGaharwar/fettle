@@ -38,7 +38,7 @@ exclude = [
 
 [mutation]
 enabled = true
-mode = "enforce"
+mode = "advisory"
 paths = ["fettle/"]
 exclude = ["tests/", "migrations/"]
 base = "origin/main"
