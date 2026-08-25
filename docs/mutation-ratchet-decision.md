@@ -98,6 +98,23 @@ enforcement (choose one):
 
 Either way, the machinery itself needs no changes.
 
+### Post-triage refinement (2026-08-25): survivor classification required
+
+Killing-by-count proved partly wrong-headed. Empirical checks show many
+survivors are **equivalent or implementation-detail mutants** (e.g.,
+`mkdir(parents=True→False)` is unobservable when the immediate parent
+always exists). Raw survivor count is therefore not a valid enforcement
+bar. Revised path back to enforcement:
+
+1. Build a survivor classifier: auto-label candidates as equivalent /
+   implementation-detail / behavioral (heuristics + manual review).
+2. Enforcement bar = zero unexplained *behavioral* survivors in changed
+   scope, not zero survivors overall.
+3. Ledger hardening round produced 16 new contract-pin tests (paths,
+   schema versions, secret-marker completeness, digest preimage shape,
+   gap/linkage reason strings, rotate continuity) — retained as permanent
+   value independent of the bar.
+
 
 Run after ~5 enforced PRs (or 14 days, whichever first):
 
