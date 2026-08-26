@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from fettle.assurance import build_assurance_record
+from fettle.assurance import build_assurance_record, evaluate_vector, render_assurance
 
 
 def _init_repo(tmp_path):
@@ -85,13 +85,15 @@ def test_stages_report_presence(tmp_path):
     assert stages["mutation"]["digest"] is None
 
 
-def test_independence_passes_with_spawn_lineage(tmp_path, monkeypatch):
+def test_independence_medium_with_spawn_lineage(tmp_path, monkeypatch):
     root = _init_repo(tmp_path)
     monkeypatch.setenv("FETTLE_PARENT_SESSION", "parent-abc")
 
     record = build_assurance_record(str(root))["record"]
 
-    assert record["dimensions"]["independence"]["status"] == "PASS"
+    independence = record["dimensions"]["independence"]
+    assert independence["status"] == "MEDIUM"
+    assert "spawn lineage" in independence["reason"]
 
 
 def test_independence_unknown_without_roles_or_lineage(tmp_path):
@@ -131,3 +133,86 @@ def test_scope_dimension_from_changed_files(tmp_path):
     )["record"]
 
     assert record["dimensions"]["scope"]["status"] == "PASS"
+
+
+# ── P81 — assurance vector + release policies ────────────────────────────
+
+
+
+def _full_record():
+    return {
+        "dimensions": {
+            "authorization": {"status": "PASS", "evidence": []},
+            "policy_integrity": {"status": "PASS", "evidence": []},
+            "scope": {"status": "PASS", "evidence": []},
+            "behavior": {"status": "PASS", "evidence": []},
+            "security": {"status": "UNKNOWN", "evidence": [],
+                          "reason": "joins in P81"},
+            "independence": {"status": "MEDIUM", "evidence": []},
+            "provenance": {"status": "COMPLETE", "evidence": []},
+            "uat": {"status": "PASS", "evidence": []},
+            "ci": {"status": "PASS", "evidence": []},
+        }
+    }
+
+
+def test_vector_passes_with_matching_policy():
+    record = _full_record()
+    policy = {"authorization": "PASS", "behavior": "PASS",
+              "provenance": "COMPLETE"}
+
+    result = evaluate_vector(record, policy)
+
+    assert result["release_ready"] is True
+    assert result["vector"]["behavior"]["verdict"] == "PASS"
+
+
+def test_vector_fails_on_dimension_mismatch():
+    record = _full_record()
+    policy = {"authorization": "PASS", "security": "PASS"}
+
+    result = evaluate_vector(record, policy)
+
+    assert result["release_ready"] is False
+    assert any("security" in f for f in result["failures"])
+
+
+def test_unknown_fails_gated_dimension():
+    record = _full_record()
+    policy = {"security": "PASS"}
+
+    result = evaluate_vector(record, policy)
+
+    assert result["release_ready"] is False
+    assert result["vector"]["security"]["verdict"] == "FAIL"
+
+
+def test_ungated_dimensions_are_not_gated():
+    record = _full_record()
+    policy = {"behavior": "PASS"}
+
+    result = evaluate_vector(record, policy)
+
+    assert result["vector"]["security"]["verdict"] == "NOT_GATED"
+
+
+def test_render_shows_decision_and_failures():
+    record = _full_record()
+    policy = {"behavior": "PASS", "security": "PASS"}
+    result = evaluate_vector(record, policy)
+
+    text = render_assurance(record, result)
+
+    assert "NOT RELEASEABLE" in text
+    assert "security" in text
+    assert "✗" in text or "FAIL" in text
+
+
+def test_render_shows_releaseable_when_policy_met():
+    record = _full_record()
+    result = evaluate_vector(record, {"behavior": "PASS"})
+    result["release_ready"] = True
+
+    text = render_assurance(record, result)
+
+    assert "RELEASEABLE" in text

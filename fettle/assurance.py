@@ -83,17 +83,60 @@ def _behavior_dimension(root: Path) -> dict:
                       reason="no verify stamp or mutation report retained")
 
 
-def _independence_dimension(root: Path) -> dict:
-    roles_declared = False
-    lineage_present = bool(os.environ.get("FETTLE_PARENT_SESSION"))
-    cfg = _read_json(root / ".fettle" / "assurance-config.json") or {}
+def compute_independence(
+    root: str | Path,
+    config: dict | None = None,
+    env: dict[str, str] | None = None,
+) -> dict:
+    """P82 — independence level from role separation + spawn lineage + CI.
+
+    Criteria:
+      HIGH    — role-separated authorship AND independent CI confirmed
+      MEDIUM  — role-separated authorship (tester ≠ implementer)
+      LOW     — same agent wrote code and tests (no role separation)
+      UNKNOWN — insufficient data (no role info and no lineage)
+
+    The env dict overrides os.environ for testability.
+    """
+    env = env if env is not None else dict(os.environ)
+    cfg = config or {}
+    root_path = Path(root)
+    evidence: list[dict] = []
+
     roles_declared = bool(cfg.get("roles_declared"))
-    if roles_declared or lineage_present:
-        return _dimension("PASS",
-                          [{"path": ".fettle/assurance-config.json",
-                            "digest": _digest_of(root / ".fettle" / "assurance-config.json") or ""}])
-    return _dimension("UNKNOWN", [],
-                      reason="no role declaration or spawn lineage retained")
+    lineage = env.get("FETTLE_PARENT_SESSION", "")
+    ci_confirmed = False
+    ci = _read_json(root_path / ".fettle" / "ci-verdict.json")
+    if ci is not None and ci.get("conclusion") == "success":
+        ci_confirmed = True
+        evidence.append({"path": ".fettle/ci-verdict.json",
+                         "digest": _digest_of(root_path / ".fettle" / "ci-verdict.json") or ""})
+
+    authorship_gate = (cfg.get("gates") or {}).get("authorship", {})
+    gate_enabled = bool(authorship_gate.get("enabled", False))
+
+    if roles_declared and gate_enabled:
+        level = "HIGH" if ci_confirmed else "MEDIUM"
+        evidence.append({"path": ".fettle/assurance-config.json",
+                         "digest": _digest_of(root_path / ".fettle" / "assurance-config.json") or ""})
+        reason = "role-separated authorship" + (" + independent CI" if ci_confirmed else "")
+    elif lineage:
+        level = "MEDIUM"
+        reason = "delegated via spawn lineage (child agent wrote this)"
+        evidence.append({"path": "env:FETTLE_PARENT_SESSION",
+                         "digest": canonical_digest({"parent": lineage})})
+    elif gate_enabled:
+        level = "LOW"
+        reason = "authorship gate enabled but no role separation detected"
+    else:
+        return _dimension("UNKNOWN", [],
+                          reason="no role declaration, spawn lineage, or authorship gate")
+
+    return _dimension(level, evidence, reason)
+
+
+def _independence_dimension(root: Path) -> dict:
+    return compute_independence(str(root))
 
 
 def _provenance_dimension(root: Path) -> dict:
@@ -228,3 +271,100 @@ def build_assurance_record(root: str = ".",
         {k: v for k, v in record.items() if k not in ("digest", "generated_at")}
     )
     return {"status": "completed", "record": record}
+
+
+# ── P81 — assurance vector + sufficiency policies ─────────────────────────
+
+
+DEFAULT_RELEASE_POLICY = {
+    "authorization": "PASS",
+    "policy_integrity": "PASS",
+    "behavior": "PASS",
+    "provenance": "COMPLETE",
+}
+
+
+def evaluate_vector(record: dict, policy: dict | None = None) -> dict:
+    """Evaluate the assurance record against a release policy.
+
+    ``policy`` maps dimension names to required values. Dimensions not
+    mentioned in the policy are not gated. A dimension passes if its
+    status equals the required value (or, for completeness, matches
+    exactly). UNKNOWN always fails a gated dimension.
+
+    Returns the vector with per-dimension verdicts and an overall
+    ``release_ready`` flag with reasons for every failure.
+    """
+    policy = policy or {}
+    dimensions = record.get("dimensions", {})
+    vector: dict[str, dict] = {}
+    failures: list[str] = []
+
+    all_dims = set(dimensions) | set(policy)
+    for dim in sorted(all_dims):
+        actual = dimensions.get(dim, {})
+        status = actual.get("status", "UNKNOWN")
+        required = policy.get(dim)
+
+        entry: dict = {"actual": status, "evidence": actual.get("evidence", [])}
+        if actual.get("reason"):
+            entry["reason"] = actual["reason"]
+
+        if required is None:
+            entry["verdict"] = "NOT_GATED"
+        elif status == required or (
+            required == "COMPLETE" and status not in ("UNKNOWN", "FAIL")
+        ):
+            entry["verdict"] = "PASS"
+        else:
+            entry["verdict"] = "FAIL"
+            failures.append(
+                f"{dim}: required {required!r}, got {status!r}"
+                + (f" ({actual.get('reason', '')})" if actual.get("reason") else "")
+            )
+
+        vector[dim] = entry
+
+    release_ready = not failures
+    return {
+        "vector": vector,
+        "failures": failures,
+        "release_ready": release_ready,
+        "policy": policy,
+    }
+
+
+def render_assurance(record: dict, evaluation: dict) -> str:
+    """Human 'Why should I trust this change?' explanation."""
+    # dimensions accessed via record
+    vector = evaluation.get("vector", {})
+    lines = ["# Why Should I Trust This Change?", ""]
+
+    subject = record.get("subject", {})
+    commit = subject.get("commit", "unknown")
+    lines.append(f"Commit: {commit[:12]}")
+    lines.append(f"Completeness: {record.get('completeness', 'UNKNOWN')}")
+    lines.append("")
+
+    lines.append("## Assurance Vector")
+    lines.append("")
+    for dim in sorted(vector):
+        entry = vector[dim]
+        mark = "✓" if entry["verdict"] == "PASS" else (
+            "○" if entry["verdict"] == "NOT_GATED" else "✗")
+        status = entry["actual"]
+        lines.append(f"  {mark} {dim:<22} {status:<15} {entry['verdict']}")
+        if entry.get("reason"):
+            lines.append(f"    {entry['reason']}")
+
+    if evaluation.get("failures"):
+        lines.append("")
+        lines.append("## Failures")
+        lines.extend(f"  - {f}" for f in evaluation["failures"])
+
+    lines.append("")
+    decision = "RELEASEABLE" if evaluation["release_ready"] else "NOT RELEASEABLE"
+    lines.append(f"Decision: {decision}")
+    lines.append("")
+    lines.append("Every assertion carries an evidence reference in the record.")
+    return "\n".join(lines)

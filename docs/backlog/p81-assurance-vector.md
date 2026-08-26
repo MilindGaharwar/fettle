@@ -1,21 +1,14 @@
 ---
 fettle-work-item: true
 id: p81-assurance-vector
-status: open
+status: done
 scope:
   - fettle/assurance.py
-  - tests/test_assurance_record.py
+  - tests/
 spec: assurance-record-plan
 ---
 
-# P81 — Assurance vector + sufficiency policy
-
-Formal vector over the record's dimensions; release policies as
-machine-checkable rules (e.g., production requires authorization=PASS,
-policy_integrity=PASS, behavior=PASS, provenance=COMPLETE). Render the
-"Why should I trust this change?" explanation. Security dimension joins
-here.
+# P81 — assurance vector + sufficiency policies
 
 ## Resolution
-
-Record how it was resolved.
+evaluate_vector() evaluates the record against release policies; render_assurance() produces the 'Why should I trust this change?' CLI output. DEFAULT_RELEASE_POLICY pins authorization, policy_integrity, behavior, and provenance.
