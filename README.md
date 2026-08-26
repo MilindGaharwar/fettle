@@ -70,61 +70,39 @@ authoritative.
 
 Choose the smallest path that proves value for your job.
 
-### Evaluate the CLI
+### See the Assurance Record
 
-One package installs the complete toolkit — analyzers, test and mutation
-runners, hooks, browser automation, and the mutation engine:
+One package installs the complete toolkit. Three commands produce the
+product's core output — a digest-bound, nine-dimension trust assessment
+for your change:
 
 ```bash
 pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
 cd your-project
 fettle init --profile solo   # presets: solo | team | enterprise
-fettle doctor
-fettle check --changed
+fettle verify                # run tests; bind evidence
+fettle assurance             # ← this is the product
 ```
 
-Presets generate an advisory-first `.fettle.toml` non-interactively —
-`solo` for individual repos, `team` adds delegation gates, `enterprise`
-adds strict mode and compliance evidence. Omit `--profile` for the guided
-interview.
+The `fettle assurance` output:
 
-The PyPI package is `finefettle`; the installed command is `fettle`. Installation
-does not modify agent settings. `fettle init --dry-run` previews repository and
-host changes, and `fettle init` applies them explicitly.
+```
+Assurance Record c04c9a206c05 · PARTIAL · commit 25f4957
+  ✓ behavior            PASS
+  ✓ provenance          PASS
+  ~ security            UNKNOWN — security evidence joins in P81
+  ~ independence        UNKNOWN — no role declaration or spawn lineage
+  ...
+```
+
+Every dimension is backed by evidence references or an honest explanation
+of why it's unknown. Profiles: `solo` for individual repos, `team` adds
+delegation gates, `enterprise` adds strict mode and compliance evidence.
+Omit `--profile` for the guided interview.
+
+The PyPI package is `finefettle`; the installed command is `fettle`.
 
 ### Add Live Agent Governance
-
-The wheel includes a versioned installed-package bridge for Claude Code, Codex
-CLI, Gemini CLI, and OpenCode. Preview every repository and host mutation before
-applying it:
-
-```bash
-cd your-project
-fettle init --dry-run
-fettle init
-fettle doctor
-```
-
-`fettle init` detects the four hosts, preserves unrelated host settings, creates
-an advisory-first project configuration, and installs guided workflows. Claude
-Code, Codex CLI, and OpenCode have current installed-host evidence. Gemini CLI's
-installed transport is contract-tested, but its live OAuth verification is
-blocked upstream by `UNSUPPORTED_CLIENT`.
-
-```bash
-fettle init --interactive
-fettle init --install-tools
-```
-
-### Close the Evidence Loop
-
-After local evaluation or agent setup:
-
-```bash
-fettle verify                 # run tests; bind source, policy, scope, and runner evidence
-fettle ci wait                # bind the pushed revision to remote CI
-fettle explain                # inspect the latest decision and recovery path
-```
 
 ## The Problem Fettle Solves
 

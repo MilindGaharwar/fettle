@@ -1,0 +1,102 @@
+{
+  "status": "completed",
+  "record": {
+    "schema_version": 1,
+    "subject": {
+      "commit": "0580587e457373db68b04b8d48bc15f34e2e2f3b",
+      "root": "examples/assurance-record"
+    },
+    "generated_at": 1787704396.652,
+    "stages": [
+      {
+        "stage": "requirements",
+        "path": "examples/assurance-record/specs",
+        "digest": null,
+        "present": false
+      },
+      {
+        "stage": "agent_actions",
+        "path": "examples/assurance-record/.fettle/trace.jsonl",
+        "digest": null,
+        "present": false
+      },
+      {
+        "stage": "mutation",
+        "path": "examples/assurance-record/mutation-report.json",
+        "digest": null,
+        "present": false
+      },
+      {
+        "stage": "uat",
+        "path": "examples/assurance-record/.fettle/uat-report.json",
+        "digest": null,
+        "present": false
+      },
+      {
+        "stage": "ledger",
+        "path": "examples/assurance-record/.fettle/governance-ledger.jsonl",
+        "digest": null,
+        "present": false
+      },
+      {
+        "stage": "anchor",
+        "path": "examples/assurance-record/.fettle/ledger-anchor.json",
+        "digest": null,
+        "present": false
+      }
+    ],
+    "dimensions": {
+      "authorization": {
+        "status": "NOT_APPLICABLE",
+        "evidence": [],
+        "reason": "solo session \u2014 no delegation capsule"
+      },
+      "policy_integrity": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "no policy file found"
+      },
+      "scope": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "changed-scope not provided for this record"
+      },
+      "behavior": {
+        "status": "PASS",
+        "evidence": [
+          {
+            "path": ".fettle/verify.json",
+            "digest": "sha256:b1d274e0d8afc8f675a33046456730a072fd6212c272b351ecefe2ce291ff160"
+          }
+        ]
+      },
+      "security": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "security evidence joins in P81"
+      },
+      "independence": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "no role declaration or spawn lineage retained"
+      },
+      "provenance": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "no governance ledger retained"
+      },
+      "uat": {
+        "status": "UNKNOWN",
+        "evidence": [],
+        "reason": "no UAT report retained"
+      },
+      "ci": {
+        "status": "NOT_APPLICABLE",
+        "evidence": [],
+        "reason": "no retained CI verdict (bind with fettle ci wait)"
+      }
+    },
+    "completeness": "PARTIAL",
+    "digest": "d843566a44888b37a2b780d8154734be5d086cfc6c27fef29360b36b63e5a8f8"
+  }
+}

@@ -1,0 +1,7 @@
+"""Simple calculator for the assurance-record demo."""
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+def subtract(a: int, b: int) -> int:
+    return a - b
