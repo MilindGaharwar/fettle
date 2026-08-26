@@ -30,6 +30,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Bind a decision into durable evidence | `fettle.trace.build_evidence` / `fettle.evidence_ledger.append_record` |
 | Add a graph provider (structure intelligence) | `fettle/providers/` adapter returning NodeDraft/EdgeDraft; register in `default_providers()` |
 | Add a state-consistency contract type | Extend frozen schema in `fettle/state_consistency.py` via SC1 review — never ad-hoc keys |
+| Author or lint a state-consistency contract | `fettle consistency init|lint|list` (`fettle/state_consistency.py` frozen schema + lint) |
 | Add mutation methodology automation | Follow the staged model: preflight → execution → policy (`fettle/mutation_test.py`) |
 
 ## Delegation and coordination

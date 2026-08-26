@@ -228,3 +228,32 @@ def build_assurance_record(root: str = ".",
         {k: v for k, v in record.items() if k not in ("digest", "generated_at")}
     )
     return {"status": "completed", "record": record}
+
+
+def write_evidence(root: str, record: dict) -> dict:
+    """Persist the Assurance Record as a bounded evidence artifact."""
+    from fettle.trace import build_evidence
+
+    dims = record.get("dimensions", {})
+    all_pass = all(
+        d.get("status") in ("PASS", "NOT_APPLICABLE") for d in dims.values()
+    )
+    evidence = build_evidence(
+        "assurance_record",
+        exit_code=0 if all_pass else 1,
+        scope=record.get("subject", {}).get("root", ""),
+    )
+    out_dir = Path(root) / ".fettle"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / "assurance-record.evidence.json"
+    out.write_text(json.dumps({
+        "schema_version": SCHEMA_VERSION,
+        "evidence_id": evidence["evidence_id"],
+        "record_digest": record.get("digest", ""),
+        "completeness": record.get("completeness", "UNKNOWN"),
+        "dimensions": {k: v.get("status", "UNKNOWN")
+                        for k, v in dims.items()},
+        "evidence": evidence,
+    }, indent=2) + "\n", encoding="utf-8")
+    return {"status": "completed", "path": str(out),
+            "evidence_id": evidence["evidence_id"]}

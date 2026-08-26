@@ -109,3 +109,16 @@ Each adversary is a test proving detection. Feeds P77 benchmark scoring.
 - Persistent graph store (P51 gate decides if ever needed).
 - Numeric assurance score (vector + policy, per doctrine).
 - New agent framework, LLM, observability platform, rule-count chase.
+
+## P48 Consumer Graduation Review (2026-08-25)
+
+Shadow parity results on `examples/corpus` (maintained fixture):
+
+| Consumer | Matched | Unexplained narrower | Documented differences | Verdict |
+|---|---|---|---|---|
+| semantic | 4 | 0 | traces (requirements as attributes) | **READY** |
+| topology | 0 items | 0 | no open work items in corpus (vacuous) | needs fixture |
+| verify | — | — | expected_unsupported (module↔scenario bridge deferred) | NOT READY |
+
+**Decision**: semantic consumer authorized for graduation. Topology and
+verify remain advisory until their prerequisites are met.
