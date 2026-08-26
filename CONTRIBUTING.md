@@ -78,6 +78,10 @@ Write for the reader's next action:
   product boundaries.
 - `docs/README.md` routes users to task-specific guides.
 - `docs/CONFIG.md` is the authoritative policy reference.
+- [docs/behavior-map.md](docs/behavior-map.md) — "I want to add X" → the
+  exact mechanism (gates, commands, providers, surfaces, evidence).
+- [docs/event-map.md](docs/event-map.md) — every hook event, its per-host
+  support, durability, and consumers.
 - `CHANGELOG.md` records shipped behavior; `docs/ROADMAP.md` records graduation
   triggers.
 - `docs/archive/` and historical engagement notes preserve provenance and must

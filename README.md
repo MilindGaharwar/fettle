@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-<h3 align="center">The assurance layer for agentic software engineering</h3>
+<h3 align="center">The trust layer for agentic software engineering</h3>
 
-<p align="center"><b>One policy across agents, workspaces, delegation, verification, and CI.</b></p>
+<p align="center"><b>Policy that survives delegation · evidence that cannot become clean by accident · verdicts bound to artifacts.</b></p>
 
 <p align="center">
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
@@ -70,61 +70,39 @@ authoritative.
 
 Choose the smallest path that proves value for your job.
 
-### Evaluate the CLI
+### See the Assurance Record
 
-One package installs the complete toolkit — analyzers, test and mutation
-runners, hooks, browser automation, and the mutation engine:
+One package installs the complete toolkit. Three commands produce the
+product's core output — a digest-bound, nine-dimension trust assessment
+for your change:
 
 ```bash
 pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
 cd your-project
 fettle init --profile solo   # presets: solo | team | enterprise
-fettle doctor
-fettle check --changed
+fettle verify                # run tests; bind evidence
+fettle assurance             # ← this is the product
 ```
 
-Presets generate an advisory-first `.fettle.toml` non-interactively —
-`solo` for individual repos, `team` adds delegation gates, `enterprise`
-adds strict mode and compliance evidence. Omit `--profile` for the guided
-interview.
+The `fettle assurance` output:
 
-The PyPI package is `finefettle`; the installed command is `fettle`. Installation
-does not modify agent settings. `fettle init --dry-run` previews repository and
-host changes, and `fettle init` applies them explicitly.
+```
+Assurance Record c04c9a206c05 · PARTIAL · commit 25f4957
+  ✓ behavior            PASS
+  ✓ provenance          PASS
+  ~ security            UNKNOWN — security evidence joins in P81
+  ~ independence        UNKNOWN — no role declaration or spawn lineage
+  ...
+```
+
+Every dimension is backed by evidence references or an honest explanation
+of why it's unknown. Profiles: `solo` for individual repos, `team` adds
+delegation gates, `enterprise` adds strict mode and compliance evidence.
+Omit `--profile` for the guided interview.
+
+The PyPI package is `finefettle`; the installed command is `fettle`.
 
 ### Add Live Agent Governance
-
-The wheel includes a versioned installed-package bridge for Claude Code, Codex
-CLI, Gemini CLI, and OpenCode. Preview every repository and host mutation before
-applying it:
-
-```bash
-cd your-project
-fettle init --dry-run
-fettle init
-fettle doctor
-```
-
-`fettle init` detects the four hosts, preserves unrelated host settings, creates
-an advisory-first project configuration, and installs guided workflows. Claude
-Code, Codex CLI, and OpenCode have current installed-host evidence. Gemini CLI's
-installed transport is contract-tested, but its live OAuth verification is
-blocked upstream by `UNSUPPORTED_CLIENT`.
-
-```bash
-fettle init --interactive
-fettle init --install-tools
-```
-
-### Close the Evidence Loop
-
-After local evaluation or agent setup:
-
-```bash
-fettle verify                 # run tests; bind source, policy, scope, and runner evidence
-fettle ci wait                # bind the pushed revision to remote CI
-fettle explain                # inspect the latest decision and recovery path
-```
 
 ## The Problem Fettle Solves
 
@@ -274,13 +252,19 @@ and changed-scope advisory evidence. See the
 ### Evidence and Operations
 
 ```bash
-fettle config --explain       # effective value and provenance for each key
-fettle explain                # recent gate decisions and recovery context
-fettle verify                 # run tests and bind a verification stamp
-fettle ci status              # remote CI verdict for the current commit
-fettle report --days 7        # effectiveness and lineage evidence
-fettle report --compliance    # CWE, OWASP ASVS, and SOC 2 control evidence
-fettle ratchet status         # evidence for promotion or demotion
+fettle assurance               # canonical trust assessment for this change
+fettle ledger status           # governance evidence ledger state
+fettle ledger anchor           # bind terminal digest to current commit
+fettle graph status            # ephemeral hypergraph digest + provider completeness
+fettle graph impact src/       # advisory blast-radius closure
+fettle graph shadow            # parity vs legacy semantic layer
+fettle config --explain        # effective value and provenance for each key
+fettle explain                 # recent gate decisions and recovery context
+fettle verify                  # run tests and bind a verification stamp
+fettle ci status               # remote CI verdict for the current commit
+fettle report --days 7         # effectiveness and lineage evidence
+fettle report --compliance     # CWE, OWASP ASVS, and SOC 2 control evidence
+fettle ratchet status          # evidence for promotion or demotion
 ```
 
 ### Multi-Agent Work
