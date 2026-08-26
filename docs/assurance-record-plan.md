@@ -109,3 +109,20 @@ Each adversary is a test proving detection. Feeds P77 benchmark scoring.
 - Persistent graph store (P51 gate decides if ever needed).
 - Numeric assurance score (vector + policy, per doctrine).
 - New agent framework, LLM, observability platform, rule-count chase.
+
+## Tamper-evident vs tamper-proof boundary
+
+The evidence ledger is **tamper-evident** (hash chain detects tampering),
+not **tamper-proof** (tampering prevented). True tamper-proofing requires
+trust anchors outside the generating process: operator-held signing keys,
+write-once storage, or a remote verification service. These conflict with
+the stdlib-only, no-external-services design constraint.
+
+**Trigger conditions** for upgrading to tamper-resistant:
+- Adversarial agents actively forging evidence (not just accidental corruption)
+- Compliance requirements demanding cryptographic non-repudiation
+- Multi-tenant evidence sharing where the generator is untrusted
+
+**Incremental path** (when triggered): operator-held Ed25519 signing of
+terminal digests → external anchoring to a timestamping service →
+read-only evidence API.

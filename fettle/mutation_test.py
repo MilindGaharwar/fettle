@@ -2285,6 +2285,15 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     paths = cfg.get("paths", ["src/"])
     excluded = cfg.get("exclude", ["tests/", "migrations/"])
     timeout = int(cfg.get("timeout_s", 600))
+    # Learning (2026-08-25): large files need proportionally longer mutation
+    # timeouts. Scale by line count: base 600s for ≤500 lines, +1s per line above.
+    if cfg.get("auto_scale_timeout", True):
+        for file_path in paths:
+            abs_path = Path(root) / file_path
+            if abs_path.is_file():
+                line_count = len(abs_path.read_text(encoding="utf-8").splitlines())
+                scaled = max(timeout, 600 + max(0, line_count - 500))
+                timeout = max(timeout, scaled)
     threshold = float(cfg.get("score_target", cfg.get("threshold", 70)))
     base = str(cfg.get("base", "origin/main"))
     all_files = bool(cfg.get("all", False))

@@ -74,13 +74,38 @@ def _behavior_dimension(root: Path) -> dict:
         evidence.append({"path": "mutation-report.json",
                          "digest": _digest_of(root / "mutation-report.json")})
         if mutation.get("status") == "completed":
-            return _dimension("PASS", evidence)
+            return _classify_behavior(mutation, evidence, root)
         return _dimension("FAIL", evidence,
                           reason=f"mutation run {mutation.get('status')}")
     if tests is not None:
         return _dimension("PASS", evidence)
     return _dimension("UNKNOWN", [],
                       reason="no verify stamp or mutation report retained")
+
+
+def _classify_behavior(mutation: dict, evidence: list[dict],
+                       root: Path) -> dict:
+    """P48 follow-on: classify survivors; behavioral survivors block."""
+    from fettle.survivor_classify import classify_survivors, load_waivers
+
+    waiver_path = root / "survivor-waivers.yml"
+    if waiver_path.is_file():
+        try:
+            waivers, _findings = load_waivers(
+                waiver_path.read_text(encoding="utf-8"))
+        except Exception:
+            waivers = {}
+    else:
+        waivers = {}
+
+    result = classify_survivors(mutation, waivers)
+    if result["enforce_ready"]:
+        return _dimension("PASS", evidence)
+    return _dimension(
+        "FAIL", evidence,
+        reason=(f"{result['behavioral_count']} behavioral survivors "
+                f"(of {result['total_survivors']} total) — "
+                f"kill or waive before enforcing"))
 
 
 def compute_independence(

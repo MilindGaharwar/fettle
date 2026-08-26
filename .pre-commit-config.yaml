@@ -27,6 +27,12 @@ repos:
         pass_filenames: false
         always_run: true
         types: [python]
+      - id: no-mutmut-apply
+        name: no mutmut apply (corrupts working tree)
+        entry: fettle/no_mutmut_apply.sh
+        language: script
+        pass_filenames: false
+        always_run: true
       - id: fettle-rules-validate
         name: fettle rules validate
         entry: fettle/pre_commit_rules_validate.sh
