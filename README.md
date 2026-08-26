@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-<h3 align="center">The assurance layer for agentic software engineering</h3>
+<h3 align="center">The trust layer for agentic software engineering</h3>
 
-<p align="center"><b>One policy across agents, workspaces, delegation, verification, and CI.</b></p>
+<p align="center"><b>Policy that survives delegation · evidence that cannot become clean by accident · verdicts bound to artifacts.</b></p>
 
 <p align="center">
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
@@ -252,13 +252,19 @@ and changed-scope advisory evidence. See the
 ### Evidence and Operations
 
 ```bash
-fettle config --explain       # effective value and provenance for each key
-fettle explain                # recent gate decisions and recovery context
-fettle verify                 # run tests and bind a verification stamp
-fettle ci status              # remote CI verdict for the current commit
-fettle report --days 7        # effectiveness and lineage evidence
-fettle report --compliance    # CWE, OWASP ASVS, and SOC 2 control evidence
-fettle ratchet status         # evidence for promotion or demotion
+fettle assurance               # canonical trust assessment for this change
+fettle ledger status           # governance evidence ledger state
+fettle ledger anchor           # bind terminal digest to current commit
+fettle graph status            # ephemeral hypergraph digest + provider completeness
+fettle graph impact src/       # advisory blast-radius closure
+fettle graph shadow            # parity vs legacy semantic layer
+fettle config --explain        # effective value and provenance for each key
+fettle explain                 # recent gate decisions and recovery context
+fettle verify                  # run tests and bind a verification stamp
+fettle ci status               # remote CI verdict for the current commit
+fettle report --days 7         # effectiveness and lineage evidence
+fettle report --compliance     # CWE, OWASP ASVS, and SOC 2 control evidence
+fettle ratchet status          # evidence for promotion or demotion
 ```
 
 ### Multi-Agent Work
