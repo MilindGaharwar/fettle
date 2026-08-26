@@ -313,3 +313,41 @@ rules:
       citation: "Shard-201: mutated cfg default deleted the live runner cache at the repository root during self-mutation"
       compliance: {cwe: CWE-362, asvs: V14.3.2, soc2: CC8.1}
       fix: "Pass str(tmp_path) as the root argument instead of '.'."
+
+  - id: unguarded-optional-import
+    patterns:
+      - pattern-either:
+          - pattern: import $MODULE
+          - pattern: from $MODULE import $NAME
+      - pattern-not-inside: |
+          try:
+              ...
+              from $MODULE import $NAME
+              ...
+          except ...:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+              import $MODULE
+              ...
+          except ...:
+              ...
+      - pattern-inside: |
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^(capture_|drive_|probe_|run_.*web|.*_web_|.*_playwright)
+    message: >-
+      Optional dependency imported without a try/except guard inside a
+      bounded operation — if the module is absent, the operation crashes
+      instead of returning a canonical envelope. Import inside the try
+      block or use a capability probe.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      origin: fettle-v1.12.0
+      citation: "Three incidents: shard-201 (mutmut cache), docs-claims predicate (playwright), capture_web_page (playwright)"
+      compliance: {cwe: CWE-755, asvs: V14.3.2, soc2: CC8.1}
+      fix: "Move the import inside the try block that catches ImportError/ModuleNotFoundError."

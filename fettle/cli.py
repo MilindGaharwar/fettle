@@ -1391,6 +1391,36 @@ def cmd_assurance(args: argparse.Namespace) -> None:
             print(line)
 
 
+def cmd_mutation_classify(args: argparse.Namespace) -> None:
+    """Classify mutation survivors into behavioral vs waivable (P48 follow-on)."""
+    import json as _json
+
+    from fettle.survivor_classify import classify_survivors, load_waivers
+
+    report_path = args.report
+    waiver_path = args.waivers or "survivor-waivers.yml"
+    try:
+        report = _json.loads(Path(report_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"Cannot read report: {exc}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        waivers, findings = load_waivers(
+            Path(waiver_path).read_text(encoding="utf-8"), waiver_path
+        )
+    except OSError as exc:
+        print(f"Cannot read waivers: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    result = classify_survivors(report, waivers)
+    if args.json:
+        print(_json.dumps(result, indent=2))
+    else:
+        from fettle.survivor_classify import summarize_classification
+        print(summarize_classification(result))
+    sys.exit(0 if result["enforce_ready"] else 1)
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1928,6 +1958,13 @@ def main() -> None:
     g_shadow.add_argument("--root", default=".")
     g_shadow.add_argument("--json", action="store_true")
 
+    p_mut_classify = subparsers.add_parser(
+        "mutation-classify",
+        help="Classify mutation survivors into behavioral vs waived")
+    p_mut_classify.add_argument("report", help="Path to mutation-report.json")
+    p_mut_classify.add_argument("--waivers", default="survivor-waivers.yml")
+    p_mut_classify.add_argument("--json", action="store_true")
+
     p_ledger = subparsers.add_parser(
         "ledger", help="Governance evidence ledger (P41)")
     ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
@@ -2027,6 +2064,7 @@ def main() -> None:
         "links": cmd_links,
         "graph": cmd_graph,
         "ledger": cmd_ledger,
+        "mutation_classify": cmd_mutation_classify,
         "pipeline": cmd_pipeline,
         "assurance": cmd_assurance,
         "uat": cmd_uat,
