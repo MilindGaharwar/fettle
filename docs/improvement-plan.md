@@ -25,6 +25,37 @@ lists its verdict from the GLM review and its persistence location
 - GIF capture requires an operator terminal session; Fettle side prepares
   scripted replay commands only.
 
+## Mutation hardening learnings (2026-08-25)
+
+From the first cli.py mutation hardening attempt:
+
+1. **Auto-classify before killing.** 56% of survivors are string-literal
+   mutations in error messages / help text / output formatting — killing
+   them adds brittle tests without behavioral value. Use
+   `fettle/survivor_classify.py` + diff-pattern heuristics to separate
+   equivalent/implementation_detail from behavioral before writing tests.
+2. **Gate mismatch causes CI churn.** The pre-commit hook runs
+   `fettle check --changed` while CI runs raw `ruff check fettle tests`.
+   The `ruff-ci-parity` hook (added 2026-08-25) closes this gap — always
+   run the exact CI command locally.
+3. **Large files need long mutation timeouts.** cli.py (1,789 lines,
+   ~2,300 mutants) requires a 3,600s timeout; the default 900s times out
+   before completing even the first pass.
+4. **Survivor classification pipeline**: mutation run → `mutmut results` →
+   `mutmut show <id>` per survivor → diff-pattern heuristic → waiver
+   registry (`survivor-waivers.yml`) or kill list. The classifier
+   (`fettle/survivor_classify.py`) and registry are committed and tested.
+5. **Enforcement bar = zero behavioral survivors**, not zero survivors.
+   Equivalent and implementation-detail mutants are waived with documented
+   reasons; only genuinely behavioral survivors block the flip.
+6. **Optional dependencies must be imported inside the bounded operation
+   that needs them** — their absence must produce a canonical envelope,
+   not a crash (three instances: shard-201, docs-claims predicate,
+   capture_web_page).
+7. **Never run `mutmut apply` on a working tree you will later
+   `git add -A`** — use a scratch checkout (corrupted evidence_ledger.py
+   for two releases' worth of survivor data).
+
 ## Hazard note (item 4)
 
 Never run lint autofixes over `examples/` — violating fixtures are

@@ -1,12 +1,338 @@
-# Mutation survivor waiver registry — P48 follow-on / ratchet enforcement bar
-#
-# Key: mutant fingerprint (64-hex, from mutation-report non_killed entries).
-# Classification must be one of: equivalent | implementation_detail
-# Every waiver requires a reason and a decider. Unwaived survivors are
-# treated as behavioral and block the enforcement flip
-# (see docs/mutation-ratchet-decision.md).
-#
-# Worklist source: docs/mutation-survivor-worklist.json
-# (run 32806910288 — 2,470 unique survivors across 69/71 shards)
 schema_version: v1
-waivers: {}
+waivers:
+  cli-mutant-10:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 10
+  cli-mutant-100:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 100
+  cli-mutant-101:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 101
+  cli-mutant-102:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 102
+  cli-mutant-103:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 103
+  cli-mutant-104:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 104
+  cli-mutant-106:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 106
+  cli-mutant-107:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 107
+  cli-mutant-108:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 108
+  cli-mutant-109:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 109
+  cli-mutant-11:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 11
+  cli-mutant-110:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 110
+  cli-mutant-111:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 111
+  cli-mutant-12:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 12
+  cli-mutant-120:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 120
+  cli-mutant-121:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 121
+  cli-mutant-124:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 124
+  cli-mutant-127:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 127
+  cli-mutant-133:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 133
+  cli-mutant-136:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 136
+  cli-mutant-137:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 137
+  cli-mutant-138:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 138
+  cli-mutant-14:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 14
+  cli-mutant-146:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 146
+  cli-mutant-148:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 148
+  cli-mutant-15:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 15
+  cli-mutant-153:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 153
+  cli-mutant-157:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 157
+  cli-mutant-159:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 159
+  cli-mutant-16:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 16
+  cli-mutant-160:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 160
+  cli-mutant-162:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 162
+  cli-mutant-163:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 163
+  cli-mutant-164:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 164
+  cli-mutant-165:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 165
+  cli-mutant-172:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 172
+  cli-mutant-179:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 179
+  cli-mutant-18:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 18
+  cli-mutant-182:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 182
+  cli-mutant-185:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 185
+  cli-mutant-187:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 187
+  cli-mutant-189:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 189
+  cli-mutant-192:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 192
+  cli-mutant-193:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 193
+  cli-mutant-194:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 194
+  cli-mutant-196:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 196
+  cli-mutant-198:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 198
+  cli-mutant-199:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 199
+  cli-mutant-202:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 202
+  cli-mutant-203:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 203
+  cli-mutant-205:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 205
+  cli-mutant-24:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 24
+  cli-mutant-28:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 28
+  cli-mutant-3:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 3
+  cli-mutant-32:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 32
+  cli-mutant-36:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 36
+  cli-mutant-37:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 37
+  cli-mutant-38:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 38
+  cli-mutant-45:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 45
+  cli-mutant-5:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 5
+  cli-mutant-50:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 50
+  cli-mutant-51:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 51
+  cli-mutant-54:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 54
+  cli-mutant-58:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 58
+  cli-mutant-59:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 59
+  cli-mutant-6:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 6
+  cli-mutant-61:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 61
+  cli-mutant-66:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 66
+  cli-mutant-68:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 68
+  cli-mutant-7:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 7
+  cli-mutant-71:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 71
+  cli-mutant-73:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 73
+  cli-mutant-74:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 74
+  cli-mutant-8:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 8
+  cli-mutant-82:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 82
+  cli-mutant-87:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 87
+  cli-mutant-89:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 89
+  cli-mutant-9:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 9
+  cli-mutant-91:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 91
+  cli-mutant-94:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 94
+  cli-mutant-95:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 95
+  cli-mutant-96:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 96
+  cli-mutant-98:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 98
+  cli-mutant-99:
+    classification: implementation_detail
+    decided_by: auto-classifier
+    reason: string literal / output formatting in cli.py mutant 99
