@@ -20,6 +20,13 @@ repos:
         language: script
         pass_filenames: false
         always_run: true
+      - id: ruff-ci-parity
+        name: ruff check (same as CI)
+        entry: ruff check fettle tests
+        language: system
+        pass_filenames: false
+        always_run: true
+        types: [python]
       - id: fettle-rules-validate
         name: fettle rules validate
         entry: fettle/pre_commit_rules_validate.sh
