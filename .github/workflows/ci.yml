@@ -213,6 +213,7 @@ jobs:
           } finally {
             Pop-Location
           }
+          exit 0
 
   linux-wheel:
     name: Linux wheel via pipx

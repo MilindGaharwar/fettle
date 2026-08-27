@@ -134,6 +134,7 @@ def test_ci_runs_blocking_windows_bridge_publication_uat():
     assert "$recoveredExit = $LASTEXITCODE" in windows
     assert '$LASTEXITCODE -ne 0 -or -not ($doctor.checks' not in windows
     assert '$LASTEXITCODE -ne 0 -or -not ($recovered.checks' not in windows
+    assert "          exit 0" in windows
     assert 'Add-Content (Join-Path $bridgeVersion "opencode\\fettle.ts")' in windows
     assert "fettle demo" in windows
 
