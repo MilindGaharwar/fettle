@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Made `pipx install finefettle` the single installation path for the complete
-  Python toolkit, including analyzers, test and mutation runners, evaluation
-  parsing, commit-hook support, and browser automation. Existing extras remain
-  accepted as compatibility aliases.
-
 ## v1.12.1 - Apache-2.0 License
 
 **Released 2026-08-27**

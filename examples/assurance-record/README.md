@@ -6,7 +6,7 @@ Assurance Record.
 ## The 60-Second Version
 
 ```bash
-pipx install finefettle
+pipx install "finefettle[all]"
 cd your-project
 fettle init --profile solo
 fettle verify          # runs your tests; binds evidence

@@ -5,24 +5,22 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 
 
-def test_default_install_contains_complete_python_toolkit():
+def test_default_install_has_no_runtime_dependencies():
     with (ROOT / "pyproject.toml").open("rb") as stream:
         project = tomllib.load(stream)["project"]
 
-    names = {dependency.split("[", 1)[0].split("=", 1)[0].split(">", 1)[0] for dependency in project["dependencies"]}
-    assert names == {
-        "deptry", "mutmut", "playwright", "pre-commit", "pyright",
-        "pytest", "pyyaml", "ruff", "semgrep",
-    }
+    assert project["dependencies"] == []
 
 
-def test_legacy_capability_extras_are_compatible_aliases():
+def test_all_extra_composes_every_optional_capability():
     with (ROOT / "pyproject.toml").open("rb") as stream:
         extras = tomllib.load(stream)["project"]["optional-dependencies"]
 
-    assert extras == {
-        "dev": [], "mutation": [], "semgrep": [], "evals": [],
-        "uat": [], "all": [],
+    assert extras["mutation"] == ["mutmut==2.5.1"]
+    assert extras["evals"] == ["pyyaml>=6.0"]
+    assert extras["uat"] == ["playwright>=1.40"]
+    assert {dependency.removeprefix("finefettle[").removesuffix("]") for dependency in extras["all"]} == {
+        "dev", "mutation", "semgrep", "evals", "uat",
     }
 
 

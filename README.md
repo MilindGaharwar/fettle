@@ -69,7 +69,7 @@ authoritative.
 | Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
 | Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
 | Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Installation | One Python package includes Fettle's analyzers and runners |
+| Runtime footprint | Python 3.11+; base install has no third-party dependencies |
 
 ## Start in Two Minutes
 
@@ -77,7 +77,7 @@ Install once, prove the local loop, then initialize the repository you want to
 govern:
 
 ```bash
-pipx install finefettle
+pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
 fettle demo                  # deterministic, offline proof; changes no repo
 cd your-project
 fettle init --dry-run        # inspect files and host integrations first
@@ -104,11 +104,12 @@ of why it's unknown. Profiles: `solo` for individual repos, `team` adds
 delegation gates, `enterprise` adds strict mode and compliance evidence.
 Omit `--profile` for the guided interview.
 
-The PyPI package is `finefettle`; the installed command is `fettle`. The one
-install includes Fettle's Python analyzers, test and mutation runners,
-commit-hook support, evaluation parser, and Playwright library. Browser engines,
-agent CLIs, Git, external services, and JavaScript/TypeScript, Go, and Rust
-toolchains remain separate runtimes.
+The PyPI package is `finefettle`; the installed command is `fettle`. Plain
+`pipx install finefettle` installs one dependency-free package for governance,
+initialization, and the offline demo. The `all` extra adds Python analyzers,
+test and mutation runners, commit-hook support, evaluation parsing, and the
+Playwright library. Browser engines, agent CLIs, Git, external services, and
+JavaScript/TypeScript, Go, and Rust toolchains remain separate runtimes.
 
 ### Add Live Agent Governance
 
@@ -201,13 +202,14 @@ quarantine. A human reviews and promotes it; evidence and false-positive data
 drive later ratcheting. The model may propose policy, but it cannot silently
 activate it.
 
-### One Python Install, Strong Release Evidence
+### Small Base, Complete Toolkit Extra
 
-`pipx install finefettle` provides every Python dependency used by the shipped
-toolkit. Release CI installs the exact wheel through that command, exercises the
-offline demo and installed bridge, and checks the analyzer and runner entry
-points. Releases use PyPI Trusted Publishing, GitHub build provenance
-attestations, pinned workflow actions, and a CycloneDX SBOM.
+The base wheel has no third-party dependencies and supports governance,
+initialization, and the offline demo. Install `finefettle[all]` for Python
+analyzers, test and mutation runners, commit-hook support, evaluation parsing,
+and browser automation. Release CI tests both environments from the exact wheel.
+Releases use PyPI Trusted Publishing, GitHub build provenance attestations,
+pinned workflow actions, and a CycloneDX SBOM.
 
 ### Acceptance Is Tested From the User's Side
 

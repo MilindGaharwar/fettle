@@ -9,7 +9,7 @@ __version__ = "1.12.1"
 __all__ = ["__version__", "load_config", "scan_project", "find_repo_root"]
 
 
-def __getattr__(name):  # lazy to keep `import fettle` lightweight
+def __getattr__(name):  # lazy — keep `import fettle` dependency-free
     if name == "load_config":
         from fettle.config import load_config
         return load_config

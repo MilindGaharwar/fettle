@@ -18,7 +18,7 @@ fettle:
     FETTLE_MODE: advisory
     GIT_DEPTH: "0" # full history — --changed and baseline diffs need it
   before_script:
-    - pip install --quiet finefettle
+    - pip install --quiet finefettle ruff==0.15.20 semgrep==1.168.0
   script:
     - fettle config --validate
     - |

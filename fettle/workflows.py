@@ -57,8 +57,9 @@ def _unquote(value: str) -> str:
 def parse_command(path: Path) -> Workflow:
     """Parse a canonical commands/*.md file.
 
-    Frontmatter is at most five flat string keys. This small parser keeps
-    workflow installation independent from the general YAML parser.
+    Frontmatter is 5 flat string keys at most — a 20-line parser keeps
+    PyYAML out of the runtime dependencies (WP-11 constraint: pyproject
+    dependencies = [] is a hard invariant).
     """
     text = path.read_text(encoding="utf-8")
     meta: dict[str, str] = {}

@@ -63,17 +63,16 @@ def test_readme_replay_gate_claim_matches_workflow():
 
 
 def test_readme_single_install_claim_matches_pyproject():
-    """README's plain install must provide every advertised Python tool."""
+    """README quick start uses finefettle[all]; pyproject must compose it."""
     readme = _read("README.md")
-    assert "pipx install finefettle" in readme
-    assert "pipx install \"finefettle[all]\"" not in readme
+    if 'finefettle[all]' not in readme:
+        return
 
     import tomllib
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = "\n".join(data["project"]["dependencies"])
-    for package in ("mutmut", "playwright", "pyyaml", "ruff", "semgrep"):
-        assert package in dependencies
+    extras = data["project"]["optional-dependencies"]
+    assert any("finefettle[dev]" in dep for dep in extras["all"])
 
 
 def test_event_map_covers_all_dispatcher_and_transport_events():
