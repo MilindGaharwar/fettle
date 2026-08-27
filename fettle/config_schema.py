@@ -37,6 +37,7 @@ SCHEMA_VERSION = 1
 
 #: Dict paths whose keys are user-defined by design.
 OPEN_DICT_PATHS = frozenset({
+    "assurance.release",
     "gates.tdd.path_mappings",
     "mutation.test_mappings",
     "mutation.chunk_lines",

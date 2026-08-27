@@ -18,6 +18,77 @@ def test_cli_help(capsys):
     assert "consistency         State-consistency contracts (P53/SC2)" in capsys.readouterr().out
 
 
+def test_assurance_human_output_explains_evidence(tmp_path, capsys):
+    from argparse import Namespace
+    from fettle.cli import cmd_assurance
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle").mkdir()
+
+    cmd_assurance(Namespace(root=str(tmp_path), json=False, policy=None))
+
+    output = capsys.readouterr().out
+    assert "Why should I trust this change?" in output
+    assert "Evidence: none" in output
+
+
+def test_assurance_policy_json_exits_one_on_mismatch(tmp_path, capsys):
+    from argparse import Namespace
+    from fettle.cli import cmd_assurance
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle").mkdir()
+    (tmp_path / ".fettle.toml").write_text(
+        '[assurance.release.production]\nsecurity = "PASS"\n', encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_assurance(Namespace(root=str(tmp_path), json=True, policy="production"))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exc_info.value.code == 1
+    assert payload["policy"]["status"] == "FAIL"
+    assert payload["policy"]["criteria"][0]["evidence"] == []
+
+
+def test_assurance_policy_exits_two_on_configuration_error(tmp_path, capsys):
+    from argparse import Namespace
+    from fettle.cli import cmd_assurance
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle").mkdir()
+    (tmp_path / ".fettle.toml").write_text(
+        '[assurance.release.production]\nconfidence = "PASS"\n', encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_assurance(Namespace(root=str(tmp_path), json=False, policy="production"))
+
+    assert exc_info.value.code == 2
+    assert "Configuration error: unknown dimension confidence" in capsys.readouterr().out
+
+
+def test_assurance_policy_parser_exits_zero_on_match(tmp_path, monkeypatch, capsys):
+    from fettle.cli import main
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".fettle").mkdir()
+    (tmp_path / ".fettle.toml").write_text(
+        '[assurance.release.local]\nauthorization = "NOT_APPLICABLE"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["fettle", "assurance", "--root", str(tmp_path),
+                      "--policy", "local"],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert "Release policy local: PASS" in capsys.readouterr().out
+
+
 def test_cli_config_effective(capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".git").mkdir()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from fettle.assurance import build_assurance_record
+from fettle.assurance import build_assurance_record, evaluate_assurance_policy
 
 
 def _init_repo(tmp_path):
@@ -187,3 +187,136 @@ def test_scope_dimension_from_changed_files(tmp_path):
     )["record"]
 
     assert record["dimensions"]["scope"]["status"] == "PASS"
+
+
+def test_complete_clean_security_review_passes(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "security-review.json").write_text(json.dumps({
+        "findings": [],
+        "tools_used": ["ruff", "semgrep"],
+        "tools_missing": [],
+        "tool_errors": [],
+    }), encoding="utf-8")
+
+    security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
+
+    assert security["status"] == "PASS"
+    assert security["evidence"][0]["path"] == ".fettle/security-review.json"
+
+
+def test_partial_security_review_remains_unknown(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "security-review.json").write_text(json.dumps({
+        "findings": [],
+        "tools_used": ["ruff"],
+        "tools_missing": ["semgrep"],
+        "tool_errors": [],
+    }), encoding="utf-8")
+
+    security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
+
+    assert security["status"] == "UNKNOWN"
+    assert "incomplete" in security["reason"]
+
+
+def test_security_findings_fail_even_when_review_is_partial(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "security-review.json").write_text(json.dumps({
+        "findings": [{"code": "S608"}],
+        "tools_used": ["ruff"],
+        "tools_missing": ["semgrep"],
+        "tool_errors": [],
+    }), encoding="utf-8")
+
+    security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
+
+    assert security["status"] == "FAIL"
+    assert "1 security finding" in security["reason"]
+
+
+def test_policy_accepts_alternative_status_without_changing_vector(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nindependence = "PASS|UNKNOWN"\n',
+        encoding="utf-8",
+    )
+    record = build_assurance_record(str(root))["record"]
+
+    decision = evaluate_assurance_policy(record, str(root), "production")
+
+    assert record["dimensions"]["independence"]["status"] == "UNKNOWN"
+    assert decision["status"] == "PASS"
+    assert decision["criteria"][0]["actual"] == "UNKNOWN"
+    assert decision["criteria"][0]["expected"] == ["PASS", "UNKNOWN"]
+
+
+def test_policy_uses_documented_provenance_completeness_values(tmp_path):
+    root = _init_repo(tmp_path)
+    ledger = root / ".fettle" / "governance-ledger.jsonl"
+    ledger.write_text("{}\n", encoding="utf-8")
+    (root / ".fettle" / "ledger-anchor.json").write_text("{}", encoding="utf-8")
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nprovenance = "COMPLETE"\n',
+        encoding="utf-8",
+    )
+    record = build_assurance_record(str(root))["record"]
+
+    decision = evaluate_assurance_policy(record, str(root), "production")
+
+    assert record["dimensions"]["provenance"]["status"] == "PASS"
+    assert decision["status"] == "PASS"
+    assert decision["criteria"][0]["actual"] == "COMPLETE"
+
+
+def test_malformed_security_review_shape_remains_unknown(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "security-review.json").write_text("[]", encoding="utf-8")
+
+    security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
+
+    assert security["status"] == "UNKNOWN"
+    assert "malformed" in security["reason"]
+
+
+def test_policy_fails_closed_on_unknown_dimension(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nconfidence = "PASS"\n',
+        encoding="utf-8",
+    )
+
+    decision = evaluate_assurance_policy(
+        build_assurance_record(str(root))["record"], str(root), "production",
+    )
+
+    assert decision["status"] == "CONFIG_ERROR"
+    assert "unknown dimension confidence" in decision["errors"][0]
+
+
+def test_policy_fails_closed_on_empty_alternative(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nbehavior = "PASS|"\n',
+        encoding="utf-8",
+    )
+
+    decision = evaluate_assurance_policy(
+        build_assurance_record(str(root))["record"], str(root), "production",
+    )
+
+    assert decision["status"] == "CONFIG_ERROR"
+    assert "unsupported status" in decision["errors"][0]
+
+
+def test_policy_fails_closed_on_malformed_toml(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production\nbehavior = "PASS"\n', encoding="utf-8",
+    )
+
+    decision = evaluate_assurance_policy(
+        build_assurance_record(str(root))["record"], str(root), "production",
+    )
+
+    assert decision["status"] == "CONFIG_ERROR"
+    assert "could not parse" in decision["errors"][0]

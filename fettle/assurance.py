@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tomllib
 from pathlib import Path
 
 from fettle.graph_types import canonical_digest
@@ -35,6 +36,9 @@ _DIMENSIONS = (
     "authorization", "policy_integrity", "scope", "behavior",
     "security", "independence", "provenance", "uat", "ci",
 )
+
+_DIMENSION_STATUSES = {"PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"}
+_PROVENANCE_STATUSES = {"COMPLETE", "PARTIAL"}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -83,6 +87,39 @@ def _behavior_dimension(root: Path) -> dict:
         return _dimension("PASS", evidence)
     return _dimension("UNKNOWN", [],
                       reason="no verify stamp or mutation report retained")
+
+
+def _security_dimension(root: Path) -> dict:
+    path = root / ".fettle" / "security-review.json"
+    report = _read_json(path)
+    if not isinstance(report, dict):
+        reason = ("security review is malformed" if path.exists()
+                  else "no security review retained; run "
+                       "python -m fettle.security_review --path . --json > "
+                       ".fettle/security-review.json")
+        return _dimension("UNKNOWN", [], reason=reason)
+    evidence = [{"path": ".fettle/security-review.json",
+                 "digest": _digest_of(path)}]
+    findings = report.get("findings")
+    if not isinstance(findings, list):
+        return _dimension("UNKNOWN", evidence,
+                          reason="security review has malformed findings")
+    if findings:
+        suffix = "finding" if len(findings) == 1 else "findings"
+        return _dimension("FAIL", evidence,
+                          reason=f"{len(findings)} security {suffix} retained")
+    complete = (
+        isinstance(report.get("tools_used"), list)
+        and bool(report["tools_used"])
+        and isinstance(report.get("tools_missing"), list)
+        and report.get("tools_missing") == []
+        and isinstance(report.get("tool_errors"), list)
+        and report.get("tool_errors") == []
+    )
+    if complete:
+        return _dimension("PASS", evidence)
+    return _dimension("UNKNOWN", evidence,
+                      reason="security review coverage is incomplete")
 
 
 def _independence_dimension(root: Path) -> dict:
@@ -231,7 +268,65 @@ def _scope_dimension(root: Path, changed: list[str] | None) -> dict:
     return _dimension("PASS",
                       [{"path": "changed-files",
                         "digest": "sha256:" + hashlib.sha256(
-                            json.dumps(sorted(changed)).encode()).hexdigest()}])
+                             json.dumps(sorted(changed)).encode()).hexdigest()}])
+
+
+def evaluate_assurance_policy(record: dict, root: str, policy: str) -> dict:
+    """Evaluate one named release policy against a completed assurance vector."""
+    path = Path(root) / ".fettle.toml"
+    try:
+        with path.open("rb") as handle:
+            config = tomllib.load(handle)
+    except FileNotFoundError:
+        return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
+                "errors": [f"no .fettle.toml found for policy {policy}"]}
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
+                "errors": [f"could not parse .fettle.toml: {exc}"]}
+
+    assurance = config.get("assurance", {})
+    release = assurance.get("release", {}) if isinstance(assurance, dict) else {}
+    rules = release.get(policy) if isinstance(release, dict) else None
+    if not isinstance(rules, dict) or not rules:
+        return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
+                "errors": [f"missing [assurance.release.{policy}] policy"]}
+
+    dimensions = record.get("dimensions", {})
+    errors: list[str] = []
+    criteria: list[dict] = []
+    for name, requirement in sorted(rules.items()):
+        if name not in _DIMENSIONS:
+            errors.append(f"unknown dimension {name}")
+            continue
+        if not isinstance(requirement, str):
+            errors.append(f"{name} requirement must be a status string")
+            continue
+        expected = [value.strip() for value in requirement.split("|")]
+        allowed = (_PROVENANCE_STATUSES if name == "provenance"
+                   else _DIMENSION_STATUSES)
+        if not expected or any(value not in allowed for value in expected):
+            errors.append(f"{name} has unsupported status requirement {requirement!r}")
+            continue
+        dimension = dimensions.get(name, {})
+        dimension_status = dimension.get("status", "UNKNOWN")
+        actual = dimension_status
+        if name == "provenance" and dimension_status in _DIMENSION_STATUSES:
+            actual = "COMPLETE" if dimension_status == "PASS" else "PARTIAL"
+        criteria.append({
+            "dimension": name,
+            "actual": actual,
+            "expected": expected,
+            "passed": actual in expected,
+            "reason": dimension.get("reason", ""),
+            "evidence": dimension.get("evidence", []),
+        })
+
+    if errors:
+        status = "CONFIG_ERROR"
+    else:
+        status = "PASS" if all(item["passed"] for item in criteria) else "FAIL"
+    return {"name": policy, "status": status, "criteria": criteria,
+            "errors": errors}
 
 
 def build_assurance_record(root: str = ".",
@@ -243,8 +338,7 @@ def build_assurance_record(root: str = ".",
         "policy_integrity": _policy_integrity_dimension(root_path),
         "scope": _scope_dimension(root_path, changed_files),
         "behavior": _behavior_dimension(root_path),
-        "security": _dimension("UNKNOWN", [],
-                               reason="security evidence joins in P81"),
+        "security": _security_dimension(root_path),
         "independence": _independence_dimension(root_path),
         "provenance": _provenance_dimension(root_path),
         "uat": _uat_dimension(root_path),
