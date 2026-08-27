@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.12.1 - Apache-2.0 License
+
+**Released 2026-08-27**
+
+- Relicensed Fettle from the MIT License to the Apache License 2.0.
+- Added project attribution, trademark, citation, and contribution-signoff
+  guidance.
+- Releases through v1.12.0 remain licensed under the MIT License under which
+  they were published.
+
 ## v1.12.0 — Enforced Mutation Gate, Governance Ledger, Graph Intelligence
 
 **Released 2026-08-24**

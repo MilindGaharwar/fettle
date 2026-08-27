@@ -70,6 +70,12 @@ include credentials, private transcripts, proprietary source, or generated
 Security vulnerabilities follow [SECURITY.md](SECURITY.md), not the public issue
 tracker.
 
+## Developer Certificate of Origin
+
+Contributions must include a `Signed-off-by` line certifying the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/).
+Add it automatically when committing with `git commit -s`.
+
 ## Documentation
 
 Write for the reader's next action:

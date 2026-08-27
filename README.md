@@ -13,7 +13,7 @@
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
   <a href="https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml"><img src="https://github.com/MilindGaharwar/fettle/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="Apache 2.0 license"></a>
 </p>
 
 <p align="center">
@@ -374,4 +374,7 @@ backlog.
 
 ## License
 
-MIT (c) Milind
+Fettle v1.12.1 and later are licensed under the
+[Apache License 2.0](LICENSE). Releases through v1.12.0 remain available under
+the MIT License under which they were published. See the [trademark
+policy](TRADEMARK.md) for permitted uses of the Fettle name and logos.
