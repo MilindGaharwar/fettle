@@ -1370,16 +1370,20 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
 
 
 def cmd_assurance(args: argparse.Namespace) -> None:
-    """P80: canonical Assurance Record for this change."""
+    """P80/P81: canonical Assurance Record and release-policy decision."""
     import json as _json
 
-    from fettle.assurance import build_assurance_record
+    from fettle.assurance import build_assurance_record, evaluate_assurance_policy
 
     result = build_assurance_record(args.root)
     record = result["record"]
+    policy_name = getattr(args, "policy", None)
+    if policy_name:
+        result["policy"] = evaluate_assurance_policy(record, args.root, policy_name)
     if args.json:
         print(_json.dumps(result, indent=2))
     else:
+        print("Why should I trust this change?")
         print(f"Assurance Record {record['digest'][:16]} · "
               f"{record['completeness']} · commit "
               f"{(record['subject'].get('commit') or 'unknown')[:12]}")
@@ -1389,6 +1393,23 @@ def cmd_assurance(args: argparse.Namespace) -> None:
             if dim.get("reason"):
                 line += f" — {dim['reason']}"
             print(line)
+            evidence = dim.get("evidence", [])
+            refs = ", ".join(
+                item["path"] for item in evidence if isinstance(item.get("path"), str)
+            )
+            print(f"    Evidence: {refs or 'none'}")
+        if policy_name:
+            decision = result["policy"]
+            print(f"Release policy {policy_name}: {decision['status']}")
+            for criterion in decision["criteria"]:
+                expected = "|".join(criterion["expected"])
+                print(f"  {criterion['dimension']}: {criterion['actual']} "
+                      f"(requires {expected})")
+            for error in decision["errors"]:
+                print(f"  Configuration error: {error}")
+    if policy_name:
+        status = result["policy"]["status"]
+        raise SystemExit(0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
 
 def cmd_consistency(args: argparse.Namespace) -> None:
@@ -2054,6 +2075,8 @@ def main() -> None:
         "assurance", help="Canonical Assurance Record (P80)")
     p_assurance.add_argument("--root", default=".")
     p_assurance.add_argument("--json", action="store_true")
+    p_assurance.add_argument(
+        "--policy", help="Evaluate [assurance.release.NAME] against the record")
 
     p_consistency = subparsers.add_parser(
         "consistency", help="State-consistency contracts (P53/SC2)")

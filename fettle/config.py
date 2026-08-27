@@ -398,6 +398,8 @@ DEFAULTS: dict[str, Any] = {
         "timeout_s": 1800,
         "mode": "report",
     },
+    # P81: named release policies are validated by the assurance evaluator.
+    "assurance": {"release": {}},
 }
 
 CONFIG_FILENAME = ".fettle.toml"

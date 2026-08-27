@@ -75,6 +75,14 @@ class TestValidate:
         )
         assert errors == [] and warnings == []
 
+    def test_named_assurance_release_policies_are_valid_config(self) -> None:
+        errors, warnings = validate_config({
+            "assurance": {"release": {"production": {"security": "PASS"}}},
+        })
+
+        assert errors == [] and warnings == []
+        assert "assurance.release" in OPEN_DICT_PATHS
+
     def test_unknown_mode_value_errors(self) -> None:
         # WP4: lint has a declared mode enum, so a bogus mode is an error now
         errors, _ = validate_config({"gates": {"lint": {"mode": "yolo"}}})

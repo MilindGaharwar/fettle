@@ -83,6 +83,10 @@ Wire into the completion-gate pattern (criterion-typed, evidence-checked).
 Render the "Why should I trust this change?" explanation (CLI; every
 assertion carries its evidence reference).
 
+Status: complete. Named release policies evaluate exact dimension statuses,
+malformed policy fails closed, retained security-review results join the
+vector, and human/JSON output exposes the same evidence-linked decision.
+
 ### P82 — Independence computation
 
 Join authorship of code vs tests vs verifying identity from P52 roles +

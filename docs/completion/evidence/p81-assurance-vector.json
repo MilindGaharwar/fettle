@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "milestone": "p81-assurance-vector",
+  "revision": "assurance-policy-2026-08-27",
+  "observations": {
+    "full_tests": "2952 passed",
+    "focused_tests": "181 passed",
+    "ruff": "passed",
+    "diff_check": "passed",
+    "fettle_scan": "completed with 77 existing warnings and no errors",
+    "manual_cli": "human explanation and fail-closed missing-policy output confirmed"
+  },
+  "contracts": [
+    "exact-status-policy",
+    "alternative-status-policy",
+    "malformed-policy-fails-closed",
+    "security-review-non-pass-on-missing-or-partial-evidence",
+    "human-json-decision-parity",
+    "stable-policy-exit-codes"
+  ],
+  "uat_decision": "SHIP"
+}

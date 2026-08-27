@@ -1513,6 +1513,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "assurance": {
+      "type": "object",
+      "properties": {
+        "release": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
