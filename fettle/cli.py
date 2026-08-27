@@ -1393,8 +1393,6 @@ def cmd_assurance(args: argparse.Namespace) -> None:
 
 def cmd_consistency(args: argparse.Namespace) -> None:
     """P53/SC2 — state-consistency contract authoring UX."""
-    import sys as _sys
-
     from fettle.state_consistency import TEMPLATE_V1, lint_contract_text
 
     root = Path(args.root)
@@ -2003,6 +2001,7 @@ def main() -> None:
         "consistency", help="State-consistency contracts (P53/SC2)")
     consistency_sub = p_consistency.add_subparsers(dest="consistency_action", required=True)
     ci_init = consistency_sub.add_parser("init", help="Create a new contract from template")
+    ci_init.add_argument("--root", default=".")
     ci_init.add_argument("--id", dest="id", default=None)
     ci_init.add_argument("--force", action="store_true")
     ci_lint = consistency_sub.add_parser("lint", help="Validate all contracts")
