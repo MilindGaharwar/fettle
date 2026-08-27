@@ -105,21 +105,15 @@ jobs:
           WHEEL=$(ls dist/*.whl)
           sha256sum "$WHEEL" | sed 's#  dist/#  #' > artifact-contract/wheel.sha256
 
-      - name: Smoke-test dependency-free wheel
+      - name: Smoke-test complete default wheel
         run: |
           python -m venv /tmp/smoke
-          /tmp/smoke/bin/pip install --quiet --no-deps dist/*.whl
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
           /tmp/smoke/bin/fettle --version
           /tmp/smoke/bin/fettle demo
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; r = rules_dir(); c = commands_dir(); assert r.is_dir() and any(r.glob('*.yml')), r; assert c.is_dir() and len(list(c.glob('*.md'))) == 17, c"
-
-      - name: Smoke-test all optional capabilities
-        run: |
-          python -m venv /tmp/all-smoke
-          WHEEL=$(realpath dist/*.whl)
-          /tmp/all-smoke/bin/pip install --quiet "${WHEEL}[all]"
-          /tmp/all-smoke/bin/python -c "import fettle.evals_runner, playwright, pytest, yaml"
-          /tmp/all-smoke/bin/python -c "from pathlib import Path; bindir = Path('/tmp/all-smoke/bin'); assert all((bindir / tool).is_file() for tool in ('deptry', 'mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep'))"
+          /tmp/smoke/bin/python -c "import fettle.evals_runner, playwright, pytest, yaml"
+          /tmp/smoke/bin/python -c "from pathlib import Path; bindir = Path('/tmp/smoke/bin'); assert all((bindir / tool).is_file() for tool in ('deptry', 'mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep'))"
 
       - name: Validate exact wheel through pipx outside checkout
         run: |

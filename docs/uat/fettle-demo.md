@@ -8,7 +8,7 @@ Date: 2026-08-27
 |---|---|---|---|
 | Run demo outside a project | New user | Isolated pipx installation on macOS | Pass |
 | Repeat demo with identical output | Power user | Two independent subprocesses | Pass |
-| Fail independent verification | Power user | Injected verifier failure | Pass |
+| Fail independent verification | Power user | Broken assertion in copied fixture | Pass |
 | Initialize a detected host | New user | Empty Git repo, isolated home, detected OpenCode | Pass |
 | Run without network or API key | New user | Local wheel, self-contained runtime | Pass |
 
@@ -19,7 +19,7 @@ interactive input. Browser accessibility checks do not apply.
 
 ## Performance
 
-The installed-wheel demo completed in 0.16 seconds on the local macOS host,
+The source-rich demo completed in 0.14 seconds on the local macOS host,
 within the 20-second budget.
 
 ## Platform Evidence

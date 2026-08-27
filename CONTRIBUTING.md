@@ -14,11 +14,8 @@ uv sync --extra dev
 uv run fettle doctor
 ```
 
-Install Semgrep when changing bundled rules or adapter Semgrep behavior:
-
-```bash
-uv sync --extra dev --extra semgrep
-```
+The default project dependencies include the Python analyzers and runners used
+by Fettle. Legacy extras are accepted but do not change the environment.
 
 ## Make a focused change
 

@@ -16,10 +16,10 @@ whether the product is relevant in under 20 seconds.
 
 | Phase | Action | Output | Outcome |
 |---|---|---|---|
-| Entry | Run `fettle demo` anywhere | Stage 1 introduces a known violation | The demonstration starts without setup |
-| Detect | Wait | Stage 2 names the detected rule | The quality control is visible |
-| Repair | Wait | Stage 3 states the bounded repair | The corrective action is visible |
-| Verify | Wait | Stage 4 reports independent verification | Exit 0 proves the repaired behavior |
+| Entry | Run `fettle demo` anywhere | Stage 1 shows the seeded source with line numbers | The bug is concrete without opening a file |
+| Detect | Wait | Stage 2 names the rule and relative source location | The quality control is traceable |
+| Repair | Wait | Stage 3 shows a fixture-derived diff | The corrective action is visible |
+| Verify | Wait | Stage 4 reports clean detection, the real test count, and the bug's consequence | Exit 0 proves the repaired behavior |
 
 Interaction budget: one command, no prompts, under 20 seconds.
 
@@ -47,17 +47,20 @@ describes the command as an offline demonstration.
 Successful stdout is byte-identical across runs and supported operating systems.
 It contains no timestamps, durations, absolute paths, random identifiers, or
 filesystem iteration. Temporary files and subprocess output are never exposed.
+Source context and repair lines are derived from the bundled fixture rather than
+duplicated display strings. Output remains approximately 30 lines or fewer.
 
 ## UAT Scenarios
 
 Scenario: complete offline loop
   Given finefettle is installed and the current directory is not a project
   When the user runs `fettle demo` without network access
-  Then four ordered stages introduce, detect, repair, and independently verify the fixture
+  Then four ordered stages show the source, rule, repair diff, and independent verification
+  And stage 4 ends with the real-world consequence in plain language
   And the command exits 0 in under 20 seconds
 
 Scenario: independent verification fails
-  Given the repaired fixture does not satisfy its behavioral tests
+  Given a bundled fixture copy has a broken behavioral assertion
   When the verifier runs
   Then stage 4 reports `REPAIR NOT VERIFIED`
   And the command exits non-zero

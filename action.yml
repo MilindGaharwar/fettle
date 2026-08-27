@@ -51,11 +51,6 @@ runs:
       shell: bash
       run: python -m pip install --quiet "${{ github.action_path }}"
 
-    - name: Install ruff and semgrep
-      shell: bash
-      run: |
-        python -m pip install --quiet ruff semgrep
-
     - name: Run Fettle
       id: run-fettle
       continue-on-error: true

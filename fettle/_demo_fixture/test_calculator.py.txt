@@ -10,6 +10,9 @@ class ParseCountTests(unittest.TestCase):
     def test_invalid_count_returns_none(self) -> None:
         self.assertIsNone(parse_count("unknown"))
 
+    def test_negative_count(self) -> None:
+        self.assertEqual(parse_count("-2"), -2)
+
     def test_unexpected_errors_remain_visible(self) -> None:
         with self.assertRaises(TypeError):
             parse_count(None)

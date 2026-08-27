@@ -71,15 +71,14 @@ def test_sdist_smoke_runs_demo():
     assert "/tmp/sdist-smoke/bin/fettle demo" in build
 
 
-def test_release_smokes_dependency_free_base_and_all_capabilities():
+def test_release_smokes_complete_default_install():
     workflow = _workflow()
     build = workflow[workflow.index("  build:"):workflow.index("  publish:")]
 
-    assert "/tmp/smoke/bin/pip install --quiet --no-deps dist/*.whl" in build
+    assert "/tmp/smoke/bin/pip install --quiet dist/*.whl" in build
     assert "/tmp/smoke/bin/fettle demo" in build
-    assert '"${WHEEL}[all]"' in build
     assert "import fettle.evals_runner, playwright, pytest, yaml" in build
-    assert "bindir = Path('/tmp/all-smoke/bin')" in build
+    assert "bindir = Path('/tmp/smoke/bin')" in build
     assert "('deptry', 'mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep')" in build
 
 
