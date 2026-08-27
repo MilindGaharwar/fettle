@@ -21,7 +21,7 @@ def _git(cwd, *args):
 
 def _init_repo(tmp_path):
     _git(tmp_path, "init", "--initial-branch=main")
-    _git(tmp_path, "config", "user.email", "test@test.com")
+    _git(tmp_path, "config", "user.email", "test@fettle.invalid")
     _git(tmp_path, "config", "user.name", "Test")
     (tmp_path / "initial.txt").write_text("initial")
     _git(tmp_path, "add", "initial.txt")

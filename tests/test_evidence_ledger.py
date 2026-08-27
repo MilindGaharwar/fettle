@@ -19,7 +19,7 @@ from fettle.evidence_ledger import (
 
 def _init_repo(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)])
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", str(tmp_path), *flag], capture_output=True)
     return str(tmp_path)
 
@@ -409,7 +409,7 @@ def test_anchor_file_written_with_parents_and_exact_fields(tmp_path):
     nested = tmp_path / "deep"
     nested.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(nested)])
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", str(nested), *flag], capture_output=True)
     _seed(nested, 1)
     subprocess.run(["git", "-C", str(nested), "add", "."], capture_output=True)

@@ -648,6 +648,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     sys.exit(exit_code)
 
 
+def cmd_demo(_args: argparse.Namespace) -> None:
+    """Run the deterministic offline demonstration."""
+    from fettle.demo import run_demo
+
+    sys.exit(run_demo())
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     """Effectiveness metrics from the audit trail; --org rolls up per repo (WP-145)."""
     from fettle.report import compute_effectiveness, compute_org_report
@@ -1776,6 +1783,9 @@ def main() -> None:
     p_doctor.add_argument("--verify-hashes", dest="verify_hashes", action="store_true",
                           help="Verify pinned tools against wheel RECORD hashes (WP-147)")
 
+    subparsers.add_parser(
+        "demo", help="Run an offline detect-repair-verify demonstration")
+
     p_integrations = subparsers.add_parser(
         "integrations",
         help="Run external tool adapters (SonarQube, Black Duck, Pact)")
@@ -2158,6 +2168,7 @@ def main() -> None:
         "mutation": cmd_mutation,
         "completion": cmd_completion,
         "doctor": cmd_doctor,
+        "demo": cmd_demo,
         "integrations": cmd_integrations,
         "init": cmd_init,
         "workflows": cmd_workflows,

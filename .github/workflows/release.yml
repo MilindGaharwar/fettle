@@ -105,14 +105,21 @@ jobs:
           WHEEL=$(ls dist/*.whl)
           sha256sum "$WHEEL" | sed 's#  dist/#  #' > artifact-contract/wheel.sha256
 
-      - name: Smoke-test wheel (console script, version, bundled rules)
+      - name: Smoke-test dependency-free wheel
         run: |
           python -m venv /tmp/smoke
-          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          /tmp/smoke/bin/pip install --quiet --no-deps dist/*.whl
           /tmp/smoke/bin/fettle --version
+          /tmp/smoke/bin/fettle demo
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; r = rules_dir(); c = commands_dir(); assert r.is_dir() and any(r.glob('*.yml')), r; assert c.is_dir() and len(list(c.glob('*.md'))) == 17, c"
-          /tmp/smoke/bin/python -c "import fettle.evals_runner, playwright, pytest, yaml"
-          /tmp/smoke/bin/python -c "import os; from pathlib import Path; bindir = Path(os.path.dirname(os.path.realpath('/tmp/smoke/bin/python'))); assert all((bindir / tool).is_file() for tool in ('mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep'))"
+
+      - name: Smoke-test all optional capabilities
+        run: |
+          python -m venv /tmp/all-smoke
+          WHEEL=$(realpath dist/*.whl)
+          /tmp/all-smoke/bin/pip install --quiet "${WHEEL}[all]"
+          /tmp/all-smoke/bin/python -c "import fettle.evals_runner, playwright, pytest, yaml"
+          /tmp/all-smoke/bin/python -c "from pathlib import Path; bindir = Path('/tmp/all-smoke/bin'); assert all((bindir / tool).is_file() for tool in ('deptry', 'mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep'))"
 
       - name: Validate exact wheel through pipx outside checkout
         run: |
@@ -121,6 +128,7 @@ jobs:
           export PIPX_HOME=/tmp/candidate-pipx
           export PIPX_BIN_DIR=/tmp/candidate-bin
           pipx install "$WHEEL"
+          /tmp/candidate-bin/fettle demo
           PIPX_PYTHON=/tmp/candidate-pipx/venvs/finefettle/bin/python
           test -x "$PIPX_PYTHON"
           cd /tmp
@@ -139,6 +147,7 @@ jobs:
           /tmp/sdist-smoke/bin/pip install --quiet dist/*.tar.gz
           /tmp/sdist-smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; assert any(rules_dir().glob('*.yml')); assert len(list(commands_dir().glob('*.md'))) == 17"
           /tmp/sdist-smoke/bin/fettle workflows list
+          /tmp/sdist-smoke/bin/fettle demo
           /tmp/sdist-smoke/bin/python -c "from fettle.bridge import _source_subagent_hook; assert _source_subagent_hook().is_file()"
 
       # WP-147: SLSA provenance + Sigstore signatures for every artifact,

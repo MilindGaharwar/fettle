@@ -110,7 +110,7 @@ def test_stop_blocks_committed_v2_done_work_item_without_manifest(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
     item = root / "docs" / "backlog" / "feature.md"
     item.parent.mkdir(parents=True)
@@ -151,7 +151,7 @@ def test_stop_blocks_new_v1_work_item_but_allows_tracked_legacy_v1(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
     item_dir = root / "docs" / "backlog"
     item_dir.mkdir(parents=True)
@@ -181,7 +181,7 @@ def test_post_edit_allows_tracked_legacy_v1_work_item(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
     item = root / "docs" / "backlog" / "legacy.md"
     item.parent.mkdir(parents=True)

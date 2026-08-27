@@ -1,0 +1,15 @@
+import unittest
+
+from calculator import parse_count
+
+
+class ParseCountTests(unittest.TestCase):
+    def test_valid_count(self) -> None:
+        self.assertEqual(parse_count("6"), 6)
+
+    def test_invalid_count_returns_none(self) -> None:
+        self.assertIsNone(parse_count("unknown"))
+
+    def test_unexpected_errors_remain_visible(self) -> None:
+        with self.assertRaises(TypeError):
+            parse_count(None)

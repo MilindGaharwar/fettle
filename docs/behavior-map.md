@@ -17,6 +17,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Goal | Mechanism |
 |---|---|
 | Produce the canonical Assurance Record for this change | `fettle assurance` (`fettle/assurance.py` aggregating verify stamps, mutation reports, UAT reports, governance ledger, CI binding, spec coverage) |
+| Demonstrate the complete control loop without setup or network | `fettle demo` (`fettle/demo.py` over the bundled fixture and independent behavioral verifier) |
 | Inspect the composed gate/check pipeline with provenance | `fettle pipeline` (`fettle/pipeline_dump.py` over `dispatcher_registry.CHECKS` + policy layers) |
 | Add a user-facing CLI command | `cmd_*` function + subparser + entry in `cli.py::commands` dispatch dict + tests (`tests/test_cli.py`) |
 | Add an agent host transport | `fettle/agents/<host>.py` translator + conformance fixtures + `fettle init` registration |

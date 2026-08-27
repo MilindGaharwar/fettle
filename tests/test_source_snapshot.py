@@ -30,7 +30,7 @@ def _commit_file(root, rel, content, executable=False):
         handle.write(content)
     os.chmod(path, mode)
     _git(root, "add", rel)
-    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", rel)
+    _git(root, "-c", "user.email=test@fettle.invalid", "-c", "user.name=t", "commit", "-qm", rel)
 
 
 def _init_repo(tmp_path):
@@ -38,7 +38,7 @@ def _init_repo(tmp_path):
     root.mkdir()
     _git(str(root), "init", "-q")
     _git(str(root), "config", "core.symlinks", "true")
-    _git(str(root), "config", "user.email", "t@t")
+    _git(str(root), "config", "user.email", "test@fettle.invalid")
     _git(str(root), "config", "user.name", "t")
     return str(root)
 
@@ -109,7 +109,7 @@ def test_materialize_preserves_modes_and_symlinks(tmp_path):
         link = tmp_path / "repo" / "link.py"
         link.symlink_to("src/app.py")
         _git(root, "add", "link.py")
-        _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "link")
+        _git(root, "-c", "user.email=test@fettle.invalid", "-c", "user.name=t", "commit", "-qm", "link")
     snap = committed_snapshot(root)
 
     result = materialize_committed(root, snap["snapshot"])

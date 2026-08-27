@@ -2,7 +2,7 @@
   "schema_version": 1,
   "milestone": "p81-assurance-vector",
   "revision": "assurance-policy-2026-08-27",
-  "scope_digest": "7a3c4e37208947a84b4dfcb7d0bd055449ba369b5cc74a9508d538ec581d6f81",
+  "scope_digest": "7dfad932fcdcd09d4aca5ef6b3cec02212ccbe04e99ae11464a114f2eeb2ed37",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [

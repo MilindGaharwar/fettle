@@ -4,7 +4,9 @@ include README.md
 include CHANGELOG.md
 
 recursive-include rules *.yml
+recursive-include rules *.yaml
 recursive-include rules *.toml
+include rules/PROVENANCE.md
 recursive-include hooks *.json *.js
 include integrations/opencode/fettle.ts
 include integrations/vscode/src/extension.ts

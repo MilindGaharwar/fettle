@@ -23,16 +23,16 @@ class _BuildPyWithRules(build_py):
         if src_rules.is_dir():
             dest = Path(self.build_lib) / "fettle" / "_rules"
             dest.mkdir(parents=True, exist_ok=True)
-            for pattern in ("*.yml", "*.toml"):
-                for resource in src_rules.glob(pattern):
-                    shutil.copy2(resource, dest / resource.name)
-            # Also copy learned/ subdirectory if present
-            learned = src_rules / "learned"
-            if learned.is_dir():
-                dest_learned = dest / "learned"
-                dest_learned.mkdir(parents=True, exist_ok=True)
-                for yml in learned.glob("*.yml"):
-                    shutil.copy2(yml, dest_learned / yml.name)
+            resources = [src_rules / "PROVENANCE.md"]
+            resources.extend(
+                path for path in src_rules.rglob("*")
+                if path.is_file() and path.suffix in {".yml", ".yaml", ".toml"}
+            )
+            for resource in resources:
+                if resource.is_file():
+                    target = dest / resource.relative_to(src_rules)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(resource, target)
         # Copy templates/*.md so workflow commands can locate them when
         # pip-installed (WP-17; resolved at runtime via _resources.templates_dir)
         src_templates = Path(__file__).parent / "templates"

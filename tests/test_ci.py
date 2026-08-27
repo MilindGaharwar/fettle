@@ -51,7 +51,7 @@ def test_run_ci_changed_spec_without_audit_fails():
         "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
     })
     subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qm", "base"],
         cwd=d,
         check=True,
     )
@@ -73,7 +73,7 @@ def test_run_ci_baseline_cannot_suppress_spec_audit():
         "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
     })
     subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qam", "base"],
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qam", "base"],
         cwd=d,
         check=True,
     )
@@ -98,7 +98,7 @@ def test_run_ci_committed_spec_and_audit_pass_on_clean_branch():
         "docs/PRODUCT-STRATEGY.md": "# Strategy\n",
     })
     subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qm", "base"],
         cwd=d,
         check=True,
     )
@@ -110,7 +110,7 @@ def test_run_ci_committed_spec_and_audit_pass_on_clean_branch():
         f.write("# Audit\n" + "".join(f"\n## {section}\nChecked.\n" for section in sections))
     subprocess.run(["git", "add", "-A"], cwd=d, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "audited"],
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qm", "audited"],
         cwd=d,
         check=True,
     )

@@ -59,6 +59,11 @@ class TestRepoScaffolding:
 
 
 class TestAgentDetection:
+    def test_wheel_bridge_static_hook_asset_is_packaged(self) -> None:
+        from fettle.bridge import _source_subagent_hook
+
+        assert _source_subagent_hook().is_file()
+
     def test_no_agents_skipped(self, repo) -> None:
         named = _by_name(run_init(repo)[0])
         assert named["claude-code"].status == "skipped"

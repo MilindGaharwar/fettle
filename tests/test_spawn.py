@@ -59,7 +59,7 @@ def _git_repo(env) -> Path:
     repo = env / "gitrepo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     (repo / "README.md").write_text("hello\n")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)

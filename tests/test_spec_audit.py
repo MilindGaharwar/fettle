@@ -15,7 +15,7 @@ def _project(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "PRODUCT-STRATEGY.md").write_text("# Strategy\n")
     _git(tmp_path, "add", "docs/PRODUCT-STRATEGY.md")
-    _git(tmp_path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
+    _git(tmp_path, "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qm", "base")
 
 
 def _config(enabled=True):
@@ -61,7 +61,7 @@ def test_unchanged_audit_is_stale(tmp_path):
     _project(tmp_path)
     _write_audit(tmp_path)
     _git(tmp_path, "add", "docs/SPEC-AUDIT.md")
-    _git(tmp_path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "audit")
+    _git(tmp_path, "-c", "user.name=Test", "-c", "user.email=test@fettle.invalid", "commit", "-qm", "audit")
     _change_spec(tmp_path)
     assert "without a current" in scan_spec_audit(str(tmp_path), _config())[0]["message"]
 

@@ -24,6 +24,11 @@
   <a href="docs/README.md">Documentation</a>
 </p>
 
+```bash
+pipx install finefettle
+fettle demo
+```
+
 > **fettle** *(v.)* — a foundry term for trimming and cleaning a rough casting.
 
 AI coding agents changed the unit of software work. A change is no longer just a
@@ -64,7 +69,7 @@ authoritative.
 | Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
 | Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
 | Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Runtime footprint | Python 3.11+; Python analyzers and automation libraries included |
+| Runtime footprint | Python 3.11+; base install has no third-party dependencies |
 
 ## Start in Two Minutes
 
@@ -72,7 +77,7 @@ Choose the smallest path that proves value for your job.
 
 ### See the Assurance Record
 
-One package installs the complete toolkit. Three commands produce the
+The `all` extra installs the complete toolkit. Three commands produce the
 product's core output — a digest-bound, nine-dimension trust assessment
 for your change:
 
@@ -190,10 +195,11 @@ activate it.
 
 ### One Python Install, Strong Release Evidence
 
-The default package includes Fettle's Python analyzers, test and mutation runners,
-commit-hook support, evaluation parser, and browser-automation library. Releases
-use PyPI Trusted Publishing, GitHub build provenance attestations, pinned
-workflow actions, and a CycloneDX SBOM.
+The dependency-free base package supports governance, initialization, and the
+offline demo. Install `finefettle[all]` for Python analyzers, test and mutation
+runners, commit-hook support, evaluation parsing, and browser automation.
+Releases use PyPI Trusted Publishing, GitHub build provenance attestations,
+pinned workflow actions, and a CycloneDX SBOM.
 
 ### Acceptance Is Tested From the User's Side
 

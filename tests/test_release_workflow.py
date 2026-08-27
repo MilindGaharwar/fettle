@@ -1,6 +1,7 @@
 """Release workflow invariants for fail-closed publication."""
 
 from pathlib import Path
+import zipfile
 
 
 WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "release.yml"
@@ -45,6 +46,7 @@ def test_release_tests_exact_wheel_through_pipx_and_retains_digest():
 
     assert "pipx==1.7.1" in build
     assert "pipx install \"$WHEEL\"" in build
+    assert "/tmp/candidate-bin/fettle demo" in build
     assert "sha256sum \"$WHEEL\"" in build
     assert "name: artifact-contract" in build
     assert "fettle.installed_artifact_canary" in build
@@ -53,14 +55,32 @@ def test_release_tests_exact_wheel_through_pipx_and_retains_digest():
     assert "relative_to(Path('/tmp/candidate-pipx/venvs/finefettle').resolve())" in build
 
 
-def test_release_smoke_requires_default_runtime_dependencies():
+def test_built_wheel_contains_installed_hook_and_demo_assets(tmp_path):
+    wheels = list((Path(__file__).parent.parent / "dist").glob("finefettle-*.whl"))
+    if not wheels:
+        return
+    with zipfile.ZipFile(max(wheels, key=lambda path: path.stat().st_mtime_ns)) as archive:
+        names = set(archive.namelist())
+    assert "fettle/_bridge/subagent_inject.js" in names
+    assert "fettle/_demo_fixture/calculator.py.txt" in names
+    assert "fettle/_demo_fixture/test_calculator.py.txt" in names
+
+
+def test_sdist_smoke_runs_demo():
+    build = _workflow()[_workflow().index("  build:"):_workflow().index("  publish:")]
+    assert "/tmp/sdist-smoke/bin/fettle demo" in build
+
+
+def test_release_smokes_dependency_free_base_and_all_capabilities():
     workflow = _workflow()
     build = workflow[workflow.index("  build:"):workflow.index("  publish:")]
 
+    assert "/tmp/smoke/bin/pip install --quiet --no-deps dist/*.whl" in build
+    assert "/tmp/smoke/bin/fettle demo" in build
+    assert '"${WHEEL}[all]"' in build
     assert "import fettle.evals_runner, playwright, pytest, yaml" in build
-    assert "bindir = Path(os.path.dirname(os.path.realpath('/tmp/smoke/bin/python')))" in build
-    assert "('mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep')" in build
-    assert "finefettle\\[evals\\]" not in build
+    assert "bindir = Path('/tmp/all-smoke/bin')" in build
+    assert "('deptry', 'mutmut', 'pre-commit', 'pyright', 'ruff', 'semgrep')" in build
 
 
 def test_public_canary_verifies_digest_and_installed_behavior():
@@ -85,13 +105,14 @@ def test_ci_exposes_one_stable_required_check():
 
     assert "  required:\n" in workflow
     assert "name: CI required" in workflow
-    assert "needs: [lint, test, coverage, windows-bridge]" in workflow
+    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel]" in workflow
     assert "if: always()" in workflow
     assert "LINT_RESULT: ${{ needs.lint.result }}" in workflow
     assert "TEST_RESULT: ${{ needs.test.result }}" in workflow
     assert "COVERAGE_RESULT: ${{ needs.coverage.result }}" in workflow
     assert "WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}" in workflow
-    assert workflow.count('!= "success"') == 4
+    assert "LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}" in workflow
+    assert workflow.count('!= "success"') == 5
 
 
 def test_ci_runs_blocking_windows_bridge_publication_uat():
@@ -107,3 +128,16 @@ def test_ci_runs_blocking_windows_bridge_publication_uat():
     assert 'from fettle.bridge import bridge_dir; print(bridge_dir())' in windows
     assert 'Write-Host ($doctor | ConvertTo-Json -Depth 6)' in windows
     assert 'Add-Content (Join-Path $bridgeVersion "opencode\\fettle.ts")' in windows
+    assert "fettle demo" in windows
+
+
+def test_ci_runs_blocking_linux_pipx_container_uat():
+    workflow = CI_WORKFLOW.read_text()
+    linux = workflow[workflow.index("  linux-wheel:"):workflow.index("  required:")]
+
+    assert "container: python:3.12-slim" in linux
+    assert "pipx install dist/*.whl" in linux
+    assert "/tmp/bin/fettle demo || exit 1" in linux
+    assert "/tmp/bin/fettle init --json" in linux
+    assert "steps['opencode']['status'] == 'created'" in linux
+    assert "validate_bridge().ok" in linux

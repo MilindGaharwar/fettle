@@ -134,9 +134,9 @@
 
 ### Packaging
 
-- Extras are real install targets now; `pip install "finefettle[all]"`
-  composes every capability in one command on top of the already
-  batteries-included core wheel.
+- The base wheel has no third-party dependencies and supports governance,
+  initialization, and the offline demo. `pip install "finefettle[all]"`
+  composes every external capability in one command.
 
 ### Mutation Evidence
 
@@ -151,11 +151,10 @@
 
 ### Installation And Documentation
 
-- The default `finefettle` installation now includes Fettle's Python analyzers,
-  test and mutation runners, commit-hook support, behavioral-evaluation parser,
-  and browser-automation library. `pipx install finefettle` is the single
-  supported Python installer command; browser binaries, agent hosts, Git, and
-  non-Python language toolchains remain explicit external runtimes.
+- The default `finefettle` installation is dependency-free. Install
+  `finefettle[all]` for Python analyzers, test and mutation runners, commit-hook
+  support, behavioral-evaluation parsing, and browser automation. Browser
+  binaries, agent hosts, Git, and non-Python toolchains remain external.
 - Refreshed the README and active guides around a two-minute proof, safe agent
   activation, capability boundaries, recovery, and independently bound evidence.
 - Graduated Claude Code to `supported-installed` after a live candidate-wheel
