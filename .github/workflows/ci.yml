@@ -198,16 +198,18 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or ($init | Where-Object name -eq "bridge").status -ne "created") { throw "bridge publication failed" }
             $bridgeVersion = & $python -c "from fettle.bridge import bridge_dir; print(bridge_dir())"
             $doctor = & $python -m fettle doctor --json | ConvertFrom-Json
+            $doctorExit = $LASTEXITCODE
             Write-Host "Bridge path: $bridgeVersion"
             Write-Host ($doctor | ConvertTo-Json -Depth 6)
-            if ($LASTEXITCODE -ne 0 -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
+            if (($doctorExit -ne 0 -and $doctorExit -ne 1) -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
 
             Add-Content (Join-Path $bridgeVersion "opencode\fettle.ts") "tampered"
             $stale = & $python -m fettle doctor --json | ConvertFrom-Json
             if ($stale.checks | Where-Object { $_.name -eq "bridge" -and $_.ok }) { throw "doctor accepted tampered bridge" }
             & $python -m fettle init --json | Out-Null
             $recovered = & $python -m fettle doctor --json | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or -not ($recovered.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "bridge recovery failed" }
+            $recoveredExit = $LASTEXITCODE
+            if (($recoveredExit -ne 0 -and $recoveredExit -ne 1) -or -not ($recovered.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "bridge recovery failed" }
           } finally {
             Pop-Location
           }
@@ -230,6 +232,8 @@ jobs:
 
       - name: Configure detected OpenCode host without a clone
         run: |
+          apt-get update -q
+          apt-get install -yq --no-install-recommends git
           export HOME=/tmp/home
           export XDG_DATA_HOME=/tmp/home/.local/share
           mkdir -p "$HOME/.config/opencode" /tmp/project

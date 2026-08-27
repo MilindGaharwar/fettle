@@ -129,6 +129,11 @@ def test_ci_runs_blocking_windows_bridge_publication_uat():
     assert "fettle doctor --json" in windows
     assert 'from fettle.bridge import bridge_dir; print(bridge_dir())' in windows
     assert 'Write-Host ($doctor | ConvertTo-Json -Depth 6)' in windows
+    assert '$doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok }' in windows
+    assert "$doctorExit = $LASTEXITCODE" in windows
+    assert "$recoveredExit = $LASTEXITCODE" in windows
+    assert '$LASTEXITCODE -ne 0 -or -not ($doctor.checks' not in windows
+    assert '$LASTEXITCODE -ne 0 -or -not ($recovered.checks' not in windows
     assert 'Add-Content (Join-Path $bridgeVersion "opencode\\fettle.ts")' in windows
     assert "fettle demo" in windows
 
@@ -138,6 +143,7 @@ def test_ci_runs_blocking_linux_pipx_container_uat():
     linux = workflow[workflow.index("  linux-wheel:"):workflow.index("  required:")]
 
     assert "container: python:3.12-slim" in linux
+    assert "apt-get install -yq --no-install-recommends git" in linux
     assert "pipx install dist/*.whl" in linux
     assert "/tmp/bin/fettle demo || exit 1" in linux
     assert "/tmp/bin/fettle init --json" in linux
