@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "milestone": "p56-consistency-evaluator",
+  "revision": "p56a-2026-08-27",
+  "scope_digest": "3379ec8da73bb7ea5306ab25150922acb49fdc12a0e586abfc68527fe284d2f0",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "comparison-and-evaluation-contracts",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p56a-consistency-evaluator.json",
+        "sha256": "4f7147b2bb25598c6664fb37fc306795fb40daf67c10ae13f1e12925dd1c74db",
+        "revision": "p56a-2026-08-27"
+      },
+      "recovery": "Rerun the focused consistency comparator, runner, schema, and CLI suites"
+    },
+    {
+      "id": "full-regression-suite",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "success",
+      "evidence": {
+        "path": "docs/completion/evidence/p56a-consistency-evaluator.json",
+        "sha256": "4f7147b2bb25598c6664fb37fc306795fb40daf67c10ae13f1e12925dd1c74db",
+        "revision": "p56a-2026-08-27"
+      },
+      "recovery": "Run the full pytest suite and fix every failure"
+    }
+  ]
+}

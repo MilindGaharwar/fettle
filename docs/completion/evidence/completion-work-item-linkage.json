@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "milestone": "completion-work-item-linkage",
+  "revision": "completion-linkage-2026-08-27",
+  "observations": {
+    "focused_tests": "141 passed",
+    "full_tests": "2938 passed",
+    "ruff": "passed",
+    "diff_check": "passed",
+    "fettle_scan": "completed with 77 pre-existing advisories",
+    "p56_completion_validation": "complete with exit code 0"
+  },
+  "contracts": [
+    "v2-done-requires-same-id-manifest",
+    "stop-and-release-scan-all-v2-done-items",
+    "post-edit-validates-v2-done-transition",
+    "explicit-validation-recognizes-v2-work-items",
+    "scope-digest-invalidates-stale-completion",
+    "malformed-work-items-fail-closed",
+    "new-v1-rejected-tracked-v1-preserved",
+    "eventual-deadline-preserves-last-valid-observation"
+  ],
+  "uat_decision": "SHIP"
+}

@@ -46,6 +46,7 @@ class WorkItem:
     scope: list[str] = field(default_factory=list)
     spec: str = ""  # optional spec-id link (Pillar 5 → Pillar 1)
     has_resolution: bool = False
+    requires_completion: bool = False
 
 
 def _finding(path: str, line: int, severity: str, message: str, fix: str) -> dict:
@@ -59,6 +60,15 @@ def _finding(path: str, line: int, severity: str, message: str, fix: str) -> dic
 def is_work_item_text(text: str) -> bool:
     data, end = _parse_frontmatter(text.splitlines()[:50])
     return end > 0 and "fettle-work-item" in data
+
+
+def _looks_like_work_item(text: str) -> bool:
+    lines = text.splitlines()
+    return bool(
+        lines
+        and lines[0].strip() == "---"
+        and any(re.match(r"^\s*fettle-work-item\s*:", line) for line in lines[1:50])
+    )
 
 
 def parse_work_item(text: str, path: str = "<item>") -> tuple[WorkItem | None, list[dict]]:
@@ -95,8 +105,15 @@ def parse_work_item(text: str, path: str = "<item>") -> tuple[WorkItem | None, l
 
     if any(f["severity"] == "ERROR" for f in findings):
         return None, findings
-    return WorkItem(path=path, item_id=item_id, status=status, scope=list(scope),
-                    spec=str(data.get("spec", "")), has_resolution=has_resolution), findings
+    return WorkItem(
+        path=path,
+        item_id=item_id,
+        status=status,
+        scope=list(scope),
+        spec=str(data.get("spec", "")),
+        has_resolution=has_resolution,
+        requires_completion=data.get("fettle-work-item") == "v2",
+    ), findings
 
 
 def discover_work_items(root: str) -> list[tuple[WorkItem | None, list[dict]]]:
@@ -108,12 +125,28 @@ def discover_work_items(root: str) -> list[tuple[WorkItem | None, list[dict]]]:
             continue
         try:
             text = md.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            results.append((None, [_finding(
+                str(md.relative_to(root_path)),
+                1,
+                "ERROR",
+                f"cannot read possible work-item file: {exc}",
+                "restore readable UTF-8 Markdown or remove the file",
+            )]))
             continue
-        if not is_work_item_text(text):
+        if not is_work_item_text(text) and not _looks_like_work_item(text):
             continue
         rel = str(md.relative_to(root_path))
-        results.append(parse_work_item(text, rel))
+        parsed = parse_work_item(text, rel)
+        if parsed == (None, []):
+            parsed = (None, [_finding(
+                rel,
+                1,
+                "ERROR",
+                "malformed work item frontmatter",
+                "close the YAML frontmatter and provide valid work-item fields",
+            )])
+        results.append(parsed)
     return results
 
 

@@ -13,7 +13,8 @@ Amend evolution plan §17: any milestone In-progress >30 days must record one
 of — close-by-date, cut scope, or park with reason. First dispositions
 (PROPOSED, operator ratification welcome):
 
-- P52 authorship separation: CLOSE-BY-DATE next working session (2–3 d remain).
+- P52 authorship separation: GRADUATED 2026-08-23 with retained TLA+,
+  adversarial-path, topology, and two-role-flow evidence.
 - P43 narrow formal verification: PARK remaining three models pending demand;
   Policy Capsule and Work Item Claims models already verified.
 - P34 ratchet: no triage needed — awaiting qualifying runs via required PR gate.

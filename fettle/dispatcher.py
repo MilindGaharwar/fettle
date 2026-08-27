@@ -199,7 +199,7 @@ def main() -> int:
 
         elapsed_ms = int((time.monotonic() - check_start) * 1000)
         aggregator.add_result(spec.name, result, elapsed_ms)
-        if result.findings or result.evidence:
+        if result.findings or result.evidence or spec.name == "authorship_gate":
             with contextlib.suppress(Exception):
                 log_decision(
                     hook=spec.name,
@@ -210,6 +210,7 @@ def main() -> int:
                     evidence=[item.to_dict() for item in result.evidence],
                     duration_ms=elapsed_ms,
                     session_id=session_id,
+                    role=str(ctx.config.get("role", "")),
                 )
 
         # WP-D: Log overruns for observability

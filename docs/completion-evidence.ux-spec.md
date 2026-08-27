@@ -35,8 +35,10 @@ losing valid implementation or error-path evidence.
 ## Flow And Budget
 
 1. Maintain `docs/completion/<milestone>.json` beside the human report.
-2. Run `fettle completion validate`.
-3. If incomplete, run the displayed recovery command and update evidence.
+2. New work items use `fettle-work-item: v2`; record evidence and a same-ID
+   completion manifest before changing the work item to `status: done`.
+3. Run `fettle completion validate`.
+4. If incomplete, run the displayed recovery command and update evidence.
 
 - Common flow: one validation command, one recovery command after failure.
 - Validation performs local bounded file reads only and targets less than 100 ms

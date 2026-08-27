@@ -123,9 +123,9 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       enforcing override path verified
 - [?] D6. P45-P51 change-integrity runtime — gated by package-specific
       authorization and prerequisites in the evolution plan
-- [~] D7. P52 authorship separation — role gate and capsule plumbing shipped;
-      TLA+ role invariants, adversarial path coverage, topology guidance, and
-      an evidenced multi-agent flow remain
+- [x] D7. P52 authorship separation — role gate and capsule plumbing shipped;
+      retained CI verifies TLA+ role invariants, with adversarial path coverage,
+      topology guidance, and an evidenced two-role flow
 - [ ] D8. P53-P61 state consistency contracts — P53-P54 scheduled for the next
       minor and P55-P56 for the following minor; review and authorize P53/SC1
       before any runner, browser adapter, static heuristic, or enforcement work

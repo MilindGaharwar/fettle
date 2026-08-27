@@ -291,7 +291,7 @@ CHECKS: tuple[CheckSpec, ...] = (
         run=_lazy("fettle.completion_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
-        extensions=frozenset({".json"}),
+        extensions=frozenset({".json", ".md"}),
         order=18,
         budget_ms=100,
     ),

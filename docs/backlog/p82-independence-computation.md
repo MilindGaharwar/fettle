@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: p82-independence-computation
-status: open
+status: done
 scope:
   - fettle/assurance.py
   - fettle/authorship_gate.py
@@ -17,4 +17,10 @@ dimension (v1 is presence-based).
 
 ## Resolution
 
-Record how it was resolved.
+`fettle.assurance` now derives independence from retained `authorship_gate`
+trace decisions, the verification stamp's session identity, common spawn
+lineage, and a matching live work-item claim. `HIGH` requires distinct tester,
+implementer, and verifier identities under one claimed lineage; `MEDIUM`
+requires distinct implementation and test authors; same-session authorship is
+`LOW`; missing, malformed, or incomplete evidence remains `UNKNOWN`. The
+authorship gate records its validated effective role in the bounded trace.

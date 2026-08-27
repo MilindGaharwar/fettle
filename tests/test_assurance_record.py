@@ -85,13 +85,68 @@ def test_stages_report_presence(tmp_path):
     assert stages["mutation"]["digest"] is None
 
 
-def test_independence_passes_with_spawn_lineage(tmp_path, monkeypatch):
+def _write_authorship_trace(state_root, root, entries):
+    trace = state_root / "fettle" / "trace.jsonl"
+    trace.parent.mkdir(parents=True, exist_ok=True)
+    trace.write_text("".join(json.dumps({
+        "schema": 2, "hook": "authorship_gate", "status": "pass",
+        "file": str(root / path), "session_id": session, "role": role,
+        "parent_session_id": parent, "capsule_digest": "a" * 16,
+    }) + "\n" for path, session, role, parent in entries), encoding="utf-8")
+
+
+def test_independence_is_high_with_separate_authors_verifier_and_claim(tmp_path, monkeypatch):
     root = _init_repo(tmp_path)
-    monkeypatch.setenv("FETTLE_PARENT_SESSION", "parent-abc")
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    _write_authorship_trace(state, root, [
+        ("src/app.py", "impl-1", "implementer", "reviewer-1"),
+        ("tests/test_app.py", "test-1", "tester", "reviewer-1"),
+    ])
+    (root / ".fettle" / "verify.json").write_text(
+        json.dumps({"ok": True, "session_id": "reviewer-1"}), encoding="utf-8")
+    common = root / ".git" / "fettle"
+    common.mkdir(parents=True)
+    (common / "claims.json").write_text(json.dumps({
+        "item": {"session_id": "reviewer-1", "worktree": str(root), "claimed_at": 1},
+    }), encoding="utf-8")
 
     record = build_assurance_record(str(root))["record"]
 
-    assert record["dimensions"]["independence"]["status"] == "PASS"
+    independence = record["dimensions"]["independence"]
+    assert independence["status"] == "PASS"
+    assert independence["grade"] == "HIGH"
+
+
+def test_independence_is_medium_with_separate_authors_only(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    _write_authorship_trace(state, root, [
+        ("src/app.py", "impl-1", "implementer", "parent-1"),
+        ("tests/test_app.py", "test-1", "tester", "parent-1"),
+    ])
+
+    independence = build_assurance_record(str(root))["record"]["dimensions"]["independence"]
+
+    assert independence["status"] == "PASS"
+    assert independence["grade"] == "MEDIUM"
+    assert "independent verification" in independence["reason"]
+
+
+def test_independence_is_low_when_one_session_authors_code_and_tests(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    _write_authorship_trace(state, root, [
+        ("src/app.py", "same-1", "implementer", "parent-1"),
+        ("tests/test_app.py", "same-1", "tester", "parent-1"),
+    ])
+
+    independence = build_assurance_record(str(root))["record"]["dimensions"]["independence"]
+
+    assert independence["status"] == "FAIL"
+    assert independence["grade"] == "LOW"
 
 
 def test_independence_unknown_without_roles_or_lineage(tmp_path):
@@ -101,7 +156,8 @@ def test_independence_unknown_without_roles_or_lineage(tmp_path):
 
     independence = record["dimensions"]["independence"]
     assert independence["status"] == "UNKNOWN"
-    assert "role declaration" in independence["reason"]
+    assert independence["grade"] == "UNKNOWN"
+    assert "role-bound authorship" in independence["reason"]
 
 
 def test_anchor_makes_provenance_pass(tmp_path):

@@ -87,6 +87,15 @@ class TestFormat:
         assert item is not None and item.has_resolution
         assert findings == []
 
+    def test_v2_work_item_requires_completion_evidence_when_done(self):
+        text = VALID_ITEM.replace("fettle-work-item: v1", "fettle-work-item: v2")
+
+        item, findings = parse_work_item(text)
+
+        assert item is not None
+        assert item.requires_completion is True
+        assert findings == []
+
     def test_discover_and_duplicate_lint(self, repo):
         items_dir = repo / "docs" / "work" / "items"
         items_dir.mkdir(parents=True)

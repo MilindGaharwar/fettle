@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "milestone": "p55-consistency-runner",
+  "revision": "consistency-2026-08-27",
+  "observations": {
+    "full_tests": "2938 passed",
+    "ruff": "passed",
+    "diff_check": "passed",
+    "fettle_scan": "completed with 77 existing warnings and no errors"
+  },
+  "contracts": [
+    "bounded-adapter-execution",
+    "process-group-timeout",
+    "bounded-redacted-output",
+    "versioned-json-envelope",
+    "cleanup-on-all-terminal-paths",
+    "deterministic-execution-identity"
+  ],
+  "uat_decision": "SHIP"
+}

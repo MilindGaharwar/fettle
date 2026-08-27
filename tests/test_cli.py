@@ -619,16 +619,17 @@ def test_consistency_requires_an_action(capsys):
 def test_consistency_help_describes_commands(capsys):
     assert _run_consistency_cli(["--help"]) == 0
     assert capsys.readouterr().out == """\
-usage: fettle consistency [-h] {init,lint,list} ...
+usage: fettle consistency [-h] {init,lint,list,run} ...
 
 positional arguments:
-  {init,lint,list}
-    init            Create a new contract from template
-    lint            Validate all contracts
-    list            List contracts
+  {init,lint,list,run}
+    init                Create a new contract from template
+    lint                Validate all contracts
+    list                List contracts
+    run                 Run selected contracts
 
 options:
-  -h, --help        show this help message and exit
+  -h, --help            show this help message and exit
 """
 
 
@@ -686,9 +687,10 @@ def test_consistency_lint_continues_after_ignored_and_unmarked_files(tmp_path, c
 
 def test_consistency_lint_warning_only_is_nonblocking(tmp_path, capsys):
     (tmp_path / "contract.md").write_text("fettle-consistency: v1\n", encoding="utf-8")
-    warning = {"severity": "WARNING", "message": "review this", "fix": "confirm it"}
+    from fettle.state_consistency import Finding
+    warning = Finding("contract.md", 1, "WARNING", "review this", "confirm it")
 
-    with patch("fettle.state_consistency.lint_contract_text", return_value=[warning]):
+    with patch("fettle.state_consistency.discover_contracts", return_value=([], [warning])):
         assert _run_consistency_cli(["lint", "--root", str(tmp_path)]) == 0
     assert capsys.readouterr().out == "  [WARNING] review this\n      fix: confirm it\n"
 
@@ -741,3 +743,90 @@ comparator: {kind: exact}
 
     assert _run_consistency_cli(["list"]) == 0
     assert "local-contract" in capsys.readouterr().out
+
+
+def test_consistency_list_json_is_stable_and_includes_source(tmp_path, capsys):
+    contract = """\
+fettle-consistency: v1
+id: account-sync
+scope: ["src/**"]
+fact: account.name
+owner: accounts
+consistency: {model: immediate}
+observers: [{id: api, surface: api, adapter: read_account}]
+comparator: {kind: exact}
+"""
+    (tmp_path / "contract.md").write_text(contract, encoding="utf-8")
+
+    assert _run_consistency_cli(["list", "--root", str(tmp_path), "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "contracts": [{
+            "id": "account-sync", "model": "immediate",
+            "observers": 1, "path": "contract.md", "scope": ["src/**"],
+        }],
+        "status": "completed",
+    }
+
+
+def test_consistency_lint_executable_reports_missing_manifests_without_running(
+        tmp_path, capsys):
+    contract = """\
+fettle-consistency: v1
+id: account-sync
+scope: ["src/**"]
+fact: account.name
+owner: accounts
+consistency: {model: immediate}
+mutation: {adapter: rename_account, retry_safe: false}
+canonical_read: {adapter: read_account}
+observers: [{id: api, surface: api, adapter: read_api}]
+comparator: {kind: exact}
+cleanup: {adapter: delete_account}
+"""
+    (tmp_path / "contract.md").write_text(contract, encoding="utf-8")
+
+    assert _run_consistency_cli([
+        "lint", "--root", str(tmp_path), "--executable", "--json",
+    ]) == 1
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "config_error"
+    assert any("has no manifest" in finding["message"] for finding in result["findings"])
+
+
+def test_consistency_run_selects_exact_ids_and_reports_filtered_empty(
+        tmp_path, capsys):
+    contract = """\
+fettle-consistency: v1
+id: account-sync
+scope: ["src/**"]
+fact: account.name
+owner: accounts
+consistency: {model: immediate}
+mutation: {adapter: mutate, retry_safe: false}
+canonical_read: {adapter: read}
+observers: [{id: api, surface: api, adapter: read}]
+comparator: {kind: exact}
+cleanup: {adapter: cleanup}
+adapters:
+  mutate: {kind: command, argv: [tool, mutate], timeout_s: 1, output: json-v1}
+  read: {kind: command, argv: [tool, read], timeout_s: 1, output: json-v1}
+  cleanup: {kind: command, argv: [tool, cleanup], timeout_s: 1, output: json-v1}
+"""
+    (tmp_path / "contract.md").write_text(contract, encoding="utf-8")
+    completed = {"contract_id": "account-sync", "outcome": "unknown"}
+
+    with patch("fettle.consistency_runner.execute_contract", return_value=completed) as execute:
+        assert _run_consistency_cli([
+            "run", "account-sync", "--root", str(tmp_path), "--json",
+        ]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "results": [completed], "status": "completed",
+    }
+    assert execute.call_args.args[1].id == "account-sync"
+
+    assert _run_consistency_cli([
+        "run", "missing", "--root", str(tmp_path), "--json",
+    ]) == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "not_found"

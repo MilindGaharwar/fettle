@@ -3,8 +3,8 @@
 > Navigation: per-program plans and current next-actions are indexed in
 > `docs/plan-index.md`. This document remains the canonical decision record.
 
-Status: APPROVED for completed activities; P33, P35, and P44 complete; P34,
-P43, and P52 partially implemented; P36-P42 and P45-P61 remain proposed,
+Status: APPROVED for completed activities; P33, P35, P44, and P52 complete;
+P34 and P43 partially implemented; P36-P42 and P45-P61 remain proposed,
 blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning
 follow-through; P66-P71 prioritize first-class evidence-contract convergence
 
@@ -163,9 +163,9 @@ and are planning ranges, not commitments.
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
 | P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Graduated |
-| P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Proposed |
-| P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Proposed |
-| P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Proposed |
+| P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Complete |
+| P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Complete |
+| P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Complete |
 | P56 | Add comparators and immediate/eventual/snapshot/monotonic evaluation | following minor | P55 | 4-6 days | Proposed |
 | P57 | Add cross-view web/UAT state-consistency adapter | later minor | P55, P56 | 5-8 days | Proposed |
 | P58 | Add optional deterministic and property-based state sequences | later minor | P55, P56 | 5-8 days | Evidence-gated |
@@ -2067,10 +2067,11 @@ Add a `role` field to the PolicyCapsule spec and verify:
   spawns tester and implementer children, each constrained to its file set.
 - TLA+ role invariants verified via TLC.
 
-Status 2026-08-07: role propagation, monotonic capsule merging, spawn plumbing,
-and PreToolUse file-authority enforcement are implemented and unit-tested. The
-TLA+ role invariants, adversarial path/symlink coverage, topology recommendation,
-and evidenced end-to-end multi-agent session remain, so P52 has not graduated.
+Status 2026-08-23: graduated. Role propagation, monotonic capsule merging,
+spawn plumbing, and PreToolUse file-authority enforcement are implemented.
+Retained CI verifies the TLA+ role invariants; adversarial path/symlink coverage,
+topology recommendation, and an evidenced two-role flow cover the remaining
+graduation criteria. See the evidence summary in section 17.
 
 Estimate: 2–3 days.
 
@@ -2467,8 +2468,8 @@ machine-checkable rules over the record's assurance vector.
 - **P81** Assurance vector + sufficiency policies: after P80.
 - **P82** Independence computation (P52 roles x spawn lineage join):
   after P80.
-- **P83** Assurance Adversary v1 (codified tamper/adversary suite): after
-  P80. Feeds the P77 benchmark.
+- **P83** Assurance Adversary v1 (codified tamper/adversary suite): complete.
+  The named production-validator suite feeds the P77 benchmark.
 
 The assurance chain is stored as ordered digest-bound stage references
 inside the record — not a persistent graph store. P51's measured-admission
@@ -2517,8 +2518,8 @@ Current dispositions:
 - P44–P51 status: P44 is complete. Architecture, UX/BDD, and implementation
   contracts are recorded in the change-integrity document set; P45–P51 are not
   authorized until their package proposal review is explicitly accepted.
-- P52 status: role-based enforcement is implemented, but its TLA+, adversarial,
-  topology, and end-to-end graduation evidence remains.
+- P52 status: graduated 2026-08-23 with retained TLA+, adversarial path,
+  topology, and evidenced two-role flow coverage described above.
 - P53–P61 status: state-consistency UX/UAT and implementation contracts are
   recorded in the state-consistency document set. P53 is proposed as the next
   contract-only package; P54–P61 are not authorized, and P60 remains blocked on

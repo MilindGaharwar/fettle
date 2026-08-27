@@ -89,12 +89,21 @@ Join authorship of code vs tests vs verifying identity from P52 roles +
 spawn lineage chains + work-item claims. independence ∈ {LOW, MEDIUM,
 HIGH, UNKNOWN} with defined criteria; feeds the vector dimension.
 
+Status: complete. The dimension remains policy-compatible (`PASS`, `FAIL`, or
+`UNKNOWN`) and includes a `grade`: `HIGH` requires distinct tester,
+implementer, and verifier sessions under one claimed lineage; `MEDIUM` proves
+separate implementation and test authorship; same-session authorship is `LOW`;
+incomplete or conflicting retained evidence is `UNKNOWN`.
+
 ### P83 — Assurance Adversary v1
 
 Codify existing tamper coverage (ledger tampering, transcript drift,
 docs-claims, capsule tamper) into a named adversary suite; add stale-
 evidence injection, scope-manipulation attempt, policy-downgrade attempt.
 Each adversary is a test proving detection. Feeds P77 benchmark scoring.
+
+Status: complete. `tests/test_assurance_adversary.py` provides the named suite
+and exercises the production validators for all seven attack classes.
 
 ## Integration with existing programs
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 from fettle.dispatcher_types import Decision, HookContext, HookInput
@@ -62,6 +63,142 @@ def test_unrelated_json_edit_skips_completion_validation(tmp_path):
     ctx = _ctx(root, event="PostToolUse", target=root / "package.json")
 
     assert run_check(ctx).decision == Decision.ALLOW
+
+
+def test_done_work_item_edit_blocks_without_completion_manifest(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    item = root / "docs" / "backlog" / "feature.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n---\n"
+        "\n## Resolution\nShipped.\n",
+        encoding="utf-8",
+    )
+    ctx = _ctx(root, event="PostToolUse", target=item)
+
+    result = run_check(ctx)
+
+    assert result.decision == Decision.BLOCK
+    assert "feature-x" in result.message
+
+
+def test_stop_blocks_changed_v2_done_work_item_without_manifest(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    item = root / "docs" / "backlog" / "feature.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n---\n"
+        "\n## Resolution\nShipped.\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(_ctx(root))
+
+    assert result.decision == Decision.BLOCK
+    assert "feature-x" in result.message
+
+
+def test_stop_blocks_committed_v2_done_work_item_without_manifest(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+    item = root / "docs" / "backlog" / "feature.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n---\n"
+        "\n## Resolution\nShipped.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "done without evidence"], cwd=root, check=True)
+
+    result = run_check(_ctx(root))
+
+    assert result.decision == Decision.BLOCK
+    assert "feature-x" in result.message
+
+
+def test_post_edit_blocks_malformed_marked_work_item(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    item = root / "docs" / "backlog" / "feature.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(_ctx(root, event="PostToolUse", target=item))
+
+    assert result.decision == Decision.BLOCK
+    assert "malformed work item" in result.message
+
+
+def test_stop_blocks_new_v1_work_item_but_allows_tracked_legacy_v1(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+    item_dir = root / "docs" / "backlog"
+    item_dir.mkdir(parents=True)
+    legacy = item_dir / "legacy.md"
+    legacy.write_text(
+        "---\nfettle-work-item: v1\nid: legacy-x\nstatus: done\n---\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "legacy item"], cwd=root, check=True)
+    assert run_check(_ctx(root)).decision == Decision.ALLOW
+    (item_dir / "new.md").write_text(
+        "---\nfettle-work-item: v1\nid: new-x\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(_ctx(root))
+
+    assert result.decision == Decision.BLOCK
+    assert "new-x" in result.message
+    assert "fettle-work-item: v2" in result.message
+
+
+def test_post_edit_allows_tracked_legacy_v1_work_item(tmp_path):
+    from fettle.completion_gate import run_check
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+    item = root / "docs" / "backlog" / "legacy.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nfettle-work-item: v1\nid: legacy-x\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "legacy item"], cwd=root, check=True)
+    item.write_text(
+        "---\nfettle-work-item: v1\nid: legacy-x\nstatus: claimed\n---\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(_ctx(root, event="PostToolUse", target=item))
+
+    assert result.decision == Decision.ALLOW
 
 
 def test_release_blocks_invalid_complete_claim(tmp_path):
