@@ -24,7 +24,7 @@ def _git_repo(tmp_path: Path, remote: str | None = None) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     (repo / "a.txt").write_text("x\n")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)

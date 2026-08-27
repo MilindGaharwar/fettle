@@ -55,7 +55,7 @@ def _make_repo(tmp_path: Path) -> str:
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q", str(tmp_path)])
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", str(tmp_path), *flag], capture_output=True)
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True)
     subprocess.run(

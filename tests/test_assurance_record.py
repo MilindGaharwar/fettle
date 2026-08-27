@@ -12,7 +12,7 @@ def _init_repo(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)])
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", str(root), *flag], capture_output=True)
     (root / ".fettle").mkdir(exist_ok=True)
     return root

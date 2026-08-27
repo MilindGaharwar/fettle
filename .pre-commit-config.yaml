@@ -26,6 +26,12 @@ repos:
         language: script
         pass_filenames: false
         files: '^(rules/|\.fettle/rules/|\.lint/semgrep/).*\.ya?ml$'
+      - id: fettle-rule-provenance
+        name: fettle rule provenance
+        entry: python3 scripts/check_rule_provenance.py
+        language: system
+        pass_filenames: false
+        files: '^rules/'
       # Repo-consistency tests (fast, <10s): version alignment, schema
       # anti-drift, CLI exit-code contract. Added 2026-07-24 after a
       # README-only edit broke the version-alignment gate in CI — docs

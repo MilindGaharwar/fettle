@@ -12,7 +12,7 @@ Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
 | I want to... | Start here | Expected result |
 |---|---|---|
-| Evaluate Fettle without changing agent settings | `pipx install finefettle`, then `fettle check --changed` | A local quality report with bundled Python analyzers |
+| Evaluate Fettle without changing a repository | `pipx install finefettle`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
 | Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
 | Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
@@ -75,7 +75,7 @@ Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 | External integrations | SonarQube, Black Duck/Polaris, Pact | Disabled by default; credentials come from environment variables |
 | Guided workflows | 17 workflows across supported agents | Workflows guide agent reasoning; CLI commands remain deterministic automation |
 | Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
-| Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Requires pinned mutmut; changed-scope enforcement remains advisory |
+| Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Changed-scope survivors are enforced in this repository; adoption elsewhere remains policy-controlled |
 | Specifications and UAT | Living Markdown specs, trace coverage, agent/manual acceptance verdicts | UAT is report-only; unavailable automation remains visible |
 
 Every analyzer result preserves the distinction between `pass`, `violation`,

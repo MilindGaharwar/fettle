@@ -2,7 +2,7 @@
   "schema_version": 1,
   "milestone": "p55-consistency-runner",
   "revision": "consistency-2026-08-27",
-  "scope_digest": "d19733983c939b9dfc9e3c825348a5cee2a232ced3389cc0780b1b89792e5188",
+  "scope_digest": "ef17cac2c327c5aa8459b091c7d18a6c2b5b718d7b1092fbfbdfe3bac40d74ee",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [

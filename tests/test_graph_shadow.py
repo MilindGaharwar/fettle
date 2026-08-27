@@ -34,7 +34,7 @@ def test_marker_based_links_match_between_engines(tmp_path):
         "def test_a():\n    # traces: a/S1\n    assert True\n", encoding="utf-8"
     )
     subprocess.run(["git", "init", "-q", root])
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", root, *flag], capture_output=True)
     subprocess.run(["git", "-C", root, "add", "."], capture_output=True)
     subprocess.run(["git", "-C", root, "commit", "-qm", "init"], capture_output=True)

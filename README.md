@@ -24,6 +24,11 @@
   <a href="docs/README.md">Documentation</a>
 </p>
 
+```bash
+pipx install finefettle
+fettle demo
+```
+
 > **fettle** *(v.)* — a foundry term for trimming and cleaning a rough casting.
 
 AI coding agents changed the unit of software work. A change is no longer just a
@@ -64,27 +69,26 @@ authoritative.
 | Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
 | Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
 | Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Runtime footprint | Python 3.11+; Python analyzers and automation libraries included |
+| Runtime footprint | Python 3.11+; base install has no third-party dependencies |
 
 ## Start in Two Minutes
 
-Choose the smallest path that proves value for your job.
-
-### See the Assurance Record
-
-One package installs the complete toolkit. Three commands produce the
-product's core output — a digest-bound, nine-dimension trust assessment
-for your change:
+Install once, prove the local loop, then initialize the repository you want to
+govern:
 
 ```bash
 pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
+fettle demo                  # deterministic, offline proof; changes no repo
 cd your-project
+fettle init --dry-run        # inspect files and host integrations first
 fettle init --profile solo   # presets: solo | team | enterprise
-fettle verify                # run tests; bind evidence
-fettle assurance             # ← this is the product
+fettle verify                # run tests and bind evidence to this change
+fettle assurance             # inspect the resulting trust assessment
 ```
 
-The `fettle assurance` output:
+`fettle demo` starts with a broken Python fixture, shows the source and finding,
+applies the repair, then proves all four fixture tests pass. `fettle assurance`
+produces a digest-bound, nine-dimension record for a real repository:
 
 ```
 Assurance Record c04c9a206c05 · PARTIAL · commit 25f4957
@@ -100,9 +104,18 @@ of why it's unknown. Profiles: `solo` for individual repos, `team` adds
 delegation gates, `enterprise` adds strict mode and compliance evidence.
 Omit `--profile` for the guided interview.
 
-The PyPI package is `finefettle`; the installed command is `fettle`.
+The PyPI package is `finefettle`; the installed command is `fettle`. Plain
+`pipx install finefettle` installs one dependency-free package for governance,
+initialization, and the offline demo. The `all` extra adds Python analyzers,
+test and mutation runners, commit-hook support, evaluation parsing, and the
+Playwright library. Browser engines, agent CLIs, Git, external services, and
+JavaScript/TypeScript, Go, and Rust toolchains remain separate runtimes.
 
 ### Add Live Agent Governance
+
+`fettle init` installs the supported host bridge and repository policy after
+showing the planned changes. Run `fettle doctor` afterward to see which host and
+external-runtime capabilities are available.
 
 ## The Problem Fettle Solves
 
@@ -131,9 +144,10 @@ developer do next?”
 
 ### One Policy Across Four Agent Hosts
 
-Claude Code, Codex CLI, Gemini CLI, and OpenCode events normalize into one
-dispatcher and one `.fettle.toml` policy. Host transports differ, but gate logic
-does not need to be rewritten for every agent.
+Claude Code, Codex CLI, and OpenCode are live-verified; Gemini CLI is
+contract-tested. Their events normalize into one dispatcher and one
+`.fettle.toml` policy, so gate logic does not need to be rewritten for every
+agent.
 
 ### Evidence Never Becomes Clean by Accident
 
@@ -188,12 +202,14 @@ quarantine. A human reviews and promotes it; evidence and false-positive data
 drive later ratcheting. The model may propose policy, but it cannot silently
 activate it.
 
-### One Python Install, Strong Release Evidence
+### Small Base, Complete Toolkit Extra
 
-The default package includes Fettle's Python analyzers, test and mutation runners,
-commit-hook support, evaluation parser, and browser-automation library. Releases
-use PyPI Trusted Publishing, GitHub build provenance attestations, pinned
-workflow actions, and a CycloneDX SBOM.
+The base wheel has no third-party dependencies and supports governance,
+initialization, and the offline demo. Install `finefettle[all]` for Python
+analyzers, test and mutation runners, commit-hook support, evaluation parsing,
+and browser automation. Release CI tests both environments from the exact wheel.
+Releases use PyPI Trusted Publishing, GitHub build provenance attestations,
+pinned workflow actions, and a CycloneDX SBOM.
 
 ### Acceptance Is Tested From the User's Side
 
@@ -221,7 +237,7 @@ Support is described by surface, not by one broad "polyglot" claim.
 | Mutation quality | Python preflight, changed/full runs, **enforced survivor gate**, replay machinery, canonical baseline comparison |
 | Governance ledger | Tamper-evident hash-chained records anchored to commits (`fettle ledger`) |
 | Graph intelligence | Advisory ephemeral hypergraph: `fettle graph status\|impact\|shadow` with digest-bound generations |
-| Consistency contracts | Frozen cross-view divergence contracts (schema + lint + template; runners next) |
+| Consistency contracts | Frozen cross-view divergence contracts: schema, lint, and template; execution remains planned |
 | Assurance | Canonical result states, behavioral evals, compliance/lineage reports, TLA+ models for selected protocols |
 
 ### Quality and Security Gates

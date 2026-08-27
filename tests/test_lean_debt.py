@@ -72,7 +72,7 @@ def _run_sniffers(
 
 def _init_git(path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=str(path), check=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(path), check=True)
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=str(path), check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=str(path), check=True)
 
 

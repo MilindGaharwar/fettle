@@ -480,7 +480,7 @@ class TestStopGate:
 
     def test_fettle_runtime_files_do_not_invalidate_their_own_evidence(self, tmp_path):
         subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=tmp_path, check=True)
         subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
         src = tmp_path / "src.py"
         src.write_text("x = 1\n")
@@ -620,7 +620,7 @@ class TestStopGate:
         """Stamp older than edits but git tree identical to verify time — fresh."""
         import subprocess as sp
         sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-        sp.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=tmp_path, check=True)
         sp.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
         src = tmp_path / "src.py"
         src.write_text("x = 1\n")

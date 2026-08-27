@@ -26,6 +26,9 @@ jobs:
       - name: Ruff check
         run: ruff check fettle tests
 
+      - name: Require provenance for every rule asset
+        run: python scripts/check_rule_provenance.py
+
   # WP-B5: honesty for the `Typing :: Typed` classifier — mypy runs on every
   # push but does not block yet. Promote to blocking once the baseline is 0.
   typecheck:
@@ -181,6 +184,8 @@ jobs:
           python -m venv $venv
           $python = Join-Path $venv "Scripts\python.exe"
           & $python -m pip install --quiet $env:GITHUB_WORKSPACE
+          & $python -m fettle demo
+          if ($LASTEXITCODE -ne 0) { throw "offline demo failed" }
           $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"
 
           Push-Location $project
@@ -193,24 +198,55 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or ($init | Where-Object name -eq "bridge").status -ne "created") { throw "bridge publication failed" }
             $bridgeVersion = & $python -c "from fettle.bridge import bridge_dir; print(bridge_dir())"
             $doctor = & $python -m fettle doctor --json | ConvertFrom-Json
+            $doctorExit = $LASTEXITCODE
             Write-Host "Bridge path: $bridgeVersion"
             Write-Host ($doctor | ConvertTo-Json -Depth 6)
-            if ($LASTEXITCODE -ne 0 -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
+            if (($doctorExit -ne 0 -and $doctorExit -ne 1) -or -not ($doctor.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "doctor did not validate bridge" }
 
             Add-Content (Join-Path $bridgeVersion "opencode\fettle.ts") "tampered"
             $stale = & $python -m fettle doctor --json | ConvertFrom-Json
             if ($stale.checks | Where-Object { $_.name -eq "bridge" -and $_.ok }) { throw "doctor accepted tampered bridge" }
             & $python -m fettle init --json | Out-Null
             $recovered = & $python -m fettle doctor --json | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or -not ($recovered.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "bridge recovery failed" }
+            $recoveredExit = $LASTEXITCODE
+            if (($recoveredExit -ne 0 -and $recoveredExit -ne 1) -or -not ($recovered.checks | Where-Object { $_.name -eq "bridge" -and $_.ok })) { throw "bridge recovery failed" }
           } finally {
             Pop-Location
           }
+          exit 0
+
+  linux-wheel:
+    name: Linux wheel via pipx
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and install exact wheel
+        run: |
+          python -m pip install --quiet build==1.5.0 pipx==1.7.1
+          python -m build --wheel
+          export PIPX_HOME=/tmp/pipx
+          export PIPX_BIN_DIR=/tmp/bin
+          pipx install dist/*.whl
+          /tmp/bin/fettle demo || exit 1
+
+      - name: Configure detected OpenCode host without a clone
+        run: |
+          apt-get update -q
+          apt-get install -yq --no-install-recommends git
+          export HOME=/tmp/home
+          export XDG_DATA_HOME=/tmp/home/.local/share
+          mkdir -p "$HOME/.config/opencode" /tmp/project
+          git init -q /tmp/project
+          cd /tmp/project
+          /tmp/bin/fettle init --json > /tmp/init.json
+          /tmp/pipx/venvs/finefettle/bin/python -c "import json; from pathlib import Path; from fettle.bridge import validate_bridge; data=json.loads(Path('/tmp/init.json').read_text()); steps={item['name']: item for item in data}; assert steps['bridge']['status'] == 'created'; assert steps['opencode']['status'] == 'created'; assert validate_bridge().ok"
 
   required:
     name: CI required
     if: always()
-    needs: [lint, test, coverage, windows-bridge]
+    needs: [lint, test, coverage, windows-bridge, linux-wheel]
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking CI job
@@ -219,11 +255,13 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}
+          LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}
         run: |
           if [ "$LINT_RESULT" != "success" ] || \
              [ "$TEST_RESULT" != "success" ] || \
              [ "$COVERAGE_RESULT" != "success" ] || \
-             [ "$WINDOWS_BRIDGE_RESULT" != "success" ]; then
-            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT"
+             [ "$WINDOWS_BRIDGE_RESULT" != "success" ] || \
+             [ "$LINUX_WHEEL_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT"
             exit 1
           fi

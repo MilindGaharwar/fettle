@@ -42,7 +42,7 @@ scope:
 def _git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path,
                    capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path,
+    subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=tmp_path,
                    capture_output=True, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path,
                    capture_output=True, check=True)

@@ -33,7 +33,7 @@ try:
     import yaml
 except ImportError:
     sys.stderr.write(
-        "fettle evals requires PyYAML — reinstall finefettle\n"
+        "fettle evals requires PyYAML; install 'finefettle[evals]'\n"
     )
     sys.exit(2)
 

@@ -45,7 +45,7 @@ def _make_repo(tmp_path):
     )
     subprocess.run(["git", "init", "-q", str(tmp_path)])
     subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "t@t"],
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@fettle.invalid"],
         capture_output=True,
     )
     subprocess.run(

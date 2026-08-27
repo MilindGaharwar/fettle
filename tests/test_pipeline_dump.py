@@ -12,7 +12,7 @@ def _init_repo_with_config(tmp_path, config_body: str) -> str:
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)])
     (root / ".fettle.toml").write_text(config_body, encoding="utf-8")
-    for flag in (("config", "user.email", "t@t"), ("config", "user.name", "t")):
+    for flag in (("config", "user.email", "test@fettle.invalid"), ("config", "user.name", "t")):
         subprocess.run(["git", "-C", str(root), *flag], capture_output=True)
     return str(root)
 
