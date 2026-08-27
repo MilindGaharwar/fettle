@@ -11,7 +11,7 @@
       "description": "In-session quality governance with advisory-first code and process gates, evidence, and multi-agent controls.",
       "version": "1.6.0",
       "author": {"name": "Milind"},
-      "license": "MIT",
+      "license": "Apache-2.0",
       "homepage": "https://github.com/MilindGaharwar/fettle",
       "keywords": ["quality", "ai-agents", "lint", "semgrep", "ruff", "hooks", "governance"]
     }

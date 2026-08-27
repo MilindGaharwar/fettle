@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "finefettle"
-version = "1.12.0"
+version = "1.12.1"
 description = "Trust layer for agentic software engineering: policy that survives delegation, evidence that cannot become clean by accident, and verdicts bound to artifacts across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Milind"}]
 requires-python = ">=3.11"
 dependencies = [

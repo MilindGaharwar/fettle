@@ -5,7 +5,7 @@
   "version": "0.9.1",
   "publisher": "MilindGaharwar",
   "icon": "icon.png",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/MilindGaharwar/fettle"
