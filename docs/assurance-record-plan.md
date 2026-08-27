@@ -89,12 +89,21 @@ Join authorship of code vs tests vs verifying identity from P52 roles +
 spawn lineage chains + work-item claims. independence ∈ {LOW, MEDIUM,
 HIGH, UNKNOWN} with defined criteria; feeds the vector dimension.
 
+Status: complete. The dimension remains policy-compatible (`PASS`, `FAIL`, or
+`UNKNOWN`) and includes a `grade`: `HIGH` requires distinct tester,
+implementer, and verifier sessions under one claimed lineage; `MEDIUM` proves
+separate implementation and test authorship; same-session authorship is `LOW`;
+incomplete or conflicting retained evidence is `UNKNOWN`.
+
 ### P83 — Assurance Adversary v1
 
 Codify existing tamper coverage (ledger tampering, transcript drift,
 docs-claims, capsule tamper) into a named adversary suite; add stale-
 evidence injection, scope-manipulation attempt, policy-downgrade attempt.
 Each adversary is a test proving detection. Feeds P77 benchmark scoring.
+
+Status: complete. `tests/test_assurance_adversary.py` provides the named suite
+and exercises the production validators for all seven attack classes.
 
 ## Integration with existing programs
 
@@ -109,3 +118,16 @@ Each adversary is a test proving detection. Feeds P77 benchmark scoring.
 - Persistent graph store (P51 gate decides if ever needed).
 - Numeric assurance score (vector + policy, per doctrine).
 - New agent framework, LLM, observability platform, rule-count chase.
+
+## P48 Consumer Graduation Review (2026-08-25)
+
+Shadow parity results on `examples/corpus` (maintained fixture):
+
+| Consumer | Matched | Unexplained narrower | Documented differences | Verdict |
+|---|---|---|---|---|
+| semantic | 4 | 0 | traces (requirements as attributes) | **READY** |
+| topology | 0 items | 0 | no open work items in corpus (vacuous) | needs fixture |
+| verify | — | — | expected_unsupported (module↔scenario bridge deferred) | NOT READY |
+
+**Decision**: semantic consumer authorized for graduation. Topology and
+verify remain advisory until their prerequisites are met.

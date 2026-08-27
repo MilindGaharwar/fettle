@@ -10,6 +10,21 @@ Correct P63's false completion record, obtain genuine installed-CLI success
 evidence, and make contradictory completion claims mechanically impossible in
 normal Fettle completion and release paths.
 
+### Integrated Activity Flow
+
+For `fettle-work-item: v2`, planning, implementation, evidence, and completion
+are one lifecycle rather than parallel documentation:
+
+```text
+open/claimed work item -> implement and verify -> record typed evidence
+       -> validate same-ID completion manifest -> transition item to done
+```
+
+Post-edit, Stop, explicit validation, and release checks use the same completion
+evaluator. A v2 `done` transition without complete evidence fails closed. Legacy
+v1 work items remain readable and migrate when next edited rather than causing a
+repository-wide historical backfill.
+
 ## Assumptions And Boundaries
 
 - `c2be709` is retained; corrections use a new commit.

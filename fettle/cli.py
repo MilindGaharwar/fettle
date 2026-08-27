@@ -1391,6 +1391,120 @@ def cmd_assurance(args: argparse.Namespace) -> None:
             print(line)
 
 
+def cmd_consistency(args: argparse.Namespace) -> None:
+    """P53/SC2 — state-consistency contract authoring UX."""
+    from fettle.state_consistency import (
+        TEMPLATE_V1,
+        discover_contracts,
+        validate_executable_contract,
+    )
+
+    root = Path(args.root)
+    if args.consistency_action == "init":
+        target = root / "specs" / f"{args.id or 'new-contract'}.md"
+        if target.exists() and not args.force:
+            print(f"Already exists: {target} — use --force to overwrite")
+            sys.exit(1)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(TEMPLATE_V1, encoding="utf-8")
+        print(f"Created: {target}")
+        print("Fill in the placeholders and run `fettle consistency lint` to validate.")
+        sys.exit(0)
+
+    if args.consistency_action == "lint":
+        contracts, parsed_findings = discover_contracts(root)
+        findings = [finding.__dict__ | {"rule": "CONSISTENCY_CONTRACT_LINT"}
+                    for finding in parsed_findings]
+        if args.executable:
+            for discovered in contracts:
+                findings.extend(
+                    finding.__dict__ | {"rule": "CONSISTENCY_EXECUTABLE_LINT"}
+                    for finding in validate_executable_contract(discovered.contract)
+                )
+        if args.json:
+            print(json.dumps({
+                "status": "config_error" if findings else "completed",
+                "contracts": len(contracts),
+                "findings": findings,
+            }, indent=2, sort_keys=True))
+            sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
+        if not findings:
+            print("All consistency contracts pass lint.")
+            sys.exit(0)
+        for f in findings:
+            print(f"  [{f['severity']}] {f['message']}")
+            print(f"      fix: {f['fix']}")
+        sys.exit(1 if any(f["severity"] == "ERROR" for f in findings) else 0)
+
+    if args.consistency_action == "list":
+        contracts, _findings = discover_contracts(root)
+        if args.json:
+            print(json.dumps({
+                "status": "completed",
+                "contracts": [{
+                    "id": item.contract.id,
+                    "model": item.contract.model,
+                    "observers": len(item.contract.observers),
+                    "path": str(item.path.relative_to(root)),
+                    "scope": list(item.contract.scope),
+                } for item in contracts],
+            }, indent=2, sort_keys=True))
+            sys.exit(0)
+        for item in contracts:
+            c = item.contract
+            print(f"  {c.id:<36} {c.model:<12} {len(c.observers)} observers  "
+                  f"scope: {', '.join(c.scope[:2])}")
+        if not contracts:
+            print("No consistency contracts found.")
+        sys.exit(0)
+
+    if args.consistency_action == "run":
+        from fettle.config import load_config
+        from fettle.consistency_runner import execute_contract
+
+        contracts, findings = discover_contracts(root)
+        if findings:
+            result = {
+                "status": "config_error",
+                "findings": [finding.__dict__ for finding in findings],
+            }
+            print(json.dumps(result, indent=2, sort_keys=True) if args.json
+                  else "Consistency contracts are invalid; run `fettle consistency lint`.")
+            sys.exit(2)
+        requested = set(args.ids)
+        selected = [item for item in contracts
+                    if not requested or item.contract.id in requested]
+        missing = sorted(requested - {item.contract.id for item in selected})
+        if missing:
+            result = {"status": "not_found", "missing": missing, "results": []}
+            print(json.dumps(result, indent=2, sort_keys=True) if args.json
+                  else f"No consistency contract matches: {', '.join(missing)}")
+            sys.exit(2)
+        if not selected:
+            result = {"status": "not_found", "missing": [], "results": []}
+            print(json.dumps(result, indent=2, sort_keys=True) if args.json
+                  else "No consistency contracts found. Run `fettle consistency init`.")
+            sys.exit(2)
+        results = [
+            execute_contract(root, item.contract, policy=load_config(str(root)))
+            for item in selected
+        ]
+        payload = {"status": "completed", "results": results}
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            for result in results:
+                print(f"  {result['contract_id']:<36} {result['outcome']}")
+                if result.get("primary_error"):
+                    print(f"      {result['primary_error']['message']}")
+                print(f"      rerun: {result['rerun']}")
+        sys.exit(1 if any(result["outcome"] in {"tool_error", "config_error"}
+                          for result in results) else 0)
+
+    print(f"Unknown action: {args.consistency_action}")
+    sys.exit(2)
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     """Run the project's test suite and record the verification stamp.
 
@@ -1941,6 +2055,26 @@ def main() -> None:
     p_assurance.add_argument("--root", default=".")
     p_assurance.add_argument("--json", action="store_true")
 
+    p_consistency = subparsers.add_parser(
+        "consistency", help="State-consistency contracts (P53/SC2)")
+    consistency_sub = p_consistency.add_subparsers(dest="consistency_action", required=True)
+    ci_init = consistency_sub.add_parser("init", help="Create a new contract from template")
+    ci_init.add_argument("--root", default=".")
+    ci_init.add_argument("--id", dest="id", default=None)
+    ci_init.add_argument("--force", action="store_true")
+    ci_lint = consistency_sub.add_parser("lint", help="Validate all contracts")
+    ci_lint.add_argument("--root", default=".")
+    ci_lint.add_argument("--executable", action="store_true",
+                         help="Also require complete runnable adapter manifests")
+    ci_lint.add_argument("--json", action="store_true", help="JSON output")
+    ci_list = consistency_sub.add_parser("list", help="List contracts")
+    ci_list.add_argument("--root", default=".")
+    ci_list.add_argument("--json", action="store_true", help="JSON output")
+    ci_run = consistency_sub.add_parser("run", help="Run selected contracts")
+    ci_run.add_argument("ids", nargs="*", help="Exact contract IDs (default: all)")
+    ci_run.add_argument("--root", default=".")
+    ci_run.add_argument("--json", action="store_true", help="JSON output")
+
     for name, help_text in (
         ("status", "Record count + anchor state"),
         ("verify", "Full hash-chain verification"),
@@ -2029,6 +2163,7 @@ def main() -> None:
         "ledger": cmd_ledger,
         "pipeline": cmd_pipeline,
         "assurance": cmd_assurance,
+        "consistency": cmd_consistency,
         "uat": cmd_uat,
         "verify": cmd_verify,
     }

@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: p83-assurance-adversary
-status: open
+status: done
 scope:
   - tests/
   - fettle/
@@ -17,4 +17,9 @@ Each adversary is a test proving detection. Feeds the P77 benchmark.
 
 ## Resolution
 
-Record how it was resolved.
+`tests/test_assurance_adversary.py` is the stable P83 benchmark entry point. It
+injects ledger edits, transcript drift, capsule digest tampering, documentation
+omission, stale evidence, wrong-scope replay, and numeric/list policy
+downgrades into the production validators. Every case asserts a block,
+tampered/indeterminate verdict, typed non-pass, or preservation of the stricter
+parent policy; no parallel test-only validator was introduced.

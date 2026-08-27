@@ -87,6 +87,16 @@ def test_lineage_fields_from_spawn_env(tmp_path, monkeypatch):
     assert entry["capsule_digest"] == "abcd1234abcd1234"
 
 
+def test_role_is_retained_as_bounded_authorship_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+
+    log_decision(hook="authorship_gate", status="pass", file="src/app.py",
+                 session_id="implementer-1", role="implementer")
+
+    entry = get_recent_decisions(limit=1)[0]
+    assert entry["role"] == "implementer"
+
+
 def test_structured_evidence_is_bounded_and_redacted(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     evidence = build_evidence(

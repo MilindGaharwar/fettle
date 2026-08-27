@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
+from glob import glob
 from pathlib import Path
 from typing import Any
+
+from fettle.changeset import ChangeStatus, get_changed_files
 
 KINDS = {"success", "error_path"}
 VERDICTS = {
@@ -87,6 +90,8 @@ def _evaluate_manifest(
     uat_decision = _string(data, "uat_decision", path, errors)
     if data.get("schema_version") != 1:
         errors.append(f"{path}: unsupported schema_version")
+    if milestone and path.stem != milestone:
+        errors.append(f"{path}: milestone must match manifest filename {path.stem}")
     if status and status not in STATUSES:
         errors.append(f"{path}: unsupported status {status}")
     if uat_decision and uat_decision not in UAT_DECISIONS:
@@ -170,7 +175,69 @@ def _evaluate_manifest(
     )
 
 
-def evaluate_manifests(root: Path, milestone: str | None = None) -> CompletionResult:
+def work_item_scope_digest(root: Path, item: Any) -> tuple[str, str]:
+    """Digest current non-completion files selected by a v2 work item's scope."""
+    root = root.resolve()
+    records: dict[str, str] = {}
+    for pattern in item.scope:
+        relative = Path(pattern)
+        if relative.is_absolute() or ".." in relative.parts:
+            return "", f"work item {item.item_id} has unsafe scope pattern {pattern!r}"
+        for value in glob(str(root / pattern), recursive=True):
+            path = Path(value)
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            try:
+                rel = resolved.relative_to(root).as_posix()
+            except ValueError:
+                return "", f"work item {item.item_id} scope escapes repository"
+            if rel == "docs/completion" or rel.startswith("docs/completion/"):
+                continue
+            try:
+                records[rel] = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            except OSError as exc:
+                return "", f"work item {item.item_id} cannot read scoped file {rel}: {exc}"
+    if not records:
+        return "", (
+            f"work item {item.item_id} scope matches no files outside docs/completion"
+        )
+    encoded = json.dumps(
+        {"item": item.item_id, "scope": list(item.scope), "files": records},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest(), ""
+
+
+def _work_item_state(root: Path) -> tuple[dict[str, Any], list[str]]:
+    from fettle.work_items import discover_work_items
+
+    items: dict[str, Any] = {}
+    errors: list[str] = []
+    for item, findings in discover_work_items(str(root)):
+        errors.extend(
+            f"{finding['file']}: {finding['message']}"
+            for finding in findings
+            if finding["severity"] == "ERROR"
+        )
+        if item is not None:
+            if item.item_id in items:
+                errors.append(
+                    f"{item.path}: duplicate work item id {item.item_id} "
+                    f"(also in {items[item.item_id].path})"
+                )
+                continue
+            items[item.item_id] = item
+    return items, errors
+
+
+def evaluate_manifests(
+    root: Path,
+    milestone: str | None = None,
+    *,
+    required_work_items: set[str] | None = None,
+) -> CompletionResult:
     """Evaluate manifests under ``docs/completion`` with fail-closed evidence checks."""
     root = Path(root).resolve()
     manifest_dir = root / "docs" / "completion"
@@ -178,6 +245,7 @@ def evaluate_manifests(root: Path, milestone: str | None = None) -> CompletionRe
     results: list[MilestoneResult] = []
     parse_errors: list[str] = []
     seen: set[str] = set()
+    manifests: dict[Path, dict[str, Any]] = {}
     evidence_kinds: dict[str, str] = {}
     for path in paths:
         try:
@@ -185,6 +253,8 @@ def evaluate_manifests(root: Path, milestone: str | None = None) -> CompletionRe
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             parse_errors.append(f"{path}: malformed manifest: {exc}")
             continue
+        if isinstance(data, dict):
+            manifests[path] = data
         result = _evaluate_manifest(root, path, data, evidence_kinds)
         if result.milestone in seen:
             result.errors.append(f"duplicate milestone {result.milestone}")
@@ -193,10 +263,73 @@ def evaluate_manifests(root: Path, milestone: str | None = None) -> CompletionRe
             result.status = "invalid"
         seen.add(result.milestone)
         results.append(result)
+    work_items, work_item_errors = _work_item_state(root)
+    if milestone is None:
+        parse_errors.extend(work_item_errors)
+    changed = get_changed_files(str(root))
+    new_paths = {
+        item.path.replace("\\", "/")
+        for item in changed
+        if item.status in {ChangeStatus.ADDED, ChangeStatus.UNTRACKED}
+    }
+    if milestone is None:
+        for item in work_items.values():
+            if not item.requires_completion and item.path.replace("\\", "/") in new_paths:
+                parse_errors.append(
+                    f"new work item {item.item_id} uses legacy format; "
+                    "set fettle-work-item: v2"
+                )
+    required = set(required_work_items or ())
+    if required_work_items is None and milestone is None:
+        required = {
+            item.item_id for item in work_items.values()
+            if item.status == "done" and item.requires_completion
+        }
     if milestone is not None:
+        item = work_items.get(milestone)
+        if item is not None and item.status == "done" and item.requires_completion:
+            required.add(milestone)
         results = [result for result in results if result.milestone == milestone]
         if not results and not parse_errors:
-            parse_errors.append(f"unknown milestone {milestone}")
+            if milestone not in required:
+                parse_errors.append(f"unknown milestone {milestone}")
+    completed = {result.milestone for result in results if result.complete}
+    for item_id in sorted(required - completed):
+        matching = next((result for result in results if result.milestone == item_id), None)
+        if matching is None:
+            parse_errors.append(
+                f"done work item {item_id} has no completion manifest; "
+                f"add docs/completion/{item_id}.json before marking it done"
+            )
+        elif not matching.complete:
+            parse_errors.append(
+                f"done work item {item_id} does not have complete evidence; "
+                "set the work item back to claimed or satisfy every required criterion"
+            )
+    by_milestone = {result.milestone: result for result in results}
+    for item_id in sorted(required):
+        item = work_items.get(item_id)
+        result = by_milestone.get(item_id)
+        if item is None or result is None:
+            continue
+        scope_digest, scope_error = work_item_scope_digest(root, item)
+        manifest_path = manifest_dir / f"{item_id}.json"
+        manifest = manifests.get(manifest_path)
+        if manifest is None and not manifest_path.exists():
+            parse_errors.append(
+                f"done work item {item_id} requires same-ID manifest {manifest_path}"
+            )
+            continue
+        if manifest is None:
+            continue
+        if scope_error:
+            parse_errors.append(scope_error)
+        elif "scope_digest" not in manifest:
+            parse_errors.append(f"{manifest_path}: missing scope_digest")
+        elif manifest["scope_digest"] != scope_digest:
+            parse_errors.append(
+                f"{manifest_path}: scope_digest does not match current work-item scope"
+            )
     errors = parse_errors + [error for result in results for error in result.errors]
     valid = not errors
     complete = valid and all(result.complete for result in results)
@@ -216,5 +349,8 @@ def render_completion(result: CompletionResult) -> str:
                 lines.append(f"  {criterion.id}: {criterion.reason}")
                 lines.append(f"  Next: {criterion.recovery}")
         lines.extend(f"  Error: {error}" for error in milestone.errors)
-    lines.extend(f"Error: {error}" for error in result.errors if not result.milestones)
+    milestone_errors = {
+        error for milestone in result.milestones for error in milestone.errors
+    }
+    lines.extend(f"Error: {error}" for error in result.errors if error not in milestone_errors)
     return "\n".join(lines) + "\n"

@@ -172,10 +172,11 @@ unknown-field rejection where digest semantics could change, and bounded text.
 | ID | Activity | Depends on | Estimate | State |
 |---|---|---|---:|---|
 | SC0 | UX/UAT contract and implementation plan | P33 | 1-2 days | Complete when accepted |
-| SC1 | Freeze contract, adapter, evidence, and result schemas | SC0, P33 | 3-5 days | Proposed |
-| SC2 | Add contract discovery, lint, list, and init template | SC1 | 3-5 days | Proposed |
-| SC3 | Build bounded API/CLI execution kernel | SC2 | 5-8 days | Proposed |
-| SC4 | Add comparators and consistency-model evaluator | SC3 | 4-6 days | Proposed |
+| SC1 | Freeze contract, adapter, evidence, and result schemas | SC0, P33 | 3-5 days | Complete |
+| SC2 | Add contract discovery, lint, list, and init template | SC1 | 3-5 days | Complete |
+| SC3 | Build bounded API/CLI execution kernel | SC2 | 5-8 days | Complete |
+| SC4a | Add exact/normalized immediate/eventual evaluator | SC3 | 4-6 days | Complete |
+| SC4b | Add snapshot, monotonic, and temporal schemas/evaluation | SC4a | TBD | Proposed |
 | SC5 | Add cross-view web/UAT adapter | SC3, SC4 | 5-8 days | Proposed |
 | SC6 | Add optional stateful sequence generation | SC3, SC4 | 5-8 days | Proposed |
 | SC7 | Add duplicate-state and invalidation heuristics | SC1, measured corpus | 5-8 days | Evidence-gated |
@@ -317,6 +318,10 @@ Acceptance:
 - A seeded mini-application reproduces one real stale-read defect.
 
 ### SC4: Comparison And Consistency Evaluation
+
+Implementation status: SC4a is complete for the frozen v1 exact/normalized and
+immediate/eventual schema. Snapshot, monotonic, and two-operation temporal
+evaluation are deferred to SC4b and require a separate schema review.
 
 Goal: turn observations into deterministic outcomes without guessing root cause.
 

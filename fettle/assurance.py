@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 
 from fettle.graph_types import canonical_digest
+from fettle.paths import classify_file, is_within_repo
+from fettle.trace import read_tail
+from fettle.work_items import load_claims
 
 SCHEMA_VERSION = 1
 
@@ -84,16 +86,71 @@ def _behavior_dimension(root: Path) -> dict:
 
 
 def _independence_dimension(root: Path) -> dict:
-    roles_declared = False
-    lineage_present = bool(os.environ.get("FETTLE_PARENT_SESSION"))
-    cfg = _read_json(root / ".fettle" / "assurance-config.json") or {}
-    roles_declared = bool(cfg.get("roles_declared"))
-    if roles_declared or lineage_present:
-        return _dimension("PASS",
-                          [{"path": ".fettle/assurance-config.json",
-                            "digest": _digest_of(root / ".fettle" / "assurance-config.json") or ""}])
-    return _dimension("UNKNOWN", [],
-                      reason="no role declaration or spawn lineage retained")
+    trace = read_tail(max_bytes=1024 * 1024)
+    verify_path = root / ".fettle" / "verify.json"
+    verify = _read_json(verify_path)
+    authors: dict[str, set[str]] = {"implementation": set(), "test": set()}
+    parents: dict[str, str] = {}
+
+    for entry in trace:
+        if entry.get("hook") != "authorship_gate" or entry.get("status") != "pass":
+            continue
+        session = entry.get("session_id")
+        role = entry.get("role")
+        path = entry.get("file")
+        if not all(isinstance(value, str) and value for value in (session, role, path)):
+            continue
+        if not is_within_repo(path, root):
+            continue
+        kind = classify_file(path)
+        if (role, kind) not in {("implementer", "implementation"), ("tester", "test")}:
+            continue
+        authors[kind].add(session)
+        parent = entry.get("parent_session_id")
+        if isinstance(parent, str) and parent:
+            parents[session] = parent
+
+    implementers = authors["implementation"]
+    testers = authors["test"]
+    evidence = []
+    if implementers or testers:
+        evidence.append({"path": "trace:authorship_gate", "digest": "sha256:" + canonical_digest([
+            entry for entry in trace if entry.get("hook") == "authorship_gate"
+        ])})
+    if verify is not None:
+        evidence.append({"path": ".fettle/verify.json", "digest": _digest_of(verify_path)})
+
+    if not implementers and not testers:
+        return {**_dimension("UNKNOWN", evidence,
+                             reason="no retained role-bound authorship decisions"),
+                "grade": "UNKNOWN"}
+    if not implementers or not testers:
+        return {**_dimension("UNKNOWN", evidence,
+                             reason="both implementation and test authorship are required"),
+                "grade": "UNKNOWN"}
+    if implementers & testers:
+        return {**_dimension("FAIL", evidence,
+                             reason="the same session authored implementation and tests"),
+                "grade": "LOW"}
+
+    verifier = verify.get("session_id") if isinstance(verify, dict) and verify.get("ok") is True else ""
+    all_authors = implementers | testers
+    shared_parents = {parents.get(session) for session in all_authors}
+    separated = len(implementers) == 1 and len(testers) == 1
+    same_lineage = separated and len(shared_parents) == 1 and None not in shared_parents
+    claims = load_claims(str(root))
+    claimed_sessions = {
+        record.get("session_id") for record in claims.values()
+        if isinstance(record, dict) and Path(str(record.get("worktree", ""))).resolve() == root.resolve()
+    }
+    claim_matches = bool(shared_parents & claimed_sessions)
+
+    if same_lineage and isinstance(verifier, str) and verifier and verifier not in all_authors \
+            and verifier in shared_parents and claim_matches:
+        return {**_dimension("PASS", evidence), "grade": "HIGH"}
+    return {**_dimension("PASS", evidence,
+                         reason="code and tests have separate authors; independent verification or claim lineage is incomplete"),
+            "grade": "MEDIUM"}
 
 
 def _provenance_dimension(root: Path) -> dict:
@@ -228,3 +285,32 @@ def build_assurance_record(root: str = ".",
         {k: v for k, v in record.items() if k not in ("digest", "generated_at")}
     )
     return {"status": "completed", "record": record}
+
+
+def write_evidence(root: str, record: dict) -> dict:
+    """Persist the Assurance Record as a bounded evidence artifact."""
+    from fettle.trace import build_evidence
+
+    dims = record.get("dimensions", {})
+    all_pass = all(
+        d.get("status") in ("PASS", "NOT_APPLICABLE") for d in dims.values()
+    )
+    evidence = build_evidence(
+        "assurance_record",
+        exit_code=0 if all_pass else 1,
+        scope=record.get("subject", {}).get("root", ""),
+    )
+    out_dir = Path(root) / ".fettle"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / "assurance-record.evidence.json"
+    out.write_text(json.dumps({
+        "schema_version": SCHEMA_VERSION,
+        "evidence_id": evidence["evidence_id"],
+        "record_digest": record.get("digest", ""),
+        "completeness": record.get("completeness", "UNKNOWN"),
+        "dimensions": {k: v.get("status", "UNKNOWN")
+                        for k, v in dims.items()},
+        "evidence": evidence,
+    }, indent=2) + "\n", encoding="utf-8")
+    return {"status": "completed", "path": str(out),
+            "evidence_id": evidence["evidence_id"]}

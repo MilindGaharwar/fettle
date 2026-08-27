@@ -11,8 +11,8 @@ graduated R2 canonical workspace/adapter substrate, scanner and CI result
 integrity, deterministic change-integrity contracts, P62's reproducible
 full-repository mutation calibration and accepted baseline, and wheel-native
 versioned agent transports. Changed-scope
-mutation policy, narrow formal verification, and authorship separation remain
-advisory or partial and subject to the graduation triggers below. See the
+mutation policy and narrow formal verification remain advisory or partial and
+subject to the graduation triggers below. See the
 [README](../README.md) for current capabilities and operational boundaries.
 
 ## Priorities
@@ -24,7 +24,7 @@ advisory or partial and subject to the graduation triggers below. See the
 | Graduated | Change-integrity contracts and adversarial corpus (P44) | Immutable source, graph, provider, traversal, freshness, closure, and obligation records have deterministic identities and executable adversarial fixtures |
 | Baseline complete; advisory graduation in progress | Mutation evidence integrity and quality ratchet (P34/P62-P65) | Independent full calibrations now reproduce exactly and establish the committed 49.1 floor; changed-scope runs must still demonstrate runtime and reviewer-confirmed actionability before zero-new-survivor enforcement per the [mutation quality plan](mutation-quality-implementation-plan.md) |
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
-| In progress | Authorship separation (P52) | Role-based edit enforcement is implemented; TLA+ role invariants, adversarial path coverage, and an evidenced multi-agent flow remain before graduation |
+| Graduated | Authorship separation (P52) | Role-based edit enforcement, TLA+ role invariants, adversarial path coverage, topology guidance, and an evidenced two-role flow are verified |
 | Proposed, priority | First-class portable evidence (P66-P71) | Consequential results bind producer, source, policy, scope, completeness, freshness, and occurrence; producers graduate independently with measured cost per verified change |
 | Next | Seeded-defect controls, independent red/green evidence, expanded evals, and traceability | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |
 | Scheduled | State consistency contracts (P53-P61) | P53-P54 contract authoring targets the next minor; execution follows only after contract validation, and later surfaces graduate independently without treating tool failure or intentional snapshots as defects |
@@ -49,9 +49,9 @@ completeness for provider or evidence authority. No agent integration is planned
 The scheduled state-divergence program is defined in the
 [state consistency UX specification](state-consistency.ux-spec.md) and
 [implementation plan](state-consistency-implementation-plan.md). It begins with
-explicit contracts rather than inferred field-name relationships. P53-P54 are
-scheduled for the next minor, P55-P56 for the following minor, and P57-P61 stay
-package- or evidence-gated; scheduling does not itself authorize implementation.
+explicit contracts rather than inferred field-name relationships. P53-P55 and
+P56a are complete; P56b snapshot/monotonic/temporal evaluation and P57-P61 stay
+package- or evidence-gated. Scheduling does not itself authorize implementation.
 
 ## Formal Verification (TLA+)
 

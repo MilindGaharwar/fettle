@@ -17,7 +17,8 @@ Schema v2 (WP-145 — stable, versioned; consumers must tolerate unknown keys):
     session_id  str
     parent_session_id str — spawning session ('' when solo; WP-158)
     capsule_digest    str — 16-hex digest of the governing policy capsule
-                            ('' when ungoverned; WP-158)
+                             ('' when ungoverned; WP-158)
+    role              str — effective P52 role ('' when undeclared)
 
 v1 entries (no `schema`/`repo` keys) remain readable forever.
 """
@@ -203,6 +204,7 @@ def log_decision(
     overrides: list[dict] | None = None,
     duration_ms: float = 0.0,
     session_id: str = "",
+    role: str = "",
 ) -> bool:
     """Log a hook decision to the trace file.
 
@@ -227,6 +229,7 @@ def log_decision(
         "session_id": session_id,
         "parent_session_id": parent_session_id,
         "capsule_digest": capsule_digest,
+        "role": _redact_text(role, 32),
     }
     try:
         trace_path = _get_trace_path()
