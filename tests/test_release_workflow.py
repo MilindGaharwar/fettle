@@ -102,6 +102,18 @@ def test_public_canary_verifies_digest_and_installed_behavior():
     assert "actions/checkout" not in canary
 
 
+def test_public_canary_runs_demo_in_clean_container_with_git():
+    workflow = _workflow()
+    canary = workflow[workflow.index("  public-canary:"):workflow.index("  release:")]
+
+    assert "container: python:3.11-slim" in canary
+    assert "apt-get install --yes --no-install-recommends git" in canary
+    assert "python -m pip install --quiet --no-deps --prefix /tmp/public" in canary
+    assert "package_count={len(packages)}" in canary
+    assert "/tmp/public/bin/fettle demo" in canary
+    assert "demo_exit_code=$DEMO_EXIT" in canary
+
+
 def test_ci_exposes_one_stable_required_check():
     workflow = CI_WORKFLOW.read_text()
 
@@ -145,6 +157,9 @@ def test_ci_runs_blocking_linux_pipx_container_uat():
 
     assert "container: python:3.12-slim" in linux
     assert "apt-get install -yq --no-install-recommends git" in linux
+    assert linux.index("apt-get install -yq --no-install-recommends git") < linux.index(
+        "/tmp/bin/fettle demo || exit 1"
+    )
     assert "pipx install dist/*.whl" in linux
     assert "/tmp/bin/fettle demo || exit 1" in linux
     assert "/tmp/bin/fettle init --json" in linux

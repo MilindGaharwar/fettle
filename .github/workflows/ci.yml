@@ -224,6 +224,8 @@ jobs:
 
       - name: Build and install exact wheel
         run: |
+          apt-get update -q
+          apt-get install -yq --no-install-recommends git
           python -m pip install --quiet build==1.5.0 pipx==1.7.1
           python -m build --wheel
           export PIPX_HOME=/tmp/pipx
@@ -233,8 +235,6 @@ jobs:
 
       - name: Configure detected OpenCode host without a clone
         run: |
-          apt-get update -q
-          apt-get install -yq --no-install-recommends git
           export HOME=/tmp/home
           export XDG_DATA_HOME=/tmp/home/.local/share
           mkdir -p "$HOME/.config/opencode" /tmp/project

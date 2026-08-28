@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,32 @@ def test_demo_output_is_byte_identical_across_processes(tmp_path):
     assert first.stderr == second.stderr == b""
     assert len(first.stdout.splitlines()) <= 30
     assert str(tmp_path).encode() not in first.stdout
+
+
+def test_demo_explains_how_to_install_missing_git(tmp_path):
+    empty_path = tmp_path / "bin"
+    empty_path.mkdir()
+    env = {**os.environ, "PATH": str(empty_path)}
+    assert shutil.which("git", path=env["PATH"]) is None
+
+    result = subprocess.run(
+        [sys.executable, "-m", "fettle", "demo"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == b""
+    assert result.stderr == (
+        b"fettle demo requires Git, but git was not found on PATH.\n"
+        b"Install Git and rerun fettle demo:\n"
+        b"  macOS: brew install git\n"
+        b"  Debian/Ubuntu: sudo apt-get update && sudo apt-get install git\n"
+        b"  Windows: winget install --id Git.Git -e\n"
+    )
 
 
 def test_demo_returns_nonzero_when_fixture_verification_fails(tmp_path, capsys):

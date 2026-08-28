@@ -203,14 +203,11 @@ jobs:
   public-canary:
     needs: publish
     runs-on: ubuntu-latest
+    container: python:3.11-slim
     permissions:
       actions: read
       contents: read
     steps:
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: artifact-contract
@@ -234,6 +231,22 @@ jobs:
           PUBLIC_WHEEL=$(realpath public-dist/*.whl)
           EXPECTED=$(awk '{print $1}' artifact-contract/wheel.sha256)
           printf '%s  %s\n' "$EXPECTED" "$PUBLIC_WHEEL" | sha256sum -c -
+
+      - name: Run public demo with its Git prerequisite
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends git
+          PUBLIC_WHEEL=$(realpath public-dist/*.whl)
+          PUBLIC_SITE=/tmp/public/lib/python3.11/site-packages
+          python -m pip install --quiet --no-deps --prefix /tmp/public "$PUBLIC_WHEEL"
+          PYTHONPATH="$PUBLIC_SITE" python -c "from importlib.metadata import distributions; packages = list(distributions(path=['$PUBLIC_SITE'])); print(f'package_count={len(packages)}'); print('\n'.join(sorted(f'{item.metadata[\"Name\"]}=={item.version}' for item in packages)))"
+          set +e
+          OUTPUT=$(PYTHONPATH="$PUBLIC_SITE" /tmp/public/bin/fettle demo 2>&1)
+          DEMO_EXIT=$?
+          set -e
+          printf '%s\n' "$OUTPUT"
+          echo "demo_exit_code=$DEMO_EXIT"
+          exit "$DEMO_EXIT"
 
       - name: Canary installed governance from public PyPI
         run: |

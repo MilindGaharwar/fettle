@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.12.2 - Dependency-Free Installed Demo
+
+**Released 2026-08-28**
+
+- Added `fettle demo`, a deterministic offline detect-repair-verify walkthrough
+  that runs from bundled fixtures without third-party Python dependencies and
+  reports actionable installation commands when its Git prerequisite is absent.
+- Preserved a dependency-free base installation while keeping external quality,
+  mutation, evaluation, and UAT tools available through optional extras.
+- Added assurance sufficiency policies and standalone capability, multi-agent,
+  and workflow documentation.
+- Added a clean Python container release canary that installs the Git
+  prerequisite, reports the installed Python package count, and runs the demo
+  from the public PyPI wheel.
+
 ## v1.12.1 - Apache-2.0 License
 
 **Released 2026-08-27**
