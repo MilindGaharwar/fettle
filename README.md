@@ -69,7 +69,7 @@ authoritative.
 | Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
 | Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
 | Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Runtime footprint | Python 3.11+; base install has no third-party dependencies |
+| Runtime footprint | Python 3.11+ and Git; base install has no third-party Python dependencies |
 
 ## Start in Two Minutes
 
@@ -105,8 +105,8 @@ delegation gates, `enterprise` adds strict mode and compliance evidence.
 Omit `--profile` for the guided interview.
 
 The PyPI package is `finefettle`; the installed command is `fettle`. Plain
-`pipx install finefettle` installs one dependency-free package for governance,
-initialization, and the offline demo. The `all` extra adds Python analyzers,
+`pipx install finefettle` installs one dependency-free Python package for governance,
+initialization, and the offline demo. Git is required. The `all` extra adds Python analyzers,
 test and mutation runners, commit-hook support, evaluation parsing, and the
 Playwright library. Browser engines, agent CLIs, Git, external services, and
 JavaScript/TypeScript, Go, and Rust toolchains remain separate runtimes.
@@ -354,9 +354,12 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 ## Operational Boundaries
 
 - Python 3.11 or newer is required.
+- Git is required. Install it with `brew install git` on macOS,
+  `sudo apt-get update && sudo apt-get install git` on Debian/Ubuntu, or
+  `winget install --id Git.Git -e` on Windows.
 - Agent transports can run from the v1.11.0 wheel or a source checkout. Installed
   bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
-- Browser engines require an explicit `playwright install`. Agent CLIs, Git,
+- Browser engines require an explicit `playwright install`. Agent CLIs,
   shellcheck, and JavaScript/TypeScript, Go, and Rust toolchains remain external.
 - Hooks favor session continuity and visible degradation; CI is the independent
   fail-closed boundary.

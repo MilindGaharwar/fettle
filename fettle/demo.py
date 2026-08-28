@@ -16,6 +16,14 @@ _DISPLAY_PATH = "demo_project/calculator.py"
 _RULE_PATH = "rules/llm-antipatterns.yml"
 _FIXTURE = Path(__file__).parent / "_demo_fixture"
 
+_GIT_REQUIRED = """\
+fettle demo requires Git, but git was not found on PATH.
+Install Git and rerun fettle demo:
+  macOS: brew install git
+  Debian/Ubuntu: sudo apt-get update && sudo apt-get install git
+  Windows: winget install --id Git.Git -e
+"""
+
 
 def _stage(heading: str, detail: str) -> None:
     sys.stdout.write(f"{heading}\n{detail}\n")
@@ -55,6 +63,10 @@ def _repair_diff(before: str, after: str) -> str:
 
 def run_demo(fixture_dir: Path = _FIXTURE) -> int:
     """Run the bundled detect-repair-verify cycle and return its exit code."""
+    if shutil.which("git") is None:
+        sys.stderr.write(_GIT_REQUIRED)
+        return 1
+
     with tempfile.TemporaryDirectory(prefix="fettle-demo-") as temporary:
         root = Path(temporary) / "demo_project"
         try:

@@ -3,7 +3,7 @@
 ## Job To Be Done
 
 When I am evaluating Fettle before adopting it, I want one command that proves
-the detect-repair-verify loop without setup or credentials, so I can decide
+the detect-repair-verify loop without project setup or credentials, so I can decide
 whether the product is relevant in under 20 seconds.
 
 ## Personas
@@ -33,6 +33,7 @@ Interaction budget: one command, no prompts, under 20 seconds.
 - Populated: all four stages print in order with stable text.
 - Recoverable error: the failed stage prints a stable failure reason and exits non-zero.
 - Fatal error: verification failure prints `REPAIR NOT VERIFIED` and exits non-zero.
+- Missing prerequisite: stderr names Git and gives macOS, Debian/Ubuntu, and Windows install commands.
 - Offline: normal operation; no network or API key is consulted.
 - Stale: not applicable; every run copies the bundled fixture anew.
 
@@ -64,6 +65,13 @@ Scenario: independent verification fails
   When the verifier runs
   Then stage 4 reports `REPAIR NOT VERIFIED`
   And the command exits non-zero
+
+Scenario: Git is unavailable
+  Given finefettle is installed and Git is not on PATH
+  When the user runs `fettle demo`
+  Then stderr says that Git is required
+  And it gives install commands for macOS, Debian/Ubuntu, and Windows
+  And the command exits non-zero without starting the demo stages
 
 Scenario: repeated execution
   Given the same installed wheel
