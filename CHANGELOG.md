@@ -1,8 +1,21 @@
 # Changelog
 
-## v1.12.2 - Dependency-Free Installed Demo
+## v1.12.3 - Dependency-Free Installed Demo
 
 **Released 2026-08-28**
+
+- Publishes the dependency-free installed demo originally prepared for
+  v1.12.2.
+- Corrected the release smoke test to exclude standard virtual-environment
+  bootstrap packages while still requiring `finefettle` to be the only
+  installed non-bootstrap distribution.
+
+## v1.12.2 - Dependency-Free Installed Demo
+
+**Unpublished failed release 2026-08-28**
+
+The tag is retained for provenance. Publication stopped before PyPI because
+the release smoke test counted standard virtual-environment bootstrap packages.
 
 - Added `fettle demo`, a deterministic offline detect-repair-verify walkthrough
   that runs from bundled fixtures without third-party Python dependencies and

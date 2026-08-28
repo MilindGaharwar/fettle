@@ -112,7 +112,7 @@ jobs:
           /tmp/smoke/bin/fettle --version
           /tmp/smoke/bin/fettle demo
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; r = rules_dir(); c = commands_dir(); assert r.is_dir() and any(r.glob('*.yml')), r; assert c.is_dir() and len(list(c.glob('*.md'))) == 17, c"
-          /tmp/smoke/bin/python -c "import sysconfig; from importlib.metadata import distributions; assert len(list(distributions(path=[sysconfig.get_path('purelib')]))) == 1"
+          /tmp/smoke/bin/python -c "import sysconfig; from importlib.metadata import distributions; names = {item.metadata['Name'].lower() for item in distributions(path=[sysconfig.get_path('purelib')])} - {'pip', 'setuptools'}; assert names == {'finefettle'}, names"
 
       - name: Smoke-test all optional capabilities
         run: |
