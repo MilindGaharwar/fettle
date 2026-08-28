@@ -5,9 +5,14 @@
   </picture>
 </p>
 
-<h3 align="center">The trust layer for agentic software engineering</h3>
+<h3 align="center">Catch what your coding agent got wrong, in the session that made it</h3>
 
-<p align="center"><b>Policy that survives delegation · evidence that cannot become clean by accident · verdicts bound to artifacts.</b></p>
+An agent makes thirty edits across nine files and reports that it's done. CI
+disagrees forty minutes later, by which point the reasoning that produced the
+code is gone and you're reconstructing intent from a diff.
+
+Fettle runs your checks inside the agent session instead, so the finding lands
+while the agent still knows why it wrote what it wrote — and can fix it itself.
 
 <p align="center">
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
@@ -28,6 +33,35 @@
 pipx install finefettle
 fettle demo
 ```
+
+```text
+[1/4] VIOLATION INTRODUCED  demo_project/calculator.py:4
+
+   2 |     try:
+   3 |         return int(value)
+   4 |     except Exception:
+   5 |         return None
+
+   Broad handler hides unexpected failures.
+
+[2/4] VIOLATION DETECTED
+   broad-except-no-reraise  demo_project/calculator.py:4
+   Rule: rules/llm-antipatterns.yml
+
+[3/4] REPAIR APPLIED
+
+   -     except Exception:
+   +     except ValueError:
+
+[4/4] REPAIR INDEPENDENTLY VERIFIED
+   Re-ran check: clean
+   Re-ran tests: 4 passed
+
+   An unexpected TypeError now surfaces instead of being silently swallowed.
+```
+
+one package, no config, no API key, no network, no repository of your own.
+Python 3.11+ and Git are the only prerequisites.
 
 > **fettle** *(v.)* — a foundry term for trimming and cleaning a rough casting.
 
@@ -54,7 +88,7 @@ evidence into a clean result.
 
 <p align="center">
   <a href="examples/assurance-loop/README.md">
-    <img src="assets/assurance-loop.svg" width="720" alt="Terminal proof: Fettle detects an unused import, identifies its rule and location, then verifies the repaired file">
+    <img src="assets/assurance-loop.svg" width="720" alt="Terminal proof: Fettle detects a broad exception handler, identifies its rule and location, then verifies the repaired file">
   </a>
 </p>
 
@@ -77,7 +111,7 @@ Install once, prove the local loop, then initialize the repository you want to
 govern:
 
 ```bash
-pipx install "finefettle[all]"   # or: pip install "finefettle[all]"
+pipx install finefettle          # or: pip install finefettle
 fettle demo                  # deterministic, offline proof; changes no repo
 cd your-project
 fettle init --dry-run        # inspect files and host integrations first
@@ -357,7 +391,7 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 - Git is required. Install it with `brew install git` on macOS,
   `sudo apt-get update && sudo apt-get install git` on Debian/Ubuntu, or
   `winget install --id Git.Git -e` on Windows.
-- Agent transports can run from the v1.11.0 wheel or a source checkout. Installed
+- Agent transports can run from the v1.12.3 wheel or a source checkout. Installed
   bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
 - Browser engines require an explicit `playwright install`. Agent CLIs,
   shellcheck, and JavaScript/TypeScript, Go, and Rust toolchains remain external.
