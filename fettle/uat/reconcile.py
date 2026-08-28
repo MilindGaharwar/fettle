@@ -32,12 +32,16 @@ VERDICTS = ("CONFIRMED", "CONTRADICTED", "BLOCKED", "UNOBSERVED", "INDETERMINATE
 
 _BLOCK_RE = re.compile(r"^SCENARIO:\s*(\S+)\s*$", re.MULTILINE)
 _FIELD_RE = re.compile(r"^(OBSERVED|OUTCOME|NOTES):\s*(.*)$")
+_RESTART_RE = re.compile(r"^RESTART_PROBE:\s*$", re.MULTILINE)
+_RESTART_FIELD_RE = re.compile(r"^(BEFORE|AFTER|OUTCOME|NOTES):\s*(.*)$")
 
 _OUTCOME_MAP = {
     "matches": "CONFIRMED",
     "differs": "CONTRADICTED",
     "could-not-attempt": "BLOCKED",
 }
+
+_JUDGMENT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 
 @dataclass
@@ -61,6 +65,8 @@ def parse_transcript(text: str) -> dict[str, dict]:
         entry = {"observed": "", "outcome": "", "notes": ""}
         current: str | None = None
         for line in text[m.end():end].splitlines():
+            if _RESTART_RE.match(line.strip()):
+                break
             if _CANDIDATE_RE.match(line.strip()):
                 break  # P73: charter findings start a new section
             f = _FIELD_RE.match(line.strip())
@@ -71,6 +77,114 @@ def parse_transcript(text: str) -> dict[str, dict]:
                 entry[current] += "\n" + line.strip()  # multi-line field
         blocks[m.group(1)] = entry
     return blocks
+
+
+def parse_restart_probe(text: str) -> dict | None:
+    """Extract the final structured P75 restart probe from a transcript."""
+    matches = list(_RESTART_RE.finditer(text))
+    if not matches:
+        return None
+    entry = {"before": "", "after": "", "outcome": "", "notes": ""}
+    current: str | None = None
+    for line in text[matches[-1].end():].splitlines():
+        if _BLOCK_RE.match(line.strip()) or _CANDIDATE_RE.match(line.strip()):
+            break
+        field = _RESTART_FIELD_RE.match(line.strip())
+        if field:
+            current = field.group(1).lower()
+            entry[current] = field.group(2).strip()
+        elif current and line.strip():
+            entry[current] += "\n" + line.strip()
+    return entry
+
+
+def reconcile_restart_probe(worktree: str, session: dict, transcript: str) -> Verdict | None:
+    """Reconcile configured restart evidence; None means not applicable."""
+    probe = session.get("restart_probe") or {"status": "NOT_APPLICABLE"}
+    if probe.get("status") == "NOT_APPLICABLE":
+        return None
+    sid = "__lifecycle__/restart-persistence"
+    if probe.get("status") != "captured":
+        return Verdict(sid, "INDETERMINATE",
+                       note="configured session has no complete restart evidence")
+    path = Path(worktree) / ".fettle" / "uat-restart-probe.json"
+    try:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Verdict(sid, "INDETERMINATE",
+                       note="restart evidence artifact is missing or malformed")
+    block = parse_restart_probe(transcript)
+    if block is None or artifact.get("block_sha") != _digest(block):
+        return Verdict(sid, "INDETERMINATE",
+                       note="restart evidence drifted from the retained artifact")
+    if not block.get("before") or not block.get("after"):
+        return Verdict(sid, "INDETERMINATE", note="restart evidence is incomplete")
+    outcome = block.get("outcome", "").strip().lower()
+    mapped = {"persisted": "CONFIRMED", "lost": "CONTRADICTED",
+              "could-not-attempt": "BLOCKED"}.get(outcome)
+    if mapped is None:
+        return Verdict(sid, "INDETERMINATE", observed=block.get("after", ""),
+                       note=f"unrecognized restart outcome {outcome!r}")
+    return Verdict(sid, mapped, observed=block["after"], note=block.get("notes", ""))
+
+
+def evaluate_judgment(
+    worktree: str,
+    transcript: str,
+    artifacts: dict[str, dict],
+    runner,
+    timeout_s: int = 600,
+) -> dict:
+    """Run and validate an independent, artifact-bound judgment pass."""
+    references = [
+        {"scenario_id": sid, "block_sha": artifact.get("block_sha", ""),
+         "block": artifact.get("block", {})}
+        for sid, artifact in sorted(artifacts.items())
+    ]
+    prompt = (
+        "You are an independent reviewer of a completed UAT session. Hunt for "
+        "passes for the wrong reason and missed confusion or friction. Do not "
+        "change primary verdicts. Return only JSON as "
+        '{"findings":[{"scenario_id":"...","severity":"low|medium|high|critical",'
+        '"summary":"...","artifact_sha":"..."}]}. Every finding must cite '
+        "one exact artifact SHA from the supplied references.\n\n"
+        f"ARTIFACTS:\n{json.dumps(references, sort_keys=True)}\n\n"
+        f"TRANSCRIPT:\n{transcript}"
+    )
+    run = runner.run(prompt, cwd=str(Path(worktree)), timeout_s=timeout_s)
+    if run.error:
+        return {"status": "tool_error", "findings": [], "error": run.error}
+    try:
+        payload = json.loads(run.transcript)
+        raw_findings = payload["findings"]
+        if not isinstance(raw_findings, list):
+            raise TypeError("findings must be a list")
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"status": "indeterminate", "findings": [],
+                "error": f"malformed evaluator output: {exc}"}
+
+    findings = []
+    for finding in raw_findings:
+        if not isinstance(finding, dict):
+            return {"status": "indeterminate", "findings": [],
+                    "error": "evaluator finding must be an object"}
+        sid = str(finding.get("scenario_id") or "")
+        severity = str(finding.get("severity") or "").lower()
+        summary = str(finding.get("summary") or "").strip()
+        artifact_sha = str(finding.get("artifact_sha") or "")
+        artifact = artifacts.get(sid)
+        if (severity not in _JUDGMENT_SEVERITIES or not summary
+                or artifact is None or artifact.get("block_sha") != artifact_sha):
+            return {"status": "indeterminate", "findings": [],
+                    "error": "evaluator finding lacks valid severity or exact artifact reference"}
+        findings.append({
+            "scenario_id": sid,
+            "severity": severity,
+            "summary": summary,
+            "artifact": {"scenario_id": sid, "block_sha": artifact_sha},
+            "resolution": "operator-attestation-required",
+        })
+    return {"status": "completed", "findings": findings, "error": ""}
 
 
 def _looks_parroted(observed: str, scenario: dict) -> bool:
@@ -200,6 +314,7 @@ def write_report(
     session: dict,
     verdicts: list[Verdict],
     candidates: list[dict] | None = None,
+    judgment: dict | None = None,
 ) -> tuple[str, str]:
     """Persist the evidence artifact. Returns (path, error).
 
@@ -212,17 +327,31 @@ def write_report(
         "uat_report", exit_code=0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1,
         scope=session.get("surface", ""),
     )["evidence_id"]
+    judgment = judgment or {"status": "NOT_APPLICABLE", "findings": []}
+    judgment_pass = (judgment["status"] == "NOT_APPLICABLE"
+                     or (judgment["status"] == "completed" and not judgment["findings"]))
+    complete = bool(verdicts) and all(v.verdict == "CONFIRMED" for v in verdicts)
+    complete = complete and judgment_pass
     data = {
         "session_id": session.get("session_id", ""),
         "surface": session.get("surface", ""),
         "evidence_id": evidence_id,
         "candidate_scenarios": candidates or [],
+        "judgment": judgment,
         "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
                        "observed": v.observed, "note": v.note} for v in verdicts],
         "completion": {
-            "complete": bool(verdicts) and all(v.verdict == "CONFIRMED" for v in verdicts),
+            "complete": complete,
             "required_total": len(verdicts),
             "required_confirmed": sum(v.verdict == "CONFIRMED" for v in verdicts),
+        },
+        "lifecycle": {
+            "restart_probe": next((
+                {"verdict": v.verdict, "observed": v.observed, "note": v.note}
+                for v in verdicts
+                if v.scenario_id == "__lifecycle__/restart-persistence"
+            ), {"verdict": "NOT_APPLICABLE",
+                "note": (session.get("restart_probe") or {}).get("reason", "")}),
         },
     }
     try:
@@ -350,11 +479,33 @@ def reconcile_session(root: str, worktree: str) -> tuple[list[Verdict], dict, st
                  if s["id"] in set(cp.get("scenario_ids", []))]
     from fettle.uat.artifacts import load_scenario_artifacts
 
+    artifacts = load_scenario_artifacts(worktree)
     verdicts = reconcile(
         scenarios, transcript,
-        artifacts=load_scenario_artifacts(worktree),
+        artifacts=artifacts,
         require_artifacts=True,
     )
+    restart_verdict = reconcile_restart_probe(worktree, cp, transcript)
+    if restart_verdict is not None:
+        verdicts.append(restart_verdict)
+    judgment = {"status": "NOT_APPLICABLE", "findings": []}
+    evaluator_name = str(cp.get("evaluator_runner") or "")
+    if evaluator_name:
+        from fettle.runners import get_runner
+
+        try:
+            evaluator = get_runner(evaluator_name)
+            judgment = evaluate_judgment(
+                worktree, transcript, artifacts, evaluator,
+                timeout_s=int(cp.get("evaluator_timeout_s") or 600),
+            )
+        except ValueError as exc:
+            judgment = {"status": "tool_error", "findings": [], "error": str(exc)}
+    cp["judgment"] = judgment
+    cp["judgment_pass"] = (
+        judgment["status"] == "NOT_APPLICABLE"
+        or (judgment["status"] == "completed" and not judgment["findings"])
+    )
     _, err = write_report(worktree, cp, verdicts,
-                          candidates=parse_candidates(transcript))
+                          candidates=parse_candidates(transcript), judgment=judgment)
     return verdicts, cp, err

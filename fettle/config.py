@@ -396,6 +396,8 @@ DEFAULTS: dict[str, Any] = {
         "start_command": "",
         "runner": "claude",
         "timeout_s": 1800,
+        "evaluator_runner": "",
+        "evaluator_timeout_s": 600,
         "mode": "report",
     },
     # P81: named release policies are validated by the assurance evaluator.
@@ -443,7 +445,9 @@ def _load_toml_layer(path: Path) -> dict | None:
         with open(path, "rb") as fh:
             return tomllib.load(fh)
     except (tomllib.TOMLDecodeError, OSError) as e:
-        print(f"fettle: could not parse {path}: {e} — skipping layer", file=sys.stderr)
+        print(  # nosemgrep: debug-print-statement -- user-facing config diagnostic
+            f"fettle: could not parse {path}: {e} — skipping layer", file=sys.stderr,
+        )
         return None
 
 

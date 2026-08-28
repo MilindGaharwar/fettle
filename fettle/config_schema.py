@@ -112,6 +112,7 @@ RANGES: dict[str, tuple[float | None, float | None]] = {
     "gates.lean_review.tier2.high_confidence_threshold": (0, 1),
     "gates.lean_review.tier2.max_findings": (1, None),
     "uat.timeout_s": (1, 86400),
+    "uat.evaluator_timeout_s": (1, 86400),
     "gates.verify.timeout_s": (1, 3600),
     "gates.ci.timeout_s": (1, 7200),
     "gates.ci.poll_s": (1, 300),

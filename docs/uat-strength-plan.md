@@ -4,7 +4,7 @@ id: plan-uat-strength
 
 # UAT Strength Plan — Agent Acceptance At Par With, Then Stronger Than, Human UAT
 
-Status: proposed (P72–P77) · Research basis: `docs/hypothesis-tree-uat.md` ·
+Status: P72–P76 complete; P77 harness complete, baseline pending · Research basis: `docs/hypothesis-tree-uat.md` ·
 Backlog: `docs/backlog/uat-p7[2-7]-*.md` work items
 
 ## User story and job
@@ -80,6 +80,12 @@ mutation, or completion gates except additive references. Existing
 | P77 | Seeded-defect parity benchmark ("mutation testing for UX") over ≥10 seeds with recorded human baseline | success: metrics reproduce from canonical retained evidence; gate: zero false-verdicts and agreed discovery threshold unblocks enforcement mode | P73, P74, P75, P76 |
 
 Estimates follow the house pattern of 3–8 days each; P77 is the largest.
+
+P75 and P76 are implemented in report-only mode. P77 now has a packaged
+ten-seed manifest and reproducible retained-evidence scorer exposed through
+`fettle uat benchmark`; parity and enforcement graduation remain blocked until
+all ten seeds have real human evidence and reviewers commit a discovery
+threshold.
 
 ## Sequencing and concurrency
 

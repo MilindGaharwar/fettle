@@ -12,6 +12,7 @@ from fettle.evidence import parse_artifact
 from fettle.uat.session import (
     build_prompt,
     collect_scenarios,
+    generate_profile,
     load_checkpoint,
     run_session,
 )
@@ -103,7 +104,17 @@ class TestScenariosAndPrompt:
 
     def test_prompt_access_from_start_command(self):
         cfg = {"start_command": "npm run dev"}
-        assert "npm run dev" in build_prompt("api", [], cfg)
+        prompt = build_prompt("api", [], cfg)
+        assert "npm run dev" in prompt
+        assert "RESTART_PROBE:" in prompt
+        assert "stop the configured application" in prompt
+
+    def test_seeded_profile_has_eight_distinct_equivalence_classes(self):
+        first = generate_profile("uat-fixed-seed")
+        second = generate_profile("uat-fixed-seed")
+        assert first == second
+        assert len(first["inputs"]) >= 8
+        assert len({item["sha256"] for item in first["inputs"]}) >= 8
 
 
 class TestRunSession:
@@ -124,6 +135,38 @@ class TestRunSession:
         assert runner.calls[0]["cwd"] == result.worktree
         transcript = Path(result.transcript_path).read_text()
         assert "OUTCOME: matches" in transcript
+
+    def test_configured_restart_probe_is_retained(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        config = _cfg()
+        config["uat"]["start_command"] = "python -m x"
+        runner = FakeRunner(transcript=(
+            "SCENARIO: greeter/S1\n"
+            "OBSERVED: $ greet Ada -> Hello, Ada!\n"
+            "OUTCOME: matches\n"
+            "RESTART_PROBE:\n"
+            "BEFORE: profile Ada exists\n"
+            "AFTER: profile Ada exists after restart\n"
+            "OUTCOME: persisted\n"
+            "NOTES: stopped and relaunched python -m x\n"
+        ))
+        with patch("fettle.runners.claude.shutil.which", return_value="/usr/bin/claude"):
+            result = run_session(str(repo), config, "cli", runner=runner, consent=True)
+
+        cp = load_checkpoint(result.worktree)
+        artifact = Path(cp["restart_probe"]["artifact"])
+        assert cp["profile"]["equivalence_class_count"] >= 8
+        assert cp["restart_probe"]["status"] == "captured"
+        assert artifact.is_file()
+        assert "profile Ada exists after restart" in artifact.read_text()
+
+    def test_stateless_session_marks_restart_not_applicable(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        result = self._run(repo)
+        assert load_checkpoint(result.worktree)["restart_probe"] == {
+            "status": "NOT_APPLICABLE",
+            "reason": "uat.start_command is not configured",
+        }
 
     def test_checkpoint_written_and_resumable(self, tmp_path):
         repo = _git_repo(tmp_path)

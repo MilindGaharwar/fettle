@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "milestone": "p54-consistency-authoring",
-  "revision": "consistency-2026-08-27",
-  "scope_digest": "205d468962db040a9cbbfd07f799088040de1bb1b5f14faf9577541d36f16db0",
+  "revision": "uat-strength-2026-08-28",
+  "scope_digest": "d6fd1b001401050bda926319d3dd6a24b71f1b0488578751c642759413e58799",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
@@ -14,8 +14,8 @@
       "observed": "success",
       "evidence": {
         "path": "docs/completion/evidence/p54-consistency-authoring.json",
-        "sha256": "fce4abd4279d9f914cf206e16665dd4bd69d7cda4f25c245ef827e5c24dffbd6",
-        "revision": "consistency-2026-08-27"
+        "sha256": "e958af1c59f8334fc5a61c8df84ecf7581f82629ad287732f0baf66ab7e66a0f",
+        "revision": "uat-strength-2026-08-28"
       },
       "recovery": "Rerun state-consistency and CLI authoring tests"
     }

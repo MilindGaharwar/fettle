@@ -1589,6 +1589,7 @@ def cmd_uat(args: argparse.Namespace) -> None:
         from fettle.uat.session import run_session
         result = run_session(root, config, args.surface, consent=args.yes)
         verdicts = []
+        _cp = {}
         if result.status == "completed":
             verdicts, _cp, rec_err = reconcile_session(root, result.worktree)
             if rec_err:
@@ -1599,6 +1600,8 @@ def cmd_uat(args: argparse.Namespace) -> None:
                 "worktree": result.worktree, "transcript": result.transcript_path,
                 "scenarios": result.scenario_ids, "status": result.status,
                 "error": result.error,
+                "judgment": _cp.get("judgment", {"status": "NOT_APPLICABLE",
+                                                   "findings": []}),
                 "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
                               "observed": v.observed, "note": v.note}
                              for v in verdicts],
@@ -1611,10 +1614,17 @@ def cmd_uat(args: argparse.Namespace) -> None:
                 print(f"  transcript: {result.transcript_path}")
             if verdicts:
                 print(format_verdicts(verdicts))
+            judgment = _cp.get("judgment", {})
+            if judgment.get("status") not in (None, "NOT_APPLICABLE", "completed"):
+                print(f"  judgment: {judgment['status']}: {judgment.get('error', '')}")
+            elif judgment.get("findings"):
+                print(f"  judgment: {len(judgment['findings'])} finding(s); "
+                      "operator attestation required")
             if result.error:
                 print(f"  error: {result.error}", file=sys.stderr)
-        ok = result.status == "completed" and not result.error and all(
-            v.verdict == "CONFIRMED" for v in verdicts)
+        ok = (result.status == "completed" and not result.error
+              and all(v.verdict == "CONFIRMED" for v in verdicts)
+              and (not verdicts or _cp.get("judgment_pass", True)))
         sys.exit(0 if ok else 1)
 
     if getattr(args, "uat_action", "doctor") == "report":
@@ -1626,13 +1636,17 @@ def cmd_uat(args: argparse.Namespace) -> None:
         if args.json:
             print(json.dumps({
                 "session_id": cp.get("session_id", ""),
+                "judgment": cp.get("judgment", {"status": "NOT_APPLICABLE",
+                                                  "findings": []}),
                 "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
                               "observed": v.observed, "note": v.note}
                              for v in verdicts],
             }, indent=2))
         else:
             print(format_verdicts(verdicts))
-        sys.exit(0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1)
+        ok = all(v.verdict == "CONFIRMED" for v in verdicts) and cp.get(
+            "judgment_pass", True)
+        sys.exit(0 if ok else 1)
 
     if getattr(args, "uat_action", "doctor") == "manual":
         from fettle.uat.manual import format_manual_guide
@@ -1652,6 +1666,27 @@ def cmd_uat(args: argparse.Namespace) -> None:
         print(f"Recorded operator attestation for {entry['scenario_id']}: "
               f"{entry['outcome']} (source: operator)")
         sys.exit(0)
+
+    if getattr(args, "uat_action", "doctor") == "benchmark":
+        from fettle.uat.benchmark import score_benchmark
+
+        scored = score_benchmark(args.evidence, manifest_path=args.manifest)
+        if args.json:
+            print(json.dumps(scored, indent=2))
+        else:
+            print(f"UAT parity benchmark: {scored['status']}")
+            for actor, metrics in scored.get("metrics", {}).items():
+                print(f"  {actor}: discovery={metrics['discovery_rate']} "
+                      f"false-verdicts={metrics['false_verdicts']} "
+                      f"coverage={metrics['coverage_rate']}")
+            if scored.get("errors"):
+                for error in scored["errors"]:
+                    print(f"  error: {error}", file=sys.stderr)
+            for blocker in scored["graduation"]["blockers"]:
+                print(f"  blocked: {blocker}")
+        if scored["status"] == "invalid":
+            sys.exit(2)
+        sys.exit(0 if scored["graduation"]["ready"] else 1)
 
     # default action: doctor
     surfaces, err = resolve_surfaces(root, config)
@@ -2143,6 +2178,13 @@ def main() -> None:
                            choices=["matches", "differs", "could-not-attempt"])
     p_uat_att.add_argument("--observed", required=True,
                            help="What you actually saw (verbatim where possible)")
+    p_uat_bench = uat_sub.add_parser(
+        "benchmark", help="Score retained seeded-defect UAT evidence")
+    p_uat_bench.add_argument("--evidence", required=True,
+                             help="JSON evidence file containing agent/human runs")
+    p_uat_bench.add_argument("--manifest", default=None,
+                             help="Seed manifest override (default: packaged canonical set)")
+    p_uat_bench.add_argument("--json", action="store_true", help="JSON output")
     p_uat.set_defaults(uat_action="doctor", json=False)
 
     args = parser.parse_args()

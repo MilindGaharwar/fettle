@@ -28,4 +28,7 @@ stronger" — no capability ships past advisory on vibes.
 
 ## Resolution
 
-Record how it was resolved.
+The canonical ten-seed manifest and `fettle uat benchmark` scorer now reproduce
+discovery, false-verdict, and coverage metrics from digest-verified retained
+artifacts. This item remains open: no human baseline has been fabricated and
+the discovery threshold remains intentionally unset, so graduation is blocked.

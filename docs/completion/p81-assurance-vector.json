@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "milestone": "p81-assurance-vector",
-  "revision": "assurance-policy-2026-08-27",
-  "scope_digest": "7dfad932fcdcd09d4aca5ef6b3cec02212ccbe04e99ae11464a114f2eeb2ed37",
+  "revision": "uat-strength-2026-08-28",
+  "scope_digest": "8778ede2f0630c8b7f44740d9e3e07eb53d5a1c4cd5bea07624fc1e2c313d2ce",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
@@ -14,8 +14,8 @@
       "observed": "success",
       "evidence": {
         "path": "docs/completion/evidence/p81-assurance-vector.json",
-        "sha256": "9e51aac01a678025d873d19502f46300952b8e2cef2432a2a4520c47812a0f20",
-        "revision": "assurance-policy-2026-08-27"
+        "sha256": "a1570f4ae88cd282b2543e4fc54edc810fbacd63a0562db3d2e5b6f3c20aa39f",
+        "revision": "uat-strength-2026-08-28"
       },
       "recovery": "Rerun assurance policy, CLI, schema, adversary, and full-suite tests"
     }

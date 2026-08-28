@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### User Acceptance (P75-P77)
+
+- Added deterministic eight-class UAT profiles and artifact-bound application
+  restart probes. Missing, malformed, or drifted persistence evidence cannot
+  pass; sessions without an explicit start command report `NOT_APPLICABLE`.
+- Added an optional independent evaluator runner that reviews transcripts and
+  retained observation artifacts for wrong-reason passes. Findings require a
+  recognized severity and exact artifact hash, route to operator attestation,
+  and leave primary verdicts unchanged while keeping completion non-pass.
+- Added `fettle uat benchmark`, a packaged canonical ten-seed scorer for
+  digest-verified agent and human evidence. Parity graduation remains blocked
+  until real human evidence exists for all seeds and reviewers agree a
+  discovery threshold.
+
 ## v1.12.3 - Dependency-Free Installed Demo
 
 **Released 2026-08-28**

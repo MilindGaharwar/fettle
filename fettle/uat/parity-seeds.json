@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "discovery_threshold": null,
+  "seeds": [
+    {"id": "p77-01-lost-restart-state", "surface": "web", "defect_class": "persistence"},
+    {"id": "p77-02-stale-confirmation", "surface": "web", "defect_class": "wrong-reason-pass"},
+    {"id": "p77-03-unicode-roundtrip", "surface": "api", "defect_class": "data-integrity"},
+    {"id": "p77-04-zero-boundary", "surface": "cli", "defect_class": "boundary"},
+    {"id": "p77-05-duplicate-submit", "surface": "web", "defect_class": "idempotency"},
+    {"id": "p77-06-permission-dead-end", "surface": "web", "defect_class": "authorization-ux"},
+    {"id": "p77-07-misleading-success", "surface": "cli", "defect_class": "false-verdict"},
+    {"id": "p77-08-partial-write", "surface": "api", "defect_class": "interruption"},
+    {"id": "p77-09-inaccessible-error", "surface": "web", "defect_class": "accessibility"},
+    {"id": "p77-10-large-value-truncation", "surface": "library", "defect_class": "data-integrity"}
+  ]
+}

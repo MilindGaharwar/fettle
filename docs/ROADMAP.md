@@ -30,6 +30,7 @@ subject to the graduation triggers below. See the
 | Execution kernel complete; later surfaces gated | State consistency contracts (P53-P61) | P53-P56 contract authoring, bounded execution, and evaluation are complete; web/UAT, stateful sequences, evidence binding, and graduation remain independently gated without treating tool failure or intentional snapshots as defects |
 | Proposed | Runtime change-integrity snapshots, ephemeral graph, and advisory impact (P45-P48) | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
 | Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
+| Report-only; parity evidence pending | Agentic UAT strengthening (P72-P77) | Artifact-bound scenarios, exploration, web capture, stateful restart probes, and independent judgment are implemented; the canonical ten-seed harness exists, but real human evidence and an agreed discovery threshold remain required before any enforcement or parity claim |
 | Later | Native web, enterprise adapters, advisory framework packs, semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
 
 The authoritative activity sequence, dependencies, estimates, and demand gates
