@@ -77,7 +77,8 @@ def test_release_smokes_dependency_free_base_and_all_capabilities():
 
     assert "/tmp/smoke/bin/pip install --quiet --no-deps dist/*.whl" in build
     assert "/tmp/smoke/bin/fettle demo" in build
-    assert "len(list(distributions(path=[sysconfig.get_path('purelib')]))) == 1" in build
+    assert "names == {'finefettle'}" in build
+    assert "{'pip', 'setuptools'}" in build
     assert '"${WHEEL}[all]"' in build
     assert "import fettle.evals_runner, playwright, pytest, yaml" in build
     assert "len(list(distributions(path=[sysconfig.get_path('purelib')]))) > 1" in build
