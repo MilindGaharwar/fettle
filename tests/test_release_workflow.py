@@ -157,6 +157,9 @@ def test_ci_runs_blocking_linux_pipx_container_uat():
 
     assert "container: python:3.12-slim" in linux
     assert "apt-get install -yq --no-install-recommends git" in linux
+    assert linux.index("apt-get install -yq --no-install-recommends git") < linux.index(
+        "/tmp/bin/fettle demo || exit 1"
+    )
     assert "pipx install dist/*.whl" in linux
     assert "/tmp/bin/fettle demo || exit 1" in linux
     assert "/tmp/bin/fettle init --json" in linux
