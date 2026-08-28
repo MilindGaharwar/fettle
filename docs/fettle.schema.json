@@ -1504,6 +1504,16 @@
           "minimum": 1,
           "maximum": 86400
         },
+        "evaluator_runner": {
+          "type": "string",
+          "default": ""
+        },
+        "evaluator_timeout_s": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 1,
+          "maximum": 86400
+        },
         "mode": {
           "type": "string",
           "default": "report",

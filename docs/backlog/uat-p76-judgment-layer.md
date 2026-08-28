@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: uat-p76-judgment-layer
-status: open
+status: done
 scope:
   - fettle/uat/reconcile.py
 spec: plan-uat-strength
@@ -26,4 +26,8 @@ itself.
 
 ## Resolution
 
-Record how it was resolved.
+An optional `uat.evaluator_runner` launches a separate runner invocation over
+the transcript and retained P72 artifact bodies. Findings survive only with a
+recognized severity and exact scenario artifact hash, route to operator
+attestation, and never mutate primary verdicts. Findings, malformed output, or
+runner failure keep report completion non-pass.

@@ -25,6 +25,7 @@ from fettle.evidence import EvidenceArtifact
 
 CHECKPOINT_NAME = "uat-session.json"
 SESSION_EVIDENCE_NAME = "uat-session.evidence.json"
+RESTART_EVIDENCE_NAME = "uat-restart-probe.json"
 
 #: Surfaces the session core can always drive. web needs playwright (S5.5).
 DRIVABLE_SURFACES = frozenset({"cli", "api", "library"})
@@ -66,6 +67,28 @@ and explain exactly what blocked you. Never guess or fabricate output.
 Scenarios:
 """
 
+_RESTART_PROBE_SECTION = """
+
+## Stateful profile and restart probe (P75)
+
+Use this same profile throughout the session so later scenarios can observe
+earlier effects. Exercise values from at least 8 listed equivalence classes:
+{profile}
+
+After creating or changing persistent state, stop the configured application,
+relaunch it with `{start_command}`, and inspect that state again. Output exactly
+one block in this format:
+
+RESTART_PROBE:
+BEFORE: <state observed immediately before stopping the application>
+AFTER: <state observed after relaunch>
+OUTCOME: <persisted | lost | could-not-attempt>
+NOTES: <commands and observations that support the outcome>
+
+Do not claim `persisted` unless both BEFORE and AFTER contain concrete observed
+state. Never simulate a restart or infer persistence from source code.
+"""
+
 
 @dataclass
 class SessionResult:
@@ -96,6 +119,34 @@ def collect_scenarios(root: str) -> list[dict]:
                 "requirements": [spec.requirements.get(r, "") for r in scen.traces],
             })
     return out
+
+
+def generate_profile(seed: str) -> dict:
+    """Return deterministic realistic inputs spanning distinct data classes."""
+    values = (
+        ("ascii_name", "Avery Morgan"),
+        ("unicode_name", "Jos\u00e9 N\u00fa\u00f1ez"),
+        ("email", "avery.morgan+uat@example.test"),
+        ("phone", "+1-202-555-0147"),
+        ("boundary_zero", "0"),
+        ("boundary_large", "999999999"),
+        ("whitespace", "  North Warehouse  "),
+        ("punctuation", "Unit #4 / A&B"),
+    )
+    inputs = []
+    for equivalence_class, template in values:
+        suffix = hashlib.sha256(f"{seed}:{equivalence_class}".encode()).hexdigest()[:8]
+        value = f"{template} [{suffix}]"
+        inputs.append({
+            "equivalence_class": equivalence_class,
+            "value": value,
+            "sha256": hashlib.sha256(value.encode()).hexdigest(),
+        })
+    return {
+        "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
+        "inputs": inputs,
+        "equivalence_class_count": len({item["sha256"] for item in inputs}),
+    }
 
 
 _CHARTER_SECTION = """
@@ -145,6 +196,16 @@ def build_prompt(surface: str, scenarios: list[dict], uat_cfg: dict) -> str:
     for s in scenarios:
         parts.append(f"\n### {s['id']}: {s['title']}")
         parts.extend(f"- {step}" for step in s["steps"])
+    if uat_cfg.get("start_command"):
+        profile = uat_cfg.get("profile") or generate_profile("uat-default-profile")
+        profile_lines = "\n".join(
+            f"- {item['equivalence_class']}: {item['value']}"
+            for item in profile["inputs"]
+        )
+        parts.append(_RESTART_PROBE_SECTION.format(
+            profile=profile_lines,
+            start_command=uat_cfg["start_command"],
+        ))
     if uat_cfg.get("explore"):
         parts.append(_CHARTER_SECTION)
     return "\n".join(parts) + "\n"
@@ -170,6 +231,29 @@ def _write_checkpoint(worktree: str, data: dict) -> str:
         return ""
     except OSError as exc:
         return f"cannot write checkpoint: {exc}"
+
+
+def write_restart_probe_artifact(worktree: str, transcript: str) -> dict:
+    """Retain the structured restart block; missing/malformed stays visible."""
+    from fettle.uat.reconcile import parse_restart_probe
+
+    block = parse_restart_probe(transcript)
+    if block is None:
+        return {"status": "missing"}
+    if not block.get("before") or not block.get("after") or not block.get("outcome"):
+        return {"status": "malformed", "block": block}
+    record = {
+        "schema_version": 1,
+        "kind": "restart-persistence",
+        "block": block,
+        "block_sha": _digest(block),
+    }
+    path = Path(worktree) / ".fettle" / RESTART_EVIDENCE_NAME
+    _write_bytes_atomic(
+        path, (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return {"status": "captured", "artifact": str(path),
+            "block_sha": record["block_sha"]}
 
 
 def _digest(value: object) -> str:
@@ -342,12 +426,17 @@ def run_session(root: str, config: dict, surface: str,
         result.error = f"claim failed: {claim_err}"
         return result
 
-    prompt = build_prompt(surface, scenarios, uat_cfg)
+    profile = generate_profile(session_id)
+    prompt_cfg = dict(uat_cfg, profile=profile)
+    prompt = build_prompt(surface, scenarios, prompt_cfg)
     checkpoint = {
         "session_id": session_id, "surface": surface,
         "scenario_ids": result.scenario_ids, "status": "running",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "canonical_evidence": bool(uat_cfg.get("canonical_evidence", True)),
+        "profile": profile,
+        "evaluator_runner": str(uat_cfg.get("evaluator_runner") or ""),
+        "evaluator_timeout_s": int(uat_cfg.get("evaluator_timeout_s", 600)),
     }
     err = _write_checkpoint(str(wt_path), checkpoint)
     if err:
@@ -398,6 +487,21 @@ def run_session(root: str, config: dict, surface: str,
     except (OSError, TypeError, ValueError) as exc:
         # Capture must never crash a run, but the failure stays visible.
         checkpoint["artifact_error"] = f"{type(exc).__name__}: {exc}"
+
+    if uat_cfg.get("start_command"):
+        try:
+            checkpoint["restart_probe"] = write_restart_probe_artifact(
+                str(wt_path), clean,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            checkpoint["restart_probe"] = {
+                "status": "tool_error", "error": f"{type(exc).__name__}: {exc}",
+            }
+    else:
+        checkpoint["restart_probe"] = {
+            "status": "NOT_APPLICABLE",
+            "reason": "uat.start_command is not configured",
+        }
 
     if run.error:
         result.status = "timeout" if "timed out" in run.error else "error"

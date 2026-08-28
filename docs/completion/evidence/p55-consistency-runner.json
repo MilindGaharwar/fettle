@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "milestone": "p55-consistency-runner",
-  "revision": "consistency-2026-08-27",
+  "revision": "uat-strength-2026-08-28",
   "observations": {
-    "full_tests": "2952 passed",
+    "full_tests": "2985 passed",
     "ruff": "passed",
     "diff_check": "passed",
-    "fettle_scan": "completed with 77 existing warnings and no errors"
+    "fettle_scan": "passed with no issues"
   },
   "contracts": [
     "bounded-adapter-execution",

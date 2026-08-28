@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: uat-p75-statefulness
-status: open
+status: done
 scope:
   - fettle/uat/session.py
   - fettle/uat/reconcile.py
@@ -27,4 +27,9 @@ and seeded realistic data generation instead of placeholder strings.
 
 ## Resolution
 
-Record how it was resolved.
+Sessions now retain one deterministic profile with eight hashed input classes.
+When `uat.start_command` is configured, the agent must stop and relaunch that
+command and emit a structured persistence probe. Fettle retains the probe as a
+separate artifact and reconciliation confirms it only when the transcript hash
+matches; missing, malformed, or drifted evidence is non-pass. Sessions without
+an explicit start command report the probe as `NOT_APPLICABLE`.
