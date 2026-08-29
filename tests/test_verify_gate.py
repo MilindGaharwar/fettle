@@ -412,7 +412,9 @@ class TestStopGate:
             result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
         assert result.decision == Decision.BLOCK
 
-    def test_fresh_green_stamp_allows(self, tmp_path):
+    def test_green_stamp_without_canonical_evidence_is_rejected(self, tmp_path):
+        # Omit-key attack: a hand-written green stamp that simply drops the
+        # canonical_evidence key must not skip the canonical layer.
         src = tmp_path / "src.py"
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
@@ -422,7 +424,9 @@ class TestStopGate:
         stamp.write_text(json.dumps({"ok": True, "session_id": "sess-g",
                                      "scope": "full"}))
         with patch("fettle.config.state_dir", return_value=state):
-            assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+        assert result.decision == Decision.ADVISORY
+        assert "canonical verification evidence is missing" in result.message
 
     def test_new_stamp_with_tampered_canonical_sidecar_is_rejected(self, tmp_path):
         src = tmp_path / "src.py"
@@ -597,18 +601,17 @@ class TestStopGate:
         assert "did not cover" in result.message
 
     def test_impacted_stamp_covering_edits_allows(self, tmp_path):
+        from fettle.verify_gate import _write_stamp
         src = tmp_path / "widget.py"
         src.write_text("x = 1\n")
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_widget.py").write_text("")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        stamp = tmp_path / STAMP_RELPATH
-        stamp.parent.mkdir(parents=True)
-        stamp.write_text(json.dumps({
-            "ok": True, "session_id": "sess-g", "scope": "impacted",
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
             "impacted": ["tests/test_widget.py"],
-        }))
+        }, _cfg())
         from fettle.test_discovery import TestConfig
         tc = TestConfig(framework="pytest", command="pytest tests/",
                         test_roots=["tests"])
@@ -626,17 +629,17 @@ class TestStopGate:
         src.write_text("x = 1\n")
         sp.run(["git", "add", "."], cwd=tmp_path, check=True)
         sp.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
-        from fettle.verify_gate import _dirty_digest, _head_sha
+        from fettle.verify_gate import _dirty_digest, _head_sha, _write_stamp
         stamp = tmp_path / STAMP_RELPATH
         stamp.parent.mkdir(parents=True)
         stamp.write_text("{}")  # placeholder so the untracked listing is final
         state = tmp_path / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])
-        stamp.write_text(json.dumps({
-            "ok": True, "session_id": "sess-g", "scope": "full",
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
             "head_sha": _head_sha(str(tmp_path)),
             "dirty_digest": _dirty_digest(str(tmp_path)),
-        }))
+        }, _cfg())
         import os
         past = time.time() - 60
         os.utime(stamp, (past, past))
@@ -667,6 +670,7 @@ class TestStopGate:
         assert "web" in result.message
 
     def test_multi_workspace_stamp_covering_affected_workspaces_allows(self, tmp_path):
+        from fettle.verify_gate import _write_stamp
         for path, marker, filename in (
             ("api", "pyproject.toml", "app.py"),
             ("web", "package.json", "app.ts"),
@@ -677,15 +681,13 @@ class TestStopGate:
             (root / filename).write_text("")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
-        stamp = tmp_path / STAMP_RELPATH
-        stamp.parent.mkdir(parents=True)
-        stamp.write_text(json.dumps({
-            "ok": True, "session_id": "sess-g", "scope": "full",
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
             "workspaces": [
                 {"path": "api", "ok": True, "scope": "full"},
                 {"path": "web", "ok": True, "scope": "full"},
             ],
-        }))
+        }, _cfg())
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
 

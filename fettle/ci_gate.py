@@ -638,7 +638,11 @@ def run_check(ctx: HookContext) -> CheckResult:
                 problem += f":\n{detail}"
             if repro:
                 problem += f"\nReproduce locally: {repro}"
-        elif not problem and "canonical_evidence" in stamp:
+        elif not problem and "canonical_evidence" not in stamp:
+            # The stamp writer always embeds a canonical reference (or forces
+            # ok=false) — a green stamp without one is forged or pre-canonical.
+            problem = "canonical CI evidence is missing"
+        elif not problem:
             validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
             if validity != Validity.VALID:
                 problem = f"canonical CI evidence is {validity.value}"
