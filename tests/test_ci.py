@@ -388,7 +388,12 @@ def test_mutation_replay_uses_retained_canonical_corpus():
     assert "fettle mutation run --all" not in workflow
     assert "--resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json" in workflow
     assert "--retained-preflight retained-preflight/mutation-preflight.json" in workflow
-    assert '--calibration-id "replay-${{ github.event.inputs.resume_run_id || github.run_id }}"' in workflow
+    # resume_run_id is free-text dispatch input: it must be validated and must
+    # reach the shell only via env indirection, never direct interpolation.
+    assert '--calibration-id "replay-${RESUME_RUN_ID:-${{ github.run_id }}}"' in workflow
+    assert 'RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}' in workflow
+    assert 'test "$RESUME_RUN_ID" -eq "$RESUME_RUN_ID"' in workflow
+    assert '"replay-${{ github.event.inputs.resume_run_id' not in workflow
     assert "github.event.inputs.mode == 'replay' && format('replay-{0}', github.event.inputs.resume_run_id)" in workflow
     assert "${{ github.event.inputs.resume_run_id != '' && '--resume-checkpoints resume-checkpoints' || '' }}" in workflow
     assert "if: always()\n        uses: actions/upload-artifact@" in workflow

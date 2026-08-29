@@ -285,6 +285,11 @@ jobs:
         env:
           PREFLIGHT_RUN_ID: ${{ github.event.inputs.preflight_run_id }}
         run: test -n "$PREFLIGHT_RUN_ID" && test "$PREFLIGHT_RUN_ID" -eq "$PREFLIGHT_RUN_ID"
+      - name: Require numeric resume run
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != ''
+        env:
+          RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}
+        run: test "$RESUME_RUN_ID" -eq "$RESUME_RUN_ID"
       - name: Require calibration identity
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
         env:
@@ -443,11 +448,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Full mutation shard evidence
         if: github.event.inputs.mode == 'replay'
+        env:
+          RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --resume-manifest mutation-manifests/partition-${{ matrix.shard }}.json
           --retained-preflight retained-preflight/mutation-preflight.json
-          --calibration-id "replay-${{ github.event.inputs.resume_run_id || github.run_id }}"
+          --calibration-id "replay-${RESUME_RUN_ID:-${{ github.run_id }}}"
           --checkpoint-output mutation-checkpoint.json
           ${{ github.event.inputs.resume_run_id != '' && '--resume-checkpoints resume-checkpoints' || '' }}
           --timeout 1740 --json > mutation-report.json

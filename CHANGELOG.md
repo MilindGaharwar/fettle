@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Evidence integrity (2026-08 audit, HIGH findings)
+
+- The assurance record's behavior dimension no longer passes on a verify
+  stamp that merely parses: it now requires a passing verdict (`ok: true`)
+  bound to the current session and HEAD revision. A red run is FAIL; a
+  hand-written or stale stamp is UNKNOWN. A red verify stamp now also
+  overrides a completed mutation report.
+- The verify and CI Stop gates fail closed when a green stamp omits the
+  `canonical_evidence` reference: the canonical layer can no longer be
+  skipped by deleting the key from the agent-writable stamp.
+- `mutation.yml` validates the `resume_run_id` dispatch input as numeric and
+  passes it to the shell via environment indirection, closing a workflow
+  command-injection path.
+
 ### User Acceptance (P75-P77)
 
 - Added deterministic eight-class UAT profiles and artifact-bound application
