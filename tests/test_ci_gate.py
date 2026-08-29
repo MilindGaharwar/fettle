@@ -372,13 +372,17 @@ class TestStopGate:
             result = ci_gate.run_check(_ctx(tmp_path, _cfg(mode="enforce")))
         assert result.decision.value == "block"
 
-    def test_fresh_green_stamp_allows(self, tmp_path: Path) -> None:
+    def test_green_stamp_without_canonical_evidence_is_rejected(self, tmp_path: Path) -> None:
+        # Omit-key attack: a hand-written green stamp that simply drops the
+        # canonical_evidence key must not skip the canonical layer.
         state = tmp_path / "state"
         state.mkdir()
         _record(state, "a" * 40, ts=time.time() - 60)
         _stamp(tmp_path, "a" * 40, ok=True)
         with patch("fettle.config.state_dir", return_value=state):
-            assert ci_gate.run_check(_ctx(tmp_path, _cfg())).decision.value == "allow"
+            result = ci_gate.run_check(_ctx(tmp_path, _cfg()))
+        assert result.decision.value == "advisory"
+        assert "canonical CI evidence is missing" in result.message
 
     def test_fresh_canonical_green_stamp_allows(self, tmp_path: Path) -> None:
         repo = _git_repo(tmp_path)

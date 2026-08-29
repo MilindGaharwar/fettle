@@ -657,10 +657,15 @@ def run_check(ctx: HookContext) -> CheckResult:
             if not needed or not set(needed) <= verified:
                 problem = ("the last verification run did not cover every "
                            "file edited this session")
-        if not problem and "canonical_evidence" in stamp:
-            validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
-            if validity != Validity.VALID:
-                problem = f"canonical verification evidence is {validity.value}"
+        if not problem:
+            # The stamp writer always embeds a canonical reference (or forces
+            # ok=false) — a green stamp without one is forged or pre-canonical.
+            if "canonical_evidence" not in stamp:
+                problem = "canonical verification evidence is missing"
+            else:
+                validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
+                if validity != Validity.VALID:
+                    problem = f"canonical verification evidence is {validity.value}"
 
     if not problem:
         return CheckResult.allow()
