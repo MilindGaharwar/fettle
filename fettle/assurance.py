@@ -69,6 +69,41 @@ def _stage_ref(stage: str, path: Path) -> dict:
             "digest": digest, "present": digest is not None}
 
 
+def _git_head(root: Path) -> str:
+    try:
+        import subprocess
+        done = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
+                              capture_output=True, text=True, timeout=5)
+        if done.returncode == 0:
+            return done.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def _verify_stamp_state(root: Path, tests: dict | None) -> tuple[str, str]:
+    """Judge the verify stamp: ('pass'|'fail'|'unbound'|'absent', reason).
+
+    A stamp only counts as evidence of green behavior when it records a
+    passing run (`ok is True`) AND is bound to this session and revision —
+    a hand-written or stale stamp must never promote the dimension.
+    """
+    if tests is None:
+        return "absent", "no verify stamp retained"
+    if tests.get("ok") is False:
+        detail = str(tests.get("error") or "").strip()
+        return "fail", ("last verification run failed"
+                        + (f": {detail}" if detail else ""))
+    if tests.get("ok") is not True:
+        return "unbound", "verify stamp records no passing verdict"
+    if not str(tests.get("session_id") or ""):
+        return "unbound", "verify stamp has no session binding"
+    head = _git_head(root)
+    if not head or str(tests.get("head_sha") or "") != head:
+        return "unbound", "verify stamp is not bound to the current revision"
+    return "pass", ""
+
+
 def _behavior_dimension(root: Path) -> dict:
     evidence: list[dict] = []
     mutation = _read_json(root / "mutation-report.json")
@@ -76,15 +111,24 @@ def _behavior_dimension(root: Path) -> dict:
     if tests is not None:
         evidence.append({"path": ".fettle/verify.json",
                          "digest": _digest_of(root / ".fettle" / "verify.json")})
+    stamp_state, stamp_reason = _verify_stamp_state(root, tests)
     if mutation is not None:
         evidence.append({"path": "mutation-report.json",
                          "digest": _digest_of(root / "mutation-report.json")})
-        if mutation.get("status") == "completed":
+        if mutation.get("status") != "completed":
+            return _dimension("FAIL", evidence,
+                              reason=f"mutation run {mutation.get('status')}")
+        if stamp_state == "fail":
+            return _dimension("FAIL", evidence, reason=stamp_reason)
+        if stamp_state in ("pass", "absent"):
             return _dimension("PASS", evidence)
-        return _dimension("FAIL", evidence,
-                          reason=f"mutation run {mutation.get('status')}")
-    if tests is not None:
+        return _dimension("UNKNOWN", evidence, reason=stamp_reason)
+    if stamp_state == "pass":
         return _dimension("PASS", evidence)
+    if stamp_state == "fail":
+        return _dimension("FAIL", evidence, reason=stamp_reason)
+    if stamp_state == "unbound":
+        return _dimension("UNKNOWN", evidence, reason=stamp_reason)
     return _dimension("UNKNOWN", [],
                       reason="no verify stamp or mutation report retained")
 
@@ -345,15 +389,7 @@ def build_assurance_record(root: str = ".",
         "ci": _ci_dimension(root_path),
     }
 
-    commit = None
-    try:
-        import subprocess
-        done = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                              capture_output=True, text=True)
-        if done.returncode == 0:
-            commit = done.stdout.strip()
-    except OSError:
-        pass
+    commit = _git_head(root_path) or None
 
     stages = [
         _stage_ref("requirements", root_path / "specs"),

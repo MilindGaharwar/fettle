@@ -18,6 +18,16 @@ def _init_repo(tmp_path):
     return root
 
 
+def _commit_head(root):
+    (root / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "README.md"], capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "seed"],
+                   capture_output=True)
+    done = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                          capture_output=True, text=True)
+    return done.stdout.strip()
+
+
 def test_empty_repo_produces_partial_record_with_reasons(tmp_path):
     root = _init_repo(tmp_path)
 
@@ -45,10 +55,12 @@ def test_digest_is_canonical_and_stable(tmp_path):
     assert first["record"]["completeness"] == "PARTIAL"
 
 
-def test_verify_stamp_promotes_behavior_dimension(tmp_path):
+def test_bound_green_verify_stamp_promotes_behavior_dimension(tmp_path):
     root = _init_repo(tmp_path)
+    sha = _commit_head(root)
     (root / ".fettle" / "verify.json").write_text(
-        json.dumps({"exit_code": 0, "command": "pytest -q"}),
+        json.dumps({"ok": True, "session_id": "s-1", "head_sha": sha,
+                    "exit_code": 0, "command": "pytest -q"}),
         encoding="utf-8")
 
     record = build_assurance_record(str(root))["record"]
@@ -56,6 +68,65 @@ def test_verify_stamp_promotes_behavior_dimension(tmp_path):
     behavior = record["dimensions"]["behavior"]
     assert behavior["status"] == "PASS"
     assert behavior["evidence"][0]["path"] == ".fettle/verify.json"
+
+
+def test_red_verify_stamp_fails_behavior_dimension(tmp_path):
+    root = _init_repo(tmp_path)
+    sha = _commit_head(root)
+    (root / ".fettle" / "verify.json").write_text(
+        json.dumps({"ok": False, "error": "2 failed", "session_id": "s-1",
+                    "head_sha": sha}),
+        encoding="utf-8")
+
+    record = build_assurance_record(str(root))["record"]
+
+    behavior = record["dimensions"]["behavior"]
+    assert behavior["status"] == "FAIL"
+    assert "failed" in behavior["reason"]
+
+
+def test_handwritten_minimal_stamp_never_passes_behavior(tmp_path):
+    root = _init_repo(tmp_path)
+    _commit_head(root)
+    (root / ".fettle" / "verify.json").write_text(
+        json.dumps({"ok": True}), encoding="utf-8")
+
+    record = build_assurance_record(str(root))["record"]
+
+    behavior = record["dimensions"]["behavior"]
+    assert behavior["status"] == "UNKNOWN"
+    assert "binding" in behavior["reason"]
+
+
+def test_stale_revision_stamp_never_passes_behavior(tmp_path):
+    root = _init_repo(tmp_path)
+    _commit_head(root)
+    (root / ".fettle" / "verify.json").write_text(
+        json.dumps({"ok": True, "session_id": "s-1", "head_sha": "0" * 40}),
+        encoding="utf-8")
+
+    record = build_assurance_record(str(root))["record"]
+
+    behavior = record["dimensions"]["behavior"]
+    assert behavior["status"] == "UNKNOWN"
+    assert "revision" in behavior["reason"]
+
+
+def test_red_verify_stamp_overrides_completed_mutation(tmp_path):
+    root = _init_repo(tmp_path)
+    sha = _commit_head(root)
+    (root / "mutation-report.json").write_text(
+        json.dumps({"status": "completed"}), encoding="utf-8")
+    (root / ".fettle" / "verify.json").write_text(
+        json.dumps({"ok": False, "error": "1 failed", "session_id": "s-1",
+                    "head_sha": sha}),
+        encoding="utf-8")
+
+    record = build_assurance_record(str(root))["record"]
+
+    behavior = record["dimensions"]["behavior"]
+    assert behavior["status"] == "FAIL"
+    assert "failed" in behavior["reason"]
 
 
 def test_failed_mutation_report_fails_behavior_dimension(tmp_path):
