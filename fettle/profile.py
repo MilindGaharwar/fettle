@@ -206,22 +206,20 @@ def _save_cache(root: Path, profile: Profile, marker_hash: str) -> None:
 
 
 def _apply_fettle_toml_overrides(root: Path, profile: Profile) -> None:
-    toml_path = root / ".fettle.toml"
-    if not toml_path.is_file():
-        return
-    try:
-        with open(toml_path, "rb") as f:
-            data = tomllib.load(f)
-    except (tomllib.TOMLDecodeError, OSError):
-        return
-    overrides = data.get("profile", {})
-    if not overrides or not profile.workspaces:
+    # WP-20 resolver, not a raw repo read: org/remote/capsule layers govern
+    # [profile] too — a repo-level test_command override cannot silently
+    # replace org policy (2026-08 audit).
+    from fettle.config import load_config
+    overrides = load_config(str(root)).get("profile", {})
+    if not isinstance(overrides, dict) or not overrides or not profile.workspaces:
         return
     command_keys = ("test_command", "lint_command", "format_command", "typecheck_command", "build_command")
     for ws in profile.workspaces:
         for key in command_keys:
-            if key in overrides:
-                setattr(ws, key, overrides[key])
+            # DEFAULTS ships "" for every key — empty means "not overridden".
+            value = overrides.get(key)
+            if isinstance(value, str) and value:
+                setattr(ws, key, value)
     for workspace_override in overrides.get("workspaces", []):
         if not isinstance(workspace_override, dict):
             continue
@@ -229,8 +227,9 @@ def _apply_fettle_toml_overrides(root: Path, profile: Profile) -> None:
         if ws is None:
             continue
         for key in command_keys:
-            if key in workspace_override:
-                setattr(ws, key, workspace_override[key])
+            value = workspace_override.get(key)
+            if isinstance(value, str) and value:
+                setattr(ws, key, value)
 
 
 def detect_profile(cwd: str, use_cache: bool = True) -> Profile:

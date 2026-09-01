@@ -129,3 +129,32 @@ def test_nested_workspaces_receive_path_specific_overrides(tmp_path):
         "apps/backend": "make backend-test",
         "apps/frontend": "make frontend-test",
     }
+
+
+# ─── WP-20 resolver routing (2026-08 audit: raw tomllib bypassed org layers) ──
+
+
+def test_detected_commands_survive_resolver_defaults(tmp_path):
+    """DEFAULTS ships empty [profile] strings — they must never wipe detection."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "myapp"\n')
+    (tmp_path / "tests").mkdir()
+
+    profile = detect_profile(str(tmp_path), use_cache=False)
+
+    assert profile.workspaces[0].test_command == "python -m pytest"
+
+
+def test_org_layer_governs_profile_overrides(tmp_path, monkeypatch):
+    """[profile] from the org pack applies even without a repo .fettle.toml."""
+    org_dir = tmp_path / "xdg" / "fettle"
+    org_dir.mkdir(parents=True)
+    (org_dir / "org.toml").write_text('[profile]\ntest_command = "make org-test"\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "myapp"\n')
+    (repo / "tests").mkdir()
+
+    profile = detect_profile(str(repo), use_cache=False)
+
+    assert profile.workspaces[0].test_command == "make org-test"

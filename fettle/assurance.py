@@ -358,17 +358,25 @@ def _scope_dimension(root: Path, changed: list[str] | None) -> dict:
 
 
 def evaluate_assurance_policy(record: dict, root: str, policy: str) -> dict:
-    """Evaluate one named release policy against a completed assurance vector."""
+    """Evaluate one named release policy against a completed assurance vector.
+
+    The effective policy comes from the WP-20 resolver (defaults → org →
+    remote → repo → capsule), so a repo-level .fettle.toml cannot silently
+    replace org-mandated release criteria (2026-08 audit).
+    """
     path = Path(root) / ".fettle.toml"
-    try:
-        with path.open("rb") as handle:
-            config = tomllib.load(handle)
-    except FileNotFoundError:
-        return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
-                "errors": [f"no .fettle.toml found for policy {policy}"]}
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
-                "errors": [f"could not parse .fettle.toml: {exc}"]}
+    if path.is_file():
+        # The resolver skips corrupt layers fail-visible; a release decision
+        # must instead refuse outright on an unparseable repo policy.
+        try:
+            with path.open("rb") as handle:
+                tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            return {"name": policy, "status": "CONFIG_ERROR", "criteria": [],
+                    "errors": [f"could not parse .fettle.toml: {exc}"]}
+
+    from fettle.config import load_config
+    config = load_config(str(root))
 
     assurance = config.get("assurance", {})
     release = assurance.get("release", {}) if isinstance(assurance, dict) else {}
