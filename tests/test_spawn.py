@@ -67,6 +67,46 @@ def _git_repo(env) -> Path:
     return repo
 
 
+class TestGovernedRun:
+    """2026-08 audit: UAT/evals launches must export capsule lineage too."""
+
+    def test_exports_capsule_env_and_restores(self, repo) -> None:
+        from fettle.spawn import governed_run
+
+        runner = FakeRunner()
+        result = governed_run(runner, "probe the app", str(repo), 60)
+
+        assert result.transcript == "child transcript"
+        call = runner.calls[0]
+        assert call["capsule_env"], "child saw no FETTLE_POLICY_CAPSULE"
+        assert Path(call["capsule_env"]).is_file()
+        assert call["parent_env"]
+        assert os.environ.get(ENV_VAR) is None  # restored
+
+    def test_provisioning_failure_launches_ungoverned_but_traced(
+        self, repo, monkeypatch,
+    ) -> None:
+        from fettle import spawn as spawn_module
+
+        traced: list[dict] = []
+        monkeypatch.setattr(
+            "fettle.trace.log_decision",
+            lambda *a, **k: traced.append({"args": a, "kwargs": k}),
+        )
+        monkeypatch.setattr(
+            "fettle.policy_capsule.write_capsule",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+        )
+        runner = FakeRunner()
+
+        result = spawn_module.governed_run(runner, "probe", str(repo), 60)
+
+        assert result.transcript == "child transcript"  # still launched
+        assert runner.calls[0]["capsule_env"] == ""     # ungoverned
+        assert traced, "ungoverned launch left no trace"
+        assert traced[0]["kwargs"]["findings"][0]["code"] == "UNGOVERNED_LAUNCH"
+
+
 class TestSpawnAgent:
     def test_child_inherits_capsule_and_parent_session(self, repo) -> None:
         runner = FakeRunner()

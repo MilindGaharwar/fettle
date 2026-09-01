@@ -14,6 +14,7 @@ SpawnResult.error, never as exceptions.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,72 @@ def _parent_session_id() -> str:
         if value:
             return value
     return f"spawn-{int(time.time())}-{os.getpid()}"
+
+
+@contextlib.contextmanager
+def _exported_delegation(capsule_path: str, session_id: str):
+    """Export capsule lineage env to a child launch; always restore."""
+    saved = {k: os.environ.get(k) for k in ("FETTLE_POLICY_CAPSULE", "FETTLE_PARENT_SESSION")}
+    os.environ["FETTLE_POLICY_CAPSULE"] = capsule_path
+    os.environ["FETTLE_PARENT_SESSION"] = session_id
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def governed_run(runner: AgentRunner, prompt: str, cwd, timeout_s: int) -> RunnerResult:
+    """Launch a runner under a delegation capsule (2026-08 audit).
+
+    UAT and evals launches previously exported no capsule, so child agents
+    ran ungoverned and invisible to ``fettle report --lineage``. Capsule
+    provisioning failure downgrades to an ungoverned launch — traced as a
+    tool_error, never silent.
+    """
+    from fettle import __version__
+    from fettle.config import load_config
+    from fettle.paths import find_repo_root
+    from fettle.policy_capsule import resolve_env_capsule, write_capsule
+    from fettle.trace import log_decision
+
+    session_id = _parent_session_id()
+    capsule_path: Path | None = None
+    repo_root = find_repo_root(str(cwd))
+    error = "" if repo_root else "not inside a repository"
+    if repo_root:
+        parent_doc, error = resolve_env_capsule()
+        if not error:
+            lineage: list[str] = []
+            if parent_doc:
+                lineage = list(parent_doc.get("lineage", [])) + [parent_doc["digest"][:16]]
+            try:
+                capsule_path = write_capsule(
+                    load_config(str(repo_root)),
+                    origin={
+                        "repo_root": str(repo_root),
+                        "repo": Path(repo_root).name,
+                        "session_id": session_id,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "fettle_version": __version__,
+                    },
+                    lineage=lineage,
+                )
+            except (ValueError, OSError) as exc:
+                error = f"could not write policy capsule: {exc}"
+
+    if capsule_path is None:
+        log_decision(
+            "spawn", "tool_error", tool=getattr(runner, "name", "?"), file=str(cwd),
+            findings=[{"code": "UNGOVERNED_LAUNCH", "error": error}],
+            session_id=session_id,
+        )
+        return runner.run(prompt, cwd, timeout_s=timeout_s)
+    with _exported_delegation(str(capsule_path), session_id):
+        return runner.run(prompt, cwd, timeout_s=timeout_s)
 
 
 def spawn_agent(
@@ -155,17 +222,8 @@ def spawn_agent(
         return result
 
     # Children inherit the parent process env: set, launch, restore.
-    saved = {k: os.environ.get(k) for k in ("FETTLE_POLICY_CAPSULE", "FETTLE_PARENT_SESSION")}
-    os.environ["FETTLE_POLICY_CAPSULE"] = str(capsule_path)
-    os.environ["FETTLE_PARENT_SESSION"] = session_id
-    try:
+    with _exported_delegation(str(capsule_path), session_id):
         result.run = runner.run(task, cwd=child_cwd, timeout_s=timeout_s)
-    finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
     status = "pass" if not result.run.error else "tool_error"
     log_decision(

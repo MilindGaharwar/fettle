@@ -151,7 +151,8 @@ def evaluate_judgment(
         f"ARTIFACTS:\n{json.dumps(references, sort_keys=True)}\n\n"
         f"TRANSCRIPT:\n{transcript}"
     )
-    run = runner.run(prompt, cwd=str(Path(worktree)), timeout_s=timeout_s)
+    from fettle.spawn import governed_run
+    run = governed_run(runner, prompt, str(Path(worktree)), timeout_s)
     if run.error:
         return {"status": "tool_error", "findings": [], "error": run.error}
     try:

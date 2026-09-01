@@ -449,8 +449,9 @@ def run_session(root: str, config: dict, surface: str,
         except ValueError as exc:
             result.error = str(exc)
             return result
-    run = runner.run(prompt, cwd=str(wt_path),
-                     timeout_s=int(uat_cfg.get("timeout_s", 1800)))
+    from fettle.spawn import governed_run
+    run = governed_run(runner, prompt, str(wt_path),
+                       int(uat_cfg.get("timeout_s", 1800)))
 
     transcript_path = Path(wt_path) / ".fettle" / f"{session_id}-transcript.txt"
     try:
