@@ -191,8 +191,9 @@ def _invoke_runner(runner, prompt: str, cwd: Path) -> tuple[str, int | None]:
     INDETERMINATE (broken experiment), same path as a crashing callable.
     """
     if hasattr(runner, "run"):
+        from fettle.spawn import governed_run
         timeout_s = int(os.environ.get("FETTLE_EVAL_TIMEOUT_S", "600"))
-        result = runner.run(prompt, cwd, timeout_s=timeout_s)
+        result = governed_run(runner, prompt, cwd, timeout_s)
         if result.error:
             raise RuntimeError(result.error)
         return result.transcript, getattr(result, "turns", None)
