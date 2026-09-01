@@ -1,9 +1,11 @@
 """Claude Code headless adapter — extracted from evals_runner._claude_runner.
 
 LIVE runner: launches ``claude -p``. Trusted-operator use only; never runs
-in public CI. Runs with --dangerously-skip-permissions (the quorum
-approach): in non-interactive print mode, permission prompts cannot be
-answered and stall the run to timeout.
+in public CI. Runs with a scoped ``--allowedTools`` list instead of
+``--dangerously-skip-permissions``: in print mode, tools outside the list
+are denied without prompting (deny-by-default), so repo-derived prompt
+content cannot reach network or MCP tools while shell/file tools still
+run unattended.
 """
 
 from __future__ import annotations
@@ -14,6 +16,9 @@ import time
 from pathlib import Path
 
 from fettle.runners import RunnerResult
+
+#: Deny-by-default tool grant for unattended runs (UAT/evals/spawn).
+ALLOWED_TOOLS = "Bash Read Glob Grep Write Edit TodoWrite"
 
 
 class ClaudeRunner:
@@ -30,7 +35,7 @@ class ClaudeRunner:
         start = time.monotonic()
         try:
             proc = subprocess.run(
-                [claude, "-p", "--dangerously-skip-permissions", prompt],
+                [claude, "-p", "--allowedTools", ALLOWED_TOOLS, prompt],
                 capture_output=True, text=True,
                 timeout=timeout_s, cwd=str(cwd),
             )
