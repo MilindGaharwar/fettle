@@ -56,8 +56,10 @@ jobs:
       - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
       - name: Prepare bounded changed-scope partitions
         id: prepare
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          uv run --no-sync python -m fettle.mutation_test --root . --base origin/${{ github.base_ref }} --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
+          uv run --no-sync python -m fettle.mutation_test --root . --base "origin/${BASE_REF}" --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
           {
             echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"], separators=(",", ":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')"
@@ -237,15 +239,19 @@ jobs:
           path: mutation-changed-manifests
       - name: Aggregate complete changed-scope evidence
         if: needs.changed-prepare.outputs.shard_count != '0'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --aggregate mutation-changed-shards --aggregate-scope mutation-changed-manifests
-          --base origin/${{ github.base_ref }}
+          --base "origin/${BASE_REF}"
           --shard-count ${{ needs.changed-prepare.outputs.shard_count }} --json > mutation-report.json
       - name: Record non-applicable changed scope
         if: needs.changed-prepare.outputs.shard_count == '0'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: >-
-          uv run --no-sync fettle mutation run --changed --base origin/${{ github.base_ref }}
+          uv run --no-sync fettle mutation run --changed --base "origin/${BASE_REF}"
           --json --output mutation-report.json
       - name: Mutation summary
         if: always()
