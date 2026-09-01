@@ -393,6 +393,23 @@ def test_policy_fails_closed_on_malformed_toml(tmp_path):
     assert "could not parse" in decision["errors"][0]
 
 
+def test_org_layer_supplies_release_policy_without_repo_toml(tmp_path, monkeypatch):
+    """Release policies resolve through WP-20 layers, not a raw repo read."""
+    org_dir = tmp_path / "xdg" / "fettle"
+    org_dir.mkdir(parents=True)
+    (org_dir / "org.toml").write_text(
+        '[assurance.release.production]\nbehavior = "PASS"\n', encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = _init_repo(tmp_path)
+
+    decision = evaluate_assurance_policy(
+        build_assurance_record(str(root))["record"], str(root), "production",
+    )
+
+    assert decision["status"] in ("PASS", "FAIL")  # resolved, not CONFIG_ERROR
+    assert decision["criteria"][0]["dimension"] == "behavior"
+
+
 # ─── Dimension binding (2026-08 audit: unbound JSON must not PASS) ──────────
 
 
