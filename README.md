@@ -30,7 +30,7 @@ while the agent still knows why it wrote what it wrote — and can fix it itself
 </p>
 
 ```bash
-pipx install finefettle
+pipx install "finefettle[all]"   # one installer — everything included
 fettle demo
 ```
 
@@ -111,7 +111,9 @@ Install once, prove the local loop, then initialize the repository you want to
 govern:
 
 ```bash
-pipx install finefettle          # or: pip install finefettle
+pipx install "finefettle[all]"   # single installer: analyzers, mutation, evals, browser automation
+# minimal core instead:  pipx install finefettle   (zero third-party Python deps)
+# or with uv:            uv tool install "finefettle[all]"
 fettle demo                  # deterministic, offline proof; changes no repo
 cd your-project
 fettle init --dry-run        # inspect files and host integrations first
@@ -138,12 +140,15 @@ of why it's unknown. Profiles: `solo` for individual repos, `team` adds
 delegation gates, `enterprise` adds strict mode and compliance evidence.
 Omit `--profile` for the guided interview.
 
-The PyPI package is `finefettle`; the installed command is `fettle`. Plain
-`pipx install finefettle` installs one dependency-free Python package for governance,
-initialization, and the offline demo. Git is required. The `all` extra adds Python analyzers,
-test and mutation runners, commit-hook support, evaluation parsing, and the
-Playwright library. Browser engines, agent CLIs, Git, external services, and
-JavaScript/TypeScript, Go, and Rust toolchains remain separate runtimes.
+The PyPI package is `finefettle`; the installed command is `fettle`. One
+installer covers everything: `pipx install "finefettle[all]"` bundles the
+Python analyzers, test and mutation runners, commit-hook support, evaluation
+parsing, and the Playwright library alongside the governance core — rules,
+guided workflows, and agent-host bridges ship inside the wheel itself. Plain
+`pipx install finefettle` installs the dependency-free core for governance,
+initialization, and the offline demo. Git is required. Browser engines, agent
+CLIs, external services, and JavaScript/TypeScript, Go, and Rust toolchains
+remain separate runtimes.
 
 ### Add Live Agent Governance
 
@@ -236,14 +241,28 @@ quarantine. A human reviews and promotes it; evidence and false-positive data
 drive later ratcheting. The model may propose policy, but it cannot silently
 activate it.
 
+### Audited Against Its Own Threat Model
+
+Fettle's evidence chain has been adversarially audited and hardened, and the
+attacks are pinned by tests so they stay fixed: a hand-written verify stamp,
+a deleted canonical-evidence reference, a forged assurance input, or a
+crashed quality-gate subprocess can no longer produce a clean result. Live
+agent runners execute with deny-by-default tool grants instead of blanket
+permission bypasses — the same bypass flags Fettle's own spawn gate blocks.
+`fettle doctor` states plainly which hosts can enforce a block and which can
+only notify. A governance tool must hold the bar it sets; this one is built
+to be attacked.
+
 ### Small Base, Complete Toolkit Extra
 
 The base wheel has no third-party dependencies and supports governance,
-initialization, and the offline demo. Install `finefettle[all]` for Python
-analyzers, test and mutation runners, commit-hook support, evaluation parsing,
-and browser automation. Release CI tests both environments from the exact wheel.
+initialization, and the offline demo. `pipx install "finefettle[all]"` is the
+single installer that adds Python analyzers, test and mutation runners,
+commit-hook support, evaluation parsing, and browser automation in one step.
+Release CI tests both environments from the exact wheel.
 Releases use PyPI Trusted Publishing, GitHub build provenance attestations,
-pinned workflow actions, and a CycloneDX SBOM.
+pinned workflow actions, checksum-verified third-party tooling, and a
+CycloneDX SBOM.
 
 ### Acceptance Is Tested From the User's Side
 
