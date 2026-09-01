@@ -141,15 +141,18 @@ def test_baseline_concurrent_compare_and_swap_has_one_winner(tmp_path):
 
 
 def test_floor_reduction_requires_exact_baseline_override():
+    # Frozen clock: the shared _override fixture expires 2026-09-01; the
+    # real clock crossed it and turned this into a time bomb.
+    frozen = datetime(2026, 8, 8, tzinfo=UTC)
     old = establish_baseline([_report(), _report()], ["1", "2"], floor=90)
     reports = [_report(score=80.0, killed=8, survived=2, non_killed=[_record(), _record("f" * 64, "2")])] * 2
     with pytest.raises(ValueError, match="floor"):
-        establish_baseline(reports, ["3", "4"], floor=80, previous=old)
+        establish_baseline(reports, ["3", "4"], floor=80, previous=old, now=frozen)
     survivor_override = _override("mutation.survivor", "baseline-floor", report=reports[0], run_ids=["3", "4"])
     with pytest.raises(ValueError, match="floor"):
-        establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[survivor_override])
+        establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[survivor_override], now=frozen)
     baseline_override = _override("mutation.baseline", "baseline-floor", report=reports[0], run_ids=["3", "4"])
-    result = establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[baseline_override])
+    result = establish_baseline(reports, ["3", "4"], floor=80, previous=old, overrides=[baseline_override], now=frozen)
     assert result["floor"] == 80
 
 
