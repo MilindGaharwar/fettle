@@ -99,7 +99,7 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += chunk))
     child.stderr.on("data", (chunk) => (stderr += chunk))
-    child.on("error", (error) => resolve({{ blocked: false, message: `Fettle unavailable: ${{error.message}}` }}))
+    child.on("error", (error) => resolve({{ blocked: false, message: `Fettle unavailable — failing open: ${{error.message}}` }}))
     child.on("close", (code) => {{
       try {{
         const result = JSON.parse(stdout || "{{}}")
@@ -109,7 +109,7 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
           message: result.reason ?? output.permissionDecisionReason ?? output.additionalContext ?? result.systemMessage ?? stderr.trim(),
         }})
       }} catch {{
-        resolve({{ blocked: false, message: stderr.trim() || "Fettle returned invalid output" }})
+        resolve({{ blocked: false, message: `Fettle returned invalid output — failing open: ${{(stderr.trim() || stdout.trim()).slice(0, 300)}}` }})
       }}
     }})
     child.stdin.end(JSON.stringify({{ hook_event_name: event, tool_name: tool, tool_input: normalizeArgs(args), cwd: directory, session_id: sessionID }}))

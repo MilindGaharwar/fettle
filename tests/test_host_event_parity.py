@@ -116,3 +116,21 @@ def test_translation_output_is_within_dispatcher_vocabulary(host):
         assert event in known, (
             f"{host} translates to {event!r}, which no check consumes"
         )
+
+
+# ─── Enforcement matrix (2026-08 audit: support ≠ enforcement) ────────────
+
+
+@pytest.mark.parametrize("host", ["claude_code", "codex", "gemini", "opencode"])
+def test_every_core_event_has_a_declared_enforcement_level(host):
+    caps = host_capabilities()[host]
+    for event in CORE_EVENTS:
+        assert caps["enforcement"].get(event) in ("block", "notify"), (
+            f"{host} declares no enforcement level for {event}"
+        )
+
+
+def test_opencode_post_and_stop_are_notify_only():
+    from fettle.host_capabilities import enforcement_gaps
+
+    assert enforcement_gaps() == {"opencode": ("PostToolUse", "Stop")}
