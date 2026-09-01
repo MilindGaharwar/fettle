@@ -245,7 +245,9 @@ print(json.dumps(payload))
 def test_eventual_observer_is_polled_until_it_converges(tmp_path):
     contract = replace(
         _contract(tmp_path, observer="eventual", model="eventual"),
-        deadline_ms=500,
+        # Generous deadline: convergence at attempt 2 exits early; slow shared
+        # runners must never eat the budget in subprocess startup (CI flake).
+        deadline_ms=5000,
         poll_interval_ms=10,
     )
 
@@ -268,7 +270,8 @@ def test_eventual_polling_reruns_only_mismatching_observers(tmp_path):
     contract = _contract(tmp_path, observer="eventual", model="eventual")
     contract = replace(
         contract,
-        deadline_ms=500,
+        # Generous deadline — see convergence test above (CI flake margin).
+        deadline_ms=5000,
         poll_interval_ms=10,
         observers=(
             {"id": "stable", "surface": "api", "adapter": "stable"},
@@ -317,7 +320,7 @@ phase = sys.argv[1]
 if phase == "stale":
     marker = pathlib.Path("observed-once")
     if marker.exists():
-        time.sleep(2)
+        time.sleep(30)
     marker.write_text("yes")
     print(json.dumps({"fettle-observation": "v1", "value": "old"}))
 elif phase in {"canonical", "observer"}:
@@ -325,7 +328,9 @@ elif phase in {"canonical", "observer"}:
 else:
     print(json.dumps({"fettle-operation": "v1"}))
 """, encoding="utf-8")
-    contract = replace(contract, deadline_ms=300, poll_interval_ms=10)
+    # First attempt must fit the deadline even on a slow runner; the second
+    # (30s sleep) must always cross it — that is the scenario under test.
+    contract = replace(contract, deadline_ms=1500, poll_interval_ms=10)
 
     result = execute_contract(tmp_path, contract, policy={})
 

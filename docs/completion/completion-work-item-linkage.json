@@ -2,7 +2,7 @@
   "schema_version": 1,
   "milestone": "completion-work-item-linkage",
   "revision": "completion-linkage-2026-08-27",
-  "scope_digest": "1c9269c365ab2bcedf633707c852ca7620b677b3397dd5be2eec8e03c986cfd6",
+  "scope_digest": "b334dd2fd6e0c4f4877f7ebcef0b30f37c6076997ecde6fa179101b92f778876",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
