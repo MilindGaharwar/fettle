@@ -252,6 +252,34 @@ def _provenance_dimension(root: Path) -> dict:
     return _dimension("UNKNOWN", [], reason="no governance ledger retained")
 
 
+def _uat_evidence_problem(root: Path, report_path: Path, report: dict) -> str:
+    """'' when the canonical sidecar binds this exact report; reason otherwise."""
+    sidecar = root / ".fettle" / "uat-report.evidence.json"
+    if not sidecar.is_file():
+        return "UAT report has no canonical evidence sidecar"
+    try:
+        from fettle.evidence import parse_artifact
+        artifact = parse_artifact(sidecar.read_bytes())
+    except (OSError, ValueError, TypeError, KeyError):
+        return "canonical UAT evidence is malformed"
+    if artifact.kind != "fettle.uat.report":
+        return "canonical UAT evidence has an unexpected kind"
+    from collections.abc import Mapping
+    payload = artifact.payload if isinstance(artifact.payload, Mapping) else {}
+    report_digest = "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest()
+    reference = payload.get("report")
+    reference = reference if isinstance(reference, Mapping) else {}
+    if reference.get("digest") != report_digest:
+        return "canonical UAT evidence does not match the report content"
+    if str(payload.get("session_id") or "") != str(report.get("session_id") or ""):
+        return "canonical UAT evidence is bound to a different session"
+    completion = payload.get("completion")
+    completion = completion if isinstance(completion, Mapping) else {}
+    if completion.get("complete") is not True:
+        return "canonical UAT evidence does not record completion"
+    return ""
+
+
 def _uat_dimension(root: Path) -> dict:
     report = _read_json(root / ".fettle" / "uat-report.json")
     evidence: list[dict] = []
@@ -263,6 +291,11 @@ def _uat_dimension(root: Path) -> dict:
                         if v.get("verdict") == "CONFIRMED")
         total = len(report.get("verdicts", []))
         if total and confirmed == total and report.get("candidate_scenarios") is not None:
+            problem = _uat_evidence_problem(root, path, report)
+            if problem:
+                return _dimension("UNKNOWN", evidence, reason=problem)
+            evidence.append({"path": ".fettle/uat-report.evidence.json",
+                             "digest": _digest_of(root / ".fettle" / "uat-report.evidence.json")})
             return _dimension("PASS", evidence)
         if total:
             return _dimension("FAIL", evidence,
@@ -271,18 +304,22 @@ def _uat_dimension(root: Path) -> dict:
 
 
 def _ci_dimension(root: Path) -> dict:
-    ci = _read_json(root / ".fettle" / "ci-verdict.json")
-    path = root / ".fettle" / "ci-verdict.json"
+    path = root / ".fettle" / "ci-status.json"
+    ci = _read_json(path)
     evidence: list[dict] = []
     if ci is not None:
-        evidence.append({"path": ".fettle/ci-verdict.json",
+        evidence.append({"path": ".fettle/ci-status.json",
                          "digest": _digest_of(path)})
-        if ci.get("conclusion") == "success":
-            return _dimension("PASS", evidence)
-        return _dimension("FAIL", evidence,
-                          reason=f"remote CI {ci.get('conclusion')}")
+        if ci.get("ok") is not True:
+            return _dimension("FAIL", evidence,
+                              reason=f"remote CI {ci.get('overall', 'not green')}")
+        head = _git_head(root)
+        if not head or str(ci.get("sha") or "") != head:
+            return _dimension("UNKNOWN", evidence,
+                              reason="CI status is not bound to the current revision")
+        return _dimension("PASS", evidence)
     return _dimension("NOT_APPLICABLE", [],
-                      reason="no retained CI verdict (bind with fettle ci wait)")
+                      reason="no retained CI status (bind with fettle ci wait)")
 
 
 def _authorization_dimension(root: Path) -> dict:
@@ -292,6 +329,11 @@ def _authorization_dimension(root: Path) -> dict:
     if capsule_data is not None:
         evidence.append({"path": ".fettle/capsule.json",
                          "digest": _digest_of(capsule)})
+        from fettle.policy_capsule import verify as verify_capsule
+        problem = verify_capsule(capsule_data)
+        if problem:
+            return _dimension("FAIL", evidence,
+                              reason=f"delegation capsule invalid: {problem}")
         return _dimension("PASS", evidence)
     return _dimension("NOT_APPLICABLE", [],
                       reason="solo session — no delegation capsule")
