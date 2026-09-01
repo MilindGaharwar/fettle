@@ -29,6 +29,19 @@
 - The quality gate surfaces subprocess timeout, launch failure, crash, and
   unparseable output as `tool_error` instead of silently allowing, restoring
   Stage-0 failure visibility and escalation.
+- Profile command overrides and assurance release policies now resolve
+  through the WP-20 policy resolver (defaults → org → remote → repo →
+  capsule) instead of raw repo-file reads, so a repo-level `test_command`
+  or release-policy override can no longer bypass org policy.
+- UAT sessions, UAT evaluator passes, and eval scenario launches now run
+  child agents under a delegation capsule (`governed_run`), making them
+  visible to `fettle report --lineage`; a capsule provisioning failure
+  downgrades to a traced ungoverned launch, never a silent one.
+- The host capability matrix now declares per-event *enforcement* (block
+  vs notify): OpenCode's PostToolUse/Stop surfaces are toast-only, and
+  `fettle doctor` discloses the downgrade — failing when enforce-mode
+  gates are configured that the installed host cannot honor. Bridge
+  fail-open toasts now say "failing open" explicitly.
 
 ### User Acceptance (P75-P77)
 

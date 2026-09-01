@@ -325,6 +325,38 @@ def check_bridge_health() -> list[dict]:
     }]
 
 
+def check_host_enforcement() -> list[dict]:
+    """Surface hosts where a block decision can only notify (2026-08 audit).
+
+    Informational when everything runs advisory; a failure when the repo
+    configures enforce-mode gates that the installed host cannot honor.
+    """
+    from fettle.config import load_config
+    from fettle.host_capabilities import enforcement_gaps
+
+    binaries = {"claude_code": "claude"}
+    gates = load_config().get("gates", {})
+    enforcing = sorted(
+        name for name, gate in gates.items()
+        if isinstance(gate, dict) and gate.get("enabled")
+        and gate.get("mode") == "enforce"
+    )
+    checks: list[dict] = []
+    for host, events in sorted(enforcement_gaps().items()):
+        if not _which(binaries.get(host, host)):
+            continue
+        detail = f"{', '.join(events)} decisions can only notify on {host} (never block)"
+        if enforcing:
+            detail += f" — enforce-mode gate(s) configured: {', '.join(enforcing)}"
+        checks.append({
+            "name": f"enforcement:{host}",
+            "required": False,
+            "ok": not enforcing,
+            "detail": detail,
+        })
+    return checks
+
+
 def check_config_valid() -> list[dict]:
     """Validate the project's .fettle.toml against the WP4 dependency model.
 
@@ -515,6 +547,7 @@ def main() -> int:
               + check_commit_guards() + check_org_policy()
               + check_config_valid() + check_dispatch_health()
               + check_runner_governance() + check_bridge_health() + check_mcp_trust()
+              + check_host_enforcement()
               + check_integrations() + check_workflows())
     if args.verify_hashes:
         from fettle.supply_chain import verify_tool_hashes

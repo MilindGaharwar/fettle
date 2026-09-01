@@ -269,3 +269,47 @@ def test_install_system_tools_no_manager_is_actionable(monkeypatch):
     steps = init_cmd.install_system_tools(dry_run=False)
     assert steps[0].status == "action"
     assert "shellcheck" in steps[0].detail
+
+
+# ─── Host enforcement disclosure (2026-08 audit) ─────────────────────────────
+
+
+def test_host_enforcement_reports_opencode_notify_only_downgrade(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        doctor, "_which", lambda name: "/bin/x" if name == "opencode" else None)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".fettle.toml").write_text("")
+
+    checks = doctor.check_host_enforcement()
+
+    assert len(checks) == 1
+    check = checks[0]
+    assert check["name"] == "enforcement:opencode"
+    assert check["ok"] is True  # informational when nothing enforces
+    assert "PostToolUse, Stop" in check["detail"]
+    assert "never block" in check["detail"]
+
+
+def test_host_enforcement_fails_when_enforce_gates_cannot_block(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        doctor, "_which", lambda name: "/bin/x" if name == "opencode" else None)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".fettle.toml").write_text(
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n')
+
+    checks = doctor.check_host_enforcement()
+
+    assert checks[0]["ok"] is False
+    assert "verify" in checks[0]["detail"]
+
+
+def test_host_enforcement_silent_when_gap_host_not_installed(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        doctor, "_which", lambda name: "/bin/x" if name == "claude" else None)
+    monkeypatch.chdir(tmp_path)
+
+    assert doctor.check_host_enforcement() == []
