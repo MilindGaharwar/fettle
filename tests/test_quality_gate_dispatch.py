@@ -151,3 +151,70 @@ def test_stop_blocks_untested_edits_with_normalized_payload(repo):
     result = run_check(_ctx(repo, "Stop", raw, tool_name=None, tool_input={}))
     assert result.decision is Decision.BLOCK
     assert "TESTS" in result.message
+
+
+# ─── Subprocess failure is a tool_error, never a silent allow ────────────────
+# 2026-08 audit: timeout/OSError/garbage output returned allow(), so the
+# Stage-0 failure-visibility trace and 3-in-24h escalation never fired.
+
+
+def _raw(repo):
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": "src/x.py", "content": "x"},
+        "cwd": str(repo),
+        "session_id": "sess-e2e",
+    }
+
+
+def test_subprocess_timeout_is_tool_error(repo):
+    import subprocess
+    from unittest.mock import patch
+
+    from fettle.dispatcher_types import ResultState
+
+    exc = subprocess.TimeoutExpired(cmd="quality_gate", timeout=15)
+    with patch("fettle.quality_gate.subprocess.run", side_effect=exc):
+        result = run_check(_ctx(repo, "PreToolUse", _raw(repo)))
+    assert result.result_state is ResultState.TOOL_ERROR
+    assert "timed out" in result.message
+
+
+def test_subprocess_launch_failure_is_tool_error(repo):
+    from unittest.mock import patch
+
+    from fettle.dispatcher_types import ResultState
+
+    with patch("fettle.quality_gate.subprocess.run", side_effect=OSError("no fd")):
+        result = run_check(_ctx(repo, "PreToolUse", _raw(repo)))
+    assert result.result_state is ResultState.TOOL_ERROR
+    assert "no fd" in result.message
+
+
+def test_subprocess_garbage_output_is_tool_error(repo):
+    import subprocess
+    from unittest.mock import patch
+
+    from fettle.dispatcher_types import ResultState
+
+    proc = subprocess.CompletedProcess(args=[], returncode=2,
+                                       stdout="not json {", stderr="")
+    with patch("fettle.quality_gate.subprocess.run", return_value=proc):
+        result = run_check(_ctx(repo, "PreToolUse", _raw(repo)))
+    assert result.result_state is ResultState.TOOL_ERROR
+    assert "unparseable" in result.message
+
+
+def test_subprocess_crash_without_output_is_tool_error(repo):
+    import subprocess
+    from unittest.mock import patch
+
+    from fettle.dispatcher_types import ResultState
+
+    proc = subprocess.CompletedProcess(args=[], returncode=1,
+                                       stdout="", stderr="Traceback: boom")
+    with patch("fettle.quality_gate.subprocess.run", return_value=proc):
+        result = run_check(_ctx(repo, "PreToolUse", _raw(repo)))
+    assert result.result_state is ResultState.TOOL_ERROR
+    assert "boom" in result.message

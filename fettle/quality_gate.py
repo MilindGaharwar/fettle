@@ -588,16 +588,35 @@ def run_check(ctx):
             text=True,
             timeout=15,
         )
-    except (subprocess.TimeoutExpired, OSError):
-        return CheckResult.allow()
+    except subprocess.TimeoutExpired:
+        # Silent allow() here disabled the Stage-0 failure-visibility trace
+        # and the 3-in-24h escalation (audit M: fails silently open).
+        return CheckResult.tool_error(
+            "quality gate subprocess timed out after 15s",
+            action="Run `fettle check --changed` directly and inspect its output.",
+        )
+    except OSError as error:
+        return CheckResult.tool_error(
+            f"quality gate subprocess could not launch: {error}",
+            action="Run `fettle check --changed` directly and inspect its output.",
+        )
 
     if not proc.stdout.strip():
-        return CheckResult.allow()
+        if proc.returncode == 0:
+            return CheckResult.allow()
+        return CheckResult.tool_error(
+            f"quality gate subprocess crashed (exit {proc.returncode}): "
+            + (proc.stderr or "").strip()[-300:],
+            action="Run `fettle check --changed` directly and inspect its output.",
+        )
 
     try:
         output = json.loads(proc.stdout.strip())
     except json.JSONDecodeError:
-        return CheckResult.allow()
+        return CheckResult.tool_error(
+            "quality gate produced unparseable output",
+            action="Run `fettle check --changed` directly and inspect its output.",
+        )
 
     hso = output.get("hookSpecificOutput", {})
     context = hso.get("additionalContext", "")
