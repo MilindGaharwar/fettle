@@ -168,6 +168,9 @@ def _write_tree(root: Path, published_root: Path) -> None:
         if path.is_file():
             files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        elif path.is_dir():
+            path.chmod(stat.S_IRWXU)
+    root.chmod(stat.S_IRWXU)
     manifest = {
         "schema_version": _SCHEMA_VERSION,
         "fettle_version": __version__,

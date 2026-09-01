@@ -240,6 +240,9 @@ def detect_profile(cwd: str, use_cache: bool = True) -> Profile:
     if use_cache:
         cached, cached_hash = _load_cache(root)
         if cached and cached_hash == current_hash:
+            # The cache file is agent-writable: resolver-governed overrides
+            # must always reassert over cached values (2026-08 audit).
+            _apply_fettle_toml_overrides(root, cached)
             return cached
 
     languages: list[str] = []

@@ -124,3 +124,22 @@ class TestRegistry:
         spec = next(c for c in CHECKS if c.name == "agent_spawn_gate")
         assert spec.events == frozenset({"PreToolUse"})
         assert spec.tools == frozenset({"Bash"})
+
+
+class TestGateModeKillSwitch:
+    """2026-08 audit: FETTLE_GATE_MODE=off screened on ANY segment, not
+    only agent launches — it disables every gate for the process tree."""
+
+    def test_non_launch_command_with_gate_off_advises(self) -> None:
+        result = run_check(_ctx("FETTLE_GATE_MODE=off git commit -m x"))
+        assert result.decision == Decision.ADVISORY
+        assert "FETTLE_GATE_MODE=off" in result.message
+
+    def test_non_launch_command_with_gate_off_blocks_in_enforce(self) -> None:
+        result = run_check(_ctx("FETTLE_GATE_MODE=off make test", mode="enforce"))
+        assert result.decision == "block"
+        assert result.hook_specific_output["permissionDecision"] == "deny"
+
+    def test_quoted_mention_is_not_flagged(self) -> None:
+        result = run_check(_ctx("grep -r 'FETTLE_GATE_MODE=off' docs/"))
+        assert result.decision == "allow"

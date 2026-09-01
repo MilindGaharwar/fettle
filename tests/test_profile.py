@@ -158,3 +158,21 @@ def test_org_layer_governs_profile_overrides(tmp_path, monkeypatch):
     profile = detect_profile(str(repo), use_cache=False)
 
     assert profile.workspaces[0].test_command == "make org-test"
+
+
+def test_forged_cache_cannot_override_resolver_commands(tmp_path):
+    """The cache file is agent-writable — resolver overrides must reassert."""
+    import json
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "myapp"\n')
+    (tmp_path / "tests").mkdir()
+    (tmp_path / ".fettle.toml").write_text(
+        '[profile]\ntest_command = "make governed-test"\n')
+    detect_profile(str(tmp_path))  # populate the cache
+    cache = tmp_path / ".fettle" / "profile.json"
+    data = json.loads(cache.read_text())
+    data["workspaces"][0]["test_command"] = "true"  # forged
+    cache.write_text(json.dumps(data))
+
+    profile = detect_profile(str(tmp_path))  # cache hit
+
+    assert profile.workspaces[0].test_command == "make governed-test"
