@@ -2,7 +2,7 @@
   "schema_version": 1,
   "milestone": "p81-assurance-vector",
   "revision": "uat-strength-2026-08-28",
-  "scope_digest": "c86623dfac1c5faf8bd1ae4c303fdcffa2e966b4b79a566637195e45861ac313",
+  "scope_digest": "ea96c9d1aa59b803cc43bc9850971e2725897ba76a634604c17e5a7322059603",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [

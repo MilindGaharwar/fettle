@@ -391,3 +391,120 @@ def test_policy_fails_closed_on_malformed_toml(tmp_path):
 
     assert decision["status"] == "CONFIG_ERROR"
     assert "could not parse" in decision["errors"][0]
+
+
+# ─── Dimension binding (2026-08 audit: unbound JSON must not PASS) ──────────
+
+
+def test_ci_dimension_requires_bound_green_status(tmp_path):
+    root = _init_repo(tmp_path)
+    sha = _commit_head(root)
+    (root / ".fettle" / "ci-status.json").write_text(
+        json.dumps({"ok": True, "sha": sha, "overall": "success"}),
+        encoding="utf-8")
+
+    ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
+
+    assert ci["status"] == "PASS"
+    assert ci["evidence"][0]["path"] == ".fettle/ci-status.json"
+
+
+def test_ci_dimension_rejects_status_for_other_revision(tmp_path):
+    root = _init_repo(tmp_path)
+    _commit_head(root)
+    (root / ".fettle" / "ci-status.json").write_text(
+        json.dumps({"ok": True, "sha": "0" * 40, "overall": "success"}),
+        encoding="utf-8")
+
+    ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
+
+    assert ci["status"] == "UNKNOWN"
+    assert "revision" in ci["reason"]
+
+
+def test_ci_dimension_fails_on_red_status(tmp_path):
+    root = _init_repo(tmp_path)
+    sha = _commit_head(root)
+    (root / ".fettle" / "ci-status.json").write_text(
+        json.dumps({"ok": False, "sha": sha, "overall": "failure"}),
+        encoding="utf-8")
+
+    ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
+
+    assert ci["status"] == "FAIL"
+    assert "failure" in ci["reason"]
+
+
+def test_authorization_dimension_verifies_capsule_integrity(tmp_path):
+    from fettle.graph_types import canonical_digest
+    root = _init_repo(tmp_path)
+    policy = {"gates": {"verify": {"enabled": True}}}
+    (root / ".fettle" / "capsule.json").write_text(json.dumps({
+        "fettle_capsule": 1, "digest": canonical_digest(policy),
+        "policy": policy, "origin": {}, "lineage": [],
+    }), encoding="utf-8")
+
+    auth = build_assurance_record(str(root))["record"]["dimensions"]["authorization"]
+
+    assert auth["status"] == "PASS"
+
+
+def test_authorization_dimension_fails_on_tampered_capsule(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "capsule.json").write_text(json.dumps({
+        "fettle_capsule": 1, "digest": "f" * 64,
+        "policy": {"gates": {}}, "origin": {}, "lineage": [],
+    }), encoding="utf-8")
+
+    auth = build_assurance_record(str(root))["record"]["dimensions"]["authorization"]
+
+    assert auth["status"] == "FAIL"
+    assert "digest mismatch" in auth["reason"]
+
+
+def _write_uat_report(root, all_confirmed=True):
+    from fettle.uat.reconcile import Verdict, write_report
+    verdicts = [
+        Verdict("spec/S1", "CONFIRMED" if all_confirmed else "CONTRADICTED",
+                observed="ran", note=""),
+    ]
+    session = {"session_id": "uat-1", "surface": "cli"}
+    path, error = write_report(str(root), session, verdicts, candidates=[])
+    assert path and not error, error
+
+
+def test_uat_dimension_passes_with_bound_canonical_sidecar(tmp_path):
+    root = _init_repo(tmp_path)
+    _write_uat_report(root)
+
+    uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
+
+    assert uat["status"] == "PASS"
+    assert any(e["path"] == ".fettle/uat-report.evidence.json"
+               for e in uat["evidence"])
+
+
+def test_uat_dimension_rejects_report_without_sidecar(tmp_path):
+    root = _init_repo(tmp_path)
+    _write_uat_report(root)
+    (root / ".fettle" / "uat-report.evidence.json").unlink()
+
+    uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
+
+    assert uat["status"] == "UNKNOWN"
+    assert "sidecar" in uat["reason"]
+
+
+def test_uat_dimension_rejects_edited_report(tmp_path):
+    root = _init_repo(tmp_path)
+    _write_uat_report(root)
+    path = root / ".fettle" / "uat-report.json"
+    report = json.loads(path.read_text())
+    report["verdicts"].append(
+        {"scenario_id": "spec/S2", "verdict": "CONFIRMED", "observed": "", "note": ""})
+    path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
+
+    assert uat["status"] == "UNKNOWN"
+    assert "does not match" in uat["reason"]
