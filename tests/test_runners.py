@@ -19,10 +19,16 @@ CLI_RUNNERS = [
     (CodexRunner, "codex", [
         "-a", "never", "-s", "workspace-write", "--dangerously-bypass-hook-trust", "exec",
     ]),
-    (GeminiRunner, "gemini", ["--yolo", "-p"]),
+    (GeminiRunner, "gemini", [
+        "--approval-mode", "auto_edit", "--allowed-tools", "run_shell_command", "-p",
+    ]),
     (OpenCodeRunner, "opencode", ["run"]),
 ]
 CLI_IDS = [binary for _, binary, _ in CLI_RUNNERS]
+
+#: Permission-bypass flags the agent_spawn_gate blocks in child launches —
+#: fettle's own runners must never carry them (2026-08 audit HIGH-4).
+BYPASS_FLAGS = {"--dangerously-skip-permissions", "--yolo", "--full-auto"}
 
 
 class TestRegistry:
@@ -67,7 +73,8 @@ class TestClaudeRunner:
         assert result.exit_code == 0
         assert result.error == ""
         cmd = mock_run.call_args[0][0]
-        assert "--dangerously-skip-permissions" in cmd
+        assert "--allowedTools" in cmd
+        assert not BYPASS_FLAGS & set(cmd)
         assert mock_run.call_args.kwargs["timeout"] == 30
         assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
 
@@ -133,6 +140,7 @@ class TestCliRunners:
         cmd = mock_run.call_args[0][0]
         for flag in flags:
             assert flag in cmd, f"{binary} argv missing {flag}: {cmd}"
+        assert not BYPASS_FLAGS & set(cmd), f"{binary} argv carries a bypass flag: {cmd}"
         assert cmd[-1] == "prompt"
         assert mock_run.call_args.kwargs["timeout"] == 30
         assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
