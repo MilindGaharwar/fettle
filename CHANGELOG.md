@@ -42,6 +42,23 @@
   `fettle doctor` discloses the downgrade — failing when enforce-mode
   gates are configured that the installed host cannot honor. Bridge
   fail-open toasts now say "failing open" explicitly.
+- Supply chain: `tla-verify.yml` verifies the sha256 of `tla2tools.jar`
+  before executing it, gains a least-privilege `permissions:` block, and
+  pins its actions by commit SHA; the published `action.yml` pins its
+  actions by SHA and installs ruff/semgrep at the `PINNED_TOOLS` versions.
+  `github.base_ref` now reaches mutation-workflow shells via environment
+  indirection only.
+- LOW hardening sweep: `FETTLE_GATE_MODE=off` is screened in every Bash
+  command segment (not only agent launches); mutation/canary subprocesses
+  no longer inherit credential-bearing environment variables; per-check
+  budget overruns are traced (not only logged); the agent-writable profile
+  cache can no longer override resolver-governed commands; published
+  bridge directories are re-chmodded to owner-only alongside their files.
+  Known accepted risks: runner prompts remain visible in process argv, and
+  delegation env export briefly mutates process env (single-threaded
+  launch paths).
+- Deprecation: the `scripts` → `fettle/` compatibility symlink (kept since
+  the v1.2.0 package rename) will be removed in the next minor release.
 
 ### User Acceptance (P75-P77)
 

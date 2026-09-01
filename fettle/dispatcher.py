@@ -213,12 +213,21 @@ def main() -> int:
                     role=str(ctx.config.get("role", "")),
                 )
 
-        # WP-D: Log overruns for observability
+        # WP-D: Log overruns for observability — and trace them, so chronic
+        # slow checks are visible in `fettle report`, not only in stderr.
         if time.monotonic() > check_deadline:
             logger.warning(
                 "fettle: check %s overran budget (%dms budget, %dms actual)",
                 spec.name, spec.budget_ms or 0, elapsed_ms,
             )
+            with contextlib.suppress(Exception):
+                log_decision(
+                    "dispatcher", "budget_overrun", tool=hook_input.tool_name or "",
+                    findings=[{"code": "CHECK_BUDGET_OVERRUN", "check": spec.name,
+                               "budget_ms": spec.budget_ms or 0,
+                               "actual_ms": elapsed_ms}],
+                    session_id=session_id,
+                )
 
         if aggregator.has_block:
             break
@@ -275,5 +284,5 @@ if __name__ == "__main__":
         raise
     except Exception:  # noqa: BLE001 — last-resort fail-open
         traceback.print_exc(file=sys.stderr)
-        print(_empty_output())
+        print(_empty_output())  # nosemgrep: debug-print-statement -- hook stdout protocol
         raise SystemExit(0) from None

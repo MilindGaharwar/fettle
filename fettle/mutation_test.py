@@ -37,8 +37,13 @@ _CACHE_STATES = {
     "untested": "untested",
     "skipped": "skipped",
 }
+_SENSITIVE_ENV = ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY",
+                  "ACCESS_KEY", "PRIVATE_KEY")
 _ENV = {
-    **os.environ,
+    **{k: v for k, v in os.environ.items()
+       # Mutation/canary children run git + pytest only — they never need
+       # credentials the CI job env may carry (2026-08 audit).
+       if not any(marker in k.upper() for marker in _SENSITIVE_ENV)},
     "PATH": os.pathsep.join((
         str(Path(sys.executable).parent),
         os.path.expanduser("~/.local/bin"),

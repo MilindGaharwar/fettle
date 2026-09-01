@@ -2768,3 +2768,12 @@ def test_stability_rejects_incomplete_or_inconsistent_evidence(reports, error):
 
     assert result["status"] == "unstable"
     assert error in result["errors"][0]
+
+
+def test_mutation_child_env_never_carries_credentials():
+    """2026-08 audit: mutation/canary subprocesses inherited the full env."""
+    from fettle.mutation_test import _ENV, _SENSITIVE_ENV
+
+    for key in _ENV:
+        assert not any(marker in key.upper() for marker in _SENSITIVE_ENV), key
+    assert "PATH" in _ENV  # the curated key survives

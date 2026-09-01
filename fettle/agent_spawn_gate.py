@@ -93,4 +93,27 @@ def run_check(ctx: HookContext) -> CheckResult:
                 f"inherits no policy — launch it via "
                 f"`fettle spawn {runner} --task ...` instead."
             )
+
+    # 2026-08 audit: the kill switch was only screened on agent launches,
+    # but it disables every gate for ANY child process tree (git hooks,
+    # test runners) — screen it on every command segment.
+    for segment in _normalize_command(command):
+        if _is_safe_context(segment) or _detect_launch(segment):
+            continue
+        if _GATE_OFF.search(segment):
+            reason = (
+                "FETTLE_GATE_MODE=off in a Bash command disables every fettle "
+                "gate for that process tree. Remove the kill switch, or change "
+                "policy in .fettle.toml where it is reviewable."
+            )
+            if mode == "enforce":
+                return CheckResult.block(
+                    reason,
+                    hook_specific_output={
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "additionalContext": reason,
+                    },
+                )
+            return CheckResult.advisory(reason)
     return CheckResult.allow()
