@@ -15,6 +15,20 @@
 - `mutation.yml` validates the `resume_run_id` dispatch input as numeric and
   passes it to the shell via environment indirection, closing a workflow
   command-injection path.
+- Live agent runners no longer disable agent safety wholesale: the Claude
+  runner replaces `--dangerously-skip-permissions` with a deny-by-default
+  `--allowedTools` grant, and the Gemini runner replaces `--yolo` with
+  `--approval-mode auto_edit` plus a scoped `--allowed-tools` list. A test
+  invariant pins that no runner argv ever carries a permission-bypass flag.
+- Assurance dimensions no longer trust unbound JSON: the CI dimension reads
+  `.fettle/ci-status.json` (the file `fettle ci wait` actually writes) and
+  requires a green verdict bound to HEAD; the authorization dimension
+  verifies capsule digest integrity instead of file existence; the UAT
+  dimension requires the canonical evidence sidecar to bind the exact
+  report content, session, and completion.
+- The quality gate surfaces subprocess timeout, launch failure, crash, and
+  unparseable output as `tool_error` instead of silently allowing, restoring
+  Stage-0 failure visibility and escalation.
 
 ### User Acceptance (P75-P77)
 
