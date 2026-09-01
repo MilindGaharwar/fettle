@@ -12,7 +12,7 @@ Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
 | I want to... | Start here | Expected result |
 |---|---|---|
-| Evaluate Fettle without changing a repository | `pipx install finefettle`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
+| Evaluate Fettle without changing a repository | `pipx install "finefettle[all]"`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
 | Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
 | Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
