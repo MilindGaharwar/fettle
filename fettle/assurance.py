@@ -17,15 +17,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 import tomllib
+import unicodedata
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
+from fettle import __version__
 from fettle.graph_types import canonical_digest
 from fettle.paths import classify_file, is_within_repo
 from fettle.trace import read_tail
 from fettle.work_items import load_claims
 
 SCHEMA_VERSION = 1
+EVIDENCE_RELPATH = ".fettle/assurance-record.evidence.json"
 
 STAGES = (
     "requirements", "plan", "agent_actions", "files", "commit",
@@ -56,6 +63,15 @@ def _digest_of(path: Path) -> str | None:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _json_digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    )
+    normalized = unicodedata.normalize("NFC", encoded).encode("utf-8")
+    return "sha256:" + hashlib.sha256(normalized).hexdigest()
+
+
 def _dimension(status: str, evidence: list[dict], reason: str = "") -> dict:
     out: dict = {"status": status, "evidence": evidence}
     if reason:
@@ -63,9 +79,10 @@ def _dimension(status: str, evidence: list[dict], reason: str = "") -> dict:
     return out
 
 
-def _stage_ref(stage: str, path: Path) -> dict:
+def _stage_ref(stage: str, root: Path, relative: str) -> dict:
+    path = root / relative
     digest = _digest_of(path)
-    return {"stage": stage, "path": str(path),
+    return {"stage": stage, "path": relative,
             "digest": digest, "present": digest is not None}
 
 
@@ -81,7 +98,7 @@ def _git_head(root: Path) -> str:
     return ""
 
 
-def _verify_stamp_state(root: Path, tests: dict | None) -> tuple[str, str]:
+def _verify_stamp_state(root: Path, config: dict, tests: dict | None) -> tuple[str, str]:
     """Judge the verify stamp: ('pass'|'fail'|'unbound'|'absent', reason).
 
     A stamp only counts as evidence of green behavior when it records a
@@ -90,34 +107,62 @@ def _verify_stamp_state(root: Path, tests: dict | None) -> tuple[str, str]:
     """
     if tests is None:
         return "absent", "no verify stamp retained"
-    if tests.get("ok") is False:
-        detail = str(tests.get("error") or "").strip()
-        return "fail", ("last verification run failed"
-                        + (f": {detail}" if detail else ""))
-    if tests.get("ok") is not True:
-        return "unbound", "verify stamp records no passing verdict"
-    if not str(tests.get("session_id") or ""):
-        return "unbound", "verify stamp has no session binding"
-    head = _git_head(root)
-    if not head or str(tests.get("head_sha") or "") != head:
-        return "unbound", "verify stamp is not bound to the current revision"
-    return "pass", ""
+    from fettle.evidence import ResultState, Validity
+    from fettle.verify_gate import validate_canonical_evidence
+
+    result = validate_canonical_evidence(str(root), config, tests)
+    if result.validity != Validity.VALID:
+        return "unbound", (
+            f"canonical verification evidence is {result.validity.value}; "
+            f"run {result.recovery_action}"
+        )
+    if result.result_state == ResultState.PASS:
+        return "pass", ""
+    if result.result_state == ResultState.VIOLATION:
+        return "fail", "canonical verification reported a violation"
+    return "unbound", (
+        f"canonical verification result is {result.result_state.value}; "
+        f"run {result.recovery_action}"
+    )
 
 
-def _behavior_dimension(root: Path) -> dict:
+def _behavior_dimension(root: Path, config: dict) -> dict:
     evidence: list[dict] = []
     mutation = _read_json(root / "mutation-report.json")
     tests = _read_json(root / ".fettle" / "verify.json")
     if tests is not None:
         evidence.append({"path": ".fettle/verify.json",
                          "digest": _digest_of(root / ".fettle" / "verify.json")})
-    stamp_state, stamp_reason = _verify_stamp_state(root, tests)
+    stamp_state, stamp_reason = _verify_stamp_state(root, config, tests)
+    if stamp_state in ("pass", "fail"):
+        evidence.append({"path": ".fettle/verify-evidence.json",
+                         "digest": _digest_of(root / ".fettle" / "verify-evidence.json")})
     if mutation is not None:
         evidence.append({"path": "mutation-report.json",
                          "digest": _digest_of(root / "mutation-report.json")})
-        if mutation.get("status") != "completed":
+        from fettle.evidence import ResultState, Validity
+        from fettle.mutation_test import validate_canonical_evidence
+
+        result = validate_canonical_evidence(str(root), config.get("mutation", {}), mutation)
+        if result.validity != Validity.VALID:
+            if stamp_state == "fail":
+                return _dimension("FAIL", evidence, reason=stamp_reason)
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"canonical mutation evidence is {result.validity.value}; "
+                       f"run {result.recovery_action}",
+            )
+        if result.result_state == ResultState.VIOLATION:
             return _dimension("FAIL", evidence,
-                              reason=f"mutation run {mutation.get('status')}")
+                              reason="canonical mutation reported a violation")
+        if result.result_state != ResultState.PASS:
+            if stamp_state == "fail":
+                return _dimension("FAIL", evidence, reason=stamp_reason)
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"canonical mutation result is {result.result_state.value}; "
+                       f"run {result.recovery_action}",
+            )
         if stamp_state == "fail":
             return _dimension("FAIL", evidence, reason=stamp_reason)
         if stamp_state in ("pass", "absent"):
@@ -150,8 +195,11 @@ def _security_dimension(root: Path) -> dict:
                           reason="security review has malformed findings")
     if findings:
         suffix = "finding" if len(findings) == 1 else "findings"
-        return _dimension("FAIL", evidence,
-                          reason=f"{len(findings)} security {suffix} retained")
+        return _dimension(
+            "UNKNOWN", evidence,
+            reason=f"{len(findings)} security {suffix} retained in a raw, "
+                   "non-canonical review",
+        )
     complete = (
         isinstance(report.get("tools_used"), list)
         and bool(report["tools_used"])
@@ -161,7 +209,11 @@ def _security_dimension(root: Path) -> dict:
         and report.get("tool_errors") == []
     )
     if complete:
-        return _dimension("PASS", evidence)
+        return _dimension(
+            "UNKNOWN", evidence,
+            reason="security review is complete but not canonical or bound "
+                   "to the assessed source, policy, and scope",
+        )
     return _dimension("UNKNOWN", evidence,
                       reason="security review coverage is incomplete")
 
@@ -234,50 +286,45 @@ def _independence_dimension(root: Path) -> dict:
             "grade": "MEDIUM"}
 
 
-def _provenance_dimension(root: Path) -> dict:
+def _provenance_dimension(root: Path, assessed_commit: str | None) -> dict:
     evidence: list[dict] = []
     ledger = root / ".fettle" / "governance-ledger.jsonl"
     anchor = root / ".fettle" / "ledger-anchor.json"
     if ledger.is_file():
         evidence.append({"path": ".fettle/governance-ledger.jsonl",
                          "digest": _digest_of(ledger)})
-    anchor_data = _read_json(anchor)
-    if anchor_data is not None:
+    if anchor.is_file():
         evidence.append({"path": ".fettle/ledger-anchor.json",
                          "digest": _digest_of(anchor)})
+        from fettle.evidence_ledger import verify_anchor
+
+        state = verify_anchor(str(root))
+        if state.get("status") != "anchored":
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"governance ledger or anchor is invalid: "
+                       f"{state.get('reason', state.get('status', 'unknown'))}",
+            )
+        if not assessed_commit or state.get("anchored_commit") != assessed_commit:
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason="governance anchor is bound to a different commit",
+            )
+        if state.get("coverage") != "known":
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason="governance anchor coverage is unknown",
+            )
+        if state.get("records_since_anchor") != 0:
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason="governance ledger has post-anchor records",
+            )
         return _dimension("PASS", evidence)
     if evidence:
         return _dimension("UNKNOWN", evidence,
                           reason="ledger present but never anchored")
     return _dimension("UNKNOWN", [], reason="no governance ledger retained")
-
-
-def _uat_evidence_problem(root: Path, report_path: Path, report: dict) -> str:
-    """'' when the canonical sidecar binds this exact report; reason otherwise."""
-    sidecar = root / ".fettle" / "uat-report.evidence.json"
-    if not sidecar.is_file():
-        return "UAT report has no canonical evidence sidecar"
-    try:
-        from fettle.evidence import parse_artifact
-        artifact = parse_artifact(sidecar.read_bytes())
-    except (OSError, ValueError, TypeError, KeyError):
-        return "canonical UAT evidence is malformed"
-    if artifact.kind != "fettle.uat.report":
-        return "canonical UAT evidence has an unexpected kind"
-    from collections.abc import Mapping
-    payload = artifact.payload if isinstance(artifact.payload, Mapping) else {}
-    report_digest = "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest()
-    reference = payload.get("report")
-    reference = reference if isinstance(reference, Mapping) else {}
-    if reference.get("digest") != report_digest:
-        return "canonical UAT evidence does not match the report content"
-    if str(payload.get("session_id") or "") != str(report.get("session_id") or ""):
-        return "canonical UAT evidence is bound to a different session"
-    completion = payload.get("completion")
-    completion = completion if isinstance(completion, Mapping) else {}
-    if completion.get("complete") is not True:
-        return "canonical UAT evidence does not record completion"
-    return ""
 
 
 def _uat_dimension(root: Path) -> dict:
@@ -287,74 +334,128 @@ def _uat_dimension(root: Path) -> dict:
     if report is not None:
         evidence.append({"path": ".fettle/uat-report.json",
                          "digest": _digest_of(path)})
+        from fettle.evidence import ResultState, Validity
+        from fettle.uat.reconcile import validate_canonical_evidence
+
+        result = validate_canonical_evidence(str(root), report)
+        if result.validity != Validity.VALID:
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"canonical UAT evidence is {result.validity.value}; "
+                       f"run {result.recovery_action}",
+            )
+        evidence.append({"path": ".fettle/uat-report.evidence.json",
+                         "digest": _digest_of(root / ".fettle" / "uat-report.evidence.json")})
         confirmed = sum(1 for v in report.get("verdicts", [])
-                        if v.get("verdict") == "CONFIRMED")
+                         if v.get("verdict") == "CONFIRMED")
         total = len(report.get("verdicts", []))
-        if total and confirmed == total and report.get("candidate_scenarios") is not None:
-            problem = _uat_evidence_problem(root, path, report)
-            if problem:
-                return _dimension("UNKNOWN", evidence, reason=problem)
-            evidence.append({"path": ".fettle/uat-report.evidence.json",
-                             "digest": _digest_of(root / ".fettle" / "uat-report.evidence.json")})
+        if result.result_state == ResultState.PASS:
             return _dimension("PASS", evidence)
-        if total:
+        if result.result_state == ResultState.VIOLATION:
             return _dimension("FAIL", evidence,
-                              reason=f"{confirmed}/{total} scenarios confirmed")
+                               reason=f"{confirmed}/{total} scenarios confirmed")
+        return _dimension(
+            "UNKNOWN", evidence,
+            reason=f"canonical UAT result is {result.result_state.value}; "
+                   f"run {result.recovery_action}",
+        )
     return _dimension("UNKNOWN", [], reason="no UAT report retained")
 
 
-def _ci_dimension(root: Path) -> dict:
+def _ci_dimension(root: Path, config: dict) -> dict:
     path = root / ".fettle" / "ci-status.json"
     ci = _read_json(path)
     evidence: list[dict] = []
     if ci is not None:
         evidence.append({"path": ".fettle/ci-status.json",
                          "digest": _digest_of(path)})
-        if ci.get("ok") is not True:
+        from fettle.ci_gate import validate_canonical_evidence
+        from fettle.evidence import ResultState, Validity
+
+        result = validate_canonical_evidence(str(root), config, ci)
+        if result.validity != Validity.VALID:
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"canonical CI evidence is {result.validity.value}; "
+                       f"run {result.recovery_action}",
+            )
+        evidence.append({"path": ".fettle/ci-evidence.json",
+                         "digest": _digest_of(root / ".fettle" / "ci-evidence.json")})
+        if result.result_state == ResultState.PASS:
+            return _dimension("PASS", evidence)
+        if result.result_state == ResultState.VIOLATION:
             return _dimension("FAIL", evidence,
-                              reason=f"remote CI {ci.get('overall', 'not green')}")
-        head = _git_head(root)
-        if not head or str(ci.get("sha") or "") != head:
-            return _dimension("UNKNOWN", evidence,
-                              reason="CI status is not bound to the current revision")
-        return _dimension("PASS", evidence)
+                              reason="canonical CI reported a violation")
+        return _dimension("UNKNOWN", evidence,
+                          reason=f"canonical CI result is {result.result_state.value}; "
+                                 f"run {result.recovery_action}")
     return _dimension("NOT_APPLICABLE", [],
                       reason="no retained CI status (bind with fettle ci wait)")
 
 
 def _authorization_dimension(root: Path) -> dict:
-    capsule = root / ".fettle" / "capsule.json"
-    capsule_data = _read_json(capsule)
-    evidence: list[dict] = []
-    if capsule_data is not None:
-        evidence.append({"path": ".fettle/capsule.json",
-                         "digest": _digest_of(capsule)})
-        from fettle.policy_capsule import verify as verify_capsule
-        problem = verify_capsule(capsule_data)
-        if problem:
-            return _dimension("FAIL", evidence,
-                              reason=f"delegation capsule invalid: {problem}")
-        return _dimension("PASS", evidence)
-    return _dimension("NOT_APPLICABLE", [],
-                      reason="solo session — no delegation capsule")
+    import os
+
+    from fettle.policy_capsule import ENV_VAR, resolve_env_capsule
+
+    asserted = os.environ.get(ENV_VAR, "").strip()
+    if not asserted:
+        return _dimension("NOT_APPLICABLE", [],
+                          reason="solo session — no delegation capsule")
+    capsule = Path(asserted)
+    evidence = [{"path": f"env:{ENV_VAR}", "digest": _digest_of(capsule)}]
+    capsule_data, problem = resolve_env_capsule()
+    if problem or capsule_data is None:
+        return _dimension("FAIL", evidence,
+                          reason=f"delegation capsule invalid: {problem}")
+    return _dimension("PASS", evidence)
 
 
-def _policy_integrity_dimension(root: Path) -> dict:
-    policy_digest = _digest_of(root / ".fettle.toml")
-    if policy_digest:
-        return _dimension("PASS",
-                          [{"path": ".fettle.toml", "digest": policy_digest}])
-    return _dimension("UNKNOWN", [], reason="no policy file found")
+def _policy_integrity_dimension(policy_digest: str) -> dict:
+    return _dimension(
+        "PASS", [{"path": "effective-policy", "digest": policy_digest}],
+    )
 
 
-def _scope_dimension(root: Path, changed: list[str] | None) -> dict:
-    if changed is None:
-        return _dimension("UNKNOWN", [],
-                          reason="changed-scope not provided for this record")
+def _scope_dimension(scope_digest: str) -> dict:
     return _dimension("PASS",
-                      [{"path": "changed-files",
-                        "digest": "sha256:" + hashlib.sha256(
-                             json.dumps(sorted(changed)).encode()).hexdigest()}])
+                      [{"path": "git:changed-files", "digest": scope_digest}])
+
+
+def _assessment_context(root: Path) -> dict:
+    from fettle.changeset import get_changed_files
+    from fettle.config import resolve_with_provenance
+    from fettle.source_snapshot import working_snapshot
+
+    source_result = working_snapshot(str(root))
+    if source_result.get("status") != "completed":
+        return {
+            "status": "tool_error",
+            "message": str(source_result.get("message") or "cannot identify working source"),
+        }
+    snapshot = source_result["snapshot"]
+    config, layers = resolve_with_provenance(str(root))
+    policy_digest = _json_digest(config)
+    changed = get_changed_files(str(root))
+    scope_rows = sorted({(item.path.replace("\\", "/"), item.status.value) for item in changed})
+    scope_digest = _json_digest(scope_rows)
+    return {
+        "status": "completed",
+        "source": {
+            "kind": snapshot["kind"],
+            "snapshot_digest": "sha256:" + snapshot["digest"],
+            "revision": _git_head(root) or None,
+        },
+        "policy": {
+            "digest": policy_digest,
+            "layers": [layer.name for layer in layers],
+        },
+        "config": config,
+        "scope": {
+            "digest": scope_digest,
+            "paths": [path for path, _status in scope_rows],
+        },
+    }
 
 
 def evaluate_assurance_policy(record: dict, root: str, policy: str) -> dict:
@@ -427,33 +528,43 @@ def build_assurance_record(root: str = ".",
                            changed_files: list[str] | None = None) -> dict:
     """Aggregate existing artifacts into the canonical Assurance Record."""
     root_path = Path(root)
+    context = _assessment_context(root_path)
+    if context["status"] != "completed":
+        return context
     dimensions = {
         "authorization": _authorization_dimension(root_path),
-        "policy_integrity": _policy_integrity_dimension(root_path),
-        "scope": _scope_dimension(root_path, changed_files),
-        "behavior": _behavior_dimension(root_path),
+        "policy_integrity": _policy_integrity_dimension(context["policy"]["digest"]),
+        "scope": _scope_dimension(context["scope"]["digest"]),
+        "behavior": _behavior_dimension(root_path, context["config"]),
         "security": _security_dimension(root_path),
         "independence": _independence_dimension(root_path),
-        "provenance": _provenance_dimension(root_path),
+        "provenance": _provenance_dimension(root_path, context["source"]["revision"]),
         "uat": _uat_dimension(root_path),
-        "ci": _ci_dimension(root_path),
+        "ci": _ci_dimension(root_path, context["config"]),
     }
 
-    commit = _git_head(root_path) or None
+    commit = context["source"]["revision"]
 
     stages = [
-        _stage_ref("requirements", root_path / "specs"),
-        _stage_ref("agent_actions", root_path / ".fettle" / "trace.jsonl"),
-        _stage_ref("mutation", root_path / "mutation-report.json"),
-        _stage_ref("uat", root_path / ".fettle" / "uat-report.json"),
-        _stage_ref("ledger", root_path / ".fettle" / "governance-ledger.jsonl"),
-        _stage_ref("anchor", root_path / ".fettle" / "ledger-anchor.json"),
+        _stage_ref("requirements", root_path, "specs"),
+        _stage_ref("agent_actions", root_path, ".fettle/trace.jsonl"),
+        _stage_ref("mutation", root_path, "mutation-report.json"),
+        _stage_ref("uat", root_path, ".fettle/uat-report.json"),
+        _stage_ref("ledger", root_path, ".fettle/governance-ledger.jsonl"),
+        _stage_ref("anchor", root_path, ".fettle/ledger-anchor.json"),
     ]
 
     complete = all(d["status"] not in ("UNKNOWN",) for d in dimensions.values())
     record = {
         "schema_version": 1,
-        "subject": {"commit": commit, "root": str(root_path.resolve())},
+        "subject": {
+            "commit": commit,
+            "root": str(root_path.resolve()),
+            "kind": context["source"]["kind"],
+            "snapshot_digest": context["source"]["snapshot_digest"],
+        },
+        "policy": context["policy"],
+        "scope": context["scope"],
         "generated_at": None,
         "stages": stages,
         "dimensions": dimensions,
@@ -461,36 +572,160 @@ def build_assurance_record(root: str = ".",
     }
     import time
     record["generated_at"] = round(time.time(), 3)
-    record["digest"] = canonical_digest(
-        {k: v for k, v in record.items() if k not in ("digest", "generated_at")}
-    )
+    digest_record = {k: v for k, v in record.items() if k not in ("digest", "generated_at")}
+    digest_record["subject"] = {
+        key: value for key, value in record["subject"].items() if key != "root"
+    }
+    record["digest"] = canonical_digest(digest_record)
     return {"status": "completed", "record": record}
 
 
-def write_evidence(root: str, record: dict) -> dict:
-    """Persist the Assurance Record as a bounded evidence artifact."""
-    from fettle.trace import build_evidence
+def invalidate_evidence(root: str) -> dict:
+    """Remove any prior assessment before attempting to publish a replacement."""
+    path = Path(root) / EVIDENCE_RELPATH
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        return {"status": "tool_error",
+                "message": f"cannot invalidate prior assurance record: {exc}"}
+    return {"status": "completed"}
 
-    dims = record.get("dimensions", {})
-    all_pass = all(
-        d.get("status") in ("PASS", "NOT_APPLICABLE") for d in dims.values()
-    )
-    evidence = build_evidence(
-        "assurance_record",
-        exit_code=0 if all_pass else 1,
-        scope=record.get("subject", {}).get("root", ""),
-    )
-    out_dir = Path(root) / ".fettle"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / "assurance-record.evidence.json"
-    out.write_text(json.dumps({
-        "schema_version": SCHEMA_VERSION,
-        "evidence_id": evidence["evidence_id"],
-        "record_digest": record.get("digest", ""),
-        "completeness": record.get("completeness", "UNKNOWN"),
-        "dimensions": {k: v.get("status", "UNKNOWN")
-                        for k, v in dims.items()},
-        "evidence": evidence,
-    }, indent=2) + "\n", encoding="utf-8")
-    return {"status": "completed", "path": str(out),
-            "evidence_id": evidence["evidence_id"]}
+
+def _accepted_parent_references(root: Path, record: dict) -> tuple:
+    from fettle.evidence import EvidenceReference, Validity, parse_artifact
+
+    references: list[EvidenceReference] = []
+    sidecars = {
+        ".fettle/verify-evidence.json",
+        ".fettle/ci-evidence.json",
+        ".fettle/uat-report.evidence.json",
+    }
+    dimensions = record.get("dimensions", {})
+    for dimension in dimensions.values():
+        if not isinstance(dimension, dict):
+            continue
+        for item in dimension.get("evidence", []):
+            relative = item.get("path") if isinstance(item, dict) else None
+            if relative not in sidecars:
+                continue
+            path = root / relative
+            if item.get("digest") != _digest_of(path):
+                continue
+            artifact = parse_artifact(path.read_bytes())
+            references.append(EvidenceReference(
+                artifact_digest=artifact.artifact_digest,
+                kind=artifact.kind,
+                expected={
+                    "source_snapshot_digest": artifact.source["snapshot_digest"],
+                    "policy_digest": artifact.policy_digest,
+                    "scope_digest": artifact.scope_digest,
+                    "producer_id": artifact.producer["id"],
+                },
+            ))
+
+    mutation_path = root / "mutation-report.json"
+    mutation = _read_json(mutation_path)
+    if isinstance(mutation, dict):
+        from fettle.config import load_config
+        from fettle.mutation_test import (
+            build_mutation_report_artifact,
+            validate_canonical_evidence,
+        )
+
+        result = validate_canonical_evidence(
+            str(root), load_config(str(root)).get("mutation", {}), mutation,
+        )
+        if result.validity == Validity.VALID:
+            report_digest = "sha256:" + canonical_digest(mutation)
+            artifact = build_mutation_report_artifact(
+                mutation, "mutation-report.json",
+                run_ids=mutation.get("run_ids") or [report_digest],
+                calibration_ids=(
+                    [mutation["calibration_id"]] if mutation.get("calibration_id") else []
+                ),
+            )
+            references.append(EvidenceReference(
+                artifact_digest=artifact.artifact_digest,
+                kind=artifact.kind,
+                expected={
+                    "source_snapshot_digest": artifact.source["snapshot_digest"],
+                    "policy_digest": artifact.policy_digest,
+                    "scope_digest": artifact.scope_digest,
+                    "producer_id": artifact.producer["id"],
+                },
+            ))
+    return tuple(references)
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def write_evidence(root: str, record: dict) -> dict:
+    """Atomically persist a portable canonical Assurance Record artifact."""
+    from fettle.evidence import EvidenceArtifact
+
+    invalidated = invalidate_evidence(root)
+    if invalidated["status"] != "completed":
+        return invalidated
+    path = Path(root) / EVIDENCE_RELPATH
+    try:
+        subject = record["subject"]
+        portable_record = {
+            key: value for key, value in record.items()
+            if key not in {"generated_at"}
+        }
+        portable_record["subject"] = {
+            key: value for key, value in subject.items() if key != "root"
+        }
+        dimensions = record["dimensions"]
+        if any(value.get("status") == "FAIL" for value in dimensions.values()):
+            result_state = "violation"
+        elif record.get("completeness") == "COMPLETE":
+            result_state = "pass"
+        else:
+            result_state = "unknown"
+        source = {"snapshot_digest": subject["snapshot_digest"]}
+        if subject.get("commit"):
+            source["revision"] = subject["commit"]
+        artifact = EvidenceArtifact.create(
+            kind="fettle.assurance.record",
+            producer={
+                "id": "fettle.assurance",
+                "version": __version__,
+                "implementation_digest": "sha256:" + hashlib.sha256(
+                    Path(__file__).read_bytes(),
+                ).hexdigest(),
+            },
+            result_state=result_state,
+            completeness=(
+                "complete" if record.get("completeness") == "COMPLETE" else "partial"
+            ),
+            trust_class="derived",
+            source=source,
+            policy_digest=record["policy"]["digest"],
+            scope_digest=record["scope"]["digest"],
+            observation_id="assurance-" + uuid.uuid4().hex,
+            observed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            payload={"record": portable_record},
+            parents=_accepted_parent_references(Path(root), record),
+        )
+        _write_bytes_atomic(path, artifact.to_bytes())
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        invalidate_evidence(root)
+        return {"status": "tool_error", "message": str(exc) or type(exc).__name__}
+    return {"status": "completed", "path": str(path),
+            "evidence_id": artifact.observation_id}

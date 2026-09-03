@@ -1380,13 +1380,38 @@ def cmd_assurance(args: argparse.Namespace) -> None:
     """P80/P81: canonical Assurance Record and release-policy decision."""
     import json as _json
 
-    from fettle.assurance import build_assurance_record, evaluate_assurance_policy
+    from fettle.assurance import (
+        build_assurance_record,
+        evaluate_assurance_policy,
+        invalidate_evidence,
+        write_evidence,
+    )
 
+    invalidated = invalidate_evidence(args.root)
+    if invalidated.get("status") != "completed":
+        if args.json:
+            print(_json.dumps(invalidated, indent=2))
+        else:
+            print(f"Assurance persistence failed: {invalidated.get('message', 'unknown error')}")
+        raise SystemExit(2)
     result = build_assurance_record(args.root)
+    if result.get("status") != "completed":
+        if args.json:
+            print(_json.dumps(result, indent=2))
+        else:
+            print(f"Assurance unavailable: {result.get('message', 'assessment failed')}")
+        raise SystemExit(2)
     record = result["record"]
     policy_name = getattr(args, "policy", None)
     if policy_name:
         result["policy"] = evaluate_assurance_policy(record, args.root, policy_name)
+    persisted = write_evidence(args.root, record)
+    if persisted.get("status") != "completed":
+        if args.json:
+            print(_json.dumps(persisted, indent=2))
+        else:
+            print(f"Assurance persistence failed: {persisted.get('message', 'unknown error')}")
+        raise SystemExit(2)
     if args.json:
         print(_json.dumps(result, indent=2))
     else:

@@ -63,16 +63,32 @@ def test_readme_replay_gate_claim_matches_workflow():
 
 
 def test_readme_single_install_claim_matches_pyproject():
-    """README quick start uses finefettle[all]; pyproject must compose it."""
+    """README quick start uses plain finefettle; it must carry all runtimes."""
     readme = _read("README.md")
-    if 'finefettle[all]' not in readme:
-        return
+    installation = _read("docs/INSTALLATION.md")
+    assert "pipx install finefettle" in readme
+    assert "pipx install finefettle" in installation
+    assert "No capability extra is required for normal use" in installation
+    assert "`playwright install` browser binaries" in installation
 
     import tomllib
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    extras = data["project"]["optional-dependencies"]
-    assert any("finefettle[dev]" in dep for dep in extras["all"])
+    dependencies = data["project"]["dependencies"]
+    for capability in ("mutmut", "playwright", "pytest", "pyyaml", "ruff", "semgrep"):
+        assert any(dep.split("=", 1)[0].split(">", 1)[0] == capability for dep in dependencies)
+
+
+def test_current_documentation_version_matches_package():
+    import tomllib
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    version = project["version"]
+
+    assert f"v{version}" in _read("docs/ROADMAP.md")
+    citation = _read("CITATION.cff")
+    assert f"version: {version}" in citation
+    assert 'name: "Milind"' in citation
 
 
 def test_event_map_covers_all_dispatcher_and_transport_events():

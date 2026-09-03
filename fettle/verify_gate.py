@@ -39,6 +39,8 @@ from fettle.dispatcher_types import CheckResult, HookContext
 from fettle.evidence import (
     EvidenceArtifact,
     EvidenceValidationContext,
+    EvidenceValidationResult,
+    ResultState,
     Validity,
     validate_artifact,
 )
@@ -494,18 +496,24 @@ def _write_bytes_atomic(path: Path, content: bytes) -> None:
             os.unlink(temporary)
 
 
-def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validity:
+def validate_canonical_evidence(
+    cwd: str, config: dict, stamp: dict,
+) -> EvidenceValidationResult:
+    """Validate the canonical evidence referenced by a verify stamp."""
+    def failure(validity: Validity) -> EvidenceValidationResult:
+        return EvidenceValidationResult(validity, ResultState.UNKNOWN, "fettle verify")
+
     reference = stamp.get("canonical_evidence")
     if not isinstance(reference, dict):
-        return Validity.MALFORMED
+        return failure(Validity.MALFORMED)
     if (
         reference.get("schema_version") != "1"
         or reference.get("kind") != "fettle.verify"
     ):
-        return Validity.UNSUPPORTED
+        return failure(Validity.UNSUPPORTED)
     expected = reference.get("expected")
     if not isinstance(expected, dict):
-        return Validity.MALFORMED
+        return failure(Validity.MALFORMED)
     source_digest, revision = _source_snapshot(cwd)
     context = EvidenceValidationContext(
         kind="fettle.verify",
@@ -520,24 +528,24 @@ def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validit
     )
     path = Path(cwd) / EVIDENCE_RELPATH
     if not path.is_file():
-        return Validity.MISSING
+        return failure(Validity.MISSING)
     try:
         content = path.read_bytes()
     except OSError:
-        return Validity.UNAVAILABLE
+        return failure(Validity.UNAVAILABLE)
     result = validate_artifact(content, context)
     if result.validity != Validity.VALID:
-        return result.validity
+        return result
     try:
         artifact_data = json.loads(content)
         artifact_digest = artifact_data["artifact_digest"]
         observation_id = artifact_data["observation_id"]
     except (KeyError, TypeError, json.JSONDecodeError):
-        return Validity.MALFORMED
+        return failure(Validity.MALFORMED)
     if reference.get("artifact_digest") != artifact_digest:
-        return Validity.TAMPERED
+        return failure(Validity.TAMPERED)
     if stamp.get("canonical_observation_id") != observation_id:
-        return Validity.DUPLICATE_ID
+        return failure(Validity.DUPLICATE_ID)
     requested = {
         "source_snapshot_digest": source_digest,
         "policy_digest": context.policy_digest,
@@ -545,8 +553,12 @@ def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validit
         "producer_id": context.producer_id,
     }
     if expected != requested:
-        return Validity.MALFORMED
-    return Validity.VALID
+        return failure(Validity.MALFORMED)
+    return result
+
+
+def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validity:
+    return validate_canonical_evidence(cwd, config, stamp).validity
 
 
 def _edits_path(session_id: str | None) -> Path | None:

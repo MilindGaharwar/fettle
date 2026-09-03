@@ -1,10 +1,10 @@
 # Two-Minute Assurance Loop
 
 This disposable example demonstrates one deterministic detect, explain, repair,
-and verify loop. The `all` extra includes Ruff.
+and verify loop. The default installation includes Ruff.
 
 ```bash
-pipx install "finefettle[all]"
+pipx install finefettle
 git clone https://github.com/MilindGaharwar/fettle.git
 cd fettle/examples/assurance-loop
 cp broken.py app.py

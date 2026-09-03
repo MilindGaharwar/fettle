@@ -10,15 +10,12 @@ Requirements: Python 3.11+, Git, and `uv`.
 ```bash
 git clone https://github.com/MilindGaharwar/fettle.git
 cd fettle
-uv sync --extra dev
+uv sync --extra all
 uv run fettle doctor
 ```
 
-Install Semgrep when changing bundled rules or adapter Semgrep behavior:
-
-```bash
-uv sync --extra dev --extra semgrep
-```
+The default dependencies include Fettle's runtime analyzers; the `all` extra
+adds contributor tools such as Pyright, deptry, and pre-commit.
 
 ## Make a focused change
 

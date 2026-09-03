@@ -5,23 +5,29 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 
 
-def test_default_install_has_no_runtime_dependencies():
+def test_default_install_includes_every_python_runtime_capability():
     with (ROOT / "pyproject.toml").open("rb") as stream:
         project = tomllib.load(stream)["project"]
 
-    assert project["dependencies"] == []
+    assert set(project["dependencies"]) == {
+        "mutmut==2.5.1",
+        "playwright>=1.40",
+        "pytest>=7.0",
+        "pyyaml>=6.0",
+        "ruff>=0.4.0",
+        "semgrep>=1.168",
+    }
 
 
-def test_all_extra_composes_every_optional_capability():
+def test_capability_extras_remain_compatible():
     with (ROOT / "pyproject.toml").open("rb") as stream:
         extras = tomllib.load(stream)["project"]["optional-dependencies"]
 
     assert extras["mutation"] == ["mutmut==2.5.1"]
     assert extras["evals"] == ["pyyaml>=6.0"]
     assert extras["uat"] == ["playwright>=1.40"]
-    assert {dependency.removeprefix("finefettle[").removesuffix("]") for dependency in extras["all"]} == {
-        "dev", "mutation", "semgrep", "evals", "uat",
-    }
+    assert extras["semgrep"] == ["semgrep>=1.168"]
+    assert extras["all"] == ["finefettle[dev]"]
 
 
 def test_wheel_build_declares_every_owned_resource_family():

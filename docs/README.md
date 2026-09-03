@@ -8,11 +8,23 @@ subsystem.
 
 Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
+## Start Here
+
+```bash
+pipx install finefettle
+fettle demo
+```
+
+The default package includes Ruff, Semgrep, pytest, mutmut, PyYAML, and the
+Playwright Python library. Git remains required; browser binaries, agent CLIs,
+external services, and non-Python toolchains remain separate. Run
+`fettle doctor` for an honest capability inventory on the current machine.
+
 ## Choose Your Path
 
 | I want to... | Start here | Expected result |
 |---|---|---|
-| Evaluate Fettle without changing a repository | `pipx install "finefettle[all]"`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
+| Evaluate Fettle without changing a repository | `pipx install finefettle`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
 | Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
 | Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
@@ -37,6 +49,8 @@ Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
 - [Configuration reference](CONFIG.md): precedence, modes, every gate family,
   central policy, integrations, telemetry, workspace routing, and state.
+- [Installation](INSTALLATION.md): one-package setup, activation, upgrades, and
+  external-runtime boundaries.
 - [OpenCode integration](OPENCODE.md): setup, event mapping, verification, and
   recovery.
 - [VS Code integration](../integrations/vscode/README.md): source installation
@@ -62,6 +76,19 @@ Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 - [Contributing](../CONTRIBUTING.md): setup and evidence expected from changes.
 - [Security policy](../SECURITY.md): supported releases, private reporting, and
   trust boundaries.
+
+## Reference By Task
+
+| Task | Command | Reference |
+|---|---|---|
+| Inspect effective policy | `fettle config --explain` | [Configuration](CONFIG.md) |
+| Diagnose this machine | `fettle doctor` | [Operational boundaries](../README.md#operational-boundaries) |
+| Check changed code | `fettle check --changed` | [Capability map](../README.md#capability-map) |
+| Bind tests to a change | `fettle verify` | [Canonical verification contract](canonical-evidence-verification.ux-spec.md) |
+| Assess repository trust | `fettle assurance` | [Evidence artifact contract](evidence-artifact-contract.md) |
+| Measure test strength | `fettle mutation preflight --all` | [Mutation playbook](mutation-quality-playbook.md) |
+| Coordinate agents | `fettle topology advise` | [Behavior map](behavior-map.md) |
+| Connect specs and tests | `fettle spec coverage` | [Behavior map](behavior-map.md) |
 
 ## Capability Matrix
 

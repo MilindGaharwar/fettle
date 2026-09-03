@@ -23,7 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fettle import __version__
-from fettle.evidence import EvidenceArtifact
+from fettle.evidence import (
+    EvidenceArtifact,
+    EvidenceValidationContext,
+    EvidenceValidationResult,
+    ResultState,
+    Validity,
+    parse_artifact,
+    validate_artifact,
+)
 
 REPORT_NAME = "uat-report.json"
 REPORT_EVIDENCE_NAME = "uat-report.evidence.json"
@@ -406,6 +414,8 @@ def _write_report_evidence(worktree: str, session: dict, report: dict) -> None:
         {"scenario_id": item["scenario_id"], "verdict": item["verdict"]}
         for item in report["verdicts"]
     ]
+    judgment = report["judgment"]
+    unresolved = judgment.get("status") in {"tool_error", "indeterminate"}
     artifact = EvidenceArtifact.create(
         kind="fettle.uat.report",
         producer={
@@ -413,7 +423,9 @@ def _write_report_evidence(worktree: str, session: dict, report: dict) -> None:
             "version": __version__,
             "implementation_digest": _producer_digest(),
         },
-        result_state="pass" if completion["complete"] else "violation",
+        result_state=(
+            "unknown" if unresolved else "pass" if completion["complete"] else "violation"
+        ),
         completeness="complete",
         trust_class="derived",
         source={"snapshot_digest": _digest({
@@ -438,6 +450,79 @@ def _write_report_evidence(worktree: str, session: dict, report: dict) -> None:
     )
     evidence_path = Path(worktree) / ".fettle" / REPORT_EVIDENCE_NAME
     _write_bytes_atomic(evidence_path, artifact.to_bytes())
+
+
+def validate_canonical_evidence(worktree: str, report: dict) -> EvidenceValidationResult:
+    """Validate the canonical UAT sidecar and its complete report projection."""
+    recovery = "fettle uat report"
+
+    def failure(validity: Validity) -> EvidenceValidationResult:
+        return EvidenceValidationResult(validity, ResultState.UNKNOWN, recovery)
+
+    report_path = Path(worktree) / ".fettle" / REPORT_NAME
+    evidence_path = Path(worktree) / ".fettle" / REPORT_EVIDENCE_NAME
+    if not evidence_path.is_file():
+        return failure(Validity.MISSING)
+    try:
+        content = evidence_path.read_bytes()
+        artifact = parse_artifact(content)
+        payload = artifact.payload
+        verdicts = report["verdicts"]
+        completion = report["completion"]
+        judgment = report["judgment"]
+        projected_verdicts = [
+            {"scenario_id": item["scenario_id"], "verdict": item["verdict"]}
+            for item in verdicts
+        ]
+        confirmed = sum(item["verdict"] == "CONFIRMED" for item in verdicts)
+        expected_complete = bool(verdicts) and confirmed == len(verdicts)
+        judgment_status = judgment.get("status")
+        judgment_findings = judgment.get("findings")
+        unresolved = judgment_status in {"tool_error", "indeterminate"}
+        judgment_pass = (
+            judgment_status == "NOT_APPLICABLE"
+            or judgment_status == "completed" and judgment_findings == []
+        )
+        expected_completion = {
+            "complete": expected_complete and judgment_pass,
+            "required_total": len(verdicts),
+            "required_confirmed": confirmed,
+        }
+        if completion != expected_completion:
+            return failure(Validity.TAMPERED)
+        expected_state = (
+            ResultState.UNKNOWN if unresolved
+            else ResultState.PASS if completion["complete"]
+            else ResultState.VIOLATION
+        )
+        if (
+            payload.get("session_id") != str(report["session_id"])
+            or payload.get("surface") != str(report["surface"])
+            or list(payload.get("verdicts", ())) != projected_verdicts
+            or dict(payload.get("completion", {})) != completion
+            or payload.get("report", {}).get("digest")
+            != "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest()
+            or artifact.result_state != expected_state
+        ):
+            return failure(Validity.TAMPERED)
+        context = EvidenceValidationContext(
+            kind="fettle.uat.report",
+            source_snapshot_digest=artifact.source["snapshot_digest"],
+            source_revision=None,
+            policy_digest=_digest({"canonical_evidence": True}),
+            scope_digest=_digest({
+                "surface": report["surface"],
+                "scenario_ids": [item["scenario_id"] for item in verdicts],
+            }),
+            producer_id="fettle.uat.report",
+            producer_versions=frozenset({__version__}),
+            producer_implementation_digest=_producer_digest(),
+            allowed_trust_classes=frozenset({"derived"}),
+            recovery_action=recovery,
+        )
+        return validate_artifact(content, context)
+    except (KeyError, OSError, TypeError, ValueError):
+        return failure(Validity.MALFORMED)
 
 
 def format_verdicts(verdicts: list[Verdict]) -> str:

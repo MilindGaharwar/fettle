@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 import subprocess
 
-from fettle.assurance import build_assurance_record, evaluate_assurance_policy
+from fettle.assurance import (
+    build_assurance_record,
+    evaluate_assurance_policy,
+    write_evidence,
+)
+from fettle.config import load_config
 
 
 def _init_repo(tmp_path):
@@ -26,6 +31,28 @@ def _commit_head(root):
     done = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                           capture_output=True, text=True)
     return done.stdout.strip()
+
+
+def _write_verify_result(root, *, ok, error=""):
+    from fettle.verify_gate import _write_stamp
+
+    stamp = {
+        "ok": ok, "session_id": "s-1", "head_sha": _commit_head(root),
+        "exit_code": 0 if ok else 1, "command": "pytest -q", "error": error,
+        "scope": "full", "impacted": [],
+    }
+    _write_stamp(str(root), stamp, load_config(str(root)))
+
+
+def _write_ci_result(root, *, overall):
+    from fettle.ci_gate import _write_stamp
+
+    stamp = {
+        "ok": overall == "success", "sha": _commit_head(root),
+        "overall": overall, "runs": [{"id": 1, "name": "CI"}],
+        "error": "CI failed" if overall == "failure" else "",
+    }
+    _write_stamp(str(root), stamp, load_config(str(root)))
 
 
 def test_empty_repo_produces_partial_record_with_reasons(tmp_path):
@@ -57,11 +84,7 @@ def test_digest_is_canonical_and_stable(tmp_path):
 
 def test_bound_green_verify_stamp_promotes_behavior_dimension(tmp_path):
     root = _init_repo(tmp_path)
-    sha = _commit_head(root)
-    (root / ".fettle" / "verify.json").write_text(
-        json.dumps({"ok": True, "session_id": "s-1", "head_sha": sha,
-                    "exit_code": 0, "command": "pytest -q"}),
-        encoding="utf-8")
+    _write_verify_result(root, ok=True)
 
     record = build_assurance_record(str(root))["record"]
 
@@ -72,17 +95,13 @@ def test_bound_green_verify_stamp_promotes_behavior_dimension(tmp_path):
 
 def test_red_verify_stamp_fails_behavior_dimension(tmp_path):
     root = _init_repo(tmp_path)
-    sha = _commit_head(root)
-    (root / ".fettle" / "verify.json").write_text(
-        json.dumps({"ok": False, "error": "2 failed", "session_id": "s-1",
-                    "head_sha": sha}),
-        encoding="utf-8")
+    _write_verify_result(root, ok=False, error="2 failed")
 
     record = build_assurance_record(str(root))["record"]
 
     behavior = record["dimensions"]["behavior"]
     assert behavior["status"] == "FAIL"
-    assert "failed" in behavior["reason"]
+    assert "violation" in behavior["reason"]
 
 
 def test_handwritten_minimal_stamp_never_passes_behavior(tmp_path):
@@ -95,7 +114,7 @@ def test_handwritten_minimal_stamp_never_passes_behavior(tmp_path):
 
     behavior = record["dimensions"]["behavior"]
     assert behavior["status"] == "UNKNOWN"
-    assert "binding" in behavior["reason"]
+    assert "canonical verification evidence" in behavior["reason"]
 
 
 def test_stale_revision_stamp_never_passes_behavior(tmp_path):
@@ -109,27 +128,23 @@ def test_stale_revision_stamp_never_passes_behavior(tmp_path):
 
     behavior = record["dimensions"]["behavior"]
     assert behavior["status"] == "UNKNOWN"
-    assert "revision" in behavior["reason"]
+    assert "canonical verification evidence" in behavior["reason"]
 
 
-def test_red_verify_stamp_overrides_completed_mutation(tmp_path):
+def test_malformed_mutation_cannot_mask_red_verify(tmp_path):
     root = _init_repo(tmp_path)
-    sha = _commit_head(root)
     (root / "mutation-report.json").write_text(
         json.dumps({"status": "completed"}), encoding="utf-8")
-    (root / ".fettle" / "verify.json").write_text(
-        json.dumps({"ok": False, "error": "1 failed", "session_id": "s-1",
-                    "head_sha": sha}),
-        encoding="utf-8")
+    _write_verify_result(root, ok=False, error="1 failed")
 
     record = build_assurance_record(str(root))["record"]
 
     behavior = record["dimensions"]["behavior"]
     assert behavior["status"] == "FAIL"
-    assert "failed" in behavior["reason"]
+    assert "verification reported a violation" in behavior["reason"]
 
 
-def test_failed_mutation_report_fails_behavior_dimension(tmp_path):
+def test_mutation_tool_error_is_unknown_behavior_dimension(tmp_path):
     root = _init_repo(tmp_path)
     (root / "mutation-report.json").write_text(
         json.dumps({"status": "tool_error", "message": "mutmut crashed"}),
@@ -138,8 +153,8 @@ def test_failed_mutation_report_fails_behavior_dimension(tmp_path):
     record = build_assurance_record(str(root))["record"]
 
     behavior = record["dimensions"]["behavior"]
-    assert behavior["status"] == "FAIL"
-    assert "tool_error" in behavior["reason"]
+    assert behavior["status"] == "UNKNOWN"
+    assert "incomplete" in behavior["reason"]
 
 
 def test_stages_report_presence(tmp_path):
@@ -231,23 +246,46 @@ def test_independence_unknown_without_roles_or_lineage(tmp_path):
     assert "role-bound authorship" in independence["reason"]
 
 
-def test_anchor_makes_provenance_pass(tmp_path):
+def test_current_commit_anchor_makes_provenance_pass(tmp_path):
+    from fettle.evidence_ledger import anchor, append_record
+
     root = _init_repo(tmp_path)
-    _ = build_assurance_record(str(root))
-    append = root / ".fettle" / "governance-ledger.jsonl"
-    append.parent.mkdir(parents=True, exist_ok=True)
-    append.write_text(json.dumps({
-        "schema_version": 1, "seq": 1, "ts": 1.0, "kind": "genesis",
-        "payload": {}, "prev": "0" * 64, "hash": "a" * 64,
-    }) + "\n", encoding="utf-8")
-    (root / ".fettle" / "ledger-anchor.json").write_text(json.dumps({
-        "schema_version": 1, "commit": "a" * 40, "records": 1,
-        "terminal_hash": "a" * 64,
-    }), encoding="utf-8")
+    _commit_head(root)
+    append_record(str(root), "gate_decision", decision="allow")
+    anchor(str(root))
 
     record = build_assurance_record(str(root))["record"]
 
     assert record["dimensions"]["provenance"]["status"] == "PASS"
+
+
+def test_anchor_for_other_commit_cannot_pass_provenance(tmp_path):
+    from fettle.evidence_ledger import anchor, append_record
+
+    root = _init_repo(tmp_path)
+    _commit_head(root)
+    append_record(str(root), "gate_decision", decision="allow")
+    anchor(str(root), commit="0" * 40)
+
+    provenance = build_assurance_record(str(root))["record"]["dimensions"]["provenance"]
+
+    assert provenance["status"] == "UNKNOWN"
+    assert "different commit" in provenance["reason"]
+
+
+def test_post_anchor_ledger_growth_cannot_pass_provenance(tmp_path):
+    from fettle.evidence_ledger import anchor, append_record
+
+    root = _init_repo(tmp_path)
+    _commit_head(root)
+    append_record(str(root), "gate_decision", decision="allow")
+    anchor(str(root))
+    append_record(str(root), "gate_decision", decision="block")
+
+    provenance = build_assurance_record(str(root))["record"]["dimensions"]["provenance"]
+
+    assert provenance["status"] == "UNKNOWN"
+    assert "post-anchor" in provenance["reason"]
 
 
 def test_scope_dimension_from_changed_files(tmp_path):
@@ -260,7 +298,7 @@ def test_scope_dimension_from_changed_files(tmp_path):
     assert record["dimensions"]["scope"]["status"] == "PASS"
 
 
-def test_complete_clean_security_review_passes(tmp_path):
+def test_complete_clean_raw_security_review_remains_unknown(tmp_path):
     root = _init_repo(tmp_path)
     (root / ".fettle" / "security-review.json").write_text(json.dumps({
         "findings": [],
@@ -271,8 +309,9 @@ def test_complete_clean_security_review_passes(tmp_path):
 
     security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
 
-    assert security["status"] == "PASS"
+    assert security["status"] == "UNKNOWN"
     assert security["evidence"][0]["path"] == ".fettle/security-review.json"
+    assert "not canonical" in security["reason"]
 
 
 def test_partial_security_review_remains_unknown(tmp_path):
@@ -290,7 +329,7 @@ def test_partial_security_review_remains_unknown(tmp_path):
     assert "incomplete" in security["reason"]
 
 
-def test_security_findings_fail_even_when_review_is_partial(tmp_path):
+def test_raw_security_findings_are_diagnostic_only(tmp_path):
     root = _init_repo(tmp_path)
     (root / ".fettle" / "security-review.json").write_text(json.dumps({
         "findings": [{"code": "S608"}],
@@ -301,7 +340,7 @@ def test_security_findings_fail_even_when_review_is_partial(tmp_path):
 
     security = build_assurance_record(str(root))["record"]["dimensions"]["security"]
 
-    assert security["status"] == "FAIL"
+    assert security["status"] == "UNKNOWN"
     assert "1 security finding" in security["reason"]
 
 
@@ -322,14 +361,16 @@ def test_policy_accepts_alternative_status_without_changing_vector(tmp_path):
 
 
 def test_policy_uses_documented_provenance_completeness_values(tmp_path):
+    from fettle.evidence_ledger import anchor, append_record
+
     root = _init_repo(tmp_path)
-    ledger = root / ".fettle" / "governance-ledger.jsonl"
-    ledger.write_text("{}\n", encoding="utf-8")
-    (root / ".fettle" / "ledger-anchor.json").write_text("{}", encoding="utf-8")
     (root / ".fettle.toml").write_text(
         '[assurance.release.production]\nprovenance = "COMPLETE"\n',
         encoding="utf-8",
     )
+    _commit_head(root)
+    append_record(str(root), "gate_decision", decision="allow")
+    anchor(str(root))
     record = build_assurance_record(str(root))["record"]
 
     decision = evaluate_assurance_policy(record, str(root), "production")
@@ -415,10 +456,7 @@ def test_org_layer_supplies_release_policy_without_repo_toml(tmp_path, monkeypat
 
 def test_ci_dimension_requires_bound_green_status(tmp_path):
     root = _init_repo(tmp_path)
-    sha = _commit_head(root)
-    (root / ".fettle" / "ci-status.json").write_text(
-        json.dumps({"ok": True, "sha": sha, "overall": "success"}),
-        encoding="utf-8")
+    _write_ci_result(root, overall="success")
 
     ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
 
@@ -428,55 +466,66 @@ def test_ci_dimension_requires_bound_green_status(tmp_path):
 
 def test_ci_dimension_rejects_status_for_other_revision(tmp_path):
     root = _init_repo(tmp_path)
-    _commit_head(root)
-    (root / ".fettle" / "ci-status.json").write_text(
-        json.dumps({"ok": True, "sha": "0" * 40, "overall": "success"}),
-        encoding="utf-8")
+    _write_ci_result(root, overall="success")
+    stamp_path = root / ".fettle" / "ci-status.json"
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    stamp["sha"] = "0" * 40
+    stamp_path.write_text(json.dumps(stamp), encoding="utf-8")
 
     ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
 
     assert ci["status"] == "UNKNOWN"
-    assert "revision" in ci["reason"]
+    assert "canonical CI evidence" in ci["reason"]
 
 
 def test_ci_dimension_fails_on_red_status(tmp_path):
     root = _init_repo(tmp_path)
-    sha = _commit_head(root)
-    (root / ".fettle" / "ci-status.json").write_text(
-        json.dumps({"ok": False, "sha": sha, "overall": "failure"}),
-        encoding="utf-8")
+    _write_ci_result(root, overall="failure")
 
     ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
 
     assert ci["status"] == "FAIL"
-    assert "failure" in ci["reason"]
+    assert "violation" in ci["reason"]
 
 
-def test_authorization_dimension_verifies_capsule_integrity(tmp_path):
-    from fettle.graph_types import canonical_digest
+def test_authorization_dimension_verifies_explicit_capsule(tmp_path, monkeypatch):
+    from fettle.policy_capsule import canonical_digest
     root = _init_repo(tmp_path)
     policy = {"gates": {"verify": {"enabled": True}}}
-    (root / ".fettle" / "capsule.json").write_text(json.dumps({
+    capsule = tmp_path / f"{canonical_digest(policy)[:16]}.json"
+    capsule.write_text(json.dumps({
         "fettle_capsule": 1, "digest": canonical_digest(policy),
         "policy": policy, "origin": {}, "lineage": [],
     }), encoding="utf-8")
+    monkeypatch.setenv("FETTLE_POLICY_CAPSULE", str(capsule))
 
     auth = build_assurance_record(str(root))["record"]["dimensions"]["authorization"]
 
     assert auth["status"] == "PASS"
 
 
-def test_authorization_dimension_fails_on_tampered_capsule(tmp_path):
+def test_authorization_dimension_fails_on_explicit_tampered_capsule(tmp_path, monkeypatch):
     root = _init_repo(tmp_path)
-    (root / ".fettle" / "capsule.json").write_text(json.dumps({
+    capsule = tmp_path / "ffffffffffffffff.json"
+    capsule.write_text(json.dumps({
         "fettle_capsule": 1, "digest": "f" * 64,
         "policy": {"gates": {}}, "origin": {}, "lineage": [],
     }), encoding="utf-8")
+    monkeypatch.setenv("FETTLE_POLICY_CAPSULE", str(capsule))
 
     auth = build_assurance_record(str(root))["record"]["dimensions"]["authorization"]
 
     assert auth["status"] == "FAIL"
     assert "digest mismatch" in auth["reason"]
+
+
+def test_incidental_repo_capsule_does_not_make_authorization_applicable(tmp_path):
+    root = _init_repo(tmp_path)
+    (root / ".fettle" / "capsule.json").write_text("{}", encoding="utf-8")
+
+    auth = build_assurance_record(str(root))["record"]["dimensions"]["authorization"]
+
+    assert auth["status"] == "NOT_APPLICABLE"
 
 
 def _write_uat_report(root, all_confirmed=True):
@@ -509,7 +558,7 @@ def test_uat_dimension_rejects_report_without_sidecar(tmp_path):
     uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
 
     assert uat["status"] == "UNKNOWN"
-    assert "sidecar" in uat["reason"]
+    assert "missing" in uat["reason"]
 
 
 def test_uat_dimension_rejects_edited_report(tmp_path):
@@ -524,4 +573,110 @@ def test_uat_dimension_rejects_edited_report(tmp_path):
     uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
 
     assert uat["status"] == "UNKNOWN"
-    assert "does not match" in uat["reason"]
+    assert "tampered" in uat["reason"]
+
+
+def test_newer_canonical_uat_violation_supersedes_older_pass(tmp_path):
+    from fettle.uat.reconcile import Verdict, write_report
+
+    root = _init_repo(tmp_path)
+    _write_uat_report(root)
+    path, error = write_report(
+        str(root), {"session_id": "uat-2", "surface": "cli"},
+        [Verdict("spec/S1", "CONTRADICTED", observed="wrong result")], candidates=[],
+    )
+    assert path and not error, error
+
+    uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
+
+    assert uat["status"] == "FAIL"
+    assert "0/1 scenarios confirmed" in uat["reason"]
+
+
+def test_unresolved_uat_evaluator_is_unknown_at_assurance_boundary(tmp_path):
+    from fettle.uat.reconcile import Verdict, write_report
+
+    root = _init_repo(tmp_path)
+    path, error = write_report(
+        str(root), {"session_id": "uat-1", "surface": "cli"},
+        [Verdict("spec/S1", "CONFIRMED", observed="ran")], candidates=[],
+        judgment={"status": "tool_error", "findings": [], "error": "timeout"},
+    )
+    assert path and not error, error
+
+    uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
+
+    assert uat["status"] == "UNKNOWN"
+    assert "canonical UAT result is unknown" in uat["reason"]
+
+
+def test_persisted_assurance_record_is_canonical_and_portable(tmp_path):
+    from fettle.evidence import parse_artifact
+
+    root = _init_repo(tmp_path)
+    record = build_assurance_record(str(root))["record"]
+
+    result = write_evidence(str(root), record)
+    artifact = parse_artifact((root / ".fettle" / "assurance-record.evidence.json").read_bytes())
+
+    assert result["status"] == "completed"
+    assert artifact.kind == "fettle.assurance.record"
+    assert artifact.payload["record"]["digest"] == record["digest"]
+    assert "root" not in artifact.payload["record"]["subject"]
+    assert "generated_at" not in artifact.payload["record"]
+    assert str(root) not in artifact.to_bytes().decode()
+
+
+def test_persisted_record_references_accepted_canonical_evidence(tmp_path):
+    from fettle.evidence import parse_artifact
+
+    root = _init_repo(tmp_path)
+    _write_verify_result(root, ok=True)
+    record = build_assurance_record(str(root))["record"]
+
+    write_evidence(str(root), record)
+    artifact = parse_artifact((root / ".fettle" / "assurance-record.evidence.json").read_bytes())
+    verify = parse_artifact((root / ".fettle" / "verify-evidence.json").read_bytes())
+
+    assert [(parent.kind, parent.artifact_digest) for parent in artifact.parents] == [
+        (verify.kind, verify.artifact_digest),
+    ]
+
+
+def test_failed_persistence_removes_older_assurance_record(tmp_path, monkeypatch):
+    import fettle.assurance as assurance
+
+    root = _init_repo(tmp_path)
+    output = root / ".fettle" / "assurance-record.evidence.json"
+    output.write_text("old passing record", encoding="utf-8")
+    record = build_assurance_record(str(root))["record"]
+    monkeypatch.setattr(assurance.os, "replace", lambda *_args: (_ for _ in ()).throw(OSError("disk full")))
+
+    result = write_evidence(str(root), record)
+
+    assert result["status"] == "tool_error"
+    assert not output.exists()
+    assert not list(output.parent.glob("*.tmp"))
+
+
+def test_equivalent_clones_have_same_persisted_artifact_digest(tmp_path):
+    from fettle.evidence import parse_artifact
+
+    first = _init_repo(tmp_path)
+    _commit_head(first)
+    second = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(first), str(second)], check=True)
+    (second / ".fettle").mkdir(exist_ok=True)
+
+    first_record = build_assurance_record(str(first))["record"]
+    second_record = build_assurance_record(str(second))["record"]
+    write_evidence(str(first), first_record)
+    write_evidence(str(second), second_record)
+
+    first_artifact = parse_artifact(
+        (first / ".fettle" / "assurance-record.evidence.json").read_bytes(),
+    )
+    second_artifact = parse_artifact(
+        (second / ".fettle" / "assurance-record.evidence.json").read_bytes(),
+    )
+    assert first_artifact.artifact_digest == second_artifact.artifact_digest

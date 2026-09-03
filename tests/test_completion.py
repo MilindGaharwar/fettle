@@ -149,7 +149,7 @@ def test_explicit_milestone_ignores_other_done_work_items(tmp_path):
     assert [item.milestone for item in result.milestones] == ["P1"]
 
 
-def test_v2_completion_is_bound_to_current_work_item_scope(tmp_path):
+def test_v2_completion_is_bound_to_declared_work_item_scope(tmp_path):
     item_dir = tmp_path / "docs" / "backlog"
     item_dir.mkdir(parents=True)
     source = tmp_path / "src" / "feature.py"
@@ -175,6 +175,7 @@ def test_v2_completion_is_bound_to_current_work_item_scope(tmp_path):
         "schema_version": 1,
         "milestone": "feature-x",
         "revision": "test",
+        "scope_digest_version": 2,
         "scope_digest": scope_digest,
         "status": "complete",
         "uat_decision": "SHIP",
@@ -193,10 +194,42 @@ def test_v2_completion_is_bound_to_current_work_item_scope(tmp_path):
 
     assert evaluate_manifests(tmp_path, milestone="feature-x").exit_code == 0
     source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert evaluate_manifests(tmp_path, milestone="feature-x").exit_code == 0
+
+    item_path.write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n"
+        "scope:\n  - src/*.py\n---\n\n## Resolution\nShipped.\n",
+        encoding="utf-8",
+    )
     stale = evaluate_manifests(tmp_path, milestone="feature-x")
 
     assert stale.exit_code == 2
     assert any("scope_digest does not match" in error for error in stale.errors)
+
+
+def test_unversioned_completion_remains_frozen_history(tmp_path):
+    item_dir = tmp_path / "docs" / "backlog"
+    item_dir.mkdir(parents=True)
+    source = tmp_path / "feature.py"
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    (item_dir / "feature.md").write_text(
+        "---\nfettle-work-item: v2\nid: feature-x\nstatus: done\n"
+        "scope:\n  - feature.py\n---\n\n## Resolution\nShipped.\n",
+        encoding="utf-8",
+    )
+    fixture = _copy_fixture(tmp_path, "complete")
+    completion = tmp_path / "docs" / "completion"
+    completion.mkdir(exist_ok=True)
+    shutil.copy(fixture / "evidence/success.json", completion / "success.json")
+    manifest = json.loads((fixture / "docs/completion/P1.json").read_text())
+    manifest["milestone"] = "feature-x"
+    manifest["scope_digest"] = "0" * 64
+    manifest["criteria"][0]["evidence"]["path"] = "docs/completion/success.json"
+    (completion / "feature-x.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = evaluate_manifests(tmp_path, milestone="feature-x")
+
+    assert result.exit_code == 0
 
 
 def test_v2_completion_requires_scope_digest(tmp_path):
@@ -254,6 +287,7 @@ def test_v2_completion_requires_same_id_manifest_filename(tmp_path):
         "schema_version": 1,
         "milestone": "feature-x",
         "revision": "test",
+        "scope_digest_version": 2,
         "scope_digest": scope_digest,
         "status": "complete",
         "uat_decision": "SHIP",

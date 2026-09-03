@@ -8,14 +8,17 @@ claims while preserving existing repositories.
 ## H1: Versioned Work-Item Linkage (Selected)
 
 Hypothesis: requiring every v2 `done` item to have a same-ID manifest bound to
-its current declared scope will prevent stale or missing evidence because all
-completion boundaries evaluate the same identity.
+its declared scope contract will prevent stale or missing evidence because all
+completion boundaries evaluate the same identity without treating later edits
+to shared files as retroactive changes to historical work.
 
 Falsification: Stop, release, or explicit validation passes when a v2 item lacks
-a manifest, has malformed metadata, or its scoped files changed after evidence.
+a manifest, has malformed metadata, or its declared scope changes after evidence.
 
 Evidence: changed-only scanning and self-declared revisions were falsified by
-GLM review; full v2 scanning plus current scope identity is required.
+GLM review; full v2 scanning plus declared-scope identity is required. Content
+identity belongs to each criterion's retained evidence and revision, not to a
+historical work item's reusable glob patterns.
 
 ## H2: Embed Evidence In Work Items (Rejected)
 
@@ -37,4 +40,6 @@ item and force a breaking migration of legacy repositories.
 - Newly added v1 work items are invalid; new work must use v2.
 - Completion metadata cannot participate in scope identity, avoiding circular
   digests.
+- Unversioned completion manifests are frozen historical records; explicit
+  scope digest version 2 opts a revalidated record into declared-scope identity.
 - Missing, malformed, empty, or changed scope is non-pass.

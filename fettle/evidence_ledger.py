@@ -95,21 +95,34 @@ def append_record(root: str, kind: str, **payload) -> dict:
 
 def verify_chain(root: str) -> dict:
     """Full-chain verification. Reports the first break precisely."""
-    records = read_ledger(root)
-    prev = "0" * 64
-    expected_seq = 1
+    try:
+        records = read_ledger(root)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {"status": "tampered", "at_seq": None,
+                "reason": f"ledger is malformed: {exc}"}
     prev = "0" * 64
     expected_seq = 1
     for position, record in enumerate(records):
+        if not isinstance(record, dict):
+            return {"status": "tampered", "at_seq": expected_seq,
+                    "reason": "ledger record is malformed"}
         seq = record.get("seq")
         if seq != expected_seq:
             return {
                 "status": "tampered", "at_seq": seq,
                 "reason": f"sequence gap: expected {expected_seq}, found {seq}",
             }
+        if (record.get("schema_version") != SCHEMA_VERSION
+                or not isinstance(record.get("ts"), (int, float))
+                or not isinstance(record.get("kind"), str)
+                or not isinstance(record.get("payload"), dict)
+                or not isinstance(record.get("prev"), str)
+                or not isinstance(record.get("hash"), str)):
+            return {"status": "tampered", "at_seq": seq,
+                    "reason": "ledger record is malformed"}
         recomputed = _record_hash(
             record["seq"], record["ts"], record["kind"],
-            record.get("payload", {}), record.get("prev", ""),
+            record["payload"], record["prev"],
         )
         # First record: a plain genesis must start from the zero hash, while
         # a rotation checkpoint legitimately continues a pruned chain.
@@ -186,7 +199,17 @@ def verify_anchor(root: str) -> dict:
     _path, anchor_path = _paths(root)
     if not anchor_path.is_file():
         return {"status": "unanchored"}
-    anchor_data = json.loads(anchor_path.read_text(encoding="utf-8"))
+    try:
+        anchor_data = json.loads(anchor_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {"status": "tampered", "reason": f"anchor is malformed: {exc}"}
+    if (not isinstance(anchor_data, dict)
+            or anchor_data.get("schema_version") != SCHEMA_VERSION
+            or not isinstance(anchor_data.get("records"), int)
+            or anchor_data["records"] < 0
+            or not isinstance(anchor_data.get("terminal_hash"), str)
+            or len(anchor_data["terminal_hash"]) != 64):
+        return {"status": "tampered", "reason": "anchor is malformed"}
     state = verify_chain(root)
     if state["status"] != "verified":
         return {**state, "anchored_commit": anchor_data.get("commit"),

@@ -20,6 +20,7 @@ from fettle.mutation_test import (
     save_mutation_native_cache,
     mutation_cache_reusable,
     _checkpoint_environment_digest,
+    _canonical_digest,
     _runtime_cache_identity,
     _shard_files,
     _shard_ranges,
@@ -832,6 +833,45 @@ def test_mutation_artifact_rejects_incomplete_tampered_or_misbound_report():
             report, ".fettle/report.json", run_ids=["run-1"],
             calibration_ids=["calibration-b"],
         )
+
+
+def test_canonical_mutation_validation_rejects_wrong_source_and_policy(tmp_path):
+    from fettle.mutation_test import validate_canonical_evidence
+
+    source = tmp_path / "fettle" / "a.py"
+    test = tmp_path / "tests" / "test_a.py"
+    source.parent.mkdir()
+    test.parent.mkdir()
+    source.write_text("a = 1\n", encoding="utf-8")
+    test.write_text("def test_a(): pass\n", encoding="utf-8")
+    report = _stable_report(
+        passed=True,
+        policy_digest=_canonical_digest({
+            "mode": "advisory", "score_target": 80.0,
+            "minimum_scored_mutants": 0, "max_new_actionable_survivors": 0,
+            "max_untested": 1, "max_mutant_timeouts": None,
+            "max_suspicious_mutants": None,
+        }),
+        source_scope_digest=_canonical_digest({
+            "fettle/a.py": __import__("hashlib").sha256(source.read_bytes()).hexdigest(),
+        }),
+        test_mapping_digest=_canonical_digest({"fettle/a.py": ["tests/test_a.py"]}),
+        line_range_digest=_canonical_digest([{"file": "fettle/a.py", "start": 1, "end": 1}]),
+    )
+    config = {
+        "mode": "advisory", "score_target": 80.0,
+        "minimum_scored_mutants": 0, "max_new_actionable_survivors": 0,
+        "max_untested": 1, "max_mutant_timeouts": None,
+        "max_suspicious_mutants": None,
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        assert validate_canonical_evidence(str(tmp_path), config, report).validity.value == "valid"
+        report["policy_digest"] = "f" * 64
+        assert validate_canonical_evidence(str(tmp_path), config, report).validity.value == "wrong_policy"
+        report["policy_digest"] = _canonical_digest(config)
+        source.write_text("a = 2\n", encoding="utf-8")
+        assert validate_canonical_evidence(str(tmp_path), config, report).validity.value == "wrong_source"
 
 
 def test_rerun_mutant_executes_exact_current_engine_id_and_rejects_stale_id():
