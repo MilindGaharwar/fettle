@@ -25,7 +25,14 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from fettle import __version__
-from fettle.evidence import EvidenceArtifact
+from fettle.evidence import (
+    EvidenceArtifact,
+    EvidenceValidationContext,
+    EvidenceValidationResult,
+    ResultState,
+    Validity,
+    validate_artifact,
+)
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -1501,6 +1508,83 @@ def build_mutation_report_artifact(
             "calibration_ids": calibration_ids,
         },
     )
+
+
+def validate_canonical_evidence(
+    root: str, config: dict, report: dict,
+    report_location: str = "mutation-report.json",
+) -> EvidenceValidationResult:
+    """Validate a retained mutation report through its canonical wrapper contract."""
+    recovery = "fettle mutation run --changed"
+
+    def failure(validity: Validity) -> EvidenceValidationResult:
+        return EvidenceValidationResult(validity, ResultState.UNKNOWN, recovery)
+
+    if report.get("status") != "completed":
+        return failure(Validity.INCOMPLETE)
+    try:
+        report_digest = "sha256:" + _canonical_digest(report)
+        artifact = build_mutation_report_artifact(
+            report,
+            report_location,
+            run_ids=report.get("run_ids") or [report_digest],
+            calibration_ids=(
+                [report["calibration_id"]] if report.get("calibration_id") else []
+            ),
+        )
+        files = report["files_tested"]
+        tests = report["tests_run"]
+        ranges = report["line_ranges"]
+        if (
+            report.get("engine_version") != MUTMUT_VERSION
+            or report.get("test_runner") != _TEST_RUNNER
+            or not files or files != sorted(set(files))
+            or not tests or tests != sorted(set(tests))
+            or not ranges
+            or report.get("selection") not in {"all", "changed"}
+        ):
+            return failure(Validity.MALFORMED)
+        source_scope = {
+            file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
+            for file in files
+        }
+        policy = {
+            key: config.get(key) for key in (
+                "mode", "score_target", "minimum_scored_mutants",
+                "max_new_actionable_survivors", "max_untested",
+                "max_mutant_timeouts", "max_suspicious_mutants",
+            )
+        }
+        if report["policy_digest"] != _canonical_digest(policy):
+            return failure(Validity.WRONG_POLICY)
+        if report["source_scope_digest"] != _canonical_digest(source_scope):
+            return failure(Validity.WRONG_SOURCE)
+        if report["revision"] != _revision(root):
+            return failure(Validity.WRONG_SOURCE)
+        mapping = _mapped_tests(root, files, config.get("test_mappings", {}))
+        if report["test_mapping_digest"] != _canonical_digest(mapping):
+            return failure(Validity.WRONG_SCOPE)
+        if report["line_range_digest"] != _canonical_digest(ranges):
+            return failure(Validity.TAMPERED)
+        score = compute_score(*(report[state] for state in _STATES[:5]))
+        if score is None or report.get("score") != round(score, 1):
+            return failure(Validity.TAMPERED)
+        if report["passed"] is not evaluate_policy(report, config)["passed"]:
+            return failure(Validity.TAMPERED)
+        context = EvidenceValidationContext(
+            kind="fettle.mutation.report",
+            source_snapshot_digest=artifact.source["snapshot_digest"],
+            source_revision=report["revision"],
+            policy_digest=artifact.policy_digest,
+            scope_digest=artifact.scope_digest,
+            producer_id="fettle.mutation",
+            producer_versions=frozenset({__version__}),
+            producer_implementation_digest=artifact.producer["implementation_digest"],
+            recovery_action=recovery,
+        )
+        return validate_artifact(artifact, context)
+    except (KeyError, OSError, TypeError, ValueError):
+        return failure(Validity.MALFORMED)
 
 
 def _rerun_mutant(root: str, record: dict, current_ids: dict[str, list[str]], timeout: int) -> dict:

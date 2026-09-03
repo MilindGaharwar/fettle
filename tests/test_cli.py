@@ -3,6 +3,7 @@
 import os
 import sys
 import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -22,7 +23,7 @@ def test_assurance_human_output_explains_evidence(tmp_path, capsys):
     from argparse import Namespace
     from fettle.cli import cmd_assurance
 
-    (tmp_path / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".fettle").mkdir()
 
     cmd_assurance(Namespace(root=str(tmp_path), json=False, policy=None))
@@ -32,11 +33,83 @@ def test_assurance_human_output_explains_evidence(tmp_path, capsys):
     assert "Evidence: none" in output
 
 
+def test_assurance_invalid_repository_exits_two(tmp_path, capsys):
+    from argparse import Namespace
+    from fettle.cli import cmd_assurance
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_assurance(Namespace(root=str(tmp_path), json=False, policy=None))
+
+    assert exc_info.value.code == 2
+    assert "Assurance unavailable:" in capsys.readouterr().out
+
+
+def test_assurance_persists_canonical_record(tmp_path, capsys):
+    from argparse import Namespace
+
+    from fettle.cli import cmd_assurance
+    from fettle.evidence import parse_artifact
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".fettle").mkdir()
+
+    cmd_assurance(Namespace(root=str(tmp_path), json=True, policy=None))
+
+    payload = json.loads(capsys.readouterr().out)
+    artifact = parse_artifact(
+        (tmp_path / ".fettle" / "assurance-record.evidence.json").read_bytes(),
+    )
+    assert artifact.payload["record"]["digest"] == payload["record"]["digest"]
+
+
+def test_assurance_persistence_failure_exits_two_without_stale_record(
+    tmp_path, monkeypatch, capsys,
+):
+    from argparse import Namespace
+
+    from fettle.cli import cmd_assurance
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    state = tmp_path / ".fettle"
+    state.mkdir()
+    output = state / "assurance-record.evidence.json"
+    output.write_text("old passing record", encoding="utf-8")
+    monkeypatch.setattr(
+        "fettle.assurance.write_evidence",
+        lambda *_args: {"status": "tool_error", "message": "disk full"},
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_assurance(Namespace(root=str(tmp_path), json=False, policy=None))
+
+    assert exc_info.value.code == 2
+    assert "Assurance persistence failed: disk full" in capsys.readouterr().out
+    assert not output.exists()
+
+
+def test_failed_assessment_removes_stale_record(tmp_path, capsys):
+    from argparse import Namespace
+
+    from fettle.cli import cmd_assurance
+
+    state = tmp_path / ".fettle"
+    state.mkdir()
+    output = state / "assurance-record.evidence.json"
+    output.write_text("old passing record", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_assurance(Namespace(root=str(tmp_path), json=False, policy=None))
+
+    assert exc_info.value.code == 2
+    assert "Assurance unavailable:" in capsys.readouterr().out
+    assert not output.exists()
+
+
 def test_assurance_policy_json_exits_one_on_mismatch(tmp_path, capsys):
     from argparse import Namespace
     from fettle.cli import cmd_assurance
 
-    (tmp_path / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".fettle").mkdir()
     (tmp_path / ".fettle.toml").write_text(
         '[assurance.release.production]\nsecurity = "PASS"\n', encoding="utf-8",
@@ -55,7 +128,7 @@ def test_assurance_policy_exits_two_on_configuration_error(tmp_path, capsys):
     from argparse import Namespace
     from fettle.cli import cmd_assurance
 
-    (tmp_path / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".fettle").mkdir()
     (tmp_path / ".fettle.toml").write_text(
         '[assurance.release.production]\nconfidence = "PASS"\n', encoding="utf-8",
@@ -71,7 +144,7 @@ def test_assurance_policy_exits_two_on_configuration_error(tmp_path, capsys):
 def test_assurance_policy_parser_exits_zero_on_match(tmp_path, monkeypatch, capsys):
     from fettle.cli import main
 
-    (tmp_path / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".fettle").mkdir()
     (tmp_path / ".fettle.toml").write_text(
         '[assurance.release.local]\nauthorization = "NOT_APPLICABLE"\n',

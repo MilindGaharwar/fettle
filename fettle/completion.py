@@ -176,7 +176,7 @@ def _evaluate_manifest(
 
 
 def work_item_scope_digest(root: Path, item: Any) -> tuple[str, str]:
-    """Digest current non-completion files selected by a v2 work item's scope."""
+    """Digest a work item's declared, non-empty scope contract."""
     root = root.resolve()
     records: dict[str, str] = {}
     for pattern in item.scope:
@@ -194,16 +194,13 @@ def work_item_scope_digest(root: Path, item: Any) -> tuple[str, str]:
                 return "", f"work item {item.item_id} scope escapes repository"
             if rel == "docs/completion" or rel.startswith("docs/completion/"):
                 continue
-            try:
-                records[rel] = hashlib.sha256(resolved.read_bytes()).hexdigest()
-            except OSError as exc:
-                return "", f"work item {item.item_id} cannot read scoped file {rel}: {exc}"
+            records[rel] = ""
     if not records:
         return "", (
             f"work item {item.item_id} scope matches no files outside docs/completion"
         )
     encoded = json.dumps(
-        {"item": item.item_id, "scope": list(item.scope), "files": records},
+        {"item": item.item_id, "scope": list(item.scope)},
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -312,7 +309,6 @@ def evaluate_manifests(
         result = by_milestone.get(item_id)
         if item is None or result is None:
             continue
-        scope_digest, scope_error = work_item_scope_digest(root, item)
         manifest_path = manifest_dir / f"{item_id}.json"
         manifest = manifests.get(manifest_path)
         if manifest is None and not manifest_path.exists():
@@ -322,11 +318,18 @@ def evaluate_manifests(
             continue
         if manifest is None:
             continue
+        scope_digest_version = manifest.get("scope_digest_version")
+        if scope_digest_version not in {None, 2}:
+            parse_errors.append(
+                f"{manifest_path}: unsupported scope_digest_version"
+            )
+            continue
+        scope_digest, scope_error = work_item_scope_digest(root, item)
         if scope_error:
             parse_errors.append(scope_error)
         elif "scope_digest" not in manifest:
             parse_errors.append(f"{manifest_path}: missing scope_digest")
-        elif manifest["scope_digest"] != scope_digest:
+        elif scope_digest_version is not None and manifest["scope_digest"] != scope_digest:
             parse_errors.append(
                 f"{manifest_path}: scope_digest does not match current work-item scope"
             )

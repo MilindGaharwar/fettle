@@ -6,27 +6,28 @@ Assurance Record.
 ## The 60-Second Version
 
 ```bash
-pipx install "finefettle[all]"
+pipx install finefettle
 cd your-project
 fettle init --profile solo
 fettle verify          # runs your tests; binds evidence
-fettle assurance       # ← the trust assessment
+fettle assurance       # the trust assessment + persisted canonical artifact
 ```
 
 ## What You're Looking At
 
-`assurance-record.json` in this directory is the output of
-`fettle assurance` on a real project (the `src/fettle_demo/` calculator
-with two tests). Every dimension is backed by an evidence reference or
-an honest explanation of why it's unknown.
+`assurance-record.json` in this directory illustrates the JSON output from
+`fettle assurance --json`. The command also atomically writes
+`.fettle/assurance-record.evidence.json`, a portable canonical artifact that
+can be parsed with `fettle.evidence.parse_artifact`. Every dimension is backed
+by an accepted evidence reference or an honest explanation of why it is unknown.
 
 | Dimension | Status | Why |
 |---|---|---|
-| behavior | **PASS** | `verify.json` exists with `exit_code: 0` — tests ran and passed |
+| behavior | UNKNOWN | This minimal snapshot retains no canonical verify or mutation evidence |
 | authorization | NOT_APPLICABLE | Solo session — no delegation capsule |
-| policy_integrity | UNKNOWN | No `.fettle.toml` policy file in this demo |
-| scope | UNKNOWN | Changed-file list not provided |
-| security | UNKNOWN | Security evidence joins in P81 |
+| policy_integrity | **PASS** | Effective layered policy is digest-bound |
+| scope | **PASS** | Scope is derived from Git, not caller input |
+| security | UNKNOWN | Raw security reports are diagnostic until a canonical producer is approved |
 | independence | UNKNOWN | Solo session — no role separation or spawn lineage |
 | provenance | UNKNOWN | No governance ledger retained |
 | uat | UNKNOWN | No UAT report retained |
@@ -45,5 +46,6 @@ fettle ci wait                          # populates the CI dimension
 fettle uat run --surface cli            # populates the UAT dimension
 ```
 
-Each command produces a retained artifact that `fettle assurance`
-discovers and binds into the record.
+Each command produces retained evidence that `fettle assurance` validates
+before use. Accepted canonical artifacts are parent-linked from the persisted
+Assurance Record. Missing, stale, malformed, or mismatched evidence cannot pass.

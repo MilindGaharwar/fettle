@@ -38,7 +38,7 @@ repos:
       # changes CAN break consistency tests, so they run at commit time.
       - id: fettle-consistency
         name: fettle consistency tests (version/schema/contract)
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m pytest tests/test_cli.py tests/test_config_schema.py -q --no-header -p no:cacheprovider'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; unset $(git rev-parse --local-env-vars); "$PY" -m pytest tests/test_cli.py tests/test_config_schema.py -q --no-header -p no:cacheprovider'
         language: system
         pass_filenames: false
         always_run: true

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
 from fettle.capsule_guard import run_check as check_capsule
+from fettle.assurance import build_assurance_record, evaluate_assurance_policy
 from fettle.dispatcher_types import Decision, HookContext, HookInput
 from fettle.evidence import (
     EvidenceArtifact,
@@ -75,6 +77,37 @@ def _evidence_context(**changes):
     }
     values.update(changes)
     return EvidenceValidationContext(**values)
+
+
+def _init_assurance_repo(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "config", "user.email", "test@fettle.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "config", "user.name", "t"], check=True,
+    )
+    (root / ".fettle").mkdir()
+    (root / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-qm", "seed"], check=True,
+    )
+    return root
+
+
+def _release_decision(root, dimension, required="PASS"):
+    (root / ".fettle.toml").write_text(
+        f'[assurance.release.production]\n{dimension} = "{required}"\n',
+        encoding="utf-8",
+    )
+    record = build_assurance_record(str(root))["record"]
+    return record["dimensions"][dimension], evaluate_assurance_policy(
+        record, str(root), "production",
+    )
 
 
 def test_p83_ledger_edit_is_detected(tmp_path):
@@ -170,3 +203,53 @@ def test_p83_policy_downgrade_preserves_parent_policy(capsule, local, path, expe
 
     assert value == expected
     assert ignored
+
+
+@pytest.mark.parametrize(
+    ("dimension", "required", "artifact", "expected"),
+    [
+        (
+            "behavior", "PASS", ".fettle/verify.json",
+            {"ok": True, "session_id": "forged", "head_sha": "0" * 40},
+        ),
+        (
+            "security", "PASS", ".fettle/security-review.json",
+            {"findings": [], "tools_used": ["ruff", "semgrep"],
+             "tools_missing": [], "tool_errors": []},
+        ),
+        ("provenance", "COMPLETE", ".fettle/ledger-anchor.json", {}),
+    ],
+)
+def test_p83_unbound_or_forged_artifact_fails_release_policy(
+    tmp_path, dimension, required, artifact, expected,
+):
+    root = _init_assurance_repo(tmp_path)
+    path = root / artifact
+    path.write_text(json.dumps(expected), encoding="utf-8")
+    if dimension == "provenance":
+        (root / ".fettle" / "governance-ledger.jsonl").write_text(
+            "{}\n", encoding="utf-8",
+        )
+
+    result, decision = _release_decision(root, dimension, required)
+
+    assert result["status"] == "UNKNOWN"
+    assert decision["status"] == "FAIL"
+
+
+def test_p83_tampered_delegation_fails_release_policy(tmp_path, monkeypatch):
+    root = _init_assurance_repo(tmp_path)
+    capsule = tmp_path / "0000000000000000.json"
+    capsule.write_text(json.dumps({
+        "fettle_capsule": 1,
+        "digest": "0" * 64,
+        "policy": {"gates": {}},
+        "origin": {},
+        "lineage": [],
+    }), encoding="utf-8")
+    monkeypatch.setenv("FETTLE_POLICY_CAPSULE", str(capsule))
+
+    result, decision = _release_decision(root, "authorization")
+
+    assert result["status"] == "FAIL"
+    assert decision["status"] == "FAIL"

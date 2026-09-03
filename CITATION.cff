@@ -3,9 +3,9 @@ message: "If you use Fettle, please cite it using this metadata."
 title: "Fettle"
 type: software
 authors:
-  - family-names: "Milind"
-version: 1.12.1
-date-released: 2026-08-27
+  - name: "Milind"
+version: 1.13.1
+date-released: 2026-09-03
 url: "https://github.com/MilindGaharwar/fettle"
 repository-code: "https://github.com/MilindGaharwar/fettle"
 license: Apache-2.0

@@ -4,14 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finefettle"
-version = "1.13.0"
+version = "1.13.1"
 description = "Trust layer for agentic software engineering: policy that survives delegation, evidence that cannot become clean by accident, and verdicts bound to artifacts across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Milind"}]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "mutmut==2.5.1",
+    "playwright>=1.40",
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+    "ruff>=0.4.0",
+    "semgrep>=1.168",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -26,8 +33,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# The base wheel provides dependency-free governance, init, and demo commands.
-# Install only the external capabilities a workflow needs, or use `all`.
+# Capability extras remain as compatibility selectors. The default installation
+# includes every Python runtime Fettle invokes; `dev` adds contributor tooling.
 dev = [
     "deptry>=0.23",
     "pre-commit>=4.4",
@@ -41,10 +48,6 @@ evals = ["pyyaml>=6.0"]
 uat = ["playwright>=1.40"]
 all = [
     "finefettle[dev]",
-    "finefettle[mutation]",
-    "finefettle[semgrep]",
-    "finefettle[evals]",
-    "finefettle[uat]",
 ]
 
 [project.scripts]

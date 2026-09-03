@@ -83,6 +83,12 @@ losing valid implementation or error-path evidence.
 - One evidence reference cannot satisfy criteria with different expected
   outcomes.
 - Missing, malformed, stale, or unsupported evidence is never a pass.
+- Scope digest version 2 binds the work item's declared scope patterns, not the
+  current bytes of every matched file. Later work may edit shared files without
+  rewriting historical completion evidence; changing the declared scope still
+  requires revalidation. Unversioned historical manifests remain frozen records:
+  their declared scope must still be safe and non-empty, but their historical
+  byte digest is not compared with current shared-file contents.
 
 ## BDD Scenarios
 

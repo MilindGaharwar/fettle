@@ -4,6 +4,9 @@ Source: audit + GPT cross-review convergence on "ease of understanding" as
 the weakest dimension (6/10). The technology is world-class; the front door
 is a maze.
 
+Status: completed and superseded by the current README, documentation index,
+offline demo, assurance-record example, and complete default installer.
+
 ## Diagnosis
 
 A new user landing on the README sees 33 CLI commands, 20+ gates, 40+ docs.
@@ -18,7 +21,7 @@ trust this change?" — requires reading five docs to discover.
 Replace the current "Evaluate the CLI" quick-start:
 
 ```bash
-pipx install "finefettle[all]"
+pipx install finefettle
 cd your-project
 fettle init --profile solo
 # ... make a change, let your agent work ...

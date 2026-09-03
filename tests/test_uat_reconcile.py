@@ -14,6 +14,7 @@ from fettle.uat.reconcile import (
     parse_transcript,
     reconcile,
     reconcile_session,
+    validate_canonical_evidence,
     write_report,
 )
 from fettle.runners import RunnerResult
@@ -215,6 +216,33 @@ class TestArtifactsAndSummary:
             )
         assert err == "canonical UAT report evidence unavailable: full"
         assert json.loads(Path(path).read_text())["completion"]["complete"] is False
+
+    def test_canonical_validation_preserves_unresolved_evaluator_as_unknown(self, tmp_path):
+        verdicts = [Verdict("greeter/S1", "CONFIRMED", observed="ran")]
+        path, err = write_report(str(tmp_path), {
+            "session_id": "uat-x", "surface": "cli",
+        }, verdicts, judgment={"status": "tool_error", "findings": [], "error": "timeout"})
+        assert err == ""
+        report = json.loads(Path(path).read_text())
+
+        result = validate_canonical_evidence(str(tmp_path), report)
+
+        assert result.validity.value == "valid"
+        assert result.result_state.value == "unknown"
+
+    def test_canonical_validation_detects_report_projection_tampering(self, tmp_path):
+        verdicts = [Verdict("greeter/S1", "CONFIRMED", observed="ran")]
+        path, err = write_report(str(tmp_path), {
+            "session_id": "uat-x", "surface": "cli",
+        }, verdicts)
+        assert err == ""
+        report = json.loads(Path(path).read_text())
+        report["completion"]["required_total"] = 2
+
+        result = validate_canonical_evidence(str(tmp_path), report)
+
+        assert result.validity.value == "tampered"
+        assert result.result_state.value == "unknown"
 
     def test_format_verdicts_expands_problems(self):
         text = ("SCENARIO: greeter/S1\nOBSERVED: Hola\nOUTCOME: differs\n"

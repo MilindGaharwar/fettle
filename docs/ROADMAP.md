@@ -6,11 +6,13 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-The released package is v1.12.3. It includes the R1 evidence contract, the
+The current package version is v1.13.1. It includes the R1 evidence contract, the
 graduated R2 canonical workspace/adapter substrate, scanner and CI result
 integrity, deterministic change-integrity contracts, P62's reproducible
 full-repository mutation calibration and accepted baseline, and wheel-native
-versioned agent transports. Changed-scope
+versioned agent transports. The default installer includes every Python runtime
+Fettle invokes, and assurance validates producer-bound canonical evidence before
+persisting its own portable record. Changed-scope
 mutation policy and narrow formal verification remain advisory or partial and
 subject to the graduation triggers below. See the
 [README](../README.md) for current capabilities and operational boundaries.

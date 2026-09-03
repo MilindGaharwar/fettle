@@ -457,6 +457,29 @@ def test_missing_coverage_key_defaults_to_unknown(tmp_path):
     assert check["coverage"] == "unknown"
 
 
+def test_malformed_anchor_is_reported_as_tampered(tmp_path):
+    root = _init_repo(tmp_path)
+    _seed(root, 1)
+    anchor_file = tmp_path / ".fettle" / "ledger-anchor.json"
+    anchor_file.write_text("{}", encoding="utf-8")
+
+    check = verify_anchor(root)
+
+    assert check["status"] == "tampered"
+    assert "malformed" in check["reason"]
+
+
+def test_malformed_ledger_record_is_reported_as_tampered(tmp_path):
+    root = _init_repo(tmp_path)
+    path = tmp_path / ".fettle" / "governance-ledger.jsonl"
+    path.parent.mkdir()
+    path.write_text("{}\n", encoding="utf-8")
+
+    check = verify_chain(root)
+
+    assert check["status"] == "tampered"
+
+
 # ── rotate() contract pins ────────────────────────────────────────────────
 
 

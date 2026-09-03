@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.13.1 - Complete Default Python Install
+
+- Plain `pipx install finefettle` now installs every Python runtime used by
+  Fettle: Ruff, Semgrep, pytest, mutmut, PyYAML, and Playwright. Capability
+  extras remain valid for compatibility; `finefettle[all]` also adds contributor
+  tooling.
+- Installation guidance now distinguishes bundled Python capabilities from
+  external prerequisites such as Git, agent CLIs, browser binaries, services,
+  and non-Python language toolchains.
+- Release smoke tests now prove the default wheel exposes each Python-backed
+  capability instead of testing a dependency-free installation.
+- Assurance now derives subject, effective policy, and changed scope from the
+  repository; validates verify, CI, mutation, UAT, ledger, and delegation
+  evidence at their producer-owned boundaries; and keeps raw security reports
+  diagnostic-only. Forged, stale, malformed, incomplete, or mismatched evidence
+  is non-pass at the final release-policy decision. Policies requiring security
+  `PASS` therefore need an approved canonical security producer.
+- `fettle assurance` atomically writes a portable canonical
+  `.fettle/assurance-record.evidence.json` with parent references to accepted
+  producer artifacts. Failed assessment or persistence removes any older record
+  so a stale pass cannot appear current.
+
 ## v1.13.0 - Evidence Integrity Hardening
 
 ### Evidence integrity (2026-08 audit, HIGH findings)

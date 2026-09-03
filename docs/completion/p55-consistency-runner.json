@@ -2,7 +2,8 @@
   "schema_version": 1,
   "milestone": "p55-consistency-runner",
   "revision": "uat-strength-2026-08-28",
-  "scope_digest": "d0c2caf1e71af90c793a7eb85719ce64341cb4133b3044e0a998a4acd0ee455c",
+  "scope_digest_version": 2,
+  "scope_digest": "bc54edade597356ba02934a1fa5c741ea907cf02ddd2bfc1f2c3e32c57ee6d6f",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
