@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.13.0 - Evidence Integrity Hardening
 
 ### Evidence integrity (2026-08 audit, HIGH findings)
 
