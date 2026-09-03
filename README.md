@@ -410,7 +410,7 @@ See the [configuration reference](docs/CONFIG.md) for the complete contract.
 - Git is required. Install it with `brew install git` on macOS,
   `sudo apt-get update && sudo apt-get install git` on Debian/Ubuntu, or
   `winget install --id Git.Git -e` on Windows.
-- Agent transports can run from the v1.12.3 wheel or a source checkout. Installed
+- Agent transports can run from the v1.13.0 wheel or a source checkout. Installed
   bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
 - Browser engines require an explicit `playwright install`. Agent CLIs,
   shellcheck, and JavaScript/TypeScript, Go, and Rust toolchains remain external.
