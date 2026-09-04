@@ -132,6 +132,9 @@ uv build
 Files: shadow assessment log, UAT record, completion evidence, and release
 artifacts.
 
+- Follow the frozen machine-reproducible
+  [prior-v1 baseline protocol](engagement/assurance-integrity-baseline-protocol.md)
+  for every candidate row.
 - Collect 20 real assessments from distinct qualifying changes; fixtures and
   repeated unchanged runs do not count.
 - Classify every difference as intentional hardening or defect and resolve all

@@ -215,8 +215,10 @@ Files: `tests/test_assurance_adversary.py`, `examples/assurance-record/`,
 - Prove equivalent clones produce the same canonical digest.
 - Assess Fettle's own final change from the source tree and an installed wheel.
 - Run the full repository suite and required quality gates.
-- Collect at least 20 shadow assessments and classify every changed v1 decision
-  as intentional hardening or a defect before enforcement graduation.
+- Use the frozen machine-reproducible
+  [prior-v1 baseline protocol](engagement/assurance-integrity-baseline-protocol.md),
+  then collect at least 20 shadow assessments and classify every changed v1
+  decision as intentional hardening or a defect before enforcement graduation.
 
 Verification:
 

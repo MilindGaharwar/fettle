@@ -1444,6 +1444,23 @@ def cmd_assurance(args: argparse.Namespace) -> None:
         raise SystemExit(0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
 
+def cmd_assurance_baseline(args: argparse.Namespace) -> None:
+    """Collect one reproducible prior-v1 versus hardened shadow assessment."""
+    from fettle.assurance_baseline import collect
+
+    try:
+        bundle = collect(Path(args.root), Path(args.store))
+    except (OSError, ValueError, TimeoutError) as exc:
+        print(f"Assurance baseline unavailable: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    result = {"status": "completed", "bundle": str(bundle), "accepted": False}
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Captured unaccepted CS-6 assessment: {bundle}")
+        print("Review and classify every difference before adding the row to the register.")
+
+
 def cmd_consistency(args: argparse.Namespace) -> None:
     """P53/SC2 — state-consistency contract authoring UX."""
     from fettle.state_consistency import (
@@ -2148,6 +2165,17 @@ def main() -> None:
     p_assurance.add_argument(
         "--policy", help="Evaluate [assurance.release.NAME] against the record")
 
+    p_assurance_baseline = subparsers.add_parser(
+        "assurance-baseline", help="Collect a reproducible CS-6 shadow comparison")
+    assurance_baseline_sub = p_assurance_baseline.add_subparsers(
+        dest="assurance_baseline_action", required=True,
+    )
+    p_assurance_baseline_collect = assurance_baseline_sub.add_parser(
+        "collect", help="Capture and compare prior-v1 with the hardened evaluator")
+    p_assurance_baseline_collect.add_argument("--root", default=".")
+    p_assurance_baseline_collect.add_argument("--store", required=True)
+    p_assurance_baseline_collect.add_argument("--json", action="store_true")
+
     p_consistency = subparsers.add_parser(
         "consistency", help="State-consistency contracts (P53/SC2)")
     consistency_sub = p_consistency.add_subparsers(dest="consistency_action", required=True)
@@ -2264,6 +2292,7 @@ def main() -> None:
         "ledger": cmd_ledger,
         "pipeline": cmd_pipeline,
         "assurance": cmd_assurance,
+        "assurance-baseline": cmd_assurance_baseline,
         "consistency": cmd_consistency,
         "uat": cmd_uat,
         "verify": cmd_verify,

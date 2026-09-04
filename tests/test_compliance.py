@@ -20,7 +20,10 @@ from fettle.compliance import (
 )
 
 RULES_DIR = Path(__file__).resolve().parent.parent / "rules"
-RULE_PACKS = ["llm-antipatterns.yml", "go-antipatterns.yml", "ts-antipatterns.yml"]
+RULE_PACKS = [
+    "llm-antipatterns.yml", "go-antipatterns.yml", "ts-antipatterns.yml",
+    "security.yml",
+]
 
 
 def _yaml_rules() -> dict[str, dict]:
