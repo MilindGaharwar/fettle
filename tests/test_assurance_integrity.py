@@ -34,8 +34,11 @@ def _init_repo(tmp_path, name="repo"):
         ["git", "-C", str(root), "config", "user.name", "t"], check=True,
     )
     (root / ".fettle").mkdir()
+    (root / ".gitignore").write_text(".fettle/\n", encoding="utf-8")
     (root / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "add", "README.md", ".gitignore"], check=True,
+    )
     subprocess.run(
         ["git", "-C", str(root), "commit", "-q", "-m", "seed"], check=True,
     )
@@ -259,6 +262,71 @@ def test_unbound_raw_security_review_cannot_authorize(tmp_path):
     record, decision = _policy_decision(root, "security")
 
     assert record["dimensions"]["security"]["status"] == "UNKNOWN"
+    assert decision["status"] == "FAIL"
+
+
+def test_canonical_clean_security_review_authorizes_and_is_parented(tmp_path):
+    from fettle.assurance import write_evidence
+    from fettle.evidence import parse_artifact
+    from fettle.security_review import _write_review
+
+    root, _head = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nsecurity = "PASS"\n', encoding="utf-8",
+    )
+    report = {
+        "findings": [],
+        "tools_used": ["ruff (S-rules, Python)", "semgrep (Fettle security rules)"],
+        "tools_missing": [],
+        "tool_errors": [],
+        "target": ".",
+        "scanned_paths": [".fettle.toml"],
+        "coverage_note": "Bounded security checks; not comprehensive OWASP coverage.",
+    }
+    assert _write_review(str(root), report, load_config(str(root))) is None
+
+    result = build_assurance_record(str(root))
+    record = result["record"]
+    decision = evaluate_assurance_policy(record, str(root), "production")
+    assert write_evidence(str(root), record)["status"] == "completed"
+    artifact = parse_artifact(
+        (root / ".fettle" / "assurance-record.evidence.json").read_bytes(),
+    )
+
+    assert record["dimensions"]["security"]["status"] == "PASS"
+    assert decision["status"] == "PASS"
+    assert any(parent.kind == "fettle.security.review" for parent in artifact.parents)
+
+
+def test_canonical_security_finding_remains_failure(tmp_path):
+    from fettle.security_review import _write_review
+
+    root, _head = _init_repo(tmp_path)
+    (root / ".fettle.toml").write_text(
+        '[assurance.release.production]\nsecurity = "PASS"\n', encoding="utf-8",
+    )
+    report = {
+        "findings": [{
+            "file": ".fettle.toml", "line": 1, "code": "security-test",
+            "message": "finding", "severity": "HIGH", "cwe": "CWE-1",
+            "tool": "semgrep",
+        }],
+        "tools_used": ["ruff (S-rules, Python)", "semgrep (Fettle security rules)"],
+        "tools_missing": [],
+        "tool_errors": [],
+        "target": ".",
+        "scanned_paths": [".fettle.toml"],
+        "coverage_note": "Bounded security checks; not comprehensive OWASP coverage.",
+    }
+    assert _write_review(str(root), report, load_config(str(root))) is None
+
+    record = build_assurance_record(str(root))["record"]
+    decision = evaluate_assurance_policy(record, str(root), "production")
+
+    assert record["dimensions"]["security"]["status"] == "FAIL"
+    assert record["dimensions"]["security"]["reason"] == (
+        "canonical security review reported 1 finding"
+    )
     assert decision["status"] == "FAIL"
 
 

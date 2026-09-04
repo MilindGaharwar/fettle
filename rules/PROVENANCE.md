@@ -9,6 +9,7 @@ missing, duplicate, stale, or placeholder entries.
 | `.ruff.toml` | Written from scratch for Fettle; introduced in `f778435` | None | Apache-2.0 |
 | `go-antipatterns.yml` | Written from scratch for Fettle; introduced in `2c4d470` with Fettle-specific metadata and tests | None | Apache-2.0 |
 | `llm-antipatterns.yml` | Written from scratch for Fettle; introduced in `f778435` and extended for Fettle incidents and work packages | None | Apache-2.0 |
+| `security.yml` | Written from scratch for Fettle as the immutable canonical security-review policy | None | Apache-2.0 |
 | `ts-antipatterns.yml` | Written from scratch for Fettle; introduced in `717c13b` with Fettle-specific metadata and fixtures | None | Apache-2.0 |
 
 ## Audit Notes
