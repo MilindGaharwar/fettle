@@ -13,7 +13,8 @@ this index is the navigation layer.
 | Change integrity (hypergraph) | `change-integrity-implementation-plan.md` (+ architecture, UX spec) | P44–P46 complete; P47 shipped advisory; P48 next | Shadow parity for semantic/topology/verify consumers; P49 deferred on P41 |
 | State consistency | `state-consistency-implementation-plan.md` (+ UX spec) | P53-P56 complete; P57-P61 package- or evidence-gated | Review and authorize the P57 web/UAT adapter package |
 | Agentic UAT strengthening | `uat-strength-plan.md` + hypothesis tree | P72–P76 done; P77 harness done, parity baseline blocked | Record human sessions across the canonical ten seeds and agree the discovery threshold before graduation |
-| **Assurance Integrity** | `assurance-integrity-implementation-plan.md` + `assurance-integrity.ux-spec.md` | **AI-0-AI-3 complete** | Harden mutation and UAT canonical-evidence consumption in AI-4 |
+| **Assurance Integrity** | `assurance-integrity-implementation-plan.md` + `assurance-integrity.ux-spec.md` | **AI-0-AI-7 technically complete; graduation open** | Deliver canonical security evidence, then collect 20 real shadow assessments and explicit operator approval |
+| Canonical security evidence | `canonical-security-evidence-implementation-plan.md` + `canonical-security-evidence.ux-spec.md` | CS-0-CS-5 technically complete; CS-6 blocked | Collect 20 real shadow assessments; keep enforcement and release blocked pending explicit approval |
 | Assurance Record v1 | `assurance-record-plan.md` | P80-P83 delivered; authority limitations superseded by Assurance Integrity | Preserve compatibility while hardening the aggregate boundary |
 | Improvement program (audit) | `improvement-plan.md` | Items 1–6 done; 5 index done; 8 partial | Positioning motion capture (operator) |
 

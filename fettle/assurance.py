@@ -178,7 +178,7 @@ def _behavior_dimension(root: Path, config: dict) -> dict:
                       reason="no verify stamp or mutation report retained")
 
 
-def _security_dimension(root: Path) -> dict:
+def _security_dimension(root: Path, config: dict) -> dict:
     path = root / ".fettle" / "security-review.json"
     report = _read_json(path)
     if not isinstance(report, dict):
@@ -188,34 +188,59 @@ def _security_dimension(root: Path) -> dict:
                        ".fettle/security-review.json")
         return _dimension("UNKNOWN", [], reason=reason)
     evidence = [{"path": ".fettle/security-review.json",
-                 "digest": _digest_of(path)}]
-    findings = report.get("findings")
-    if not isinstance(findings, list):
-        return _dimension("UNKNOWN", evidence,
-                          reason="security review has malformed findings")
-    if findings:
+                  "digest": _digest_of(path)}]
+    if not isinstance(report.get("canonical_evidence"), dict):
+        findings = report.get("findings")
+        if not isinstance(findings, list):
+            return _dimension("UNKNOWN", evidence,
+                              reason="security review has malformed findings")
+        if findings:
+            suffix = "finding" if len(findings) == 1 else "findings"
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason=f"{len(findings)} security {suffix} retained in a raw, "
+                       "non-canonical review",
+            )
+        complete = (
+            isinstance(report.get("tools_used"), list)
+            and bool(report["tools_used"])
+            and isinstance(report.get("tools_missing"), list)
+            and report.get("tools_missing") == []
+            and isinstance(report.get("tool_errors"), list)
+            and report.get("tool_errors") == []
+        )
+        reason = (
+            "security review is complete but not canonical or bound to the "
+            "assessed source, policy, and scope"
+            if complete else "security review coverage is incomplete"
+        )
+        return _dimension("UNKNOWN", evidence, reason=reason)
+    from fettle.evidence import ResultState, Validity
+    from fettle.security_review import validate_canonical_evidence
+
+    result = validate_canonical_evidence(str(root), config, report)
+    if result.validity != Validity.VALID:
+        return _dimension(
+            "UNKNOWN", evidence,
+            reason=f"canonical security evidence is {result.validity.value}; "
+                   f"run {result.recovery_action}",
+        )
+    evidence.append({
+        "path": ".fettle/security-review.evidence.json",
+        "digest": _digest_of(root / ".fettle" / "security-review.evidence.json"),
+    })
+    if result.result_state == ResultState.PASS:
+        return _dimension("PASS", evidence)
+    if result.result_state == ResultState.VIOLATION:
+        findings = report.get("blocking_findings", [])
         suffix = "finding" if len(findings) == 1 else "findings"
-        return _dimension(
-            "UNKNOWN", evidence,
-            reason=f"{len(findings)} security {suffix} retained in a raw, "
-                   "non-canonical review",
-        )
-    complete = (
-        isinstance(report.get("tools_used"), list)
-        and bool(report["tools_used"])
-        and isinstance(report.get("tools_missing"), list)
-        and report.get("tools_missing") == []
-        and isinstance(report.get("tool_errors"), list)
-        and report.get("tool_errors") == []
+        return _dimension("FAIL", evidence,
+                          reason=f"canonical security review reported {len(findings)} {suffix}")
+    return _dimension(
+        "UNKNOWN", evidence,
+        reason=f"canonical security result is {result.result_state.value}; "
+               f"run {result.recovery_action}",
     )
-    if complete:
-        return _dimension(
-            "UNKNOWN", evidence,
-            reason="security review is complete but not canonical or bound "
-                   "to the assessed source, policy, and scope",
-        )
-    return _dimension("UNKNOWN", evidence,
-                      reason="security review coverage is incomplete")
 
 
 def _independence_dimension(root: Path) -> dict:
@@ -536,7 +561,7 @@ def build_assurance_record(root: str = ".",
         "policy_integrity": _policy_integrity_dimension(context["policy"]["digest"]),
         "scope": _scope_dimension(context["scope"]["digest"]),
         "behavior": _behavior_dimension(root_path, context["config"]),
-        "security": _security_dimension(root_path),
+        "security": _security_dimension(root_path, context["config"]),
         "independence": _independence_dimension(root_path),
         "provenance": _provenance_dimension(root_path, context["source"]["revision"]),
         "uat": _uat_dimension(root_path),
@@ -599,6 +624,7 @@ def _accepted_parent_references(root: Path, record: dict) -> tuple:
         ".fettle/verify-evidence.json",
         ".fettle/ci-evidence.json",
         ".fettle/uat-report.evidence.json",
+        ".fettle/security-review.evidence.json",
     }
     dimensions = record.get("dimensions", {})
     for dimension in dimensions.values():

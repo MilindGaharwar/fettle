@@ -36,6 +36,17 @@ exclude = [
     "docs/fettle-v14-multiagent-plan.md",
 ]
 
+# Observational until 20 real shadow assessments are classified and an operator
+# explicitly approves release enforcement. Selecting this policy is fail-closed;
+# no hook or release workflow invokes it yet.
+[assurance.release.production]
+authorization = "PASS"
+policy_integrity = "PASS"
+security = "PASS"
+behavior = "PASS"
+independence = "PASS|UNKNOWN"
+provenance = "COMPLETE"
+
 [mutation]
 enabled = true
 mode = "advisory"

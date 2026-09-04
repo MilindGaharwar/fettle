@@ -1,0 +1,36 @@
+rules:
+  - id: security-sql-fstring-python
+    metadata:
+      origin: security
+      citation: "OWASP: SQL injection via string-built queries"
+      cwe: CWE-89
+    languages: [python]
+    severity: ERROR
+    pattern-regex: "(?i)f[\"'].*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\\s.*\\{.*\\}.*[\"']"
+    message: "SQL via f-string is injection-vulnerable; use a parameterized query."
+
+  - id: security-sql-template-javascript
+    metadata:
+      origin: security
+      citation: "OWASP: SQL injection via template interpolation"
+      cwe: CWE-89
+    languages: [typescript, javascript]
+    severity: ERROR
+    pattern-regex: "(?i)`\\s*(SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^`]*`"
+    message: "SQL template interpolation is injection-vulnerable; use a parameterized query."
+
+  - id: security-sql-concat-go
+    metadata:
+      origin: security
+      citation: "OWASP: SQL injection via string-built queries"
+      cwe: CWE-89
+    languages: [go]
+    severity: ERROR
+    pattern-either:
+      - pattern: $DB.Query("..." + $VAR, ...)
+      - pattern: $DB.QueryRow("..." + $VAR, ...)
+      - pattern: $DB.Exec("..." + $VAR, ...)
+      - pattern: $DB.QueryContext($CTX, "..." + $VAR, ...)
+      - pattern: $DB.QueryRowContext($CTX, "..." + $VAR, ...)
+      - pattern: $DB.ExecContext($CTX, "..." + $VAR, ...)
+    message: "SQL built from strings is injection-vulnerable; use placeholders."
