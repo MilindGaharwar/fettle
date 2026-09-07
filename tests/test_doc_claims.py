@@ -102,21 +102,59 @@ def test_current_documentation_version_matches_package():
 
 def test_event_map_covers_all_dispatcher_and_transport_events():
     """Drift predicate: every dispatched/transported event appears in the map."""
-    import re
+    import ast
 
-    event_re = re.compile(r'"(PreToolUse|PostToolUse|Stop|SubagentStart)"')
     names = set()
     for agent_file in (Path(ROOT) / "fettle" / "agents").glob("*.py"):
-        names.update(event_re.findall(agent_file.read_text(encoding="utf-8")))
-    registry = (Path(ROOT) / "fettle" / "dispatcher_registry.py") \
-        .read_text(encoding="utf-8")
-    names.update(event_re.findall(registry))
+        tree = ast.parse(agent_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not any(
+                isinstance(target, ast.Name)
+                and target.id in {"KNOWN_EVENTS", "_EVENT_MAP"}
+                for target in node.targets
+            ):
+                continue
+            value_node = (
+                node.value.args[0]
+                if isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "frozenset"
+                else node.value
+            )
+            value = ast.literal_eval(value_node)
+            names.update(value.values() if isinstance(value, dict) else value)
+
+    registry = ast.parse(
+        (Path(ROOT) / "fettle" / "dispatcher_registry.py").read_text(
+            encoding="utf-8")
+    )
+    for node in ast.walk(registry):
+        if not isinstance(node, ast.Call) or not (
+            isinstance(node.func, ast.Name) and node.func.id == "CheckSpec"
+        ):
+            continue
+        events = next((kw.value for kw in node.keywords if kw.arg == "events"), None)
+        assert events is not None, "CheckSpec without events"
+        names.update(ast.literal_eval(events.args[0]))
 
     assert names, "no events discovered — discovery regex broke"
     event_map = (Path(ROOT) / "docs" / "event-map.md").read_text(
         encoding="utf-8")
-    missing = sorted(n for n in names if f"### {n}" not in event_map)
-    assert not missing, f"events missing from docs/event-map.md: {missing}"
+    headings = {
+        line.removeprefix("### ") for line in event_map.splitlines()
+        if line.startswith("### ")
+    }
+    assert headings == names, (
+        f"event map drift: missing={sorted(names - headings)}, "
+        f"stale={sorted(headings - names)}"
+    )
+
+    for event in names:
+        section = event_map.split(f"### {event}\n", 1)[1].split("\n### ", 1)[0]
+        assert "| **Durability** |" in section, f"{event} has no durability row"
+        assert "| **Consumers** |" in section, f"{event} has no consumers row"
+        consumer = section.split("| **Consumers** |", 1)[1].split("|", 1)[0].strip()
+        assert consumer, f"{event} has an empty consumers row; use 'none' explicitly"
 
 
 def test_behavior_map_covers_new_public_commands():

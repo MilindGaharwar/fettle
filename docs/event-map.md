@@ -2,7 +2,8 @@
 
 Canonical index of every hook/dispatcher event in Fettle's pipeline, across
 all four agent hosts. If an event is dispatched, it appears here; drift is
-enforced by `tests/test_doc_claims.py::test_event_map_covers_all_events`.
+enforced by
+`tests/test_doc_claims.py::test_event_map_covers_all_dispatcher_and_transport_events`.
 
 ## Durability classes
 
@@ -25,7 +26,7 @@ routing information.
 | **Producers** | Agent hosts, translated per transport into `HookContext` |
 | **Host support** | Claude Code · Codex CLI · Gemini CLI · OpenCode |
 | **Durability** | Durable (decision logged) + Live (hook response) |
-| **Consumers** | 12 checks incl. `authorship_gate`, `destructive_guard`, `capsule_guard`, `mcp_trust_gate`, `boundary_rules`, `config_protect`, `bash_audit`, `loop_detect`, `tdd_gate`, `claims_gate`, `artifact_gate`, `deploy_gate` |
+| **Consumers** | 12 checks: `agent_spawn_gate`, `artifact_gate`, `authorship_gate`, `capsule_guard`, `commit_message`, `config_protect`, `deploy_gate`, `destructive_guard`, `mcp_trust_gate`, `quality_gate`, `release_gate`, `tdd_gate` |
 
 Fires before a tool executes. Checks may block (enforce), advise
 (advisory), or allow. This is where file-authority (P52) and destructive-

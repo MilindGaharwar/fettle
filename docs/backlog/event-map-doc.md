@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: event-map-doc
-status: open
+status: done
 scope:
   - docs/event-map.md
   - tests/test_doc_claims.py
@@ -27,4 +27,8 @@ trace/evidence) or **live** (in-session only).
 
 ## Resolution
 
-Record how it was resolved.
+Replaced the hard-coded event-name regex with structural discovery across every
+agent transport's `KNOWN_EVENTS` or `_EVENT_MAP` declaration and every
+`CheckSpec.events` set. The predicate now rejects missing and stale event
+sections and requires each section to state durability and consumers. Corrected
+the `PreToolUse` consumer inventory to match the registry.
