@@ -111,7 +111,7 @@ regression tests despite hard latency budgets, TS/VS Code surfaces untested.
 6. **Docs drift** — WP-133 number collision (eval lab vs CLI repair);
    README says 12 commands, lists 11, repo has 17; CONFIG.md covers 7/30 gates;
    two competing worklog models (daily journal shipped vs per-work-item
-   proposed in [docs/continuity-traceability-plan.md](../continuity-traceability-plan.md));
+    proposed in [docs/archive/continuity-traceability-plan.md](../archive/continuity-traceability-plan.md));
    ~10 dead/stale plan files intermixed with live ones.
 
 ## 8. Live vs dead planning documents
