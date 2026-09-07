@@ -6,6 +6,7 @@ import sys
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+from fettle import __version__
 from fettle.baseline import create_baseline, load_baseline, filter_new_violations, _fingerprint
 
 
@@ -15,6 +16,7 @@ def test_create_baseline(tmp_path):
         {"tool": "semgrep", "file": "db.py", "line": 5, "code": "sql-fstring", "message": "injection"},
     ]
     baseline = create_baseline(findings, tmp_path)
+    assert baseline["fettle_version"] == __version__
     assert baseline["findings_count"] == 2
     assert (tmp_path / ".fettle-baseline.json").exists()
 

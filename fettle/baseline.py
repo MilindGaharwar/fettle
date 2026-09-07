@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
+from fettle import __version__
 from fettle.paths import find_repo_root
 
 
@@ -46,7 +47,7 @@ def create_baseline(findings: list[dict], repo_root: Path) -> dict:
     baseline = {
         "version": 1,
         "created": datetime.now().isoformat(),
-        "fettle_version": "0.3.0",
+        "fettle_version": __version__,
         "findings_count": len(findings),
         "fingerprints": [_fingerprint(f) for f in findings],
         "findings": findings,
