@@ -146,6 +146,14 @@ def _is_pip_command(command: str) -> bool:
     return bool(_PIP_CMD_RE.search(command))
 
 
+def _approval_error(name: str, version: str, entry: object) -> str | None:
+    if not isinstance(entry, dict) or entry.get("version") != version:
+        return f"Package {name}@{version} is not in the allowlist. Run the Zero-Trust Validation Protocol first."
+    if entry.get("approved_by_human") is not True:
+        return f"Package {name}@{version} has no explicit human approval. Run the Zero-Trust Validation Protocol first."
+    return None
+
+
 def check_package_approved(command: str, allowlist: dict[str, object]) -> str | None:
     packages = allowlist.get("packages", {})
     if not isinstance(packages, dict):
@@ -160,8 +168,9 @@ def check_package_approved(command: str, allowlist: dict[str, object]) -> str | 
             return f"Unpinned package: '{pkg_spec}'. Pin an exact version (e.g., {name}@x.y.z or {name}==x.y.z)."
 
         entry = packages.get(name)
-        if not isinstance(entry, dict) or entry.get("version") != version:
-            return f"Package {name}@{version} is not in the allowlist. Run the Zero-Trust Validation Protocol first."
+        approval_error = _approval_error(name, version, entry)
+        if approval_error:
+            return approval_error
 
         if _is_pip_command(command):
             sha = entry.get("sha256_wheel") or entry.get("sha256_tarball")
@@ -311,11 +320,15 @@ def _check_bash_result(command: str, allowlist: dict) -> str | None:
             found = False
             if isinstance(packages, dict):
                 for name, entry in packages.items():
-                    if isinstance(entry, dict):
-                        versioned = f"{name}@{entry['version']}"
-                        if pkg in (versioned, name):
-                            found = True
-                            break
+                    if not isinstance(entry, dict) or not isinstance(entry.get("version"), str):
+                        continue
+                    version = entry["version"]
+                    if pkg in (f"{name}@{version}", name):
+                        approval_error = _approval_error(name, version, entry)
+                        if approval_error:
+                            return approval_error
+                        found = True
+                        break
             if not found:
                 return f"Package '{pkg}' is not in the allowlist."
 

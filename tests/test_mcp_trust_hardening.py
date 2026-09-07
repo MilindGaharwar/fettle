@@ -86,6 +86,20 @@ def test_benign_command_allowed(command):
     assert _check_bash_result(command, ALLOWLIST) is None, command
 
 
+@pytest.mark.parametrize(
+    "command",
+    ["npm install @playwright/mcp@0.0.70", "npx @playwright/mcp@0.0.70"],
+)
+@pytest.mark.parametrize("approval", [False, None, "true"])
+def test_package_without_explicit_human_approval_is_denied(command, approval):
+    allowlist = {**ALLOWLIST, "packages": {"@playwright/mcp": {
+        "version": "0.0.70",
+        **({"approved_by_human": approval} if approval is not None else {}),
+    }}}
+
+    assert "no explicit human approval" in _check_bash_result(command, allowlist)
+
+
 # --- File-path parity (H-04): subprocess and dispatcher paths share one
 # --- resolver; every spelling of a protected target is caught by both.
 
