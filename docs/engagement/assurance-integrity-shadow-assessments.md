@@ -1,6 +1,6 @@
 # Assurance Integrity Shadow Assessments
 
-Status: collecting; 16 of 20 qualifying assessments accepted
+Status: collecting; 17 of 20 qualifying assessments accepted
 
 This append-only register records real change assessments before production
 enforcement. Test fixtures, repeated runs of an unchanged subject, and invented
@@ -34,11 +34,12 @@ Generated from reviewed external bundles. Do not edit totals or rows manually.
 | 9 | 2026-09-07 | pipeline-dump-command | `sha256:acfe726946604a78ec547b8d74c63b1e3b60864a3078d328e272703e7b4d086f` | FAIL | FAIL | none | none | `acfe726946604a78ec547b8d74c63b1e3b60864a3078d328e272703e7b4d086f` | Milind | yes |
 | 10 | 2026-09-07 | event-map-doc | `sha256:b3f35b24f6a77b40fb689b03228fdc195222912d56ae424e1326e3b6af261ea2` | FAIL | FAIL | none | none | `b3f35b24f6a77b40fb689b03228fdc195222912d56ae424e1326e3b6af261ea2` | Milind | yes |
 | 11 | 2026-09-07 | behavior-decision-table | `sha256:bbe8eb21a58ca998fed989bec9c37e9a1f8e76d8578e3d9867c4113192790f08` | FAIL | FAIL | none | none | `bbe8eb21a58ca998fed989bec9c37e9a1f8e76d8578e3d9867c4113192790f08` | Milind | yes |
-| 12 | 2026-09-07 | corpus-spec-scope | `sha256:e46083044f7eacc39aaaf246829938fb75191d850f9467ee170078bb9cacd57a` | FAIL | FAIL | none | none | `e46083044f7eacc39aaaf246829938fb75191d850f9467ee170078bb9cacd57a` | Milind | yes |
-| 13 | 2026-09-07 | docs-claims-gate | `sha256:e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | FAIL | FAIL | dimensions.behavior, dimensions.security, policy.criteria.behavior, policy.criteria.security | intentional_hardening | `e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | Milind | yes |
-| 14 | 2026-09-07 | assurance-record-uat-consent | `sha256:f0e4226f48bd2a50094acffc56965d58a619458c28b44cf0095b8d7959728388` | FAIL | FAIL | none | none | `f0e4226f48bd2a50094acffc56965d58a619458c28b44cf0095b8d7959728388` | Milind | yes |
-| 15 | 2026-09-07 | orientation-archive-link-2 | `sha256:f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | FAIL | FAIL | none | none | `f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | Milind | yes |
-| 16 | 2026-09-07 | pr-review-working-scope | `sha256:f3c2d653142dbf976463c998afaf04abfb3a7b093f0e144be30a430665d3656b` | FAIL | FAIL | dimensions.security, policy.criteria.security | intentional_hardening | `f3c2d653142dbf976463c998afaf04abfb3a7b093f0e144be30a430665d3656b` | Milind | yes |
+| 12 | 2026-09-07 | mcp-explicit-human-approval | `sha256:d228949cbe9e605c07ebf94d9c37204579318150eee6adcaba393b764dcf0b4c` | FAIL | FAIL | dimensions.security, policy.criteria.security | intentional_hardening | `d228949cbe9e605c07ebf94d9c37204579318150eee6adcaba393b764dcf0b4c` | Milind | yes |
+| 13 | 2026-09-07 | corpus-spec-scope | `sha256:e46083044f7eacc39aaaf246829938fb75191d850f9467ee170078bb9cacd57a` | FAIL | FAIL | none | none | `e46083044f7eacc39aaaf246829938fb75191d850f9467ee170078bb9cacd57a` | Milind | yes |
+| 14 | 2026-09-07 | docs-claims-gate | `sha256:e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | FAIL | FAIL | dimensions.behavior, dimensions.security, policy.criteria.behavior, policy.criteria.security | intentional_hardening | `e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | Milind | yes |
+| 15 | 2026-09-07 | assurance-record-uat-consent | `sha256:f0e4226f48bd2a50094acffc56965d58a619458c28b44cf0095b8d7959728388` | FAIL | FAIL | none | none | `f0e4226f48bd2a50094acffc56965d58a619458c28b44cf0095b8d7959728388` | Milind | yes |
+| 16 | 2026-09-07 | orientation-archive-link-2 | `sha256:f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | FAIL | FAIL | none | none | `f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | Milind | yes |
+| 17 | 2026-09-07 | pr-review-working-scope | `sha256:f3c2d653142dbf976463c998afaf04abfb3a7b093f0e144be30a430665d3656b` | FAIL | FAIL | dimensions.security, policy.criteria.security | intentional_hardening | `f3c2d653142dbf976463c998afaf04abfb3a7b093f0e144be30a430665d3656b` | Milind | yes |
 
 ## Operator Decision
 
