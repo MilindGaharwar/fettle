@@ -13,30 +13,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+from fettle.changeset import ChangedFile, get_changed_files
+
 SCRIPTS_DIR = Path(__file__).resolve().parent
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
 
 
-def _git_diff_stat(root: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", root, "diff", "--stat", "HEAD~1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
-
-
-def _git_diff_files(root: str) -> list[str]:
-    try:
-        result = subprocess.run(
-            ["git", "-C", root, "diff", "--name-only", "HEAD~1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.stdout.strip().splitlines() if result.returncode == 0 else []
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return []
+def _working_changes(root: str) -> list[ChangedFile]:
+    """Return each current working-tree path once, with its latest status."""
+    changes: dict[str, ChangedFile] = {}
+    for change in get_changed_files(root):
+        changes[change.path] = change
+    return sorted(changes.values(), key=lambda change: change.path)
 
 
 def _run_quality_scan(root: str) -> dict:
@@ -76,7 +64,7 @@ def _detect_breaking_changes(root: str, files: list[str]) -> list[str]:
         if "__init__.py" in f:
             try:
                 result = subprocess.run(
-                    ["git", "-C", root, "diff", "HEAD~1", "--", f],
+                    ["git", "-C", root, "diff", "HEAD", "--", f],
                     capture_output=True, text=True, timeout=5,
                 )
                 for line in result.stdout.splitlines():
@@ -90,11 +78,14 @@ def _detect_breaking_changes(root: str, files: list[str]) -> list[str]:
 
 def generate_pr_review(root: str) -> str:
     """Generate a PR review report from existing Fettle checks."""
-    files = _git_diff_files(root)
-    if not files:
-        return "# PR Review\n\nNo changes detected (no diff from HEAD~1)."
+    changes = _working_changes(root)
+    if not changes:
+        return "# PR Review\n\nNo working-tree changes detected."
 
-    diff_stat = _git_diff_stat(root)
+    files = [change.path for change in changes]
+    change_summary = "\n".join(
+        f"{change.status.value:>9}  {change.path}" for change in changes
+    )
     quality = _run_quality_scan(root)
     coverage = _get_coverage(root)
     breaking = _detect_breaking_changes(root, files)
@@ -119,7 +110,7 @@ def generate_pr_review(root: str) -> str:
         "",
         "## Changes",
         "```",
-        diff_stat or "(no diff stat available)",
+        change_summary,
         "```",
         "",
         *quality_lines,
