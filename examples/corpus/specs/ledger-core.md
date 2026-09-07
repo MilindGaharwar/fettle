@@ -3,7 +3,7 @@ fettle-spec: v1
 id: ledger-core
 status: active
 scope:
-  - "src/fettle_demo/**"
+  - "examples/corpus/src/fettle_demo/**"
 ---
 
 ## Requirements
