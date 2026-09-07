@@ -1,6 +1,6 @@
 # Assurance Integrity Shadow Assessments
 
-Status: collecting; 7 of 20 qualifying assessments accepted
+Status: collecting; 8 of 20 qualifying assessments accepted
 
 This append-only register records real change assessments before production
 enforcement. Test fixtures, repeated runs of an unchanged subject, and invented
@@ -30,6 +30,7 @@ Generated from reviewed external bundles. Do not edit totals or rows manually.
 | 5 | 2026-09-07 | event-map-doc | `sha256:b3f35b24f6a77b40fb689b03228fdc195222912d56ae424e1326e3b6af261ea2` | FAIL | FAIL | none | none | `b3f35b24f6a77b40fb689b03228fdc195222912d56ae424e1326e3b6af261ea2` | Milind | yes |
 | 6 | 2026-09-07 | behavior-decision-table | `sha256:bbe8eb21a58ca998fed989bec9c37e9a1f8e76d8578e3d9867c4113192790f08` | FAIL | FAIL | none | none | `bbe8eb21a58ca998fed989bec9c37e9a1f8e76d8578e3d9867c4113192790f08` | Milind | yes |
 | 7 | 2026-09-07 | docs-claims-gate | `sha256:e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | FAIL | FAIL | dimensions.behavior, dimensions.security, policy.criteria.behavior, policy.criteria.security | intentional_hardening | `e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | Milind | yes |
+| 8 | 2026-09-07 | orientation-archive-link-2 | `sha256:f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | FAIL | FAIL | none | none | `f13a1f67fec900b593d1be670a2f7351f57a3bb297626127fcb17d73a05a09d9` | Milind | yes |
 
 ## Operator Decision
 
