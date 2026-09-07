@@ -1,11 +1,12 @@
 ---
 fettle-work-item: true
 id: uat-p72-evidence-hardening
-status: open
+status: done
 scope:
+  - fettle/uat/artifacts.py
   - fettle/uat/reconcile.py
   - fettle/uat/session.py
-  - tests/test_uat_reconcile.py
+  - tests/test_uat_artifacts.py
 spec: plan-uat-strength
 ---
 
@@ -28,4 +29,9 @@ instead of trusting the transcript's self-reported `OBSERVED:` text.
 
 ## Resolution
 
-Record how it was resolved.
+Completed by the canonical `p72-uat-evidence-hardening` work item. Sessions
+retain per-scenario observation artifacts through `fettle.uat.artifacts`, and
+`reconcile_session` requires them. A claimed match without an artifact degrades
+to `INDETERMINATE`; transcript drift from the retained block hash does the
+same. `tests/test_uat_artifacts.py` covers both missing-artifact and tampered-
+transcript cases.
