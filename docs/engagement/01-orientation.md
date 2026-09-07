@@ -117,7 +117,7 @@ regression tests despite hard latency budgets, TS/VS Code surfaces untested.
 ## 8. Live vs dead planning documents
 
 **Live**: [ROADMAP.md](../ROADMAP.md), [fettle-enterprise-product-plan.md](../fettle-enterprise-product-plan.md)
-(WP-133..155), [continuity-traceability-plan.md](../continuity-traceability-plan.md) (proposed).
+(WP-133..155), [continuity-traceability-plan.md](../archive/continuity-traceability-plan.md) (proposed).
 **Dead/executed** (stale statuses): PLAN-v050-adaptive, WORKPACKAGES-v050,
 SPEC-dispatcher-v2 (superseded layout), v08/v09/v10 plans, swebok-gaps,
 expansion-plan, audit-2026-07*, ci-enforcement-plan ("ACTIVE" but shipped).
