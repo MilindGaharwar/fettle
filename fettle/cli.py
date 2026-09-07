@@ -1359,7 +1359,7 @@ def cmd_ledger(args: argparse.Namespace) -> None:
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
-    """Item 9: dump the composed gate/check pipeline with provenance."""
+    """Dump the composed gate/check pipeline with host-aware provenance."""
     import json as _json
 
     from fettle.pipeline_dump import dump_pipeline
@@ -1370,10 +1370,15 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
     else:
         layers = ", ".join(layer["name"] for layer in result["layers"])
         print(f"pipeline @ {result['root']}  layers: {layers}")
+        print("  check                        host         events                           authority state mode          source")
         for row in result["rows"]:
             state = "on" if row["enabled"] else "off"
-            print(f"  {row['name']:<28} {','.join(row['events']):<32} "
-                  f"{state:<4} {row['mode']:<9} <- {row['source']}")
+            authority = ",".join(
+                f"{event}={value}" for event, value in row["authority"].items()
+            )
+            print(f"  {row['name']:<28} {row['host']:<12} {','.join(row['events']):<32} "
+                  f"{authority:<58} {state:<5} {row['mode']:<13} "
+                  f"<- {row['source']}:{row['source_key']}")
 
 
 def cmd_assurance(args: argparse.Namespace) -> None:
@@ -2175,7 +2180,7 @@ def main() -> None:
         "ledger", help="Governance evidence ledger (P41)")
     ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
     p_pipeline = subparsers.add_parser(
-        "pipeline", help="Composed gate/check pipeline with provenance (item 9)")
+        "pipeline", help="Composed gate/check pipeline with host-aware provenance")
     p_pipeline.add_argument("--root", default=".")
     p_pipeline.add_argument("--json", action="store_true")
 

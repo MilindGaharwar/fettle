@@ -47,6 +47,27 @@ scope. Org/team packs may set `_name = "acme"` for provenance display.
 Inspect the result with `fettle config --print-effective` (exactly what
 gates load) and `fettle config --explain` (which layer set each key).
 
+## Inspect the runtime pipeline
+
+Run `fettle pipeline` to see each dispatcher check once per host that can
+deliver one of its events. Each row reports the host-specific events, whether
+the dispatcher selects the check, the host's authority for those events, and
+the exact config key and layer that decided selection. Use `--json` for the
+same stable fields in machine-readable form.
+
+```bash
+fettle pipeline
+fettle pipeline --json
+```
+
+Dispatcher selection follows runtime precedence: an explicit
+`[dispatcher.checks.<name>] enabled` value wins, then membership in
+`dispatcher.disabled_checks`, then the check registry's `enabled_by_default`.
+The `mode` value is `check-defined` because checks own their decision behavior;
+the per-event `authority` map separately shows whether each host can block or
+only notify. This differs from `fettle config --explain`, which reports values
+rather than the composed runtime bindings.
+
 ## Workspace and adapter behavior
 
 The lint hook discovers nested Python, JavaScript/TypeScript, Go, and Rust
