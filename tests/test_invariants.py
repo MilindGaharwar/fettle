@@ -1,127 +1,115 @@
-"""Item 11 — house invariant: verdict-visible means evidenced.
-
-For every blocked/violation decision recorded in the audit trace, a
-corresponding bounded evidence record must exist on disk (same file target,
-consistent exit semantics). Deleting the evidence side must make the
-invariant fail loudly — proving it is not vacuous.
-
-MVP scope per work item: authorship-gate decisions paired with
-`build_evidence("authorship_verdict", ...)` records, mirroring the P52
-two-role session flow. Graduates to verify stamps and UAT reports next.
-"""
+"""House invariant: every surfaced verdict is recoverable from retained evidence."""
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
-
-from fettle.trace import build_evidence, log_decision
-
-
-def _trace_env(tmp_path: Path) -> dict[str, str]:
-    # trace.py resolves via XDG_STATE_HOME/fettle/trace.jsonl
-    return {"XDG_STATE_HOME": str(tmp_path / "xdg-state")}
+from fettle.evidence_ledger import read_ledger, verify_chain
+from fettle.uat.reconcile import Verdict, write_report
+from fettle.verify_gate import _write_stamp
 
 
-def _trace_path(tmp_path: Path) -> Path:
-    return tmp_path / "xdg-state" / "fettle" / "trace.jsonl"
+def _trace_path(state: Path) -> Path:
+    return state / "fettle" / "trace.jsonl"
 
 
-def _record_pair(tmp_path: Path, hook: str, status: str, tool: str,
-                 target: str) -> dict:
-    """One real decision + its paired evidence artifact, as sessions do."""
-    log_decision(hook=hook, status=status, tool=tool, file=target)
-    allow = status in ("allow", "pass")
-    evidence = build_evidence(
-        kind="authorship_verdict",
-        scope=tool,
-        command=f"{hook} {tool} edits {target}",
-        exit_code=0 if allow else 1,
-    )
-    evidence_dir = tmp_path / ".fettle" / "evidence"
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    out = evidence_dir / f"{evidence['evidence_id']}.json"
-    out.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
-    return {"decision": {"status": status, "file": target},
-            "artifact": str(out), "evidence_id": evidence["evidence_id"]}
+def _assert_verdicts_evidenced(root: Path, state: Path) -> None:
+    traces = [
+        json.loads(line)
+        for line in _trace_path(state).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    verdicts = [row for row in traces if row.get("hook") in {
+        "authorship_gate", "verify", "uat_report",
+    }]
+    assert {row["hook"] for row in verdicts} == {
+        "authorship_gate", "verify", "uat_report",
+    }
+    assert verify_chain(str(root))["status"] == "verified"
+    ledger = read_ledger(str(root))
 
-
-def _invariant_holds(root: Path) -> tuple[bool, str]:
-    """Every blocked/violation trace decision has a matching artifact."""
-    trace_path = root / "xdg-state" / "fettle" / "trace.jsonl"
-    if not trace_path.is_file():
-        return True, ""
-    decisions = [json.loads(line) for line in
-                 trace_path.read_text(encoding="utf-8").splitlines()
-                 if line.strip()]
-    blocking = [d for d in decisions
-                if d.get("status") in ("blocked", "block", "violation")]
-    artifacts: list[dict] = []
-    ev_dir = root / ".fettle" / "evidence"
-    if ev_dir.is_dir():
-        for art_path in sorted(ev_dir.glob("*.json")):
-            try:
-                artifacts.append(json.loads(art_path.read_text(encoding="utf-8")))
-            except ValueError:
-                return False, f"unreadable evidence artifact: {art_path.name}"
-    for d in blocking:
-        target = d.get("file", "")
-        if not any(target in (a.get("command") or "") for a in artifacts):
-            return False, (f"blocked decision for {target!r} has no "
-                           f"matching evidence artifact")
-    return True, ""
-
-
-def test_blocked_decisions_are_evidenced(tmp_path):
-    monkeypatch_env = _trace_env(tmp_path)
-    import os
-
-    old = os.environ.get("FETTLE_TRACE_PATH")
-    os.environ.update(monkeypatch_env)
-    try:
-        [
-            _record_pair(tmp_path, "PreToolUse", "blocked", "Write",
-                         "tests/test_x.py"),
-            _record_pair(tmp_path, "PreToolUse", "allow", "Write",
-                         "src/impl.py"),
-            _record_pair(tmp_path, "Stop", "violation", "verify",
-                         "repo"),
+    for verdict in verdicts:
+        references = verdict.get("evidence") or []
+        assert references, f"{verdict['hook']} verdict has no evidence reference"
+        matching = [
+            row for row in ledger
+            if row["kind"] == "verdict"
+            and row["payload"].get("hook") == verdict["hook"]
+            and row["payload"].get("evidence") == references
         ]
-    finally:
-        if old is None:
-            os.environ.pop("FETTLE_TRACE_PATH", None)
-        else:
-            os.environ["FETTLE_TRACE_PATH"] = old
-
-    holds, why = _invariant_holds(tmp_path)
-
-    assert holds, why
-    # 3 decisions logged; 2 of them blocking with artifacts.
-    trace_lines = _trace_path(tmp_path) \
-        .read_text(encoding="utf-8").splitlines()
-    assert len(trace_lines) == 3
+        assert matching, f"{verdict['hook']} verdict is absent from evidence ledger"
+        for reference in references:
+            digest = reference.get("artifact_digest")
+            if not digest:
+                continue
+            candidates = list((root / ".fettle").glob("*evidence.json"))
+            assert any(
+                json.loads(path.read_text(encoding="utf-8")).get("artifact_digest") == digest
+                for path in candidates
+            ), f"backing artifact {digest} is missing"
 
 
-def test_deleting_artifacts_breaks_the_invariant_loudly(tmp_path):
-    monkeypatch_env = _trace_env(tmp_path)
-    import os
+def _record_standard_flows(root: Path, state: Path) -> None:
+    (root / ".fettle.toml").write_text(
+        'role = "implementer"\n[gates.authorship]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    env = {**os.environ, "XDG_STATE_HOME": str(state)}
+    dispatched = subprocess.run(
+        [sys.executable, str(Path(__file__).parents[1] / "scripts" / "dispatcher.py")],
+        input=json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "tests/test_x.py"},
+            "cwd": str(root),
+            "session_id": "session-1",
+        }),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert dispatched.returncode == 2, dispatched.stderr
+    _write_stamp(str(root), {
+        "ok": True, "session_id": "session-1", "head_sha": "",
+        "dirty_digest": "", "exit_code": 0, "command": "pytest -q",
+        "duration_s": 0.1, "scope": "full", "impacted": [], "error": "",
+    }, {})
+    path, error = write_report(
+        str(root), {"session_id": "uat-1", "surface": "cli"},
+        [Verdict("scenario-1", "CONFIRMED", "command succeeded", "")],
+    )
+    assert path and not error
 
-    old = os.environ.get("FETTLE_TRACE_PATH")
-    os.environ.update(monkeypatch_env)
+
+def test_standard_verdict_flows_are_evidenced(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    fixture = Path(__file__).parents[1] / "examples" / "assurance-loop"
+    shutil.copytree(fixture, root)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+    _record_standard_flows(root, state)
+
+    _assert_verdicts_evidenced(root, state)
+
+
+def test_deleting_backing_artifact_breaks_invariant_loudly(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    _record_standard_flows(root, state)
+    (root / ".fettle" / "verify-evidence.json").unlink()
+
     try:
-        _record_pair(tmp_path, "PreToolUse", "blocked", "Write",
-                     "tests/test_x.py")
-        ev_dir = tmp_path / ".fettle" / "evidence"
-        for stale in ev_dir.glob("*.json"):
-            stale.unlink()
-    finally:
-        if old is None:
-            os.environ.pop("FETTLE_TRACE_PATH", None)
-        else:
-            os.environ["FETTLE_TRACE_PATH"] = old
-
-    holds, why = _invariant_holds(tmp_path)
-
-    assert holds is False
-    assert "no matching evidence artifact" in why
+        _assert_verdicts_evidenced(root, state)
+    except AssertionError as exc:
+        assert "backing artifact" in str(exc)
+    else:
+        raise AssertionError("missing canonical artifact did not break the invariant")

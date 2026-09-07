@@ -32,6 +32,7 @@ from fettle.evidence import (
     parse_artifact,
     validate_artifact,
 )
+from fettle.trace import log_evidenced_decision
 
 REPORT_NAME = "uat-report.json"
 REPORT_EVIDENCE_NAME = "uat-report.evidence.json"
@@ -373,6 +374,31 @@ def write_report(
                 return str(path), (
                     "canonical UAT report evidence unavailable: "
                     + (str(exc) or type(exc).__name__)
+                )
+            evidence_data = json.loads(
+                (Path(worktree) / ".fettle" / REPORT_EVIDENCE_NAME).read_text(encoding="utf-8")
+            )
+            reference = {
+                "artifact_digest": evidence_data["artifact_digest"],
+                "kind": evidence_data["kind"],
+                "schema_version": evidence_data["schema_version"],
+                "expected": {
+                    "source_snapshot_digest": evidence_data["source"]["snapshot_digest"],
+                    "policy_digest": evidence_data["policy_digest"],
+                    "scope_digest": evidence_data["scope_digest"],
+                    "producer_id": evidence_data["producer"]["id"],
+                },
+                "availability": "available",
+            }
+            with contextlib.suppress(Exception):
+                log_evidenced_decision(
+                    worktree,
+                    hook="uat_report",
+                    status=evidence_data["result_state"],
+                    evidence=[reference],
+                    tool="fettle uat report",
+                    file=str(path),
+                    session_id=str(data["session_id"]),
                 )
         return str(path), ""
     except OSError as exc:

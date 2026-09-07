@@ -48,7 +48,7 @@ from fettle.paths import classify_file
 from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
 from fettle.test_runner_opts import build_pytest_args, record_failures
-from fettle.trace import build_evidence
+from fettle.trace import build_evidence, log_evidenced_decision
 from fettle.workspace import Workspace, route_file_to_workspace
 
 STAMP_RELPATH = os.path.join(".fettle", "verify.json")
@@ -361,6 +361,18 @@ def _write_stamp(cwd: str, stamp: dict, config: dict) -> None:
         _write_bytes_atomic(path, (json.dumps(stamp, indent=2) + "\n").encode())
     except OSError:
         pass  # gate will report the missing stamp — failure stays visible
+    reference = stamp.get("canonical_evidence")
+    if isinstance(reference, dict):
+        with contextlib.suppress(Exception):
+            log_evidenced_decision(
+                cwd,
+                hook="verify",
+                status="pass" if stamp.get("ok") else "violation",
+                evidence=[{**reference, "availability": "available"}],
+                tool="fettle verify",
+                file=str(path),
+                session_id=str(stamp.get("session_id") or ""),
+            )
 
 
 def _json_digest(value: object) -> str:

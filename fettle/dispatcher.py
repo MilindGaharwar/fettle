@@ -26,7 +26,7 @@ from fettle.config import load_config  # noqa: E402
 from fettle.dispatcher_aggregate import Aggregator  # noqa: E402
 from fettle.dispatcher_registry import select_checks  # noqa: E402
 from fettle.dispatcher_types import CheckResult, HookContext  # noqa: E402
-from fettle.trace import log_decision, read_tail  # noqa: E402
+from fettle.trace import build_evidence, log_decision, log_evidenced_decision, read_tail  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
@@ -201,17 +201,34 @@ def main() -> int:
         aggregator.add_result(spec.name, result, elapsed_ms)
         if result.findings or result.evidence or spec.name == "authorship_gate":
             with contextlib.suppress(Exception):
-                log_decision(
-                    hook=spec.name,
-                    status=result.result_state.value,
-                    tool=hook_input.tool_name or "",
-                    file=str(ctx.target_path or ""),
-                    findings=[finding.to_dict() for finding in result.findings],
-                    evidence=[item.to_dict() for item in result.evidence],
-                    duration_ms=elapsed_ms,
-                    session_id=session_id,
-                    role=str(ctx.config.get("role", "")),
-                )
+                evidence = [item.to_dict() for item in result.evidence]
+                if spec.name == "authorship_gate" and result.result_state.value != "pass":
+                    if not evidence:
+                        evidence = [build_evidence(
+                            "authorship_verdict",
+                            scope=str(ctx.target_path or ""),
+                            exit_code=0 if result.result_state.value == "pass" else 1,
+                        )]
+                    log_evidenced_decision(
+                        str(ctx.cwd), hook=spec.name,
+                        status=result.result_state.value,
+                        tool=hook_input.tool_name or "",
+                        file=str(ctx.target_path or ""), evidence=evidence,
+                        session_id=session_id,
+                        role=str(ctx.config.get("role", "")),
+                    )
+                else:
+                    log_decision(
+                        hook=spec.name,
+                        status=result.result_state.value,
+                        tool=hook_input.tool_name or "",
+                        file=str(ctx.target_path or ""),
+                        findings=[finding.to_dict() for finding in result.findings],
+                        evidence=evidence,
+                        duration_ms=elapsed_ms,
+                        session_id=session_id,
+                        role=str(ctx.config.get("role", "")),
+                    )
 
         # WP-D: Log overruns for observability — and trace them, so chronic
         # slow checks are visible in `fettle report`, not only in stderr.

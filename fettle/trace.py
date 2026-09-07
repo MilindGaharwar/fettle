@@ -253,6 +253,51 @@ def log_decision(
         return False
 
 
+def log_evidenced_decision(
+    root: str,
+    *,
+    hook: str,
+    status: str,
+    evidence: list[dict],
+    tool: str = "",
+    file: str = "",
+    session_id: str = "",
+    role: str = "",
+) -> bool:
+    """Retain one verdict and its evidence references in both audit stores."""
+    from fettle.evidence_ledger import append_record
+
+    bounded_evidence = [_bounded_evidence(item) for item in evidence[:_MAX_EVIDENCE]]
+    ledger_written = True
+    try:
+        append_record(
+            root,
+            "verdict",
+            hook=hook,
+            status=status,
+            tool=tool,
+            file=file,
+            session_id=session_id,
+            evidence=bounded_evidence,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        ledger_written = False
+        sys.stderr.write(
+            f"fettle: WARNING — evidence ledger write failed ({exc}); "
+            "verdict evidence is incomplete. Run `fettle doctor`.\n"
+        )
+    traced = log_decision(
+        hook=hook,
+        status=status,
+        tool=tool,
+        file=file,
+        evidence=bounded_evidence,
+        session_id=session_id,
+        role=role,
+    )
+    return ledger_written and traced
+
+
 def probe_writable() -> tuple[bool, str]:
     """Check the audit trace is appendable — doctor's audit-log health probe.
 
