@@ -25,7 +25,7 @@ external services, and non-Python toolchains remain separate. Run
 | I want to... | Start here | Expected result |
 |---|---|---|
 | Evaluate Fettle without changing a repository | `pipx install finefettle`, then `fettle demo` | A deterministic broken-to-repaired proof with four passing tests |
-| Add checks to an agent session | [Agent quick start](../README.md#add-live-agent-governance) | Advisory findings inside supported agents |
+| Add checks to an agent session | [Agent quick start](../README.md#try-it-in-two-minutes) | Advisory findings inside supported agents |
 | Understand what each language surface supports | [Capability matrix](#capability-matrix) | No ambiguity between hooks, CLI, verify, and editor support |
 | Configure a personal project | `fettle init --profile solo` | Lightweight advisory policy |
 | Coordinate a team | `fettle init --profile team` | Plans, worklogs, and shared evidence |
@@ -85,8 +85,8 @@ external services, and non-Python toolchains remain separate. Run
 | Task | Command | Reference |
 |---|---|---|
 | Inspect effective policy | `fettle config --explain` | [Configuration](CONFIG.md) |
-| Diagnose this machine | `fettle doctor` | [Operational boundaries](../README.md#operational-boundaries) |
-| Check changed code | `fettle check --changed` | [Capability map](../README.md#capability-map) |
+| Diagnose this machine | `fettle doctor` | [Operational boundaries](../README.md#one-package-the-complete-python-toolkit) |
+| Check changed code | `fettle check --changed` | [Capability map](../README.md#capabilities) |
 | Bind tests to a change | `fettle verify` | [Canonical verification contract](canonical-evidence-verification.ux-spec.md) |
 | Assess repository trust | `fettle assurance` | [Evidence artifact contract](evidence-artifact-contract.md) |
 | Measure test strength | `fettle mutation preflight --all` | [Mutation playbook](mutation-quality-playbook.md) |
