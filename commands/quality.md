@@ -13,4 +13,4 @@ Present the results to the user, grouped by severity. If there are errors, sugge
 After presenting results, offer to:
 1. Fix the errors automatically (if any) with `fettle check --fix`
 2. Update the baseline with `fettle baseline update`
-3. Run a cross-review with `python3 -m fettle.cross_review`
+3. Run a cross-review with `python3 -m fettle.review --file PATH`
