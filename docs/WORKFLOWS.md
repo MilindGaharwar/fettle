@@ -1,6 +1,6 @@
 # Guided Workflows
 
-Canonical workflow sources live in `commands/`, ship in the wheel, and install
+Canonical workflow sources live in `commands/`, ship in the default wheel, and install
 with `fettle workflows install`, which is also run by `fettle init`.
 
 ```bash
@@ -21,3 +21,7 @@ Invocation names vary by host: Claude Code and Gemini CLI use
 
 Workflows guide agent reasoning. CLI commands remain the deterministic
 automation surface.
+
+Run `fettle workflows list` after installation to see the exact destination and
+invocation for each detected host. Re-run `fettle init` after upgrading Fettle so
+host registrations and versioned bridges match the installed package.

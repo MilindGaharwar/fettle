@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -408,6 +409,245 @@ def _write_json(path: Path, value: object) -> None:
     path.write_bytes(_canonical_bytes(value))
 
 
+def _read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read {path.name}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path.name} is not an object")
+    return value
+
+
+def _verify_bundle(bundle: Path) -> tuple[dict, dict, dict, dict]:
+    bundle = bundle.expanduser().resolve()
+    required = (
+        "capture.json", "changed-files.json", "prior-v1.raw.json",
+        "prior-v1.decision.json", "hardened.raw.json", "hardened.decision.json",
+        "comparison.json",
+    )
+    missing = [name for name in required if not (bundle / name).is_file()]
+    if missing:
+        raise ValueError("assessment bundle is incomplete: " + ", ".join(missing))
+    capture = _read_json(bundle / "capture.json")
+    if capture.get("protocol_version") != PROTOCOL_VERSION:
+        raise ValueError("unsupported capture protocol version")
+    capture_digest = capture.get("capture_manifest_digest")
+    if capture_digest != _capture_digest(capture):
+        raise ValueError("capture manifest digest mismatch")
+    if bundle.name != str(capture_digest).removeprefix("sha256:"):
+        raise ValueError("bundle name does not match capture digest")
+    changed = json.loads((bundle / "changed-files.json").read_text(encoding="utf-8"))
+    if changed != capture.get("changed_files"):
+        raise ValueError("changed-files.json disagrees with capture")
+    for row in changed:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            raise ValueError("changed-files.json is malformed")
+        if row.get("status") == "deleted":
+            continue
+        source = (bundle / "source" / row["path"]).resolve()
+        try:
+            source.relative_to((bundle / "source").resolve())
+        except ValueError as exc:
+            raise ValueError("retained source path escapes bundle") from exc
+        if not source.is_file() or _digest_file(source) != row.get("digest"):
+            raise ValueError(f"retained source digest mismatch: {row['path']}")
+    prior_raw = _read_json(bundle / "prior-v1.raw.json")
+    hardened_raw = _read_json(bundle / "hardened.raw.json")
+    prior = _read_json(bundle / "prior-v1.decision.json")
+    hardened = _read_json(bundle / "hardened.decision.json")
+    comparison = _read_json(bundle / "comparison.json")
+    if comparison.get("protocol_version") != PROTOCOL_VERSION:
+        raise ValueError("unsupported comparison protocol version")
+    raw_digests = comparison.get("raw_digests", {})
+    if raw_digests.get("prior_v1") != _digest_file(bundle / "prior-v1.raw.json") \
+            or raw_digests.get("hardened") != _digest_file(bundle / "hardened.raw.json"):
+        raise ValueError("raw output digest mismatch")
+    for name, decision in (("prior-v1", prior), ("hardened", hardened)):
+        identity = {
+            key: value for key, value in decision.items() if key != "semantic_input_digest"
+        }
+        if decision.get("semantic_input_digest") != _json_digest(identity):
+            raise ValueError(f"{name} semantic decision digest mismatch")
+    expected_prior = normalize_decision(
+        prior_raw, capture, capture["baseline"]["commit"],
+        capture["baseline"]["implementation_digest"],
+    )
+    expected_hardened = normalize_decision(
+        hardened_raw, capture, capture["hardened"]["commit"],
+        capture["hardened"]["implementation_digest"],
+    )
+    if prior != expected_prior or hardened != expected_hardened:
+        raise ValueError("normalized decision does not match retained raw output")
+    if comparison.get("differences") != compare_decisions(prior, hardened):
+        raise ValueError("comparison differences do not match retained decisions")
+    if hardened.get("policy", {}).get("status") == "PASS":
+        failed = [name for name, status in hardened.get("dimensions", {}).items() if status == "FAIL"]
+        if failed:
+            raise ValueError("hardened false pass is present")
+    return capture, prior, hardened, comparison
+
+
+def review_bundle(
+    bundle: Path,
+    *,
+    change: str,
+    reviewer: str,
+    reviewer_email: str,
+    classifications: list[dict],
+) -> dict:
+    """Validate and record one human review without mutating collected evidence."""
+    bundle = bundle.expanduser().resolve()
+    if not change.strip() or not reviewer.strip() or not reviewer_email.strip():
+        raise ValueError("change, reviewer, and reviewer email are required")
+    if (bundle / "review.json").exists():
+        raise ValueError("assessment bundle is already reviewed")
+    capture, prior, hardened, comparison = _verify_bundle(bundle)
+    differences = comparison["differences"]
+    by_path = {}
+    for item in classifications:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise ValueError("classification is malformed")
+        if item["path"] in by_path:
+            raise ValueError(f"duplicate classification for {item['path']}")
+        kind = item.get("classification")
+        evidence = item.get("evidence")
+        if kind not in {"intentional_hardening", "defect", "unresolved"} \
+                or not isinstance(evidence, str) or not evidence.strip():
+            raise ValueError(f"classification for {item['path']} requires valid evidence")
+        by_path[item["path"]] = {
+            "path": item["path"], "classification": kind, "evidence": evidence.strip(),
+        }
+    paths = [item["path"] for item in differences]
+    if sorted(by_path) != sorted(paths):
+        raise ValueError("classification must cover every difference exactly once")
+    accepted = all(item["classification"] == "intentional_hardening" for item in by_path.values())
+    review = {
+        "protocol_version": PROTOCOL_VERSION,
+        "capture_manifest_digest": capture["capture_manifest_digest"],
+        "reviewed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "change": change.strip(),
+        "reviewer": {"name": reviewer.strip(), "email": reviewer_email.strip()},
+        "prior_decision": prior["policy"]["status"],
+        "hardened_decision": hardened["policy"]["status"],
+        "classifications": [by_path[path] for path in paths],
+        "accepted": accepted,
+    }
+    review["review_digest"] = _json_digest(review)
+    _write_json(bundle / "review.json", review)
+    return review
+
+
+def summarize_store(store: Path, register: Path | None = None) -> dict:
+    """Verify reviewed bundles and derive CS-6 progress from retained evidence."""
+    store = store.expanduser().resolve()
+    if not store.is_dir():
+        raise ValueError("assessment store does not exist")
+    rows = []
+    decision_pairs: Counter[str] = Counter()
+    changed_dimensions: Counter[str] = Counter()
+    classifications: Counter[str] = Counter()
+    accepted_subjects: set[str] = set()
+    for bundle in sorted(path for path in store.iterdir() if path.is_dir()):
+        review_path = bundle / "review.json"
+        if not review_path.is_file():
+            continue
+        capture, prior, hardened, comparison = _verify_bundle(bundle)
+        review = _read_json(review_path)
+        review_identity = {
+            key: value for key, value in review.items() if key != "review_digest"
+        }
+        if review.get("review_digest") != _json_digest(review_identity):
+            raise ValueError(f"review digest mismatch: {bundle.name}")
+        if review.get("capture_manifest_digest") != capture["capture_manifest_digest"]:
+            raise ValueError(f"review does not match bundle {bundle.name}")
+        review_paths = [item.get("path") for item in review.get("classifications", [])]
+        difference_paths = [item["path"] for item in comparison["differences"]]
+        if review_paths != difference_paths:
+            raise ValueError(f"review classifications do not match bundle {bundle.name}")
+        reviewed_accepted = bool(review.get("accepted"))
+        if reviewed_accepted and any(
+            item.get("classification") != "intentional_hardening"
+            for item in review.get("classifications", [])
+        ):
+            raise ValueError(f"accepted review contains non-accepted classification: {bundle.name}")
+        subject = capture.get("candidate", {}).get("source_snapshot_digest")
+        if not isinstance(subject, str) or not subject:
+            raise ValueError(f"bundle has no source snapshot identity: {bundle.name}")
+        duplicate_subject = reviewed_accepted and subject in accepted_subjects
+        accepted = reviewed_accepted and not duplicate_subject
+        if accepted:
+            accepted_subjects.add(subject)
+        pair = f"{prior['policy']['status']}->{hardened['policy']['status']}"
+        decision_pairs[pair] += 1
+        for path in difference_paths:
+            changed_dimensions[path] += 1
+        for item in review.get("classifications", []):
+            classifications[item["classification"]] += 1
+        rows.append({
+            "date": review["reviewed_at"][:10], "change": review["change"],
+            "capture_digest": capture["capture_manifest_digest"],
+            "prior_decision": prior["policy"]["status"],
+            "hardened_decision": hardened["policy"]["status"],
+            "changed_dimensions": difference_paths,
+            "classification": sorted({
+                item["classification"] for item in review.get("classifications", [])
+            }) or ["none"],
+            "bundle": bundle.name,
+            "reviewer": review["reviewer"]["name"], "accepted": accepted,
+            "qualification": "duplicate_subject" if duplicate_subject else (
+                "accepted" if accepted else "review_rejected"
+            ),
+        })
+    accepted_count = sum(row["accepted"] for row in rows)
+    summary = {
+        "protocol_version": PROTOCOL_VERSION,
+        "reviewed": len(rows), "accepted": accepted_count,
+        "rejected": len(rows) - accepted_count, "remaining": max(0, 20 - accepted_count),
+        "decision_pairs": dict(sorted(decision_pairs.items())),
+        "changed_dimensions": dict(sorted(changed_dimensions.items())),
+        "classifications": dict(sorted(classifications.items())),
+        "rows": rows,
+    }
+    _write_json(store / "summary.json", summary)
+    if register:
+        lines = [
+            "# Assurance Integrity Shadow Assessments", "",
+            f"Status: collecting; {accepted_count} of 20 qualifying assessments accepted", "",
+            "This append-only register records real change assessments before production",
+            "enforcement. Test fixtures, repeated runs of an unchanged subject, and invented",
+            "evidence do not count.", "",
+            "Every row must follow the machine-reproducible",
+            "[prior-v1 baseline protocol](assurance-integrity-baseline-protocol.md).", "",
+            "## Acceptance Rules", "",
+            "- Assess a real, distinct change with `fettle assurance --policy production`.",
+            "- Use the reviewed collector/comparator required by the baseline protocol.",
+            "- Retain exact subject content, normalized decisions, comparison, and digests.",
+            "- Classify every difference with evidence; unresolved or defect rows do not count.",
+            "- Enforcement requires 20 accepted rows and explicit operator approval.", "",
+            "## Register", "",
+            "Generated from reviewed external bundles. Do not edit totals or rows manually.", "",
+            "| # | Date | Change / PR | Capture digest | Prior decision | Hardened decision | Changed dimensions | Classification | Evidence bundle | Reviewer | Accepted |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for index, row in enumerate(rows, 1):
+            lines.append(
+                f"| {index} | {row['date']} | {row['change']} | `{row['capture_digest']}` | "
+                f"{row['prior_decision']} | {row['hardened_decision']} | "
+                f"{', '.join(row['changed_dimensions']) or 'none'} | "
+                f"{', '.join(row['classification'])} | `{row['bundle']}` | "
+                f"{row['reviewer']} | {'yes' if row['accepted'] else 'no'} |"
+            )
+        lines.extend([
+            "", "## Operator Decision", "",
+            "Not requested. Fewer than 20 qualifying assessments have been accepted."
+            if accepted_count < 20 else
+            "Pending explicit operator review and decision; 20 rows do not self-authorize enforcement.",
+        ])
+        register.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
+
+
 def _copy_state(root: Path, bundle: Path, runtime: Path) -> Path:
     retained = bundle / "state"
     (retained / "fettle").mkdir(parents=True)
@@ -496,6 +736,11 @@ def collect(root: Path, store: Path) -> Path:
     try:
         _write_json(bundle / "capture.json", capture)
         _write_json(bundle / "changed-files.json", capture["changed_files"])
+        for row in capture["changed_files"]:
+            if row["status"] != "deleted":
+                destination = bundle / "source" / row["path"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(root / row["path"], destination)
         paths = [row["path"] for row in capture["changed_files"]]
         with tempfile.TemporaryDirectory(prefix="fettle-baseline-state-") as state_dir:
             frozen_state = _copy_state(root, bundle, Path(state_dir))

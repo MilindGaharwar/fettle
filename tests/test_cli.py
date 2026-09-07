@@ -19,6 +19,20 @@ def test_cli_help(capsys):
     assert "consistency         State-consistency contracts (P53/SC2)" in capsys.readouterr().out
 
 
+def test_assurance_baseline_help_lists_review_and_summary(capsys):
+    from fettle.cli import main
+
+    with pytest.raises(SystemExit) as exc_info, patch(
+        "sys.argv", ["fettle", "assurance-baseline", "-h"],
+    ):
+        main()
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 0
+    assert "review" in output
+    assert "summarize" in output
+
+
 def test_assurance_human_output_explains_evidence(tmp_path, capsys):
     from argparse import Namespace
     from fettle.cli import cmd_assurance

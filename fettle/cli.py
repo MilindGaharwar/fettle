@@ -1445,20 +1445,41 @@ def cmd_assurance(args: argparse.Namespace) -> None:
 
 
 def cmd_assurance_baseline(args: argparse.Namespace) -> None:
-    """Collect one reproducible prior-v1 versus hardened shadow assessment."""
-    from fettle.assurance_baseline import collect
+    """Collect, review, or summarize CS-6 shadow assessments."""
+    from fettle.assurance_baseline import collect, review_bundle, summarize_store
 
     try:
-        bundle = collect(Path(args.root), Path(args.store))
+        if args.assurance_baseline_action == "collect":
+            bundle = collect(Path(args.root), Path(args.store))
+            result = {"status": "completed", "bundle": str(bundle), "accepted": False}
+        elif args.assurance_baseline_action == "review":
+            classifications = json.loads(Path(args.classifications).read_text(encoding="utf-8"))
+            if not isinstance(classifications, list):
+                raise ValueError("classifications file must contain a JSON array")
+            result = review_bundle(
+                Path(args.bundle), change=args.change, reviewer=args.reviewer,
+                reviewer_email=args.reviewer_email, classifications=classifications,
+            )
+        else:
+            result = summarize_store(
+                Path(args.store), Path(args.register) if args.register else None,
+            )
     except (OSError, ValueError, TimeoutError) as exc:
         print(f"Assurance baseline unavailable: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    result = {"status": "completed", "bundle": str(bundle), "accepted": False}
     if args.json:
         print(json.dumps(result, indent=2))
-    else:
+    elif args.assurance_baseline_action == "collect":
         print(f"Captured unaccepted CS-6 assessment: {bundle}")
         print("Review and classify every difference before adding the row to the register.")
+    elif args.assurance_baseline_action == "review":
+        status = "accepted" if result["accepted"] else "reviewed but not accepted"
+        print(f"CS-6 assessment {status}: {args.bundle}")
+    else:
+        print(
+            f"CS-6 progress: {result['accepted']} of 20 accepted "
+            f"({result['remaining']} remaining; {result['rejected']} rejected)"
+        )
 
 
 def cmd_consistency(args: argparse.Namespace) -> None:
@@ -2175,6 +2196,19 @@ def main() -> None:
     p_assurance_baseline_collect.add_argument("--root", default=".")
     p_assurance_baseline_collect.add_argument("--store", required=True)
     p_assurance_baseline_collect.add_argument("--json", action="store_true")
+    p_assurance_baseline_review = assurance_baseline_sub.add_parser(
+        "review", help="Validate and sign one collected bundle")
+    p_assurance_baseline_review.add_argument("--bundle", required=True)
+    p_assurance_baseline_review.add_argument("--change", required=True)
+    p_assurance_baseline_review.add_argument("--reviewer", required=True)
+    p_assurance_baseline_review.add_argument("--reviewer-email", required=True)
+    p_assurance_baseline_review.add_argument("--classifications", required=True)
+    p_assurance_baseline_review.add_argument("--json", action="store_true")
+    p_assurance_baseline_summary = assurance_baseline_sub.add_parser(
+        "summarize", help="Verify reviewed bundles and derive CS-6 progress")
+    p_assurance_baseline_summary.add_argument("--store", required=True)
+    p_assurance_baseline_summary.add_argument("--register")
+    p_assurance_baseline_summary.add_argument("--json", action="store_true")
 
     p_consistency = subparsers.add_parser(
         "consistency", help="State-consistency contracts (P53/SC2)")

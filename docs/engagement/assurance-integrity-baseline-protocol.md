@@ -75,6 +75,7 @@ prior-v1.decision.json
 hardened.raw.json
 hardened.decision.json
 comparison.json
+source/<changed path>              # exact bytes for non-deleted changed files
 state/fettle/trace.jsonl          # when present
 state/claims.json                 # when present
 ```
@@ -275,6 +276,54 @@ If uncommitted content can no longer be reconstructed exactly, the row is not
 reproducible and must be removed from the accepted count. Therefore the
 candidate patch or equivalent immutable source archive must be retained with the
 external bundle until graduation.
+
+## Collection And Review Commands
+
+Use an assessment store outside the candidate repository. Collection always
+creates an unaccepted bundle and retains the exact bytes of every non-deleted
+changed file:
+
+```bash
+uv run fettle assurance-baseline collect \
+  --root /path/to/candidate-worktree \
+  --store ~/.local/share/fettle/cs6-assessments \
+  --json
+```
+
+After inspecting both decisions and `comparison.json`, create a JSON array with
+one entry per difference. Use an empty array when there are no differences:
+
+```json
+[
+  {
+    "path": "dimensions.security",
+    "classification": "intentional_hardening",
+    "evidence": "commit <sha> and review reference <path>"
+  }
+]
+```
+
+Record the review once. A bundle cannot be reviewed a second time or accepted
+when any classification is `defect` or `unresolved`:
+
+```bash
+uv run fettle assurance-baseline review \
+  --bundle ~/.local/share/fettle/cs6-assessments/<capture-digest> \
+  --change <PR-or-work-item> \
+  --reviewer Milind \
+  --reviewer-email 20487933+MilindGaharwar@users.noreply.github.com \
+  --classifications /path/to/classifications.json \
+  --json
+```
+
+Generate progress and the checked-in register only from verified reviews:
+
+```bash
+uv run fettle assurance-baseline summarize \
+  --store ~/.local/share/fettle/cs6-assessments \
+  --register docs/engagement/assurance-integrity-shadow-assessments.md \
+  --json
+```
 
 ## Failure Rules
 

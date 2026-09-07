@@ -1,7 +1,7 @@
 # Install Fettle
 
 Fettle ships as one Python package named `finefettle`. The installed command is
-`fettle`.
+`fettle`; no feature extra is required for normal use.
 
 ## Recommended
 
@@ -17,6 +17,12 @@ fettle doctor
 Ruff, Semgrep, pytest, mutmut, PyYAML, and the Playwright Python library. It also
 includes Fettle's rules, workflows, schemas, demo fixture, and agent bridges.
 No capability extra is required for normal use.
+
+The published wheel and source distribution are both release-tested. Release CI
+installs the wheel with pip and pipx outside the source checkout, runs the demo,
+checks every bundled resource family and executable, and proves the source
+distribution reconstructs a complete wheel. Releases also publish a CycloneDX
+SBOM and GitHub build-provenance attestations.
 
 With uv, use:
 
@@ -52,6 +58,11 @@ govern. Install these only for the surfaces you use:
 `fettle doctor` reports available, missing, and degraded capabilities instead of
 silently treating unavailable tooling as a pass.
 
+This is an intentional boundary, not a partial installer: system package
+managers, browser vendors, agent vendors, and language toolchains own those
+runtimes and their update channels. Embedding them in a Python wheel would make
+updates, platform support, and security provenance less trustworthy.
+
 ## Upgrade Or Remove
 
 ```bash
@@ -64,3 +75,19 @@ pipx uninstall finefettle
 Capability extras from older releases remain accepted for compatibility.
 `finefettle[all]` additionally installs contributor tooling and is intended for
 source development, not ordinary use.
+
+## Verify the Installed Artifact
+
+```bash
+fettle --version
+fettle demo
+fettle doctor --verify-hashes
+```
+
+For a tagged GitHub release, download its wheel and provenance, then verify with
+GitHub CLI:
+
+```bash
+gh attestation verify finefettle-<version>-py3-none-any.whl \
+  --repo MilindGaharwar/fettle
+```

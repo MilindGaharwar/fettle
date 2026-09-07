@@ -1,10 +1,10 @@
 # Fettle Documentation
 
-Fettle is the trust layer between an AI coding agent's authority, actions,
-evidence, and independent verification: policy that survives delegation,
-evidence that cannot become clean by accident, and verdicts bound to
-artifacts. Start with the outcome you need rather than reading every
-subsystem.
+Fettle is the open-source trust layer between an AI coding agent's authority,
+actions, evidence, and independent verification. It catches problems while an
+agent can still repair them, carries policy through delegated work, and binds
+trust decisions to the code and evidence they describe. Start with the outcome
+you need rather than reading every subsystem.
 
 Planning documents are indexed in [docs/plan-index.md](plan-index.md).
 
@@ -33,6 +33,9 @@ external services, and non-Python toolchains remain separate. Run
 | Measure test-suite strength | [Mutation evidence](CONFIG.md#mutation-evidence-mutation) | Canonical changed/full Python mutation reports and baseline comparison |
 | Connect requirements to tests | `fettle spec lint`, then `fettle spec coverage` | Living-spec and scenario trace evidence |
 | Test from a user's perspective | `fettle uat doctor`, then `fettle uat manual` | Explicit acceptance scenarios and observable verdicts |
+| Detect inconsistent views of the same state | `fettle consistency init`, then `fettle consistency run` | A retained contract result with explicit observed and expected values |
+| Inspect likely change impact | `fettle graph impact <path>` | Advisory, snapshot-bound dependency closure |
+| Audit governance history | `fettle ledger verify` | Precise validation of the tamper-evident evidence chain |
 | Integrate an enterprise analyzer | [Configuration: integrations](CONFIG.md#integrations-integrations-wp-14b) | Explicit, opt-in SonarQube, Black Duck, or Pact evidence |
 
 ## The Core Journey
@@ -89,6 +92,8 @@ external services, and non-Python toolchains remain separate. Run
 | Measure test strength | `fettle mutation preflight --all` | [Mutation playbook](mutation-quality-playbook.md) |
 | Coordinate agents | `fettle topology advise` | [Behavior map](behavior-map.md) |
 | Connect specs and tests | `fettle spec coverage` | [Behavior map](behavior-map.md) |
+| Check cross-view consistency | `fettle consistency run` | [Capability matrix](CAPABILITIES.md) |
+| Collect assurance shadow evidence | `fettle assurance-baseline collect` | [Frozen baseline protocol](engagement/assurance-integrity-baseline-protocol.md) |
 
 ## Capability Matrix
 
@@ -104,6 +109,9 @@ external services, and non-Python toolchains remain separate. Run
 | Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
 | Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Changed-scope survivors are enforced in this repository; adoption elsewhere remains policy-controlled |
 | Specifications and UAT | Living Markdown specs, trace coverage, agent/manual acceptance verdicts | UAT is report-only; unavailable automation remains visible |
+| Change intelligence | Snapshot-bound graph status, impact, and shadow comparison | Advisory; it does not authorize a change |
+| State consistency | Contract creation, lint, listing, and execution | Adapter reach is contract-specific |
+| Assurance | Nine-dimension record plus collect, review, and summarize tooling for frozen shadow comparisons | Stronger enforcement remains evidence-gated |
 
 Every analyzer result preserves the distinction between `pass`, `violation`,
 `tool_error`, and `unknown`. Surface-specific non-applicable outcomes are also

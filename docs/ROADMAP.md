@@ -33,6 +33,7 @@ subject to the graduation triggers below. See the
 | Proposed | Runtime change-integrity snapshots, ephemeral graph, and advisory impact (P45-P48) | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
 | Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
 | Report-only; parity evidence pending | Agentic UAT strengthening (P72-P77) | Artifact-bound scenarios, exploration, web capture, stateful restart probes, and independent judgment are implemented; the canonical ten-seed harness exists, but real human evidence and an agreed discovery threshold remain required before any enforcement or parity claim |
+| Research proposed; blocked | Evidence-guided handoff pilot | After Assurance Integrity CS-6 and separate approval, 20 accepted matched pairs show candidate-bound handoffs and preservation obligations improve verified completion or regression detection within frozen integrity and cost thresholds |
 | Later | Native web, enterprise adapters, advisory framework packs, semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
 
 The authoritative activity sequence, dependencies, estimates, and demand gates
@@ -91,3 +92,5 @@ P43 can graduate.
   model confidence, inferred memory, or an unbound graph result.
 - Optimize cost per verified software change, not token reduction in isolation.
 - Hooks improve the session; CI remains an independent assurance boundary.
+- Fettle may validate cross-role handoffs, but supported hosts remain responsible
+  for scheduling and executing agents.

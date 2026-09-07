@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finefettle"
 version = "1.13.1"
-description = "Trust layer for agentic software engineering: policy that survives delegation, evidence that cannot become clean by accident, and verdicts bound to artifacts across Claude Code, Codex CLI, Gemini CLI, and OpenCode"
+description = "Open-source trust layer for AI coding agents: in-session quality, delegation-safe policy, and evidence-bound verification"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -60,7 +60,14 @@ Changelog = "https://github.com/MilindGaharwar/fettle/blob/main/CHANGELOG.md"
 Issues = "https://github.com/MilindGaharwar/fettle/issues"
 
 [tool.setuptools]
-packages = ["fettle", "fettle.adapters", "fettle.agents", "fettle.runners", "fettle.uat"]
+packages = [
+    "fettle",
+    "fettle._demo_fixture",
+    "fettle.adapters",
+    "fettle.agents",
+    "fettle.runners",
+    "fettle.uat",
+]
 
 [tool.setuptools.package-data]
 fettle = [
