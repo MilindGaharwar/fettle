@@ -1,5 +1,9 @@
 # Repository Agent Instructions
 
+Before adding behavior, use the goal-to-mechanism table in
+[`docs/behavior-map.md`](docs/behavior-map.md) to select the owning extension
+seam and its required evidence path.
+
 ## Mutation Evidence
 
 - Treat full mutation runs as held-out verification, not an iteration loop.

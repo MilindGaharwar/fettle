@@ -126,35 +126,52 @@ def test_behavior_map_covers_new_public_commands():
     added to docs/behavior-map.md (or consciously moved into the whitelist
     with a documentation pointer) before it can merge.
     """
-    import re
+    import ast
 
     src = (Path(ROOT) / "fettle" / "cli.py").read_text(encoding="utf-8")
     table = (Path(ROOT) / "docs" / "behavior-map.md").read_text(
         encoding="utf-8")
 
-    # Top-level dispatch entries only ("name": cmd_name).
-    registered = set(re.findall(r'"([a-z_]+)":\s*cmd_[a-z_]+', src))
-    assert registered, "dispatch dict discovery broke"
+    tree = ast.parse(src)
+    registered = set()
+    public = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "commands"
+            for target in node.targets
+        ) and isinstance(node.value, ast.Dict):
+            registered.update(
+                key.value for key in node.value.keys
+                if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            )
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if not (
+            node.func.attr == "add_parser"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subparsers"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            continue
+        help_value = next((kw.value for kw in node.keywords if kw.arg == "help"), None)
+        if help_value is not None:
+            public.add(node.args[0].value)
 
-    # Commands already represented in the decision table.
-    covered = {name for name in registered
+    assert registered, "dispatch dict discovery broke"
+    assert public, "public parser discovery broke"
+    assert registered == public, (
+        f"dispatch/parser mismatch: registered-only={sorted(registered - public)}, "
+        f"parser-only={sorted(public - registered)}"
+    )
+
+    covered = {name for name in public
                if f"fettle {name}" in table or f"`{name}`" in table}
 
-    # Frozen inventory: existing commands documented elsewhere (CONFIG.md,
-    # plan-index.md, subsystem docs). New commands must leave this set by
-    # joining the table.
-    documented_elsewhere = {
-        "baseline", "bench", "brief", "check", "ci", "completion",
-        "config", "doctor", "explain", "init", "insights", "integrations",
-        "learn", "links", "lsp", "mutation", "overrides", "plan", "policy",
-        "ratchet", "report", "rules", "spec", "suppressions", "telemetry",
-        "topology", "uat", "verification", "verify", "workflows",
-        # Wave-3 additions: documented in plan-index + decision memo until
-        # their table rows land with the next docs pass.
-        "graph", "ledger",
-    }
+    infrastructure_commands = {"completion", "lsp", "worktree"}
 
-    missing = sorted(registered - covered - documented_elsewhere)
+    missing = sorted(public - covered - infrastructure_commands)
     assert not missing, (
         f"new public commands missing from docs/behavior-map.md: {missing}"
     )

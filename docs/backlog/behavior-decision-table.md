@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: behavior-decision-table
-status: open
+status: done
 scope:
   - docs/behavior-map.md
   - tests/test_doc_claims.py
@@ -28,4 +28,8 @@ removing the biggest onboarding unknown.
 
 ## Resolution
 
-Record how it was resolved.
+Expanded `docs/behavior-map.md` to cover every required extension seam and all
+non-infrastructure public CLI commands. Replaced the broad documentation
+exception in `tests/test_doc_claims.py` with AST-based parser/dispatch discovery
+and a frozen three-command infrastructure whitelist. Linked the table from
+`AGENTS.md`; `docs/README.md` already links it from the task reference.
