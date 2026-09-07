@@ -26,8 +26,10 @@ def test_todo_s55_web_claim_matches_drivable_surfaces():
     the contract, not the environment.
     """
     todo = _read("docs/engagement/TODO.md")
-    if not re.search(r"- \[x\] .*S5\.5\b.*", todo):
-        return  # claim amended or removed; nothing to validate
+    assert re.search(r"- \[x\] .*S5\.5\b.*web surface.*shipped", todo), (
+        "the shipped S5.5 web-driver claim disappeared; amend this executable "
+        "contract explicitly if product scope changes"
+    )
 
     from fettle.uat.session import drivable_surfaces
 
@@ -52,12 +54,19 @@ def test_todo_s55_web_claim_matches_drivable_surfaces():
 
 
 def test_readme_replay_gate_claim_matches_workflow():
-    """README advertises a required mutation replay gate; workflow must prove it."""
+    """README's replay and survivor-enforcement claims must match required CI."""
     readme = _read("README.md")
     workflow = _read(".github/workflows/mutation.yml")
 
-    if "replay gate" not in readme and "automatically replays" not in readme:
-        return
+    mutation_row = next(
+        (line for line in readme.splitlines() if line.startswith("| Mutation quality |")),
+        "",
+    )
+    assert "replay" in mutation_row and "survivor enforcement" in mutation_row, (
+        "README mutation capability must state replay and survivor enforcement"
+    )
+    assert "needs: [changed-prepare, changed-shard, changed-replay-prepare, changed-replay]" \
+        in workflow
     assert "--prepare-replay-matrix" in workflow
     assert "mutation evidence" in workflow
 
