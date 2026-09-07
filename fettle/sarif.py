@@ -14,6 +14,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
+from fettle import __version__
+
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 
@@ -62,7 +64,7 @@ def findings_to_sarif(findings: list[dict], tool_name: str = "fettle") -> dict:
             "tool": {
                 "driver": {
                     "name": "fettle",
-                    "version": "0.4.0",
+                    "version": __version__,
                     "informationUri": "https://github.com/MilindGaharwar/fettle",
                     "rules": list(rules.values()),
                 },

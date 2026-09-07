@@ -8,6 +8,8 @@ import shlex
 import subprocess
 import sys
 
+from fettle import __version__
+
 
 def main() -> int:
     mode = os.environ.get("INPUT_MODE", "advisory").lower()
@@ -117,6 +119,7 @@ def _findings_to_sarif(findings: list[dict]) -> dict:
             "tool": {
                 "driver": {
                     "name": "fettle",
+                    "version": __version__,
                     "informationUri": "https://github.com/MilindGaharwar/fettle",
                     "rules": list(rules.values()),
                 },

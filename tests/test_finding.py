@@ -151,6 +151,8 @@ def test_sarif_export_valid():
     assert sarif["version"] == "2.1.0"
     runs = sarif["runs"]
     assert len(runs) == 1
+    from fettle import __version__
+    assert runs[0]["tool"]["driver"]["version"] == __version__
     results = runs[0]["results"]
     assert len(results) == 1
     assert results[0]["ruleId"] == "F401"
