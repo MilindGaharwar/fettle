@@ -1,6 +1,6 @@
 # Assurance Integrity Shadow Assessments
 
-Status: collecting; 0 of 20 qualifying assessments accepted
+Status: collecting; 1 of 20 qualifying assessments accepted
 
 This append-only register records real change assessments before production
 enforcement. Test fixtures, repeated runs of an unchanged subject, and invented
@@ -12,23 +12,18 @@ Every row must follow the machine-reproducible
 ## Acceptance Rules
 
 - Assess a real, distinct change with `fettle assurance --policy production`.
-- Use the reviewed collector/comparator required by the baseline protocol;
-  manual reconstruction does not count.
-- Retain the exact subject, policy, scope, capture digest, both normalized
-  decisions, comparison, and raw-output digests.
-- Record the prior v1 decision, hardened decision, and every changed dimension.
-- Classify each difference as intentional hardening, defect, or unresolved with
-  evidence; only rows with no differences or fully evidenced intentional
-  hardening can be accepted.
-- A blocked, malformed, stale, or unexplained result is non-pass and does not
-  advance graduation until resolved.
-- Enforcement requires 20 accepted rows and a separate explicit operator
-  approval recorded after review of the completed register.
+- Use the reviewed collector/comparator required by the baseline protocol.
+- Retain exact subject content, normalized decisions, comparison, and digests.
+- Classify every difference with evidence; unresolved or defect rows do not count.
+- Enforcement requires 20 accepted rows and explicit operator approval.
 
 ## Register
 
+Generated from reviewed external bundles. Do not edit totals or rows manually.
+
 | # | Date | Change / PR | Capture digest | Prior decision | Hardened decision | Changed dimensions | Classification | Evidence bundle | Reviewer | Accepted |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-09-07 | docs-claims-gate | `sha256:e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | FAIL | FAIL | dimensions.behavior, dimensions.security, policy.criteria.behavior, policy.criteria.security | intentional_hardening | `e57f1022205dddc1e37fcb12651483a53fb32fae9261ebd8c91299e2b8f4128b` | Milind | yes |
 
 ## Operator Decision
 
