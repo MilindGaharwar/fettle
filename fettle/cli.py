@@ -1080,7 +1080,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     """Session plans — checklist created before work starts (v1.6 slice A)."""
     from fettle.paths import find_repo_root
     from fettle.session_plan import (
-        active_plan, check_item, create_plan, find_plans, parse_plan,
+        active_plan, check_item, complete_plan, create_plan, find_plans, parse_plan,
         render_status,
     )
 
@@ -1113,6 +1113,11 @@ def cmd_plan(args: argparse.Namespace) -> None:
     if action == "check":
         ok, msg = check_item(root, args.text)
         print(("✓ done: " if ok else "Refused: ") + msg,
+              file=sys.stdout if ok else sys.stderr)
+        sys.exit(0 if ok else 1)
+    if action == "complete":
+        ok, msg = complete_plan(root)
+        print(("✓ completed: " if ok else "Refused: ") + msg,
               file=sys.stdout if ok else sys.stderr)
         sys.exit(0 if ok else 1)
     print(f"unknown plan action: {action}", file=sys.stderr)
@@ -2113,6 +2118,7 @@ def main() -> None:
     p_plan_status.add_argument("--json", action="store_true", help="JSON output")
     p_plan_check = plan_sub.add_parser("check", help="Tick the first unchecked item matching TEXT")
     p_plan_check.add_argument("text", help="Substring of the item to tick")
+    plan_sub.add_parser("complete", help="Archive the active plan after all items are checked")
     p_plan.set_defaults(plan_action="status", json=False)
 
     p_brief = subparsers.add_parser(

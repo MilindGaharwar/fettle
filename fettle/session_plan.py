@@ -152,6 +152,28 @@ def check_item(cwd: Path, text: str) -> tuple[bool, str]:
     return False, f"no unchecked item matches {text!r} in {path.name}"
 
 
+def complete_plan(cwd: Path) -> tuple[bool, str]:
+    """Archive the newest plan after every checklist item is complete."""
+    plans = find_plans(cwd)
+    if not plans:
+        return False, "no session plan found (fettle plan start)"
+    path = plans[0]
+    plan = parse_plan(path)
+    if not plan:
+        return False, f"not a session plan: {path.name}"
+    if plan["done"] != plan["total"]:
+        return False, f"plan has {plan['total'] - plan['done']} unchecked item(s): {path.name}"
+    archive = path.parent / "completed"
+    archive.mkdir(exist_ok=True)
+    destination = archive / path.name
+    n = 2
+    while destination.exists():
+        destination = archive / f"{path.stem}-{n}{path.suffix}"
+        n += 1
+    path.replace(destination)
+    return True, str(destination)
+
+
 def render_status(plan: dict | None) -> str:
     if plan is None:
         return "No active session plan. Start one: fettle plan start --title <t> --item <step>"

@@ -9,14 +9,15 @@ Deactivate the current development plan.
 
 ## Steps
 
-1. Check if .fettle/state/active-plan.json exists. If not, report No active plan.
+1. Run `fettle plan status` and show the active checklist. If none exists, report that and stop.
 
-2. Read and display the active plan info (path, activation time).
+2. If any checklist items remain unchecked, show them and stop. Use `fettle plan check <text>` as work is completed.
 
 3. Ask the user to confirm completion.
 
-4. On confirmation, delete the marker and tracking files via Bash:
-   rm .fettle/state/active-plan.json
-   rm -f /tmp/fettle-edits.jsonl
+4. On confirmation, archive the completed plan through the canonical CLI:
+   ```bash
+   fettle plan complete
+   ```
 
-5. Confirm: Plan completed and deactivated. Implementation file edits are now gated again.
+5. Run `fettle plan status` and confirm that no active session plan remains.

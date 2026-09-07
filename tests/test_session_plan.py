@@ -10,6 +10,7 @@ from fettle.dispatcher_types import Decision, HookContext, HookInput
 from fettle.session_plan import (
     active_plan,
     check_item,
+    complete_plan,
     create_plan,
     parse_plan,
     render_status,
@@ -69,6 +70,41 @@ def test_check_item_ticks_first_match(tmp_path):
     assert plan["done"] == 1
     ok2, _ = check_item(tmp_path, "no such step")
     assert not ok2
+
+
+def test_complete_plan_refuses_unchecked_items_and_archives_completed_plan(tmp_path):
+    path = create_plan(tmp_path, "Plan", ["write test"])
+    assert complete_plan(tmp_path) == (False, f"plan has 1 unchecked item(s): {path.name}")
+    assert path.exists()
+
+    assert check_item(tmp_path, "write test")[0]
+    ok, destination = complete_plan(tmp_path)
+    assert ok
+    assert Path(destination) == path.parent / "completed" / path.name
+    assert Path(destination).exists()
+    assert active_plan(tmp_path) is None
+
+
+def test_complete_plan_refuses_when_no_plan_exists(tmp_path):
+    assert complete_plan(tmp_path) == (False, "no session plan found (fettle plan start)")
+
+
+def test_complete_plan_preserves_same_day_plans_with_the_same_title(tmp_path):
+    first = create_plan(tmp_path, "Repeated", ["first"])
+    assert check_item(tmp_path, "first")[0]
+    assert complete_plan(tmp_path)[0]
+
+    second = create_plan(tmp_path, "Repeated", ["second"])
+    assert second.name == first.name
+    assert check_item(tmp_path, "second")[0]
+    ok, destination = complete_plan(tmp_path)
+
+    assert ok
+    assert Path(destination).name == f"{first.stem}-2.md"
+    assert {path.name for path in (first.parent / "completed").iterdir()} == {
+        first.name,
+        f"{first.stem}-2.md",
+    }
 
 
 def test_render_status(tmp_path):
@@ -224,6 +260,24 @@ def test_cli_plan_start_status_check(tmp_path, monkeypatch, capsys):
         cli.cmd_plan(ns)
     assert e.value.code == 0
     assert "1/2 done" in capsys.readouterr().out
+
+    ns = argparse.Namespace(plan_action="complete", json=False)
+    with pytest.raises(SystemExit) as e:
+        cli.cmd_plan(ns)
+    assert e.value.code == 1
+    assert "1 unchecked item" in capsys.readouterr().err
+
+    ns = argparse.Namespace(plan_action="check", text="second", json=False)
+    with pytest.raises(SystemExit):
+        cli.cmd_plan(ns)
+    capsys.readouterr()
+
+    ns = argparse.Namespace(plan_action="complete", json=False)
+    with pytest.raises(SystemExit) as e:
+        cli.cmd_plan(ns)
+    assert e.value.code == 0
+    assert "completed" in capsys.readouterr().out
+    assert active_plan(tmp_path) is None
 
 
 def test_cli_plan_start_without_items_exits_2(tmp_path, monkeypatch, capsys):

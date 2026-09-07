@@ -37,6 +37,18 @@ def test_no_scripts_run_sh_refs():
     assert offenders == [], f"legacy scripts/run.sh referenced in: {offenders}"
 
 
+def test_no_retired_plan_state_refs():
+    """Guided workflows must use the canonical .fettle/plans CLI lifecycle."""
+    retired = (".fettle/state/active-plan.json", "/tmp/fettle-edits.jsonl")
+    offenders = [
+        f"{command.name}: {value}"
+        for command in COMMANDS
+        for value in retired
+        if value in command.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"commands mutate retired plan state: {offenders}"
+
+
 def test_active_hook_launchers_exist(capsys):
     hooks = json.loads((REPO / "hooks" / "hooks.json").read_text(encoding="utf-8"))
     commands = [
