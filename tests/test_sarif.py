@@ -1,5 +1,6 @@
 """Tests for fettle.sarif — SARIF output format."""
 
+from fettle import __version__
 from fettle.sarif import findings_to_sarif
 
 
@@ -8,6 +9,7 @@ class TestFindingsToSarif:
         result = findings_to_sarif([])
         assert result["$schema"]
         assert result["version"] == "2.1.0"
+        assert result["runs"][0]["tool"]["driver"]["version"] == __version__
         assert len(result["runs"]) == 1
         assert result["runs"][0]["results"] == []
 

@@ -43,7 +43,7 @@ Run more of Fettle's evidence generators before `fettle assurance`:
 ```bash
 fettle mutation run --changed --json   # populates behavior dimension further
 fettle ci wait                          # populates the CI dimension
-fettle uat run --surface cli            # populates the UAT dimension
+fettle uat run --surface cli --yes      # consents to agent execution; populates UAT
 ```
 
 Each command produces retained evidence that `fettle assurance` validates

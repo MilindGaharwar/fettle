@@ -79,15 +79,16 @@ def test_semgrep_parses_results(tmp_path):
 
 def test_bundled_semgrep_policy_fires_on_sql_fstring(tmp_path):
     keyword = "SEL" + "ECT"
+    interpolation = "{" + "user_id}"
     (tmp_path / "app.py").write_text(
-        f'query = f"{keyword} * FROM users WHERE id = {{user_id}}"\n',
+        f'query = f"{keyword} * FROM users WHERE id = ' + interpolation + '"\n',
         encoding="utf-8",
     )
 
     findings, error = _run_semgrep_owasp(str(tmp_path))
 
     assert error is None
-    assert any(item["code"] == "security-sql-fstring-python" for item in findings)
+    assert any(item["code"] == "sql-fstring" for item in findings)
 
 
 def test_scanner_process_failure_is_not_clean(tmp_path):

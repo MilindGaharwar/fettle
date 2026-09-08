@@ -238,6 +238,7 @@ DEFAULTS: dict[str, Any] = {
             "changelog_path": "CHANGELOG.md",
             "require_semver": True,
             "check_breaking_changes": True,
+            "assurance_policy": "",
         },
         "completion": {
             "enabled": False,

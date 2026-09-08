@@ -5,18 +5,9 @@
   </picture>
 </p>
 
-<h3 align="center">The trust layer for agentic software engineering</h3>
+<h3 align="center">The open-source trust layer for AI coding agents</h3>
 
-<p align="center"><strong>Catch what coding agents get wrong while they still have the context to fix it.</strong></p>
-
-An agent makes thirty edits across nine files and reports that it's done. CI
-disagrees forty minutes later, by which point the reasoning that produced the
-code is gone and you're reconstructing intent from a diff.
-
-Fettle runs your checks inside the agent session instead, so the finding lands
-while the agent still knows why it wrote what it wrote and can fix it itself.
-It then binds consequential verdicts to the code, policy, scope, producer, and
-execution that created them, so missing evidence cannot quietly become success.
+<p align="center"><strong>Catch mistakes while the agent still has context. Prove what passed before the change ships.</strong></p>
 
 <p align="center">
   <a href="https://pypi.org/project/finefettle/"><img src="https://img.shields.io/pypi/v/finefettle?label=PyPI&color=brightgreen" alt="PyPI"></a>
@@ -26,454 +17,243 @@ execution that created them, so missing evidence cannot quietly become success.
 </p>
 
 <p align="center">
-  <a href="#start-in-two-minutes">Quick start</a> ·
-  <a href="#the-problem-fettle-solves">Why Fettle</a> ·
-  <a href="#what-makes-fettle-different">Why it is different</a> ·
-  <a href="#capability-map">Capabilities</a> ·
-  <a href="docs/INSTALLATION.md">Install</a> ·
-  <a href="docs/README.md">Documentation</a>
+  <a href="#try-it-in-two-minutes">Quick start</a> ·
+  <a href="#why-fettle">Why Fettle</a> ·
+  <a href="#one-package-the-complete-python-toolkit">Install</a> ·
+  <a href="#capabilities">Capabilities</a> ·
+  <a href="docs/README.md">Docs</a>
 </p>
 
 ```bash
-pipx install finefettle          # all Python-backed Fettle capabilities
+pipx install finefettle
 fettle demo
 ```
 
-```text
-[1/4] VIOLATION INTRODUCED  demo_project/calculator.py:4
+One command installs Fettle's complete Python-backed toolkit: Ruff, Semgrep,
+pytest, mutmut, PyYAML, Playwright's Python library, bundled rules, workflows,
+schemas, demo fixtures, and agent-host bridges. No API key, hosted control plane,
+or repository is needed for the demo. Python 3.11+ and Git are prerequisites.
 
-   2 |     try:
-   3 |         return int(value)
-   4 |     except Exception:
-   5 |         return None
+> **fettle** *(v.)* - a foundry term for trimming and cleaning a rough casting.
 
-   Broad handler hides unexpected failures.
+## Why Fettle
 
-[2/4] VIOLATION DETECTED
-   broad-except-no-reraise  demo_project/calculator.py:4
-   Rule: rules/llm-antipatterns.yml
-
-[3/4] REPAIR APPLIED
-
-   -     except Exception:
-   +     except ValueError:
-
-[4/4] REPAIR INDEPENDENTLY VERIFIED
-   Re-ran check: clean
-   Re-ran tests: 4 passed
-
-   An unexpected TypeError now surfaces instead of being silently swallowed.
-```
-
-One package, no config, no API key, no network, no repository of your own.
-Python 3.11+ and Git are the only prerequisites.
-
-> **fettle** *(v.)* — a foundry term for trimming and cleaning a rough casting.
-
-AI coding agents changed the unit of software work. A change is no longer just a
-diff: it is a chain of prompts, tool calls, delegated workers, tests, exceptions,
-and remote verdicts. Traditional quality tools inspect pieces of that chain.
-Fettle governs the chain itself.
-
-It gives agents useful feedback while code and intent are still in the same
-conversation, carries policy into delegated work, and preserves independent
-evidence for the moment trust actually matters.
+AI coding agents changed the unit of software work. It is no longer only a diff;
+it is a chain of authority, edits, delegated workers, tests, exceptions, and
+remote verdicts. Most tools inspect one link after the agent has moved on.
+Fettle governs the chain while preserving CI as the independent boundary.
 
 ```text
 intent -> authority -> action -> evidence -> independent verification
-                    Fettle assurance boundary
+                    Fettle trust boundary
 ```
 
-Fettle does not replace tests, review, CI, an orchestrator, or a sandbox. It
-connects them into a fail-visible control loop, records decision provenance
-without collecting hidden reasoning, and refuses to turn missing or malformed
-evidence into a clean result.
+Fettle is unusual because these controls live in one local, inspectable system:
 
-## Why Developers Choose Fettle
-
-| Strength | What it changes for developers |
+| Strength | Why it matters |
 |---|---|
-| In-session feedback | Agents receive actionable findings before context disappears, instead of handing developers a delayed CI archaeology exercise. |
-| Fail-closed evidence | Tool crashes, timeouts, stale artifacts, missing analyzers, and malformed reports stay visible as non-pass outcomes. |
-| Delegation-safe policy | Digest-bound capsules carry authority and policy into child agents; delegated work may tighten constraints, never silently loosen them. |
-| One policy, multiple hosts | Claude Code, Codex CLI, and OpenCode use live-verified bridges; Gemini CLI is contract-tested against the same normalized policy model. |
-| Evidence tied to reality | Verification and assurance bind verdicts to source, policy, scope, producer, and execution occurrence rather than trusting free-floating JSON. |
-| One complete Python install | The default package includes every Python runtime Fettle invokes, while `fettle doctor` names the external tools needed for optional surfaces. |
+| In-session feedback | Findings reach the agent while it still understands the code and can repair it. |
+| Evidence-bound decisions | Verification and assurance bind verdicts to source, policy, scope, producer, and execution instead of trusting free-floating JSON. |
+| Fail-visible semantics | Missing tools, stale artifacts, malformed reports, timeouts, and crashes remain non-pass outcomes. |
+| Delegation-safe policy | Digest-checked capsules carry policy and lineage to child agents; delegated work may tighten constraints, not silently loosen them. |
+| Host-neutral governance | Claude Code, Codex CLI, Gemini CLI, and OpenCode share one normalized dispatcher and `.fettle.toml` policy. |
+| Local-first operation | Core governance runs in your environment without sending source or hidden reasoning to a Fettle service. |
+| Measured promotion | Rules and gates begin advisory and move toward enforcement from retained evidence, not confidence alone. |
 
-This combination is Fettle's core distinction: it governs the full agentic
-change chain, not just a file, prompt, model, or CI job. It is useful to an
-individual trying an agent today and to teams building auditable multi-agent
-delivery workflows, without requiring a hosted control plane or API key.
+Fettle does not replace tests, code review, CI, an agent orchestrator, or a
+sandbox. It connects them into a control loop and makes unsupported trust visible.
 
-## See The Loop
-
-<p align="center">
-  <a href="examples/assurance-loop/README.md">
-    <img src="assets/assurance-loop.svg" width="720" alt="Terminal proof: Fettle detects a broad exception handler, identifies its rule and location, then verifies the repaired file">
-  </a>
-</p>
-
-The checked-in [two-minute assurance loop](examples/assurance-loop/README.md)
-contains the violating and repaired fixtures, complete transcript, reset path,
-and an automated drift test. The visual is a summary; the executable example is
-authoritative.
-
-| Built for the agentic change loop | Current, reproducible scope |
-|---|---|
-| Agent hosts | Claude Code, Codex CLI, OpenCode; Gemini CLI contract-tested |
-| Workspace routing | Python, JavaScript/TypeScript, Go, Rust |
-| Independent evidence | Tests, remote CI, mutation reports, UAT, compliance and lineage reports |
-| Delegation controls | Policy capsules, worktrees, claims, roles, topology, completion reports |
-| Runtime footprint | Python 3.11+, Git, and one package with all Python-backed capabilities |
-
-## Start in Two Minutes
-
-Install once, prove the local loop, then initialize the repository you want to
-govern:
+## Try It in Two Minutes
 
 ```bash
-pipx install finefettle          # analyzers, mutation, evals, browser automation
-# or with uv: uv tool install finefettle
-fettle demo                  # deterministic, offline proof; changes no repo
+pipx install finefettle
+fettle demo
+```
+
+The deterministic offline demo introduces a broad exception handler, detects it,
+applies the repair, and independently reruns four tests:
+
+```text
+[1/4] VIOLATION INTRODUCED  demo_project/calculator.py:4
+[2/4] VIOLATION DETECTED    broad-except-no-reraise
+[3/4] REPAIR APPLIED        Exception -> ValueError
+[4/4] REPAIR VERIFIED       Re-ran check: clean; re-ran tests: 4 passed
+```
+
+The checked-in [assurance loop](examples/assurance-loop/README.md) contains the
+fixtures, complete transcript, reset path, and drift test.
+
+To use Fettle in a repository:
+
+```bash
 cd your-project
-fettle init --dry-run        # inspect files and host integrations first
-fettle init --profile solo   # presets: solo | team | enterprise
-fettle verify                # run tests and bind evidence to this change
-fettle assurance             # assess trust and persist canonical evidence
+fettle init --dry-run
+fettle init --profile solo       # solo | team | enterprise
+fettle doctor
+fettle check --changed
+fettle verify
+fettle assurance
 ```
 
-`fettle demo` starts with a broken Python fixture, shows the source and finding,
-applies the repair, then proves all four fixture tests pass. `fettle assurance`
-produces a digest-bound, nine-dimension record for a real repository:
+`fettle init --dry-run` shows every proposed change. `fettle doctor` reports
+which capabilities are available or degraded. Start advisory; enforce only after
+you have measured signal and tested recovery in your own workflow.
 
+## One Package, the Complete Python Toolkit
+
+The PyPI project is `finefettle`; the installed command is `fettle`.
+
+```bash
+pipx install finefettle
+# or
+uv tool install finefettle
 ```
+
+The default wheel declares and installs every Python runtime Fettle invokes and
+contains its runtime resources. Release CI installs the exact wheel with both
+pip and pipx, runs the demo outside the checkout, verifies bundled resources and
+executables, rebuilds from the source distribution, generates a CycloneDX SBOM,
+and publishes provenance attestations.
+
+A Python package cannot safely embed system-owned runtimes. Install Git first;
+add browser binaries (`playwright install`), agent CLIs, language toolchains, or
+external services only for the surfaces you use. `fettle doctor` reports these
+boundaries rather than pretending an unavailable capability passed. See the
+[installation guide](docs/INSTALLATION.md).
+
+## The Trust Loop
+
+1. **Observe early.** Hooks normalize agent events and route changed files to
+   configured checks.
+2. **Return actionable findings.** The agent sees location, reason, and recovery
+   while its working context is intact.
+3. **Verify independently.** `fettle verify` runs repository tests and binds the
+   result to the exact source and policy.
+4. **Assess the whole change.** `fettle assurance` evaluates nine dimensions and
+   explains every pass, failure, and unknown.
+5. **Retain evidence.** Canonical artifacts, remote CI, mutation reports, UAT,
+   and the governance ledger preserve what actually happened.
+
+```text
 Assurance Record c04c9a206c05 · PARTIAL · commit 25f4957
-  ✓ behavior            PASS
-  ✓ provenance          PASS
-  ~ security            UNKNOWN — raw security review is not canonical
-  ~ independence        UNKNOWN — no retained role-bound authorship decisions
-  ...
+  PASS     behavior
+  PASS     provenance
+  UNKNOWN  security      raw review is not canonical evidence
+  UNKNOWN  independence  no retained role-bound authorship decisions
 ```
 
-Every dimension is backed by accepted evidence references or an honest
-explanation of why it is unknown. The command atomically persists a portable
-`.fettle/assurance-record.evidence.json`; failed assessment or persistence
-invalidates any older record rather than leaving a stale pass. Profiles:
-`solo` for individual repos, `team` adds
-delegation gates, `enterprise` adds strict mode and compliance evidence.
-Omit `--profile` for the guided interview.
+Missing evidence does not become success. Failed assessment or persistence also
+invalidates an older assurance record so stale approval cannot look current.
 
-The PyPI package is `finefettle`; the installed command is `fettle`. Plain
-`pipx install finefettle` installs the Python analyzers, test and mutation
-runners, evaluation parser, and Playwright library alongside the governance
-core. Rules, guided workflows, and agent-host bridges ship inside the wheel.
-Compatibility extras remain accepted, while `finefettle[all]` additionally
-installs contributor tools. Git is required. Browser engines, agent CLIs,
-external services, and JavaScript/TypeScript, Go, and Rust toolchains remain
-separate runtimes; `fettle doctor` reports what is available.
+## Capabilities
 
-Use `pipx upgrade finefettle` to upgrade the complete installation. Run
-`fettle init` again after upgrading so installed agent bridges match the package.
-
-### Add Live Agent Governance
-
-`fettle init` installs the supported host bridge and repository policy after
-showing the planned changes. Run `fettle doctor` afterward to see which host and
-external-runtime capabilities are available.
-
-## The Problem Fettle Solves
-
-Repository-bound quality controls are essential, but they often respond after
-the generation loop has moved on. Fettle adds an earlier control point without
-weakening the later ones.
-
-| Control point | What it is good at | Fettle's role |
+| Area | Shipped capability | Boundary |
 |---|---|---|
-| Editor and linter | Immediate local feedback | Reuse analyzers from agent events |
-| Commit hook | Protecting repository transitions | Catch selected issues before they accumulate |
-| CI and review | Independent, reproducible evidence | Remain the fail-closed authority |
-| Agent session | Intent and context are still available | Return findings and recovery steps in-session |
+| Agent lifecycle | Claude Code, Codex CLI, and OpenCode live-verified; Gemini CLI contract-tested | Host enforcement differs and `fettle doctor` reports it |
+| Quality | Ruff, bundled Semgrep rules, baselines, suppressions, noise budgets, dependency and boundary checks | `fettle check` is Python plus language-neutral Semgrep; post-edit routing is broader |
+| Polyglot workspaces | Python, JavaScript/TypeScript, Go, and Rust post-edit and verification routing | Native toolchains remain external |
+| Verification | Test execution with canonical source, policy, scope, producer, and occurrence bindings | Local evidence does not replace remote CI |
+| Assurance | Nine-dimension canonical Assurance Record and frozen baseline comparison tooling | Graduation of stronger security enforcement still requires real shadow evidence |
+| Mutation quality | Python preflight, changed/full execution, replay, stable fingerprints, accepted baselines, survivor enforcement | Python and pinned `mutmut==2.5.1` only |
+| Delegated work | Plans, worktrees, claims, topology, role-aware spawn, policy capsules, lineage, completion reports | Defense in depth, not OS isolation |
+| Specifications | Markdown specs, lint, scenario inventory, trace coverage, and canonical drift evidence | Declared links count only when execution evidence passes |
+| User acceptance | CLI, API, web, and library sessions; manual walkthroughs; artifact-bound verdicts; seeded benchmark | Report-only unless separately promoted by policy |
+| Change intelligence | Deterministic source snapshots and advisory graph `status`, `impact`, and `shadow` | Graph results are advisory |
+| State consistency | Contract templates, lint, listing, and execution across modeled views | Contract-specific adapters define observable reach |
+| Operations | Digest-pinned central policy, telemetry controls, integrations, compliance/lineage reports, tamper-evident ledger | External services are opt-in |
+| Guided workflows | 17 packaged workflows for quality, security, planning, review, and governance | Workflows guide reasoning; CLI behavior stays deterministic |
 
-This matters most when an agent works across files, languages, or delegated
-workers. Quality is not only a lint result; it is also whether policy survived
-delegation, tests were independently run, evidence is fresh, and tool failure
-was reported honestly.
+See the detailed [capability matrix](docs/CAPABILITIES.md) and
+[task-oriented documentation](docs/README.md).
 
-## What Makes Fettle Different
+## Built for Real Failure Modes
 
-Most developer tools answer one question: “is this file valid?” Fettle answers a
-larger set: “was this agent authorized, did policy survive delegation, did the
-right checks actually run, is the evidence still applicable, and what should the
-developer do next?”
+Fettle distinguishes `pass`, `violation`, `tool_error`, `unknown`, and explicit
+non-applicable states. Its regression suite pins adversarial cases including
+forged verification stamps, deleted canonical references, stale CI evidence,
+tampered policy capsules, crashed analyzers, unsafe agent-runner flags, and
+incomplete mutation shards.
 
-### One Policy Across Four Agent Hosts
+Selected high-risk protocols also have TLA+ models. Releases use PyPI Trusted
+Publishing, SHA-pinned GitHub Actions, build provenance attestations, public-wheel
+canaries, and an attached SBOM.
 
-Claude Code, Codex CLI, and OpenCode are live-verified; Gemini CLI is
-contract-tested. Their events normalize into one dispatcher and one
-`.fettle.toml` policy, so gate logic does not need to be rewritten for every
-agent.
+## Common Journeys
 
-### Evidence Never Becomes Clean by Accident
-
-Fettle distinguishes `pass`, `violation`, `tool_error`, `unknown`, and
-surface-specific non-applicable outcomes. Missing analyzers, malformed output,
-timeouts, and zero mutation evidence cannot manufacture a pass.
-
-### Policy Survives Delegation
-
-An agent launched through `fettle spawn` receives a digest-checked policy
-capsule and lineage identity. Child policy may tighten but cannot loosen the
-inherited boundary. Claims and worktrees coordinate ownership; role authority
-can separate test authorship from implementation. These are application-level
-controls, not operating-system isolation.
-
-### Workspace-Aware Polyglot Routing
-
-Nested Python, JavaScript/TypeScript, Go, and Rust workspaces are discovered
-from native project markers. Edits route to the most specific workspace and its
-repository-native tools. Python currently has the richest CLI and editor
-surface; the [capability map](#capability-map) states the boundaries explicitly.
-
-### Verification Is Bound to the Change
-
-Verification writes a canonical local artifact alongside the legacy stamp. It
-binds test results to the exact source snapshot, effective policy, selected
-workspace/test scope, Fettle producer implementation, and execution occurrence.
-The Stop gate recomputes those bindings and rejects missing, stale, malformed,
-tampered, incomplete, or mismatched claimed artifacts with `fettle verify` as
-the recovery command. Legacy-only stamps remain accepted during migration.
-Remote CI remains an independent authority bound to the pushed commit; local
-verification evidence does not substitute for it or become an attestation.
-
-### Mutation Testing Produces Evidence, Not Theater
-
-Python mutation preflight canonicalizes the engine corpus before expensive
-execution. Full runs can resume by stable fingerprint, reject incompatible
-checkpoints, and aggregate only complete ledgers. On pull requests, a required
-`mutation evidence` check fans out bounded shards, automatically replays any
-shard that timed out or lost its runner, and — as of v1.12 — **blocks merges
-when changed-scope survivors go unaddressed**: missing, conflicting, or stale
-evidence fails closed with the offending shard named. Two independent
-calibrations established Fettle's own 28,723-mutant baseline with zero
-untested outcomes.
-Use the [mutation quality playbook](docs/mutation-quality-playbook.md) for setup,
-the validation funnel, exit semantics, cache isolation, and recovery.
-
-### Rules Learn From Real Failures, With Human Control
-
-`fettle learn` drafts a rule from an incident or trace signature into
-quarantine. A human reviews and promotes it; evidence and false-positive data
-drive later ratcheting. The model may propose policy, but it cannot silently
-activate it.
-
-### Audited Against Its Own Threat Model
-
-Fettle's evidence chain has been adversarially audited and hardened, and the
-attacks are pinned by tests so they stay fixed: a hand-written verify stamp,
-a deleted canonical-evidence reference, a forged assurance input, or a
-crashed quality-gate subprocess can no longer produce a clean result. Live
-agent runners execute with deny-by-default tool grants instead of blanket
-permission bypasses — the same bypass flags Fettle's own spawn gate blocks.
-`fettle doctor` states plainly which hosts can enforce a block and which can
-only notify. A governance tool must hold the bar it sets; this one is built
-to be attacked.
-
-### One Complete Python Install
-
-The default wheel installs every Python runtime Fettle invokes: Ruff, Semgrep,
-pytest, mutmut, PyYAML, and the Playwright library. Release CI installs the exact
-wheel with plain pip and pipx, then checks those capabilities. Browser engines
-and non-Python runtimes remain explicit external installations.
-Releases use PyPI Trusted Publishing, GitHub build provenance attestations,
-pinned workflow actions, checksum-verified third-party tooling, and a
-CycloneDX SBOM.
-
-### Acceptance Is Tested From the User's Side
-
-Living specifications connect requirements and Given/When/Then scenarios to
-tests. Agentic UAT can exercise CLI, API, web, or library surfaces in an isolated
-worktree and reports `CONFIRMED`, `CONTRADICTED`, `BLOCKED`, `UNOBSERVED`, or
-`INDETERMINATE`; silence is never counted as success.
-
-## Capability Map
-
-Support is described by surface, not by one broad "polyglot" claim.
-
-| Surface | Current scope |
-|---|---|
-| Agent lifecycle | Claude Code, Codex CLI, OpenCode live-verified; Gemini CLI contract-tested |
-| Post-edit workspace adapters | Python, JavaScript/TypeScript, Go, Rust |
-| `fettle check` | Python Ruff and bundled Semgrep rules |
-| `fettle verify` | Affected discovered workspaces; Python can narrow to impacted tests |
-| LSP / VS Code | Python diagnostics |
-| External integrations | SonarQube, Black Duck/Polaris, Pact; opt-in |
-| Guided workflows | 17 quality, security, planning, learning, and readiness workflows |
-| Multi-agent controls | Worktrees, claims, topology, spawn, capsules, role authority, reports |
-| Living specifications | Spec lint, scenario inventory, trace coverage, canonical drift evidence between specs, tests, and governed code |
-| User acceptance | Agent-driven CLI, API, **web**, and library scenarios with artifact-bound verdicts; exploration charters propose candidate findings for human review |
-| Mutation quality | Python preflight, changed/full runs, **enforced survivor gate**, replay machinery, canonical baseline comparison |
-| Governance ledger | Tamper-evident hash-chained records anchored to commits (`fettle ledger`) |
-| Graph intelligence | Advisory ephemeral hypergraph: `fettle graph status\|impact\|shadow` with digest-bound generations |
-| Consistency contracts | Frozen cross-view divergence contracts: schema, lint, and template; execution remains planned |
-| Assurance | Canonical result states, behavioral evals, compliance/lineage reports, TLA+ models for selected protocols |
-
-### Quality and Security Gates
-
-- Ruff and bundled Semgrep checks with actionable locations and rerun commands.
-- Destructive-command, protected-config, MCP package-trust, secret, boundary,
-  dependency, and deployment checks.
-- Plan, TDD ordering, complexity, coverage, BDD, worklog, claims, verification,
-  and remote-CI gates.
-- Per-check budgets and advisory-first defaults so teams can measure signal
-  before enabling enforcement.
-
-### Mutation Evidence
+### Add Agent Governance
 
 ```bash
-fettle mutation preflight --all --json
-fettle mutation run --changed --json
-fettle mutation status --report mutation-report.json --json
-fettle mutation baseline check report-a.json report-b.json \
-  --run-id RUN_A --run-id RUN_B --floor 70 --json
+fettle init --profile team
+fettle doctor
+fettle workflows list
+fettle explain
 ```
 
-Mutation testing is Python-only, requires pinned `mutmut==2.5.1`, and defaults
-off. Full runs are scheduled/manual held-out verification; start with preflight
-and changed-scope advisory evidence. See the
-[mutation policy contract](docs/CONFIG.md#mutation-evidence-mutation).
-
-### Evidence and Operations
-
-```bash
-fettle assurance               # assess and persist canonical trust evidence
-fettle ledger status           # governance evidence ledger state
-fettle ledger anchor           # bind terminal digest to current commit
-fettle graph status            # ephemeral hypergraph digest + provider completeness
-fettle graph impact src/       # advisory blast-radius closure
-fettle graph shadow            # parity vs legacy semantic layer
-fettle config --explain        # effective value and provenance for each key
-fettle explain                 # recent gate decisions and recovery context
-fettle verify                  # run tests and bind a verification stamp
-fettle ci status               # remote CI verdict for the current commit
-fettle report --days 7         # effectiveness and lineage evidence
-fettle report --compliance     # CWE, OWASP ASVS, and SOC 2 control evidence
-fettle ratchet status          # evidence for promotion or demotion
-```
-
-### Multi-Agent Work
+### Coordinate Delegated Work
 
 ```bash
 fettle plan start --title "Add export" --item "Write contract test"
 fettle topology advise
 fettle spawn claude --role tester --task "Write the failing tests"
-fettle work claim export-tests
 fettle brief --json
 ```
 
-Role-based authorship separation is available, while broader end-to-end
-graduation evidence remains in progress. Start advisory and validate your agent
-runner before enforcing it.
+### Build Trust Evidence
 
-### Specifications and User Acceptance
+```bash
+fettle verify
+fettle ci status
+fettle mutation preflight --all --json
+fettle assurance
+fettle ledger status
+```
+
+### Connect Requirements to Outcomes
 
 ```bash
 fettle spec lint
 fettle spec coverage
 fettle uat doctor
 fettle uat manual
+fettle consistency lint
 ```
 
-Specifications remain plain Markdown in Git. UAT automation requires explicit
-consent; manual walkthroughs remain available when an agent or browser cannot
-run.
+## Honest Boundaries
 
-### Guided Workflows
-
-```bash
-fettle workflows list
-fettle workflows install
-```
-
-The 17 bundled workflows cover quality review, PR review, security review,
-threat modeling, deployment readiness, plans, worklogs, incident learning,
-MCP approval, baselines, explanations, reports, and lean-debt tracking.
-
-## Configuration
-
-Start with advisory defaults and promote one gate at a time:
-
-```toml
-[gates.lint]
-enabled = true
-mode = "advisory"
-
-[gates.tdd]
-enabled = false
-mode = "advisory"
-
-[gates.verify]
-enabled = false
-mode = "advisory"
-scope = "impacted"
-```
-
-Policy resolves through built-in defaults, org and team packs, digest-pinned
-central policy, repository and directory configuration, environment overrides,
-and a tighten-only delegation capsule. Inspect the final value and source with:
-
-```bash
-fettle config --validate
-fettle config --explain
-```
-
-See the [configuration reference](docs/CONFIG.md) for the complete contract.
-
-## Operational Boundaries
-
-- Python 3.11 or newer is required.
-- Git is required. Install it with `brew install git` on macOS,
-  `sudo apt-get update && sudo apt-get install git` on Debian/Ubuntu, or
-  `winget install --id Git.Git -e` on Windows.
-- Agent transports can run from the v1.13.1 wheel or a source checkout. Installed
-  bridges are versioned and digest-checked; rerun `fettle init` after upgrades.
-- Browser engines require an explicit `playwright install`. Agent CLIs,
-  shellcheck, and JavaScript/TypeScript, Go, and Rust toolchains remain external.
-- Hooks favor session continuity and visible degradation; CI is the independent
-  fail-closed boundary.
-- Shell mediation, capsules, worktrees, and role gates are defense in depth,
-  not a sandbox or substitute for least privilege.
-- Formal models cover selected high-risk protocols, not the whole product.
+- Hooks optimize feedback speed; protected CI remains the independent authority.
+- Capsules, claims, shell mediation, and role gates are not a security sandbox.
+- Python has the richest analyzer, mutation, and editor support.
+- Browser engines, agent CLIs, external services, and non-Python toolchains are
+  intentionally not bundled into the Python environment.
+- Graph intelligence is advisory. UAT and stronger assurance policies graduate
+  only from retained evidence and explicit operator decisions.
+- Fettle records decisions and observable evidence, not hidden chain-of-thought.
 
 ## Documentation
 
 | Goal | Guide |
 |---|---|
-| Choose an adoption path | [Documentation index](docs/README.md) |
 | Install, upgrade, or remove Fettle | [Installation](docs/INSTALLATION.md) |
+| Pick the right command | [Documentation index](docs/README.md) |
+| Compare supported surfaces | [Capability matrix](docs/CAPABILITIES.md) |
 | Configure gates and policy | [Configuration](docs/CONFIG.md) |
+| Govern multiple agents | [Multi-agent guide](docs/MULTI-AGENT.md) |
 | Connect OpenCode | [OpenCode integration](docs/OPENCODE.md) |
-| Use VS Code diagnostics | [VS Code integration](integrations/vscode/README.md) |
-| Run behavioral evaluations | [Evaluation lab](evals/README.md) |
-| Establish mutation evidence | [Mutation configuration](docs/CONFIG.md#mutation-evidence-mutation) |
-| Understand evidence artifacts | [Evidence artifact contract](docs/evidence-artifact-contract.md) |
-| Find the mechanism behind a behavior | [Behavior map](docs/behavior-map.md) |
-| Understand agent event routing | [Event map](docs/event-map.md) |
-| Understand current and planned work | [Roadmap](docs/ROADMAP.md) |
-| Review release history | [Changelog](CHANGELOG.md) |
+| Run mutation evidence safely | [Mutation playbook](docs/mutation-quality-playbook.md) |
+| Understand evidence identity | [Evidence contract](docs/evidence-artifact-contract.md) |
+| Review shipped and planned work | [Roadmap](docs/ROADMAP.md) |
 | Contribute | [Contributing](CONTRIBUTING.md) |
 | Report a vulnerability | [Security](SECURITY.md) |
 
 ## Contributing
 
-Contributions are welcome. Fettle expects focused changes, explicit failure
+Contributions are welcome. Fettle favors focused changes, explicit failure
 states, clean and violating fixtures, and verification proportional to risk.
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[`good first issue`](https://github.com/MilindGaharwar/fettle/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
-backlog.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) or a
+[`good first issue`](https://github.com/MilindGaharwar/fettle/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22).
 
 ## License
 
-Fettle v1.12.1 and later are licensed under the
-[Apache License 2.0](LICENSE). Releases through v1.12.0 remain available under
-the MIT License under which they were published. See the [trademark
-policy](TRADEMARK.md) for permitted uses of the Fettle name and logos.
+Fettle v1.12.1 and later are licensed under the [Apache License 2.0](LICENSE).
+Earlier releases retain their published MIT license. See [TRADEMARK.md](TRADEMARK.md)
+for permitted use of the Fettle name and logos.

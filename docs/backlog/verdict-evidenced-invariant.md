@@ -3,6 +3,10 @@ fettle-work-item: true
 id: verdict-evidenced-invariant
 status: open
 scope:
+  - fettle/dispatcher.py
+  - fettle/trace.py
+  - fettle/verify_gate.py
+  - fettle/uat/reconcile.py
   - tests/test_invariants.py
 spec: improvement-plan
 ---

@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: pipeline-dump-command
-status: open
+status: done
 scope:
   - fettle/cli.py
   - fettle/doctor.py
@@ -15,7 +15,7 @@ Adopted from DeepSeek Harness's `--dump-config` pattern: a single command
 that boots the real composition and prints every effective row with its
 source layer, so the onboarding cliff becomes visible instead of hidden.
 
-Deliverable: `fettle doctor --pipeline` printing one row per active
+Deliverable: `fettle pipeline` printing one row per active
 check/gate/hook binding:
 
 ```
@@ -40,4 +40,6 @@ transports whose KNOWN_EVENTS intersect the check's event set.
 
 ## Resolution
 
-Record how it was resolved.
+Implemented as the dedicated `fettle pipeline` command. It uses dispatcher
+selection precedence, expands each registered check across wired hosts, and
+reports host authority plus the exact layer and key controlling enablement.

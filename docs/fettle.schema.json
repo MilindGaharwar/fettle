@@ -902,6 +902,10 @@
             "check_breaking_changes": {
               "type": "boolean",
               "default": true
+            },
+            "assurance_policy": {
+              "type": "string",
+              "default": ""
             }
           },
           "additionalProperties": false

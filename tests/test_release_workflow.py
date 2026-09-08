@@ -29,8 +29,17 @@ def test_release_prerequisites_are_checked_before_publication():
     workflow = _workflow()
 
     notes_check = workflow.index("Verify authored release notes")
+    assurance_check = workflow.index("Verify production Assurance policy")
     publish = workflow.index("pypa/gh-action-pypi-publish")
     assert notes_check < publish
+    assert assurance_check < workflow.index("  build:") < publish
+    assert workflow.index("pytest==9.1.1", assurance_check) < workflow.index(
+        "fettle verify --full", assurance_check,
+    )
+    assert "fettle verify --full" in workflow
+    assert "python -m fettle.security_review --path . --json" in workflow
+    assert "fettle ledger anchor" in workflow
+    assert "fettle assurance --policy production --json" in workflow
 
 
 def test_release_candidate_runs_on_minimum_supported_python():

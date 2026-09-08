@@ -200,13 +200,20 @@ def execute_semgrep(root: str | list[str]) -> ToolScanResult:
     targets = [root] if isinstance(root, str) else list(root)
     if not targets:
         return ToolScanResult("semgrep", ResultStatus.SKIPPED, message="no Python files in scope")
-    rules_file = str(rules_dir() / "llm-antipatterns.yml")
-    if not os.path.isfile(rules_file):
+    rules_files = [
+        str(rules_dir() / "llm-antipatterns.yml"),
+        str(rules_dir() / "security.yml"),
+    ]
+    if missing := [path for path in rules_files if not os.path.isfile(path)]:
         return ToolScanResult(
-            "semgrep", ResultStatus.CONFIG_ERROR, message="semgrep rules file not found"
+            "semgrep", ResultStatus.CONFIG_ERROR,
+            message=f"semgrep rules file not found: {missing[0]}",
         )
 
-    cmd = [semgrep, "--config", rules_file, "--json", *targets]
+    cmd = [semgrep]
+    for rules_file in rules_files:
+        cmd.extend(["--config", rules_file])
+    cmd.extend(["--json", *targets])
     result = ToolRunner(timeout_s=_TOOL_TIMEOUT_S).run(cmd)
     if result.tool_missing:
         return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep not found")

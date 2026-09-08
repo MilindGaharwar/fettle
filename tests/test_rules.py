@@ -11,7 +11,10 @@ import os
 import textwrap
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-RULES_FILE = os.path.join(PLUGIN_DIR, "rules", "llm-antipatterns.yml")
+RULES_FILES = [
+    os.path.join(PLUGIN_DIR, "rules", "llm-antipatterns.yml"),
+    os.path.join(PLUGIN_DIR, "rules", "security.yml"),
+]
 FIXTURES_DIR = os.path.join(PLUGIN_DIR, "tests", "fixtures", "violations")
 
 _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")}
@@ -19,7 +22,10 @@ _ENV = {**os.environ, "PATH": os.path.expanduser("~/.local/bin") + ":" + os.envi
 
 def run_semgrep(target_file, cwd=None, extra_args=None):
     """Run semgrep and return list of rule IDs that matched."""
-    cmd = ["semgrep", "scan", "--config", RULES_FILE, "--json"]
+    cmd = ["semgrep", "scan"]
+    for rules_file in RULES_FILES:
+        cmd.extend(["--config", rules_file])
+    cmd.append("--json")
     if cwd:
         # Semgrep >= 1.136 resolves paths.include relative to the project
         # root (git root). Tmpdirs are not git repos, so pin the root
@@ -172,6 +178,63 @@ def test_sql_fstring_negative():
         """\
         query = "SELECT * FROM users WHERE id = ?"
         cursor.execute(query, (user_id,))
+        """
+    )
+    try:
+        rules = run_semgrep(relpath, cwd=tmpdir)
+        assert "sql-fstring" not in rules
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_sql_fstring_does_not_span_unrelated_lines():
+    tmpdir, relpath = _write_tmp(
+        """\
+        label = f"customer {customer_id}"
+        query = "SELECT * FROM users"
+        """
+    )
+    try:
+        rules = run_semgrep(relpath, cwd=tmpdir)
+        assert "sql-fstring" not in rules
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_sql_fstring_ignores_non_sql_prose():
+    tmpdir, relpath = _write_tmp(
+        """\
+        message = f"set status to one of: {allowed_statuses}"
+        """
+    )
+    try:
+        rules = run_semgrep(relpath, cwd=tmpdir)
+        assert "sql-fstring" not in rules
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_sql_fstring_allows_trusted_table_constant():
+    tmpdir, relpath = _write_tmp(
+        """\
+        USERS_TABLE = "users"
+        query = f"SELECT id, name FROM {USERS_TABLE}"
+        """
+    )
+    try:
+        rules = run_semgrep(relpath, cwd=tmpdir)
+        assert "sql-fstring" not in rules
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_sql_fstring_allows_validated_order_identifier():
+    tmpdir, relpath = _write_tmp(
+        """\
+        allowed_columns = {"name", "created_at"}
+        if order_by not in allowed_columns:
+            raise ValueError("invalid order column")
+        query = f"SELECT id, name FROM users ORDER BY {order_by}"
         """
     )
     try:

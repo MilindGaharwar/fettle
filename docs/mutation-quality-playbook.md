@@ -21,11 +21,10 @@ retry timeout, missing attempt, or conflicting completed attempt remains exit 2
 and cannot establish a score or pass.
 
 ```bash
-uv sync --extra dev
-python -m pip install -r requirements-mutation.txt
-uv run fettle doctor
-uv run fettle mutation preflight
-uv run fettle mutation run --changed
+pipx install finefettle
+fettle doctor
+fettle mutation preflight
+fettle mutation run --changed
 ```
 
 Set `enabled = true` under `[mutation]` in `.fettle.toml` before preflight.
@@ -69,7 +68,7 @@ uv run fettle mutation status --report .fettle/mutation-report.json
 | Symptom | Recovery |
 |---|---|
 | Mutation disabled | Set `[mutation] enabled = true`, then rerun `fettle doctor` |
-| mutmut missing or wrong version | Run `python -m pip install -r requirements-mutation.txt` |
+| mutmut missing or wrong version | Upgrade or reinstall the complete package with `pipx upgrade finefettle` |
 | Source has no mapped tests | Add an exact `[mutation.test_mappings]` entry and verify the test path exists |
 | Stale or incompatible cache | Remove `.mutmut-cache` and `.fettle/mutation-cache`, then rerun preflight |
 | Parser drift or rejected detail | Retain the bounded JSON diagnostic and add an adversarial fixture before changing canonicalization |

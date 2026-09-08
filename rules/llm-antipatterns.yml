@@ -129,19 +129,6 @@ rules:
       httpx client without timeout will hang on unresponsive servers.
       Fix: httpx.AsyncClient(timeout=httpx.Timeout(30.0))
 
-  - id: sql-fstring
-    metadata:
-      origin: security
-      citation: "OWASP: SQL injection via string-built queries"
-      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
-    languages: [python]
-    severity: ERROR
-    patterns:
-      - pattern-regex: "(?i)f[\"'].*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\\s.*\\{.*\\}.*[\"']"
-    message: >-
-      SQL via f-string is injection-vulnerable.
-      Fix: Use parameterized queries: cursor.execute('SELECT * FROM table WHERE id = ?', (user_id,))
-
   - id: datetime-now-pipeline
     metadata:
       origin: pipeline

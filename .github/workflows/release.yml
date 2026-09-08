@@ -40,6 +40,17 @@ jobs:
       - name: Verify authored release notes
         run: test -f "docs/engagement/${GITHUB_REF_NAME}-release-notes.md"
 
+      - name: Verify production Assurance policy
+        timeout-minutes: 15
+        run: |
+          python -m pip install --quiet pytest==9.1.1 ruff==0.15.20 semgrep==1.168.0 pyyaml==6.0.3
+          python -m pip install --quiet -e .
+          export FETTLE_POLICY_CAPSULE=$(python -c 'from fettle.policy_capsule import write_capsule; print(write_capsule({}, {"actor": "github-actions", "workflow": "release"}))')
+          env -u FETTLE_POLICY_CAPSULE fettle verify --full
+          python -m fettle.security_review --path . --json > /tmp/security-review.json
+          fettle ledger anchor
+          fettle assurance --policy production --json
+
       - name: Verify exact commit CI succeeded
         env:
           GH_TOKEN: ${{ github.token }}

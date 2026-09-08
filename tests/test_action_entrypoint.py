@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+from fettle import __version__
+
 
 _SPEC = importlib.util.spec_from_file_location(
     "fettle_action_entrypoint",
@@ -44,6 +46,7 @@ def test_sarif_normalizes_uppercase_severity():
         {"code": "BLE001", "severity": "ERROR", "message": "broad catch", "file": "x.py", "line": 3},
     ])
     assert sarif["runs"][0]["results"][0]["level"] == "error"
+    assert sarif["runs"][0]["tool"]["driver"]["version"] == __version__
 
 
 def test_scan_failure_is_not_advisory_success(tmp_path, monkeypatch):

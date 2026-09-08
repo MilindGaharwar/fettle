@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from fettle import __version__
+
 
 SCHEMA_VERSION = "0.6.0"
 MAX_RAW_OUTPUT_LEN = 2048
@@ -295,7 +297,7 @@ def to_sarif(findings: list[CheckFinding]) -> dict[str, Any]:
                 "tool": {
                     "driver": {
                         "name": "fettle",
-                        "version": SCHEMA_VERSION,
+                        "version": __version__,
                         "rules": list(rules_seen.values()),
                     }
                 },

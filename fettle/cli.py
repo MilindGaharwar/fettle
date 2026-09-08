@@ -1080,7 +1080,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     """Session plans — checklist created before work starts (v1.6 slice A)."""
     from fettle.paths import find_repo_root
     from fettle.session_plan import (
-        active_plan, check_item, create_plan, find_plans, parse_plan,
+        active_plan, check_item, complete_plan, create_plan, find_plans, parse_plan,
         render_status,
     )
 
@@ -1113,6 +1113,11 @@ def cmd_plan(args: argparse.Namespace) -> None:
     if action == "check":
         ok, msg = check_item(root, args.text)
         print(("✓ done: " if ok else "Refused: ") + msg,
+              file=sys.stdout if ok else sys.stderr)
+        sys.exit(0 if ok else 1)
+    if action == "complete":
+        ok, msg = complete_plan(root)
+        print(("✓ completed: " if ok else "Refused: ") + msg,
               file=sys.stdout if ok else sys.stderr)
         sys.exit(0 if ok else 1)
     print(f"unknown plan action: {action}", file=sys.stderr)
@@ -1359,7 +1364,7 @@ def cmd_ledger(args: argparse.Namespace) -> None:
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
-    """Item 9: dump the composed gate/check pipeline with provenance."""
+    """Dump the composed gate/check pipeline with host-aware provenance."""
     import json as _json
 
     from fettle.pipeline_dump import dump_pipeline
@@ -1370,10 +1375,15 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
     else:
         layers = ", ".join(layer["name"] for layer in result["layers"])
         print(f"pipeline @ {result['root']}  layers: {layers}")
+        print("  check                        host         events                           authority state mode          source")
         for row in result["rows"]:
             state = "on" if row["enabled"] else "off"
-            print(f"  {row['name']:<28} {','.join(row['events']):<32} "
-                  f"{state:<4} {row['mode']:<9} <- {row['source']}")
+            authority = ",".join(
+                f"{event}={value}" for event, value in row["authority"].items()
+            )
+            print(f"  {row['name']:<28} {row['host']:<12} {','.join(row['events']):<32} "
+                  f"{authority:<58} {state:<5} {row['mode']:<13} "
+                  f"<- {row['source']}:{row['source_key']}")
 
 
 def cmd_assurance(args: argparse.Namespace) -> None:
@@ -1442,6 +1452,44 @@ def cmd_assurance(args: argparse.Namespace) -> None:
     if policy_name:
         status = result["policy"]["status"]
         raise SystemExit(0 if status == "PASS" else 1 if status == "FAIL" else 2)
+
+
+def cmd_assurance_baseline(args: argparse.Namespace) -> None:
+    """Collect, review, or summarize CS-6 shadow assessments."""
+    from fettle.assurance_baseline import collect, review_bundle, summarize_store
+
+    try:
+        if args.assurance_baseline_action == "collect":
+            bundle = collect(Path(args.root), Path(args.store))
+            result = {"status": "completed", "bundle": str(bundle), "accepted": False}
+        elif args.assurance_baseline_action == "review":
+            classifications = json.loads(Path(args.classifications).read_text(encoding="utf-8"))
+            if not isinstance(classifications, list):
+                raise ValueError("classifications file must contain a JSON array")
+            result = review_bundle(
+                Path(args.bundle), change=args.change, reviewer=args.reviewer,
+                reviewer_email=args.reviewer_email, classifications=classifications,
+            )
+        else:
+            result = summarize_store(
+                Path(args.store), Path(args.register) if args.register else None,
+            )
+    except (OSError, ValueError, TimeoutError) as exc:
+        print(f"Assurance baseline unavailable: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    if args.json:
+        print(json.dumps(result, indent=2))
+    elif args.assurance_baseline_action == "collect":
+        print(f"Captured unaccepted CS-6 assessment: {bundle}")
+        print("Review and classify every difference before adding the row to the register.")
+    elif args.assurance_baseline_action == "review":
+        status = "accepted" if result["accepted"] else "reviewed but not accepted"
+        print(f"CS-6 assessment {status}: {args.bundle}")
+    else:
+        print(
+            f"CS-6 progress: {result['accepted']} of 20 accepted "
+            f"({result['remaining']} remaining; {result['rejected']} rejected)"
+        )
 
 
 def cmd_consistency(args: argparse.Namespace) -> None:
@@ -2070,6 +2118,7 @@ def main() -> None:
     p_plan_status.add_argument("--json", action="store_true", help="JSON output")
     p_plan_check = plan_sub.add_parser("check", help="Tick the first unchecked item matching TEXT")
     p_plan_check.add_argument("text", help="Substring of the item to tick")
+    plan_sub.add_parser("complete", help="Archive the active plan after all items are checked")
     p_plan.set_defaults(plan_action="status", json=False)
 
     p_brief = subparsers.add_parser(
@@ -2137,7 +2186,7 @@ def main() -> None:
         "ledger", help="Governance evidence ledger (P41)")
     ledger_sub = p_ledger.add_subparsers(dest="ledger_action", required=True)
     p_pipeline = subparsers.add_parser(
-        "pipeline", help="Composed gate/check pipeline with provenance (item 9)")
+        "pipeline", help="Composed gate/check pipeline with host-aware provenance")
     p_pipeline.add_argument("--root", default=".")
     p_pipeline.add_argument("--json", action="store_true")
 
@@ -2147,6 +2196,30 @@ def main() -> None:
     p_assurance.add_argument("--json", action="store_true")
     p_assurance.add_argument(
         "--policy", help="Evaluate [assurance.release.NAME] against the record")
+
+    p_assurance_baseline = subparsers.add_parser(
+        "assurance-baseline", help="Collect a reproducible CS-6 shadow comparison")
+    assurance_baseline_sub = p_assurance_baseline.add_subparsers(
+        dest="assurance_baseline_action", required=True,
+    )
+    p_assurance_baseline_collect = assurance_baseline_sub.add_parser(
+        "collect", help="Capture and compare prior-v1 with the hardened evaluator")
+    p_assurance_baseline_collect.add_argument("--root", default=".")
+    p_assurance_baseline_collect.add_argument("--store", required=True)
+    p_assurance_baseline_collect.add_argument("--json", action="store_true")
+    p_assurance_baseline_review = assurance_baseline_sub.add_parser(
+        "review", help="Validate and sign one collected bundle")
+    p_assurance_baseline_review.add_argument("--bundle", required=True)
+    p_assurance_baseline_review.add_argument("--change", required=True)
+    p_assurance_baseline_review.add_argument("--reviewer", required=True)
+    p_assurance_baseline_review.add_argument("--reviewer-email", required=True)
+    p_assurance_baseline_review.add_argument("--classifications", required=True)
+    p_assurance_baseline_review.add_argument("--json", action="store_true")
+    p_assurance_baseline_summary = assurance_baseline_sub.add_parser(
+        "summarize", help="Verify reviewed bundles and derive CS-6 progress")
+    p_assurance_baseline_summary.add_argument("--store", required=True)
+    p_assurance_baseline_summary.add_argument("--register")
+    p_assurance_baseline_summary.add_argument("--json", action="store_true")
 
     p_consistency = subparsers.add_parser(
         "consistency", help="State-consistency contracts (P53/SC2)")
@@ -2264,6 +2337,7 @@ def main() -> None:
         "ledger": cmd_ledger,
         "pipeline": cmd_pipeline,
         "assurance": cmd_assurance,
+        "assurance-baseline": cmd_assurance_baseline,
         "consistency": cmd_consistency,
         "uat": cmd_uat,
         "verify": cmd_verify,

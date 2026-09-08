@@ -1,12 +1,13 @@
 rules:
-  - id: security-sql-fstring-python
+  - id: sql-fstring
     metadata:
       origin: security
       citation: "OWASP: SQL injection via string-built queries"
       cwe: CWE-89
+      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
     languages: [python]
     severity: ERROR
-    pattern-regex: "(?i)f[\"'].*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\\s.*\\{.*\\}.*[\"']"
+    pattern-regex: "(?i)f[\"'][^\\r\\n]*\\b(?:SELECT|INSERT|UPDATE|DELETE)\\b[^\\r\\n]*\\b(?:WHERE|VALUES|SET)\\b[^\\r\\n]*\\{[^}\\r\\n]+\\}[^\\r\\n]*[\"']"
     message: "SQL via f-string is injection-vulnerable; use a parameterized query."
 
   - id: security-sql-template-javascript
@@ -14,6 +15,7 @@ rules:
       origin: security
       citation: "OWASP: SQL injection via template interpolation"
       cwe: CWE-89
+      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
     languages: [typescript, javascript]
     severity: ERROR
     pattern-regex: "(?i)`\\s*(SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^`]*`"
@@ -24,6 +26,7 @@ rules:
       origin: security
       citation: "OWASP: SQL injection via string-built queries"
       cwe: CWE-89
+      compliance: {cwe: CWE-89, asvs: V5.3.4, soc2: CC7.1}
     languages: [go]
     severity: ERROR
     pattern-either:

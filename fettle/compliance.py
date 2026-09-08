@@ -40,6 +40,8 @@ class ControlMapping:
 RULE_COMPLIANCE: dict[str, ControlMapping] = {
     # SQL injection family
     "sql-fstring": ControlMapping(cwe="CWE-89", asvs="V5.3.4", soc2="CC7.1"),
+    "security-sql-template-javascript": ControlMapping(cwe="CWE-89", asvs="V5.3.4", soc2="CC7.1"),
+    "security-sql-concat-go": ControlMapping(cwe="CWE-89", asvs="V5.3.4", soc2="CC7.1"),
     "sql-string-concat-go": ControlMapping(cwe="CWE-89", asvs="V5.3.4", soc2="CC7.1"),
     "string-built-sql-ts": ControlMapping(cwe="CWE-89", asvs="V5.3.4", soc2="CC7.1"),
     # Swallowed failures

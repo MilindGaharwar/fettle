@@ -100,7 +100,7 @@ def review_file(file_path: str, cfg: dict) -> dict:
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Fettle cross-review")
     parser.add_argument("--file", help="File to review")
     parser.add_argument("--diff", action="store_true", help="Review as a diff (context-aware)")
@@ -112,7 +112,7 @@ def main() -> None:
 
     if not args.file:
         print("Usage: fettle review --file path/to/file.py")
-        sys.exit(1)
+        return 1
 
     result = review_file(args.file, cfg)
 
@@ -125,6 +125,8 @@ def main() -> None:
         else:
             print(f"  {result['status']}: {result.get('message', '')}")
 
+    return 2 if result["status"] == "error" else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,6 +1,7 @@
 """WP-Q — Threat Model Command tests."""
 
 import textwrap
+from subprocess import CompletedProcess
 
 from fettle.threat_model import generate_threat_model, _find_entry_points, _find_data_stores
 
@@ -69,6 +70,26 @@ def test_probe_failure_marks_model_incomplete(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tm.subprocess, "run", boom)
     model = generate_threat_model(str(tmp_path), "svc")
+    assert "Auto-detection incomplete" in model
+
+
+def test_failed_probe_marks_model_incomplete(tmp_path, monkeypatch):
+    from fettle import threat_model as tm
+
+    monkeypatch.setattr(
+        tm.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 1, "", "grep failed"),
+    )
+
+    model = generate_threat_model(str(tmp_path), "svc")
+
+    assert "Auto-detection incomplete" in model
+
+
+def test_missing_root_marks_model_incomplete(tmp_path):
+    model = generate_threat_model(str(tmp_path / "missing"), "svc")
+
     assert "Auto-detection incomplete" in model
 
 
