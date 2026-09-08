@@ -6,10 +6,28 @@ import zipfile
 
 WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "release.yml"
 CI_WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
+ROOT = Path(__file__).parent.parent
+
+NODE24_ACTIONS = {
+    "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
+    "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+}
 
 
 def _workflow() -> str:
     return WORKFLOW.read_text()
+
+
+def test_repository_actions_use_immutable_node24_pins():
+    action_files = [ROOT / "action.yml", *(ROOT / ".github" / "workflows").glob("*.yml")]
+    contents = "\n".join(path.read_text(encoding="utf-8") for path in action_files)
+
+    for action, sha in NODE24_ACTIONS.items():
+        references = [line for line in contents.splitlines() if f"uses: {action}@" in line]
+        assert references
+        assert all(f"uses: {action}@{sha}" in line for line in references)
 
 
 def test_release_preflight_blocks_build_and_publish():
