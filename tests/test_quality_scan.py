@@ -302,3 +302,25 @@ def test_structured_tool_execution_rejects_malformed_entries(monkeypatch, tool, 
 
     assert result.status == ResultStatus.TOOL_ERROR
     assert "malformed finding" in result.message
+
+
+def test_scan_project_preserves_required_scanner_failure(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text(CLEAN)
+    monkeypatch.setattr(
+        quality_scan,
+        "execute_ruff",
+        lambda targets: quality_scan.ToolScanResult(
+            "ruff", ResultStatus.TOOL_ERROR, message="ruff timed out"
+        ),
+    )
+    monkeypatch.setattr(
+        quality_scan,
+        "execute_semgrep",
+        lambda targets: quality_scan.ToolScanResult("semgrep", ResultStatus.PASS),
+    )
+
+    result = quality_scan.scan_project(str(tmp_path))
+
+    assert result["status"] == ResultStatus.TOOL_ERROR.value
+    assert result["tool_errors"] == [{"tool": "ruff", "status": "tool_error", "message": "ruff timed out"}]
+    assert result["findings"] == []

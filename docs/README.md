@@ -38,6 +38,18 @@ external services, and non-Python toolchains remain separate. Run
 | Audit governance history | `fettle ledger verify` | Precise validation of the tamper-evident evidence chain |
 | Integrate an enterprise analyzer | [Configuration: integrations](CONFIG.md#integrations-integrations-wp-14b) | Explicit, opt-in SonarQube, Black Duck, or Pact evidence |
 
+Contextual impact analysis is available as an experimental, advisory-only view:
+
+```bash
+fettle graph impact src/service.py --contextual
+fettle graph impact src/service.py --contextual --detailed
+fettle graph impact src/service.py --contextual --json
+```
+
+It groups deterministic required and contextual impacts, exposes exclusions and
+typed paths in detailed or JSON output, and reports incomplete or bounded analysis
+as a non-success state. It does not change the default closure, Assurance, or CI.
+
 ## The Core Journey
 
 1. Run `fettle init --dry-run` and inspect what would change.

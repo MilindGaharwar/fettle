@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "review": {
+    "reviewers": ["maintainer-a", "maintainer-b"],
+    "disagreement_resolution": "consensus-before-freeze",
+    "raw_agreement": "16/16",
+    "minimum_held_out_cases": 4,
+    "precision_at_10": "relevant contextual targets in first 10 divided by min(10, contextual results returned)"
+  },
+  "scenarios": [
+    {
+      "id": "direct-import",
+      "held_out": false,
+      "case": "direct",
+      "seeds": ["module:src/base.py"],
+      "facts": [
+        {"source": "module:src/base.py", "target": "module:src/consumer.py", "edge": "imports", "provider": "python_imports"}
+      ],
+      "required_targets": ["module:src/consumer.py"],
+      "contextual_relevance": []
+    },
+    {
+      "id": "transitive-import",
+      "held_out": false,
+      "case": "transitive",
+      "seeds": ["module:src/base.py"],
+      "facts": [
+        {"source": "module:src/base.py", "target": "module:src/middle.py", "edge": "imports", "provider": "python_imports"},
+        {"source": "module:src/middle.py", "target": "module:src/api.py", "edge": "imports", "provider": "python_imports"}
+      ],
+      "required_targets": ["module:src/middle.py"],
+      "contextual_relevance": ["module:src/api.py"]
+    },
+    {
+      "id": "direction-excluded",
+      "held_out": false,
+      "case": "excluded",
+      "seeds": ["module:src/consumer.py"],
+      "facts": [
+        {"source": "module:src/base.py", "target": "module:src/consumer.py", "edge": "imports", "provider": "python_imports"}
+      ],
+      "required_targets": [],
+      "contextual_relevance": []
+    },
+    {
+      "id": "required-provider-incomplete",
+      "held_out": false,
+      "case": "incomplete",
+      "seeds": ["module:src/base.py"],
+      "facts": [],
+      "required_targets": [],
+      "contextual_relevance": [],
+      "expected_state": "unknown"
+    },
+    {
+      "id": "cycle-held-out",
+      "held_out": true,
+      "case": "cycle",
+      "seeds": ["module:src/a.py"],
+      "facts": [
+        {"source": "module:src/a.py", "target": "module:src/b.py", "edge": "imports", "provider": "python_imports"},
+        {"source": "module:src/b.py", "target": "module:src/a.py", "edge": "imports", "provider": "python_imports"}
+      ],
+      "required_targets": ["module:src/b.py"],
+      "contextual_relevance": []
+    },
+    {
+      "id": "hyperedge-held-out",
+      "held_out": true,
+      "case": "hyperedge",
+      "seeds": ["spec:payments"],
+      "facts": [
+        {"source": "spec:payments", "target": "scenario:payments/S1", "edge": "contains", "provider": "specs"},
+        {"source": "scenario:payments/S1", "target": "test:tests/test_payments.py", "edge": "verifies", "provider": "trace_markers"}
+      ],
+      "required_targets": ["scenario:payments/S1"],
+      "contextual_relevance": ["test:tests/test_payments.py"]
+    },
+    {
+      "id": "conflicting-provider-held-out",
+      "held_out": true,
+      "case": "conflicting-provider",
+      "seeds": ["module:src/base.py"],
+      "facts": [
+        {"source": "module:src/base.py", "target": "module:src/consumer.py", "edge": "imports", "provider": "python_imports", "fact_set": "a"},
+        {"source": "module:src/base.py", "target": "module:src/alternate.py", "edge": "imports", "provider": "python_imports", "fact_set": "b"}
+      ],
+      "required_targets": [],
+      "contextual_relevance": [],
+      "expected_state": "unknown"
+    },
+    {
+      "id": "bounded-held-out",
+      "held_out": true,
+      "case": "bounded",
+      "seeds": ["module:src/a.py"],
+      "facts": [
+        {"source": "module:src/a.py", "target": "module:src/b.py", "edge": "imports", "provider": "python_imports"},
+        {"source": "module:src/b.py", "target": "module:src/c.py", "edge": "imports", "provider": "python_imports"},
+        {"source": "module:src/c.py", "target": "module:src/d.py", "edge": "imports", "provider": "python_imports"}
+      ],
+      "required_targets": ["module:src/b.py"],
+      "contextual_relevance": ["module:src/c.py", "module:src/d.py"],
+      "expected_state": "limit_reached"
+    }
+  ]
+}

@@ -5,7 +5,8 @@ from __future__ import annotations
 import fnmatch
 import os
 
-from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult, implementation_digest
 
 
 def spec_provider(root: str) -> ProviderResult:
@@ -40,7 +41,12 @@ def spec_provider(root: str) -> ProviderResult:
             edges.append(EdgeDraft("contains", f"spec:{spec.spec_id}", key))
     governed = _governed_module_edges(root, discover_specs(root))
     edges.extend(governed)
-    return ProviderResult("specs", tuple(nodes), tuple(edges), True, tuple(notes))
+    return ProviderResult(
+        "specs", tuple(nodes), tuple(edges), True, tuple(notes),
+        provider_version="1", implementation_digest=implementation_digest(__file__),
+        deterministic=True, trust_class=TrustClass.AUTHORITATIVE,
+        completeness_scope=("active_specs", "python_scope"),
+    )
 
 
 def _governed_module_edges(root: str, specs) -> list[EdgeDraft]:

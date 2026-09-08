@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+from pathlib import Path
 from typing import Callable
+
+from fettle.provider_contract import TrustClass
 
 PROVIDER_SCHEMA_VERSION = 1
 
@@ -30,6 +34,11 @@ class ProviderResult:
     edges: tuple[EdgeDraft, ...]
     complete: bool
     notes: tuple[str, ...] = ()
+    provider_version: str = ""
+    implementation_digest: str = ""
+    deterministic: bool | None = None
+    trust_class: TrustClass | None = None
+    completeness_scope: tuple[str, ...] = ()
 
     @property
     def fact_set_id(self) -> str:
@@ -39,6 +48,11 @@ class ProviderResult:
             "schema_version": PROVIDER_SCHEMA_VERSION,
             "provider_id": self.provider_id,
             "complete": self.complete,
+            "provider_version": self.provider_version,
+            "implementation_digest": self.implementation_digest,
+            "deterministic": self.deterministic,
+            "trust_class": self.trust_class,
+            "completeness_scope": sorted(self.completeness_scope),
             "notes": sorted(self.notes),
             "node_keys": sorted(n.stable_key for n in self.nodes),
             "edges": sorted(
@@ -46,6 +60,11 @@ class ProviderResult:
             ),
         }
         return canonical_digest(payload)
+
+
+def implementation_digest(path: str) -> str:
+    """Digest the provider implementation file used for this result."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 Provider = Callable[[str], ProviderResult]

@@ -187,6 +187,32 @@ def test_sql_fstring_negative():
         shutil.rmtree(tmpdir)
 
 
+def test_debug_print_flags_library_output():
+    tmpdir, relpath = _write_tmp(
+        """\
+        def calculate_total():
+            print("temporary diagnostic")
+        """
+    )
+    try:
+        assert "debug-print-statement" in run_semgrep(relpath, cwd=tmpdir)
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_debug_print_allows_command_renderer():
+    tmpdir, relpath = _write_tmp(
+        """\
+        def cmd_report(args):
+            print("operator output")
+        """
+    )
+    try:
+        assert "debug-print-statement" not in run_semgrep(relpath, cwd=tmpdir)
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 def test_sql_fstring_does_not_span_unrelated_lines():
     tmpdir, relpath = _write_tmp(
         """\

@@ -21,6 +21,7 @@ from fettle.evals_runner import (  # noqa: E402
     Scenario,
     Verdict,
     discover_scenarios,
+    evaluate_contextual_rankings,
     load_scenario,
     run_scenario,
 )
@@ -244,6 +245,52 @@ def test_shipped_scenarios_cover_python_and_typescript_with_held_out_cases():
     for language in ("python", "typescript"):
         assert any(s.language == language for s in scenarios)
         assert any(s.language == language and s.held_out for s in scenarios)
+
+
+def test_contextual_precision_at_10_uses_returned_result_denominator():
+    cases = [{
+        "id": "small",
+        "held_out": True,
+        "ranked_contextual": ["a", "noise", "b"],
+        "contextual_relevance": ["a", "b"],
+    }]
+
+    report = evaluate_contextual_rankings(cases, held_out=True)
+
+    assert report == {
+        "split": "held_out",
+        "case_count": 1,
+        "relevant_in_top_10": 2,
+        "returned_in_top_10": 3,
+        "precision_at_10_basis_points": 6667,
+    }
+
+
+def test_contextual_evaluation_keeps_development_and_held_out_separate():
+    cases = [
+        {"id": "dev", "held_out": False, "ranked_contextual": ["x"],
+         "contextual_relevance": []},
+        {"id": "held", "held_out": True, "ranked_contextual": ["y"],
+         "contextual_relevance": ["y"]},
+    ]
+
+    development = evaluate_contextual_rankings(cases, held_out=False)
+    held_out = evaluate_contextual_rankings(cases, held_out=True)
+
+    assert development["case_count"] == 1
+    assert development["precision_at_10_basis_points"] == 0
+    assert held_out["case_count"] == 1
+    assert held_out["precision_at_10_basis_points"] == 10_000
+
+
+def test_contextual_precision_is_zero_when_no_contextual_results_returned():
+    report = evaluate_contextual_rankings([
+        {"id": "empty", "held_out": True, "ranked_contextual": [],
+         "contextual_relevance": ["expected"]},
+    ], held_out=True)
+
+    assert report["returned_in_top_10"] == 0
+    assert report["precision_at_10_basis_points"] == 0
 
 
 # ── WP-11 (audit M-07): missing PyYAML must fail with guidance ───────

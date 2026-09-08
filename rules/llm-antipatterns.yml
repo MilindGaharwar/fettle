@@ -231,19 +231,14 @@ rules:
     languages: [python]
     severity: WARNING
     patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+            ...
       - pattern: print(...)
-      - pattern-not-inside: |
-          def main(...):
-              ...
-      - pattern-not-inside: |
-          def _print_human(...):
-              ...
-      - pattern-not-inside: |
-          def _print_json(...):
-              ...
-      - pattern-not-inside: |
-          def _print_result(...):
-              ...
+      - pattern-not: print(..., file=sys.stderr, ...)
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: "^(?!(?:main|cmd_.+|print_.+|_print_.+|install_.+|check_status|deny|_explain_dict|emit_and_exit)$).+"
     paths:
       exclude:
         - "cli/"

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult, implementation_digest
 from fettle.workspace import discover_workspaces
 
 
@@ -21,4 +22,7 @@ def workspace_provider(root: str) -> ProviderResult:
         notes.append("nested workspaces route by most-specific marker")
     return ProviderResult(
         "workspaces", tuple(nodes), tuple(edges), True, tuple(notes),
+        provider_version="1", implementation_digest=implementation_digest(__file__),
+        deterministic=True, trust_class=TrustClass.DERIVED,
+        completeness_scope=("detected_workspaces",),
     )

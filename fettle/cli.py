@@ -120,6 +120,19 @@ def cmd_check(args: argparse.Namespace) -> None:
     results = scan_project(str(scan_root), config, json_output=args.json,
                            files=changed_files)
     findings = results.get("findings", [])
+    tool_errors = results.get("tool_errors", [])
+
+    if tool_errors:
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            for error in tool_errors:
+                print(
+                    f"Error: {error.get('tool', 'scanner')}: "
+                    f"{error.get('message', 'required scanner failed')}",
+                    file=sys.stderr,
+                )
+        sys.exit(2)
 
     # --baseline: report only findings absent from the committed baseline.
     if args.baseline:
@@ -1334,6 +1347,10 @@ def cmd_graph(args: argparse.Namespace) -> None:
     if args.json:
         argv.append("--json")
     if args.graph_action == "impact":
+        if args.contextual:
+            argv.append("--contextual")
+        if args.detailed:
+            argv.append("--detailed")
         argv.extend(args.paths)
     raise SystemExit(graph_main(argv))
 
@@ -2177,6 +2194,14 @@ def main() -> None:
     g_impact.add_argument("--root", default=".")
     g_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
     g_impact.add_argument("--json", action="store_true")
+    g_impact.add_argument(
+        "--contextual", action="store_true",
+        help="Experimental advisory classification and deterministic ranking",
+    )
+    g_impact.add_argument(
+        "--detailed", action="store_true",
+        help="Show contextual paths, scores, and exclusions",
+    )
     g_shadow = graph_sub.add_parser(
         "shadow", help="P48 parity report vs the legacy semantic layer")
     g_shadow.add_argument("--root", default=".")

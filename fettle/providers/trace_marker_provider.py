@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult, implementation_digest
 from fettle.trace_canonical import build_trace_index, collect_test_markers
 
 
@@ -28,4 +29,7 @@ def trace_marker_provider(root: str) -> ProviderResult:
     return ProviderResult(
         "trace_markers", tuple(nodes), tuple(edges),
         complete=True, notes=tuple(sorted(notes)),
+        provider_version="1", implementation_digest=implementation_digest(__file__),
+        deterministic=True, trust_class=TrustClass.DERIVED,
+        completeness_scope=("test_trace_markers",),
     )
