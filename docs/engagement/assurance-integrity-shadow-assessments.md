@@ -1,6 +1,6 @@
 # Assurance Integrity Shadow Assessments
 
-Status: collecting; 20 of 20 qualifying assessments accepted
+Status: graduated; 20 of 20 qualifying assessments accepted
 
 This append-only register records real change assessments before production
 enforcement. Test fixtures, repeated runs of an unchanged subject, and invented
@@ -46,4 +46,4 @@ Generated from reviewed external bundles. Do not edit totals or rows manually.
 
 ## Operator Decision
 
-Pending explicit operator review and decision; 20 rows do not self-authorize enforcement.
+Approved by Milind on 2026-09-08. Production release enforcement is authorized.

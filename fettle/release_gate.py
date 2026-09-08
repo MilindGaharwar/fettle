@@ -8,11 +8,13 @@ PreToolUse(Bash) check that validates git tag commands:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
 
 
+logger = logging.getLogger(__name__)
 _TAG_RE = re.compile(r"git\s+tag\s+(?:-[asm]\s+)?v?(\d+\.\d+\.\d+(?:-[\w.]+)?)")
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[\w.]+)?$")
 
@@ -49,6 +51,34 @@ def _has_breaking_commits(cwd: str) -> bool:
         return "BREAKING CHANGE" in result.stdout or "!:" in result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
+
+
+def _assurance_findings(cwd: str, policy_name: str) -> list[str]:
+    from fettle.assurance import build_assurance_record, evaluate_assurance_policy
+
+    try:
+        result = build_assurance_record(cwd)
+        if result.get("status") != "completed":
+            detail = result.get("message", result.get("status", "unknown error"))
+            return [f"assurance {policy_name}: unavailable: {detail}"]
+        decision = evaluate_assurance_policy(result["record"], cwd, policy_name)
+    except Exception as exc:  # noqa: BLE001 - release checks must fail closed
+        logger.exception("release assurance evaluation failed")
+        return [f"assurance {policy_name}: unavailable: {exc}"]
+
+    if decision.get("status") == "PASS":
+        return []
+    findings = [f"assurance {policy_name}: {decision.get('status', 'CONFIG_ERROR')}"]
+    findings.extend(
+        f"assurance {criterion['dimension']} is {criterion['actual']} "
+        f"(requires {'|'.join(criterion['expected'])})"
+        for criterion in decision.get("criteria", [])
+        if not criterion.get("passed", False)
+    )
+    findings.extend(
+        f"assurance configuration: {error}" for error in decision.get("errors", [])
+    )
+    return findings
 
 
 def run_check(ctx):
@@ -90,6 +120,10 @@ def run_check(ctx):
         completion = evaluate_manifests(ctx.cwd)
         if not completion.valid:
             findings.extend("completion: " + error for error in completion.errors)
+
+    assurance_policy = cfg.get("assurance_policy", "")
+    if assurance_policy:
+        findings.extend(_assurance_findings(cwd, str(assurance_policy)))
 
     if not findings:
         return CheckResult.allow()

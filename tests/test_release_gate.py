@@ -5,7 +5,13 @@ from pathlib import Path
 from fettle.dispatcher_types import Decision, HookContext, HookInput
 
 
-def _make_ctx(command: str, cwd: str, enabled: bool = True, mode: str = "advisory"):
+def _make_ctx(
+    command: str,
+    cwd: str,
+    enabled: bool = True,
+    mode: str = "advisory",
+    assurance_policy: str = "",
+):
     config = {
         "gates": {
             "release": {
@@ -14,6 +20,7 @@ def _make_ctx(command: str, cwd: str, enabled: bool = True, mode: str = "advisor
                 "changelog_path": "CHANGELOG.md",
                 "require_semver": True,
                 "check_breaking_changes": True,
+                "assurance_policy": assurance_policy,
             },
         },
     }
@@ -98,3 +105,125 @@ def test_enforce_mode_blocks(tmp_path):
     ctx = _make_ctx("git tag v1.0.0", str(tmp_path), mode="enforce")
     result = run_check(ctx)
     assert result.decision == Decision.BLOCK
+
+
+def test_production_assurance_pass_allows_tag(tmp_path, monkeypatch):
+    from fettle import assurance
+    from fettle.release_gate import run_check
+
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        assurance, "build_assurance_record",
+        lambda _root: {"status": "completed", "record": {"dimensions": {}}},
+    )
+    monkeypatch.setattr(
+        assurance, "evaluate_assurance_policy",
+        lambda _record, _root, name: {
+            "name": name, "status": "PASS", "criteria": [], "errors": [],
+        },
+    )
+
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce",
+        assurance_policy="production",
+    ))
+
+    assert result.decision == Decision.ALLOW
+
+
+def test_production_assurance_mismatch_blocks_tag(tmp_path, monkeypatch):
+    from fettle import assurance
+    from fettle.release_gate import run_check
+
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        assurance, "build_assurance_record",
+        lambda _root: {"status": "completed", "record": {"dimensions": {}}},
+    )
+    monkeypatch.setattr(
+        assurance, "evaluate_assurance_policy",
+        lambda _record, _root, name: {
+            "name": name,
+            "status": "FAIL",
+            "criteria": [{
+                "dimension": "security", "actual": "UNKNOWN",
+                "expected": ["PASS"], "passed": False,
+            }],
+            "errors": [],
+        },
+    )
+
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce",
+        assurance_policy="production",
+    ))
+
+    assert result.decision == Decision.BLOCK
+    assert "assurance production: FAIL" in result.message
+    assert "security is UNKNOWN (requires PASS)" in result.message
+
+
+def test_production_assurance_evaluator_error_blocks_tag(tmp_path, monkeypatch):
+    from fettle import assurance
+    from fettle.release_gate import run_check
+
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        assurance, "build_assurance_record",
+        lambda _root: {"status": "tool_error", "message": "cannot identify source"},
+    )
+
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce",
+        assurance_policy="production",
+    ))
+
+    assert result.decision == Decision.BLOCK
+    assert "assurance production: unavailable: cannot identify source" in result.message
+
+
+def test_production_assurance_exception_blocks_tag(tmp_path, monkeypatch):
+    from fettle import assurance
+    from fettle.release_gate import run_check
+
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+
+    def fail_closed(_root):
+        raise RuntimeError("evaluator crashed")
+
+    monkeypatch.setattr(assurance, "build_assurance_record", fail_closed)
+
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce",
+        assurance_policy="production",
+    ))
+
+    assert result.decision == Decision.BLOCK
+    assert "assurance production: unavailable: evaluator crashed" in result.message
+
+
+def test_production_assurance_configuration_error_blocks_tag(tmp_path, monkeypatch):
+    from fettle import assurance
+    from fettle.release_gate import run_check
+
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        assurance, "build_assurance_record",
+        lambda _root: {"status": "completed", "record": {"dimensions": {}}},
+    )
+    monkeypatch.setattr(
+        assurance, "evaluate_assurance_policy",
+        lambda _record, _root, name: {
+            "name": name, "status": "CONFIG_ERROR", "criteria": [],
+            "errors": ["missing [assurance.release.production] policy"],
+        },
+    )
+
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce",
+        assurance_policy="production",
+    ))
+
+    assert result.decision == Decision.BLOCK
+    assert "assurance production: CONFIG_ERROR" in result.message
+    assert "missing [assurance.release.production] policy" in result.message
