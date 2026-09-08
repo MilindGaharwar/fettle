@@ -1,0 +1,31 @@
+{
+  "status": "completed",
+  "advisory": true,
+  "seeds": [
+    "module:src/fettle_demo/accounts.py"
+  ],
+  "unresolved_paths": [],
+  "affected": [
+    {
+      "stable_key": "module:src/fettle_demo/__init__.py",
+      "kind": "module"
+    },
+    {
+      "stable_key": "module:src/fettle_demo/ledger.py",
+      "kind": "module"
+    },
+    {
+      "stable_key": "scenario:ledger-core/S1",
+      "kind": "scenario"
+    },
+    {
+      "stable_key": "spec:ledger-core",
+      "kind": "spec"
+    },
+    {
+      "stable_key": "test:tests_t/test_ledger.py",
+      "kind": "test"
+    }
+  ],
+  "count": 5
+}

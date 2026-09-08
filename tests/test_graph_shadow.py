@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fettle.graph_shadow import shadow_semantic
+from fettle.graph_shadow import shadow_contextual, shadow_semantic
+from fettle.graph_types import canonical_digest
+from fettle.hypergraph import assemble
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
 
 CORPUS = Path(__file__).resolve().parent.parent / "examples" / "corpus"
 
@@ -70,3 +74,53 @@ def test_report_is_digest_bound_and_advisory():
 
     assert report["advisory"] is True
     assert len(report["digest"]) == 64
+
+
+def _provider(provider_id, edges):
+    nodes = tuple(
+        NodeDraft("module", key) for key in sorted({key for edge in edges for key in edge[1:]})
+    )
+    return ProviderResult(
+        provider_id, nodes, tuple(EdgeDraft(*edge) for edge in edges), True,
+        provider_version="1",
+        implementation_digest=canonical_digest({"provider": provider_id}),
+        deterministic=True,
+        trust_class=TrustClass.DERIVED,
+        completeness_scope=("repository",),
+    )
+
+
+def test_contextual_shadow_has_no_unexplained_missing_legacy_candidates():
+    provider = _provider("imports", [
+        ("imports", "module:consumer", "module:base"),
+        ("imports", "module:api", "module:consumer"),
+    ])
+    graph = assemble(".", (provider,), "snapshot", {"version": 1})
+    seed = graph.find_by_stable_key("module:base").id
+
+    report = shadow_contextual(graph, (seed,))
+
+    assert report["status"] == "completed"
+    assert report["unexplained_narrower"] == []
+    assert report["required"] == ["module:consumer"]
+    assert report["contextual"] == ["module:api"]
+    assert len(report["evidence_digest"]) == 64
+
+
+def test_optional_provider_perturbation_cannot_hide_required_instability():
+    required = _provider("required-imports", [
+        ("imports", "module:consumer", "module:base"),
+    ])
+    optional = _provider("optional-imports", [
+        ("imports", "module:extra", "module:base"),
+    ])
+    graph = assemble(".", (required, optional), "snapshot", {"version": 1})
+    seed = graph.find_by_stable_key("module:base").id
+
+    report = shadow_contextual(graph, (seed,), optional_provider_ids=("optional-imports",))
+
+    perturbation = report["perturbations"][0]
+    assert perturbation["provider_id"] == "optional-imports"
+    assert perturbation["required_invariant"] is False
+    assert perturbation["removed_required"] == ["module:extra"]
+    assert report["promotion_safe"] is False

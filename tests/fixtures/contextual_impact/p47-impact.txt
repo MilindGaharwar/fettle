@@ -1,0 +1,6 @@
+blast radius (5 nodes, advisory superset):
+  [module] module:src/fettle_demo/__init__.py
+  [module] module:src/fettle_demo/ledger.py
+  [scenario] scenario:ledger-core/S1
+  [spec] spec:ledger-core
+  [test] test:tests_t/test_ledger.py

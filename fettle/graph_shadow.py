@@ -3,7 +3,10 @@ semantic layer. Measures correctness before any authority changes hands."""
 
 from __future__ import annotations
 
+from fettle.contextual_impact import analyze_contextual_impact
 from fettle.graph_builder import build_ephemeral_graph
+from fettle.graph_types import canonical_digest
+from fettle.hypergraph import AssemblyError, EphemeralGraph, assemble
 
 # Semantic-layer edge labels that have a graph-native counterpart, mapped
 # to the graph edge type. Everything else is a documented difference.
@@ -24,6 +27,84 @@ _DOCUMENTED_DIFFERENCES = {
         "not structural links"
     ),
 }
+
+
+def shadow_contextual(
+    graph: EphemeralGraph,
+    seed_node_ids: tuple[str, ...],
+    *,
+    optional_provider_ids: tuple[str, ...] = (),
+) -> dict:
+    """Compare contextual classification with legacy closure and perturb providers."""
+    result = analyze_contextual_impact(graph, seed_node_ids)
+    id_to_key = {node_id: key for key, node_id in graph.stable_keys().items()}
+    legacy = {
+        id_to_key[node_id]
+        for node_id in graph.closure(set(seed_node_ids)) - set(seed_node_ids)
+        if node_id in id_to_key
+    }
+    classified = {
+        item.stable_key
+        for group in (result.required, result.contextual, result.excluded)
+        for item in group
+    }
+    required = {item.stable_key for item in result.required}
+    perturbations = []
+    for provider_id in sorted(set(optional_provider_ids)):
+        retained = tuple(
+            item for item in graph.provider_results if item.provider_id != provider_id
+        )
+        perturbed = assemble(
+            ".", retained, graph.generation.source_snapshot_id,
+            {"source_rule_digest": graph.generation.traversal_rule_set_digest},
+        )
+        if isinstance(perturbed, AssemblyError):
+            perturbations.append({
+                "provider_id": provider_id,
+                "state": "unknown",
+                "required_invariant": False,
+                "removed_required": sorted(required),
+                "message": perturbed.message,
+            })
+            continue
+        perturbed_seeds = tuple(
+            node.id
+            for node_id in seed_node_ids
+            if (original := graph.node(node_id))
+            if (node := perturbed.find_by_stable_key(original.stable_key))
+        )
+        perturbed_result = analyze_contextual_impact(perturbed, perturbed_seeds)
+        perturbed_required = {item.stable_key for item in perturbed_result.required}
+        removed = sorted(required - perturbed_required)
+        perturbations.append({
+            "provider_id": provider_id,
+            "state": perturbed_result.state,
+            "required_invariant": not removed,
+            "removed_required": removed,
+            "contextual_delta": sorted(
+                {item.stable_key for item in result.contextual}
+                ^ {item.stable_key for item in perturbed_result.contextual}
+            ),
+        })
+    payload = {
+        "status": "completed" if result.state == "complete" else result.state,
+        "state": result.state,
+        "advisory": True,
+        "graph_digest": graph.generation.digest,
+        "analysis_digest": result.analysis_digest,
+        "required": sorted(required),
+        "contextual": sorted(item.stable_key for item in result.contextual),
+        "excluded": sorted(item.stable_key for item in result.excluded),
+        "unexplained_narrower": sorted(legacy - classified),
+        "perturbations": perturbations,
+    }
+    payload["promotion_safe"] = (
+        result.state == "complete"
+        and not payload["unexplained_narrower"]
+        and all(item["required_invariant"] for item in perturbations)
+    )
+    payload["evidence_digest"] = canonical_digest(payload)
+    return payload
 
 
 def _semantic_to_pairs(semantic_graph) -> tuple[set, list[tuple[str, str, str]]]:

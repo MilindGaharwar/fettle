@@ -107,6 +107,26 @@ class RunResult:
     metrics: EvalMetrics
 
 
+def evaluate_contextual_rankings(cases: list[dict], *, held_out: bool) -> dict:
+    """Compute aggregate precision@10 for one frozen corpus split."""
+    selected = [case for case in cases if case.get("held_out") is held_out]
+    relevant = 0
+    returned = 0
+    for case in selected:
+        ranked = case.get("ranked_contextual", [])[:10]
+        labels = set(case.get("contextual_relevance", []))
+        relevant += sum(item in labels for item in ranked)
+        returned += len(ranked)
+    precision = round(relevant * 10_000 / returned) if returned else 0
+    return {
+        "split": "held_out" if held_out else "development",
+        "case_count": len(selected),
+        "relevant_in_top_10": relevant,
+        "returned_in_top_10": returned,
+        "precision_at_10_basis_points": precision,
+    }
+
+
 def discover_scenarios(root: str | Path) -> list[Path]:
     root = Path(root)
     if not root.is_dir():

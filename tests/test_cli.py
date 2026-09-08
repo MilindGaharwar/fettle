@@ -391,6 +391,50 @@ def test_check_exits_0_on_warnings_only(tmp_path, monkeypatch, capsys):
     assert _run_check(tmp_path, monkeypatch, ["--json"], [_WARNING_FINDING]) == 0
 
 
+@pytest.mark.parametrize("output_mode", [[], ["--json"]])
+def test_check_exits_2_when_required_scanner_fails(
+    tmp_path, monkeypatch, capsys, output_mode
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    from fettle.cli import main
+
+    result = {
+        "status": "tool_error",
+        "tool_errors": [
+            {"tool": "semgrep", "status": "tool_error", "message": "semgrep timed out"}
+        ],
+        "findings": [],
+        "file_count": 1,
+    }
+    with patch("fettle.quality_scan.scan_project", return_value=result), \
+         patch("fettle.paths.find_repo_root", return_value=tmp_path), \
+         patch("sys.argv", ["fettle", "check", "--all", *output_mode]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 2
+    output = capsys.readouterr()
+    rendered = output.out if output_mode else output.err
+    assert "semgrep timed out" in rendered
+
+
+def test_graph_forwards_contextual_and_detailed_options():
+    from fettle.cli import main
+
+    with patch("fettle.graph_cli.main", return_value=0) as graph_main, \
+         patch("sys.argv", [
+             "fettle", "graph", "impact", "src/app.py", "--contextual", "--detailed",
+         ]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert graph_main.call_args.args[0] == [
+        "impact", "--root", ".", "--contextual", "--detailed", "src/app.py",
+    ]
+
+
 def test_check_all_and_changed_conflict_exits_2(tmp_path, monkeypatch, capsys):
     assert _run_check(tmp_path, monkeypatch, ["--all", "--changed"], []) == 2
 

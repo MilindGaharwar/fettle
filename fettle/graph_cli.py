@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 
+from fettle.contextual_impact import analyze_contextual_impact
 from fettle.graph_builder import build_ephemeral_graph
 
 
@@ -100,6 +102,29 @@ def cmd_impact(args: argparse.Namespace) -> int:
               if args.json else message)
         return 2
 
+    if args.contextual:
+        seeds, _ = _resolve_seeds(result["graph"], args.paths)
+        contextual = analyze_contextual_impact(result["graph"], tuple(seeds))
+        contextual_payload = {
+            "schema_version": 1,
+            "status": "completed",
+            "state": contextual.state,
+            "experimental": True,
+            "advisory": True,
+            "seeds": payload["seeds"],
+            "unresolved_paths": unresolved,
+            "required": [_candidate_payload(item) for item in contextual.required],
+            "contextual": [_candidate_payload(item) for item in contextual.contextual],
+            "excluded": [_candidate_payload(item) for item in contextual.excluded],
+            "limitations": list(contextual.limitations),
+            "analysis_digest": contextual.analysis_digest,
+        }
+        print(
+            json.dumps(contextual_payload, indent=2)
+            if args.json else _render_contextual(contextual_payload, args.detailed)
+        )
+        return 0 if contextual.state == "complete" else 2
+
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
@@ -112,6 +137,43 @@ def cmd_impact(args: argparse.Namespace) -> int:
             lines.append(f"unmatched paths: {', '.join(unresolved)}")
         print("\n".join(lines))
     return 0
+
+
+def _candidate_payload(candidate) -> dict:
+    payload = asdict(candidate)
+    payload["score_components"] = [list(component) for component in candidate.score_components]
+    payload["sort_key"] = list(candidate.sort_key)
+    return payload
+
+
+def _render_contextual(payload: dict, detailed: bool) -> str:
+    lines = ["contextual impact (experimental, advisory only)"]
+    for label in ("required", "contextual"):
+        items = payload[label]
+        lines.append(f"{label.upper()} ({len(items)})")
+        if not items:
+            lines.append("  none")
+        for item in items:
+            lines.append(f"  [{item['kind']}] {item['stable_key']} — {item['action']}")
+            if detailed:
+                lines.append(f"    score: {item['score']} {item['score_components']}")
+                for path in item["paths"]:
+                    steps = " -> ".join(
+                        f"{step['edge_type']}:{step['role']}:{step['provider_id']}"
+                        for step in path["steps"]
+                    )
+                    lines.append(f"    path: {steps}")
+    if detailed and payload["excluded"]:
+        lines.append(f"EXCLUDED ({len(payload['excluded'])})")
+        lines.extend(
+            f"  [{item['kind']}] {item['stable_key']} — {', '.join(item['reasons'])}"
+            for item in payload["excluded"]
+        )
+    if payload["limitations"]:
+        lines.append("LIMITATIONS")
+        lines.extend(f"  {limitation}" for limitation in payload["limitations"])
+    lines.append("next: fettle graph impact <paths> --contextual --detailed")
+    return "\n".join(lines)
 
 
 def cmd_shadow(args: argparse.Namespace) -> int:
@@ -151,6 +213,14 @@ def main(argv: list[str] | None = None) -> int:
     p_impact.add_argument("--root", default=".")
     p_impact.add_argument("paths", nargs="+", help="Repo-relative paths to seed from")
     p_impact.add_argument("--json", action="store_true")
+    p_impact.add_argument(
+        "--contextual", action="store_true",
+        help="Experimental advisory classification and deterministic ranking",
+    )
+    p_impact.add_argument(
+        "--detailed", action="store_true",
+        help="Show contextual paths, scores, and exclusions",
+    )
 
     p_shadow = subparsers.add_parser(
         "shadow", help="P48: parity report vs the legacy semantic layer")
@@ -158,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     p_shadow.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.graph_action == "impact" and args.detailed and not args.contextual:
+        parser.error("--detailed requires --contextual")
     actions = {"status": cmd_status, "impact": cmd_impact,
                "shadow": cmd_shadow}
     return actions[args.graph_action](args)

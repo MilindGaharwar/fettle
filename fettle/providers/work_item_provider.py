@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult, implementation_digest
 from fettle.spec_model import discover_specs
 from fettle.work_items import discover_work_items
 
@@ -32,4 +33,9 @@ def work_item_provider(root: str) -> ProviderResult:
             notes.append(
                 f"item {item.item_id} references unknown spec {item.spec!r}"
             )
-    return ProviderResult("work_items", tuple(nodes), tuple(edges), True, tuple(notes))
+    return ProviderResult(
+        "work_items", tuple(nodes), tuple(edges), True, tuple(notes),
+        provider_version="1", implementation_digest=implementation_digest(__file__),
+        deterministic=True, trust_class=TrustClass.AUTHORITATIVE,
+        completeness_scope=("declared_work_items",),
+    )

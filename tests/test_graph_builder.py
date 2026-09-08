@@ -120,6 +120,18 @@ def test_conflicting_node_kinds_are_rejected():
     assert hasattr(result, "message") and "different kind" in result.message
 
 
+def test_duplicate_edge_type_keeps_each_provider_owner():
+    nodes = (NodeDraft("module", "module:a"), NodeDraft("module", "module:b"))
+    edge = (EdgeDraft("imports", "module:a", "module:b"),)
+    first = ProviderResult("first", nodes, edge, complete=True)
+    second = ProviderResult("second", nodes, edge, complete=True)
+
+    graph = assemble(".", (first, second), "snapshot", {})
+
+    owners = {graph.edge(edge_id).provider_fact_set_id for edge_id in graph.generation.edge_ids}
+    assert owners == {first.fact_set_id, second.fact_set_id}
+
+
 def test_build_budget_on_self_repo_is_bounded():
     start = time.monotonic()
     result = build_ephemeral_graph(".")
