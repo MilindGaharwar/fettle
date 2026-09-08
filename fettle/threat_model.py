@@ -21,12 +21,17 @@ def _grep_probe(patterns: list[str], grep_args: list[str], root: str,
     """
     matches: list[str] = []
     errors: list[str] = []
+    if not Path(root).is_dir():
+        return matches, [f"project root is not a directory: {root}"]
     for pat in patterns:
         try:
             result = subprocess.run(
                 ["grep", *grep_args, pat, root],
                 capture_output=True, text=True, timeout=10,
             )
+            if result.returncode > 1 or result.stderr.strip():
+                errors.append(f"probe '{pat}' failed: grep exited {result.returncode}")
+                continue
             for line in result.stdout.splitlines()[:per_pattern_limit]:
                 matches.append(line.strip())
         except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
