@@ -47,8 +47,9 @@ def fix_file(file_path: str, cfg: dict, unsafe: bool = False) -> dict:
         cmd.insert(3, "--unsafe-fixes")
 
     try:
+        before = Path(file_path).read_bytes()
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        fixed = "Fixed" in result.stdout or result.returncode == 0
+        fixed = Path(file_path).read_bytes() != before
 
         log_decision(
             hook="autofix",
