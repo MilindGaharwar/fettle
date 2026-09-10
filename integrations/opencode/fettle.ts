@@ -32,7 +32,10 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += chunk))
     child.stderr.on("data", (chunk) => (stderr += chunk))
-    child.on("error", (error) => resolve({ blocked: false, message: `Fettle unavailable: ${error.message}` }))
+    child.on("error", () => resolve({
+      blocked: event === "PreToolUse",
+      message: event === "PreToolUse" ? "Secret protection unavailable. Run `fettle doctor`." : "Fettle unavailable",
+    }))
     child.on("close", (code) => {
       try {
         const result = JSON.parse(stdout || "{}")
@@ -47,13 +50,17 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
             stderr.trim(),
         })
       } catch {
-        resolve({ blocked: false, message: stderr.trim() || "Fettle returned invalid output" })
+        resolve({
+          blocked: event === "PreToolUse",
+          message: event === "PreToolUse" ? "Secret protection returned invalid output. Run `fettle doctor`." : "Fettle returned invalid output",
+        })
       }
     })
     child.stdin.end(JSON.stringify({
       hook_event_name: event,
       tool_name: tool,
       tool_input: normalizeArgs(args),
+      fettle_host: "opencode",
       cwd: directory,
       session_id: sessionID,
     }))
@@ -70,8 +77,7 @@ export const FettlePlugin = (async ({ client, directory }) => {
 
   return {
     "tool.execute.before": async (input, output) => {
-      const tool = toolNames[input.tool]
-      if (!tool || !["Bash", "Edit", "Write"].includes(tool)) return
+      const tool = toolNames[input.tool] ?? input.tool
       const result = await runFettle("PreToolUse", tool, output.args ?? {}, directory, input.sessionID)
       if (result.blocked) throw new Error(result.message || "Blocked by Fettle")
       await notify(result.message, "warning")

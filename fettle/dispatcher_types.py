@@ -88,6 +88,10 @@ class CheckResult:
         if self.decision != Decision.ALLOW and self.result_state == ResultState.PASS:
             self.result_state = ResultState.VIOLATION
 
+    def replace(self, *, hook_specific_output: dict[str, Any]) -> CheckResult:
+        self.hook_specific_output = hook_specific_output
+        return self
+
     @classmethod
     def allow(cls) -> CheckResult:
         return cls(decision=Decision.ALLOW)
@@ -182,6 +186,7 @@ class CheckSpec:
     order: int = 100
     enabled_by_default: bool = True
     budget_ms: int | None = None
+    fail_closed: bool = False
 
     def matches(self, ctx: HookContext) -> bool:
         if ctx.event not in self.events:

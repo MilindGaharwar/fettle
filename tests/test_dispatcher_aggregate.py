@@ -21,6 +21,18 @@ class TestAggregatorAllow:
         assert code == 0
         assert not agg.has_block
 
+    def test_allow_result_preserves_updated_tool_output(self):
+        agg = Aggregator(total_budget_ms=400, hook_event_name="PostToolUse")
+        result = CheckResult.allow().replace(
+            hook_specific_output={"updatedToolOutput": "***REDACTED***"}
+        )
+
+        agg.add_result("runtime_output_guard", result, 2)
+        output, code = agg.finish()
+
+        assert code == 0
+        assert output["hookSpecificOutput"]["updatedToolOutput"] == "***REDACTED***"
+
 
 class TestAggregatorBlock:
     def test_first_block_wins(self):

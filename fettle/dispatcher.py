@@ -176,6 +176,15 @@ def main() -> int:
 
     for spec in checks:
         if time.monotonic() > deadline:
+            if spec.fail_closed:
+                aggregator.add_result(
+                    spec.name,
+                    CheckResult.block(
+                        "Secret protection timed out before execution; the tool was not run. "
+                        "Run `fettle doctor` and retry."
+                    ),
+                    0,
+                )
             aggregator.record_budget_exhausted(spec.name)
             break
 
@@ -193,6 +202,17 @@ def main() -> int:
             if result is None:
                 result = CheckResult.allow()
         except Exception as exc:  # noqa: BLE001 — isolate check failures
+            if spec.fail_closed:
+                logger.error("fettle: security check %s failed closed", spec.name)
+                aggregator.add_result(
+                    spec.name,
+                    CheckResult.block(
+                        "Secret protection failed closed; the tool was not run. "
+                        "Run `fettle doctor` and retry."
+                    ),
+                    int((time.monotonic() - check_start) * 1000),
+                )
+                break
             logger.error("fettle: check %s failed: %s", spec.name, exc)
             aggregator.record_check_error(spec.name, f"{type(exc).__name__}: {exc}")
             continue

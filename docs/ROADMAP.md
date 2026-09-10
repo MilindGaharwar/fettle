@@ -12,7 +12,10 @@ integrity, deterministic change-integrity contracts, P62's reproducible
 full-repository mutation calibration and accepted baseline, and wheel-native
 versioned agent transports. The default installer includes every Python runtime
 Fettle invokes, and assurance validates producer-bound canonical evidence before
-persisting its own portable record. Changed-scope
+persisting its own portable record. Runtime secret access is blocked pre-tool on
+all four hosts; pre-model output protection is limited to Claude Code and Gemini.
+Explicit contextual impact analysis is implemented but remains advisory after its
+frozen promotion evaluation failed. Changed-scope
 mutation policy and narrow formal verification remain advisory or partial and
 subject to the graduation triggers below. See the
 [README](../README.md) for current capabilities and operational boundaries.
@@ -30,7 +33,8 @@ subject to the graduation triggers below. See the
 | Proposed, priority | First-class portable evidence (P66-P71) | Consequential results bind producer, source, policy, scope, completeness, freshness, and occurrence; producers graduate independently with measured cost per verified change |
 | Next | Seeded-defect controls, independent red/green evidence, expanded evals, and traceability | Evidence is reconstructed in CI, benchmark variance is measured, and PR critical path remains at or below 12 minutes |
 | Execution kernel complete; later surfaces gated | State consistency contracts (P53-P61) | P53-P56 contract authoring, bounded execution, and evaluation are complete; web/UAT, stateful sequences, evidence binding, and graduation remain independently gated without treating tool failure or intentional snapshots as defects |
-| Proposed | Runtime change-integrity snapshots, ephemeral graph, and advisory impact (P45-P48) | Immutable source snapshots, explicit provider completeness, deterministic graph digests, actionable impact output, and shadow parity exist without changing current authority |
+| Advisory implementation complete; promotion blocked | Runtime change-integrity snapshots, ephemeral graph, impact, shadow, and contextual ranking (P45-P48) | Contextual ranking remains explicit after 78.05% held-out required recall, 7/20 eligible cases, and inconclusive paired gain; any replacement experiment needs a new hypothesis and pre-frozen corpus |
+| Implemented; installed verification remains local | Runtime secret boundary | Pre-tool blocking is contract-tested on all four hosts; Claude Code/Gemini output protection is supported, while Codex/OpenCode output filtering remains explicitly unsupported |
 | Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
 | Report-only; parity evidence pending | Agentic UAT strengthening (P72-P77) | Artifact-bound scenarios, exploration, web capture, stateful restart probes, and independent judgment are implemented; the canonical ten-seed harness exists, but real human evidence and an agreed discovery threshold remain required before any enforcement or parity claim |
 | Research proposed; blocked | Evidence-guided handoff pilot | After Assurance Integrity CS-6 and separate approval, 20 accepted matched pairs show candidate-bound handoffs and preservation obligations improve verified completion or regression detection within frozen integrity and cost thresholds |
@@ -39,11 +43,12 @@ subject to the graduation triggers below. See the
 The authoritative activity sequence, dependencies, estimates, and demand gates
 are maintained in the
 [Fettle evolution implementation plan](fettle-evolution-implementation-plan.md).
-The proposed hypergraph program is detailed in the
+The hypergraph program and its remaining evidence gates are detailed in the
 [change integrity architecture](change-integrity-architecture.md),
 [UX specification](change-integrity.ux-spec.md), and
-[implementation plan](change-integrity-implementation-plan.md). Runtime work is
-not authorized by those planning documents.
+[implementation plan](change-integrity-implementation-plan.md). Contextual output
+is explicit and advisory; no default rollout, enforcement, or Assurance authority
+is authorized.
 
 External code intelligence and memory remain advisory inputs. The completed
 [`codebase-memory-mcp` evaluation](advisory-code-intelligence-evaluation.md)

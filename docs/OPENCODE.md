@@ -38,6 +38,12 @@ adapter does not alter or replace that integration.
 
 The adapter forwards local event payloads to Fettle's Python dispatcher.
 
+OpenCode can enforce the strict PreToolUse secret boundary by rejecting a tool
+before execution. Its current PostToolUse and Stop surfaces are notification-only,
+and its transport cannot replace tool output before model exposure. Therefore
+pre-model output filtering is explicitly unsupported on OpenCode; use
+least-privilege credentials and do not rely on post-tool redaction.
+
 ## Verify the Integration
 
 1. Run `fettle doctor` in the target repository.
@@ -45,6 +51,10 @@ The adapter forwards local event payloads to Fettle's Python dispatcher.
 3. Edit a Python file with a known advisory Ruff finding.
 4. Confirm OpenCode receives a Fettle advisory with a recovery action.
 5. Run `fettle explain` if the expected finding does not appear.
+
+`fettle doctor` may confirm that the plugin is registered, but it does not infer
+trust, execution, or verification from registration. Complete the live exercise
+before treating the integration as operational.
 
 Keep the first trial advisory. Only enable blocking modes after the transport,
 tool availability, and recovery flow work in your repository.

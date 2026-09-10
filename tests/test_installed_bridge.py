@@ -56,10 +56,15 @@ def test_bridge_manifest_binds_every_owned_file(tmp_path, monkeypatch):
         assert actual == expected
     assert bridge.validate_bridge().ok
     hooks = json.loads((root / "hooks" / "hooks.json").read_text())
+    assert hooks["hooks"]["PreToolUse"][0]["matcher"] == "*"
     command = hooks["hooks"]["SubagentStart"][0]["hooks"][0]["command"]
     assert shlex.split(command) == ["node", str(root / "hooks" / "subagent_inject.js")]
     assert ".tmp-" not in command
     assert len(list((root / "commands").glob("*.md"))) == 17
+    transport = (root / "opencode" / "fettle.ts").read_text()
+    before_transport = transport.split('"tool.execute.after"', 1)[0]
+    assert "if (!tool) return" not in before_transport
+    assert 'blocked: event === "PreToolUse"' in transport
 
 
 def test_validate_bridge_detects_tampering(tmp_path, monkeypatch):
