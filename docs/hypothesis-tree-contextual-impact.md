@@ -1,6 +1,7 @@
 # Hypothesis Tree: Contextual Impact Analysis
 
-Status: initialized; no experiment has been executed
+Status: CI-1 passed; initial CI-2 evaluation was non-discriminating; corpus-v2
+collection contract is ready and ranking promotion remains blocked
 
 Objective: improve the usefulness of advisory impact analysis while preserving
 zero missed required impacts, deterministic reproducibility, visible uncertainty,
@@ -54,6 +55,13 @@ below 100%, ordering is unstable, or p95 analysis overhead exceeds 20%.
 
 Expected improvement: at least 10% relative contextual precision at 10 on the
 held-out corpus, with zero required-impact regressions.
+
+Evidence, 2026-09-09: the initial four-case held-out split tied stable-key ordering
+at 10,000 precision basis points because it contained no irrelevant contextual
+candidates. This did not test the hypothesis. Corpus v2 therefore requires at
+least 20 ranking-eligible cases per split, at least 10 candidates per case, at
+least two relevant and two irrelevant labels, blind review, immutable identities,
+and repository/subsystem group isolation between development and held-out data.
 
 ## CI-3: Perturbation Stability
 

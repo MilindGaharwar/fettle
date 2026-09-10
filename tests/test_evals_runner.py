@@ -7,8 +7,10 @@ the injectable runner seam — the unit suite never starts a real CLI.
 """
 
 import os
+import json
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -21,9 +23,11 @@ from fettle.evals_runner import (  # noqa: E402
     Scenario,
     Verdict,
     discover_scenarios,
+    evaluate_contextual_corpus,
     evaluate_contextual_rankings,
     load_scenario,
     run_scenario,
+    validate_contextual_corpus,
 )
 
 
@@ -291,6 +295,176 @@ def test_contextual_precision_is_zero_when_no_contextual_results_returned():
 
     assert report["returned_in_top_10"] == 0
     assert report["precision_at_10_basis_points"] == 0
+
+
+def _contextual_case(case_id, split, group, *, ranker_relevant_first=True):
+    candidates = []
+    for index in range(12):
+        relevant = index in {9, 11}
+        score = 100 - index if not ranker_relevant_first else (200 if relevant else 100 - index)
+        candidates.append({
+            "stable_key": f"module:{index:02d}.py",
+            "score": score,
+            "depth": 2,
+            "relevance": "relevant" if relevant else "irrelevant",
+            "rationale": "changed behavior" if relevant else "no observed dependency",
+            "reviews": [
+                {"reviewer": "reviewer-a", "relevance": "relevant" if relevant else "irrelevant",
+                 "rationale": "first blind review"},
+                {"reviewer": "reviewer-b", "relevance": "relevant" if relevant else "irrelevant",
+                 "rationale": "second blind review"},
+            ],
+        })
+    return {
+        "id": case_id,
+        "split": split,
+        "group": group,
+        "repository_digest": "repo-digest",
+        "revision": "revision-digest",
+        "graph_digest": "graph-digest",
+        "provider_digest": "provider-digest",
+        "oracle_digest": "oracle-digest",
+        "ranking_eligible": True,
+        "required_targets": ["module:required.py"],
+        "actual_required": ["module:required.py"],
+        "candidates": candidates,
+    }
+
+
+def _contextual_corpus(cases, *, minimum_cases=1):
+    return {
+        "schema_version": 2,
+        "review": {
+            "reviewers": ["reviewer-a", "reviewer-b"],
+            "labeling": "blind-randomized",
+            "minimum_ranking_cases_per_split": minimum_cases,
+            "minimum_candidates_per_case": 10,
+            "minimum_relevant_per_case": 2,
+            "minimum_irrelevant_per_case": 2,
+        },
+        "cases": cases,
+    }
+
+
+def test_contextual_corpus_v2_derives_paired_rankings_from_one_candidate_universe():
+    corpus = _contextual_corpus([
+        _contextual_case("held-1", "held_out", "repo-a/payments"),
+    ])
+
+    report = evaluate_contextual_corpus(corpus, split="held_out")
+
+    assert report["case_count"] == 1
+    assert report["ranker_precision_at_10_basis_points"] == 2000
+    assert report["baseline_precision_at_10_basis_points"] == 1000
+    assert report["paired_case_deltas_basis_points"] == [1000]
+    assert report["paired_gain_ci95_basis_points"] == [1000, 1000]
+    assert report["required_recall_basis_points"] == 10_000
+    assert report["evaluation_ready"] is True
+    assert report["promotion_ready"] is True
+
+
+def test_contextual_corpus_v2_rejects_group_leakage_between_splits():
+    corpus = _contextual_corpus([
+        _contextual_case("dev-1", "development", "repo-a/payments"),
+        _contextual_case("held-1", "held_out", "repo-a/payments"),
+    ])
+
+    with pytest.raises(ValueError, match="split leakage"):
+        validate_contextual_corpus(corpus)
+
+
+@pytest.mark.parametrize("mutation, reason", [
+    (lambda case: case["candidates"].__delitem__(slice(9, None)), "at least 10 candidates"),
+    (lambda case: [item.update(relevance="relevant") for item in case["candidates"]],
+     "at least 2 irrelevant"),
+    (lambda case: case["candidates"][0].update(rationale=""), "rationale"),
+])
+def test_contextual_corpus_v2_rejects_non_discriminating_cases(mutation, reason):
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    mutation(case)
+
+    with pytest.raises(ValueError, match=reason):
+        validate_contextual_corpus(_contextual_corpus([case]))
+
+
+def test_contextual_corpus_v2_requires_enough_cases_before_promotion():
+    corpus = _contextual_corpus([
+        _contextual_case("held-1", "held_out", "repo-a/payments"),
+    ], minimum_cases=20)
+
+    report = evaluate_contextual_corpus(corpus, split="held_out")
+
+    assert report["promotion_ready"] is False
+    assert report["blocking_reasons"] == ["requires at least 20 ranking-eligible held_out cases"]
+
+
+def test_contextual_corpus_v2_development_split_cannot_authorize_promotion():
+    corpus = _contextual_corpus([
+        _contextual_case("dev-1", "development", "repo-a/payments"),
+    ])
+
+    report = evaluate_contextual_corpus(corpus, split="development")
+
+    assert report["evaluation_ready"] is True
+    assert report["promotion_ready"] is False
+    assert report["blocking_reasons"] == ["promotion requires the frozen held_out split"]
+
+
+def test_contextual_corpus_v2_requires_immutable_case_identity():
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    case["graph_digest"] = ""
+
+    with pytest.raises(ValueError, match="immutable identity"):
+        validate_contextual_corpus(_contextual_corpus([case]))
+
+
+def test_contextual_corpus_v2_requires_blind_reviews_from_declared_reviewers():
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    case["candidates"][0]["reviews"] = case["candidates"][0]["reviews"][:1]
+
+    with pytest.raises(ValueError, match="declared reviewer"):
+        validate_contextual_corpus(_contextual_corpus([case]))
+
+
+def test_contextual_corpus_v2_rejects_negative_ranking_values():
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    case["candidates"][0]["depth"] = -1
+
+    with pytest.raises(ValueError, match="non-negative integer"):
+        validate_contextual_corpus(_contextual_corpus([case]))
+
+
+def test_contextual_corpus_v2_cannot_prove_recall_without_required_targets():
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    case["required_targets"] = []
+    case["actual_required"] = []
+
+    report = evaluate_contextual_corpus(_contextual_corpus([case]), split="held_out")
+
+    assert report["required_recall_basis_points"] is None
+    assert "requires at least one required-impact label" in report["blocking_reasons"]
+
+
+def test_contextual_corpus_v2_reports_zero_baseline_as_unmeasurable_gain():
+    case = _contextual_case("held-1", "held_out", "repo-a/payments")
+    for index, candidate in enumerate(case["candidates"]):
+        relevant = index in {10, 11}
+        candidate["relevance"] = "relevant" if relevant else "irrelevant"
+        candidate["score"] = 200 if relevant else 100 - index
+
+    report = evaluate_contextual_corpus(_contextual_corpus([case]), split="held_out")
+
+    assert report["relative_gain_basis_points"] is None
+    assert report["blocking_reasons"] == ["baseline precision is zero; relative gain is undefined"]
+
+
+def test_shipped_contextual_corpus_v2_is_collection_ready_not_promotion_ready():
+    corpus = json.loads((
+        Path(PLUGIN_DIR) / "tests" / "fixtures" / "contextual_impact" / "corpus-v2.json"
+    ).read_text())
+
+    assert validate_contextual_corpus(corpus) == []
+    assert evaluate_contextual_corpus(corpus, split="held_out")["promotion_ready"] is False
 
 
 # ── WP-11 (audit M-07): missing PyYAML must fail with guidance ───────

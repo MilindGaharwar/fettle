@@ -440,9 +440,15 @@ from that fresh result. Do not rely on the earlier stale index.
 - CI-3's 10% relative-gain gate therefore did not pass. The explicit
   `--contextual` command remains experimental and advisory-only; CI-6 promotion
   and CI-7 model work remain blocked.
-- Automated verification passed for all tests except the independently modified
-  `test_canonical_security_finding_remains_failure`; its failure is caused by the
-  unrelated `fettle/assurance.py` suffix change and was not altered here.
+- Corpus-v2 evaluation infrastructure now derives stable-key baseline and ranker
+  orderings from one candidate universe, rejects development/held-out group
+  leakage, and requires discriminating labels and immutable case identities.
+- `tests/fixtures/contextual_impact/corpus-v2.json` is collection-ready but empty;
+  it is not promotion evidence. Collection requires at least 20 ranking-eligible
+  development cases and 20 ranking-eligible held-out cases before one frozen
+  held-out run.
+- Full automated verification passed after the unrelated Assurance regression
+  was resolved.
 
 After every accepted package run focused tests, then:
 
