@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "status": "collecting",
+  "review": {
+    "reviewers": ["reviewer-a", "reviewer-b"],
+    "labeling": "blind-randomized",
+    "disagreement_resolution": "consensus-before-freeze",
+    "minimum_ranking_cases_per_split": 20,
+    "minimum_candidates_per_case": 10,
+    "minimum_relevant_per_case": 2,
+    "minimum_irrelevant_per_case": 2,
+    "precision_at_10": "relevant candidates in the first 10 divided by candidates returned in the first 10",
+    "promotion_threshold": "at least 10% relative held-out precision gain with 100% required-impact recall"
+  },
+  "case_contract": {
+    "identity": [
+      "id",
+      "split",
+      "group",
+      "repository_digest",
+      "revision",
+      "graph_digest",
+      "provider_digest",
+      "oracle_digest"
+    ],
+    "ranking": "baseline and ranker are derived from the same candidates; stored rankings are not accepted",
+    "candidate": [
+      "stable_key",
+      "score",
+      "depth",
+      "relevance",
+      "rationale",
+      "one blind review per declared reviewer"
+    ]
+  },
+  "cases": []
+}
