@@ -1,6 +1,8 @@
 # UX Spec: Contextual Impact Analysis
 
-Status: PROPOSED; planning only; implementation and enforcement are not authorized
+Status: explicit advisory implementation complete and UAT accepted; default
+rollout, enforcement, Assurance consumption, and model reranking are not
+authorized because the frozen promotion evaluation failed
 
 Parent contract: [change-integrity.ux-spec.md](change-integrity.ux-spec.md)
 
@@ -44,12 +46,12 @@ rank or empty result.
 
 ## Command And Compatibility Contract
 
-The first implementation must not alter default P47 behavior. Existing
+The implementation does not alter default P47 behavior. Existing
 `fettle graph impact <paths>` human output, JSON keys, advisory status, and exit
 codes remain the compatibility oracle.
 
-Contextual output is reached through an explicit experimental option chosen in
-the contract review. Preferred surface:
+Contextual output is reached through the implemented explicit experimental
+option:
 
 ```text
 fettle graph impact <paths> --contextual [--detailed] [--json]
@@ -196,3 +198,12 @@ And no model output can remove required evidence or create PASS.
 - Identical canonical inputs produce byte-identical JSON and ordering.
 - Existing P47 compatibility fixtures remain unchanged until an explicit schema
   version and migration are approved.
+
+## Evaluation Outcome
+
+The command and recovery journey passed UAT. The frozen 40-case corpus did not
+pass promotion: only 10 development and 7 held-out cases met the predeclared
+ranking-eligibility floor, held-out required-impact recall was 78.05%, and the
+paired 95% precision-gain interval included zero. The explicit command remains
+advisory. Any replacement ranking study requires a new hypothesis and a newly
+pre-frozen, sufficiently discriminating corpus; reviewed labels are immutable.
