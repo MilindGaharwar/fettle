@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "corpus_status": "frozen",
+  "development": {
+    "split": "development",
+    "case_count": 10,
+    "ranker_precision_at_10_basis_points": 2500,
+    "baseline_precision_at_10_basis_points": 2200,
+    "relative_gain_basis_points": 1364,
+    "paired_case_deltas_basis_points": [
+      2000,
+      -1000,
+      2000,
+      0,
+      -1000,
+      0,
+      0,
+      0,
+      0,
+      1000
+    ],
+    "paired_gain_ci95_basis_points": [
+      -300,
+      900
+    ],
+    "required_recall_basis_points": 9630,
+    "evaluation_ready": false,
+    "promotion_ready": false,
+    "blocking_reasons": [
+      "requires at least 20 ranking-eligible development cases",
+      "required-impact recall must be 100%",
+      "promotion requires the frozen held_out split"
+    ]
+  },
+  "held_out": {
+    "split": "held_out",
+    "case_count": 7,
+    "ranker_precision_at_10_basis_points": 2000,
+    "baseline_precision_at_10_basis_points": 1714,
+    "relative_gain_basis_points": 1669,
+    "paired_case_deltas_basis_points": [
+      0,
+      0,
+      1000,
+      0,
+      0,
+      0,
+      1000
+    ],
+    "paired_gain_ci95_basis_points": [
+      0,
+      571
+    ],
+    "required_recall_basis_points": 7805,
+    "evaluation_ready": false,
+    "promotion_ready": false,
+    "blocking_reasons": [
+      "requires at least 20 ranking-eligible held_out cases",
+      "required-impact recall must be 100%"
+    ]
+  }
+}

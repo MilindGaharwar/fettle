@@ -139,6 +139,23 @@ def validate_contextual_corpus(corpus: dict) -> list[str]:
     reviewers = review.get("reviewers", [])
     if len(reviewers) < 2 or review.get("labeling") != "blind-randomized":
         raise ValueError("contextual corpus requires two reviewers and blind-randomized labeling")
+    roles = review.get("reviewer_roles")
+    model_classes = review.get("reviewer_model_classes")
+    if (
+        not isinstance(roles, dict)
+        or set(roles) != set(reviewers)
+        or set(roles.values()) != {"ai"}
+        or not isinstance(model_classes, dict)
+        or set(model_classes) != set(reviewers)
+        or len(set(model_classes.values())) != len(reviewers)
+        or review.get("ai_independence") != "fresh-context-blinded"
+        or review.get("disagreement_resolution")
+        != "owner-reconciles-after-both-ai-reviews"
+    ):
+        raise ValueError(
+            "contextual corpus requires two distinct fresh-context blinded AI reviewers "
+            "and owner reconciliation"
+        )
     limits = {
         "minimum_ranking_cases_per_split": 1,
         "minimum_candidates_per_case": 10,

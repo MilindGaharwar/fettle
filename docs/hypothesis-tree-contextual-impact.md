@@ -1,7 +1,9 @@
 # Hypothesis Tree: Contextual Impact Analysis
 
-Status: CI-1 passed; initial CI-2 evaluation was non-discriminating; corpus-v2
-collection contract is ready and ranking promotion remains blocked
+Status: CI-1 passed on the original fixtures; research hypothesis CI-2
+(implementation package CI-3) is falsified for promotion because corpus-v2
+required recall fell below 100%, the eligible sample was underpowered, and the
+paired precision-gain interval included zero
 
 Objective: improve the usefulness of advisory impact analysis while preserving
 zero missed required impacts, deterministic reproducibility, visible uncertainty,
@@ -26,6 +28,9 @@ Constraints:
 - Ranking never creates, removes, or resolves obligations.
 - Missing, partial, conflicting, bounded, malformed, or stale evidence is non-pass.
 - No branch may change Assurance or enforcement during research.
+- Corpus-v2 review uses two distinct fresh-context blinded AI reviewers; each
+  receives only its randomized packet and referenced repository revisions, and
+  the owner reconciles disagreements.
 
 ## CI-1: Typed Deterministic Paths
 
@@ -63,6 +68,15 @@ least 20 ranking-eligible cases per split, at least 10 candidates per case, at
 least two relevant and two irrelevant labels, blind review, immutable identities,
 and repository/subsystem group isolation between development and held-out data.
 
+Evidence, 2026-09-10: both blinded reviews and owner reconciliation completed for
+all 40 collected cases, resolving all 434 disagreements. Only 10 development and
+7 held-out cases met the frozen two-relevant/two-irrelevant eligibility floor,
+below the required 20 per split. On the eligible held-out cases, deterministic
+ranking produced 2,000 precision basis points versus 1,714 for stable-key ordering
+(1,669 basis points relative gain), but the paired 95% interval was 0 to 571 and
+required-impact recall was only 7,805 basis points. CI-2 is therefore falsified
+for promotion; labels were not changed after evaluation.
+
 ## CI-3: Perturbation Stability
 
 Parent: CI-0
@@ -81,8 +95,7 @@ required result is unstable.
 
 Parent: CI-0
 
-Status: deferred; may start only if CI-2 passes held-out evaluation and residual
-contextual noise remains above the agreed threshold.
+Status: blocked; CI-2 did not pass held-out evaluation.
 
 Hypothesis: an optional model can improve contextual precision at 10 beyond the
 deterministic ranker while leaving the deterministic required set immutable.
@@ -99,10 +112,14 @@ on held-out cases with model, prompt, input, and output digests retained.
 1. Freeze oracle labels and held-out partition before tuning.
 2. Execute CI-1; prune the program if required recall cannot reach 100%.
 3. Execute CI-2 only after CI-1 passes.
-4. Execute CI-3 only after deterministic ranking passes held-out evaluation.
+4. CI-2 did not pass. Do not execute CI-3 or retune against reviewed labels.
 5. Execute CI-4 only by separate approval and only if deterministic residual
    noise justifies its operational and governance cost.
 
 Three consecutive non-improving ranking experiments trigger a strategy review,
 not weight tuning. Eight consecutive non-improving experiments close the tree and
 retain the best deterministic advisory behavior.
+
+Any replacement ranking experiment starts a new hypothesis branch and freezes a
+new corpus before scoring. It cannot relabel this reviewed corpus to satisfy a
+threshold.

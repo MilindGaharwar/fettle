@@ -28,7 +28,21 @@ Status: advisory flow accepted; promotion blocked
 
 ## Evaluation Decision
 
-All eight frozen corpus cases matched expected states and required labels. The
-held-out ranker and stable-key baseline both scored 10,000 precision-at-10 basis
-points, a 0% relative gain. The feature remains explicit and advisory; promotion
-to default presentation, enforcement, Assurance, or model reranking is blocked.
+The initial eight-case corpus established deterministic behavior but contained no
+irrelevant contextual candidates, so it could not test ranking lift. It was
+superseded by the reviewed 40-case corpus-v2 evaluation.
+
+Both blinded reviews and owner reconciliation resolved all 434 disagreements
+across 37 cases. Under the frozen eligibility rule, 10 development and 7 held-out
+cases remained eligible, below the required 20 per split. Development required
+recall was 96.30%; held-out required recall was 78.05%. On eligible held-out
+cases, ranker precision at 10 was 20.00% versus 17.14% for stable-key ordering,
+a 16.69% relative gain, but the paired 95% gain interval of 0 to 5.71 percentage
+points included zero.
+
+The implementation package CI-3 ranking promotion gate, corresponding to
+research hypothesis CI-2, is falsified by sub-100% required recall, insufficient
+eligible cases, and inconclusive precision evidence. The feature remains explicit
+and advisory; promotion to default presentation, enforcement, Assurance, or model
+reranking is blocked. The authoritative retained result is
+`docs/contextual-impact-corpus/evaluation.json`.

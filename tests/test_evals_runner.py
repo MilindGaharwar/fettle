@@ -336,6 +336,10 @@ def _contextual_corpus(cases, *, minimum_cases=1):
         "schema_version": 2,
         "review": {
             "reviewers": ["reviewer-a", "reviewer-b"],
+            "reviewer_roles": {"reviewer-a": "ai", "reviewer-b": "ai"},
+            "reviewer_model_classes": {"reviewer-a": "general", "reviewer-b": "glm"},
+            "ai_independence": "fresh-context-blinded",
+            "disagreement_resolution": "owner-reconciles-after-both-ai-reviews",
             "labeling": "blind-randomized",
             "minimum_ranking_cases_per_split": minimum_cases,
             "minimum_candidates_per_case": 10,
@@ -424,6 +428,16 @@ def test_contextual_corpus_v2_requires_blind_reviews_from_declared_reviewers():
 
     with pytest.raises(ValueError, match="declared reviewer"):
         validate_contextual_corpus(_contextual_corpus([case]))
+
+
+def test_contextual_corpus_v2_requires_distinct_ai_reviewers_and_owner_reconciliation():
+    corpus = _contextual_corpus([_contextual_case("held-1", "held_out", "repo-a/payments")])
+    corpus["review"]["reviewer_model_classes"] = {
+        "reviewer-a": "glm", "reviewer-b": "glm",
+    }
+
+    with pytest.raises(ValueError, match="two distinct fresh-context blinded AI"):
+        validate_contextual_corpus(corpus)
 
 
 def test_contextual_corpus_v2_rejects_negative_ranking_values():

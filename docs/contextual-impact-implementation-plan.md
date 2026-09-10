@@ -2,17 +2,18 @@
 
 Status: experimental advisory implementation complete; default rollout,
 enforcement, Assurance consumption, and model reranking are not authorized.
-CI-3 promotion is blocked because the frozen held-out corpus showed 0% relative
-precision gain over stable-key ordering.
+Corpus-v2 review is complete, but implementation package CI-3 (research
+hypothesis CI-2) is falsified for promotion by insufficient ranking-eligible
+cases, required-impact recall below 100%, and an inconclusive paired
+precision-gain interval.
 
 UX contract: [contextual-impact.ux-spec.md](contextual-impact.ux-spec.md)
 
 Research state:
 [hypothesis-tree-contextual-impact.md](hypothesis-tree-contextual-impact.md)
 
-Depends on: an explicit exception to the single-feature-program rule in
-`docs/plan-index.md`, refreshed `kgraph` indexing, and separate implementation
-approval
+The approved advisory scope is complete. Any replacement ranking experiment
+requires a new hypothesis, separate approval, and a newly pre-frozen corpus.
 
 ## 1. Objective And User Story
 
@@ -426,7 +427,7 @@ from that fresh result. Do not rely on the earlier stale index.
 
 ## 8. Overall Verification And Completion
 
-### Execution Evidence (2026-09-09)
+### Execution Evidence (2026-09-09, superseded baseline)
 
 - All eight frozen scenarios reproduced their expected state and required-impact
   labels, including incomplete, conflicting-provider, cycle, hyperedge, and
@@ -437,16 +438,27 @@ from that fresh result. Do not rely on the earlier stale index.
   10,000 basis points; relative gain 0% across four held-out cases.
 - The frozen corpus has no irrelevant contextual candidates, so it establishes
   required recall and deterministic behavior but cannot demonstrate ranking lift.
-- CI-3's 10% relative-gain gate therefore did not pass. The explicit
+- This initial run did not pass CI-3's 10% relative-gain gate. The explicit
   `--contextual` command remains experimental and advisory-only; CI-6 promotion
   and CI-7 model work remain blocked.
 - Corpus-v2 evaluation infrastructure now derives stable-key baseline and ranker
   orderings from one candidate universe, rejects development/held-out group
   leakage, and requires discriminating labels and immutable case identities.
-- `tests/fixtures/contextual_impact/corpus-v2.json` is collection-ready but empty;
-  it is not promotion evidence. Collection requires at least 20 ranking-eligible
-  development cases and 20 ranking-eligible held-out cases before one frozen
-  held-out run.
+- The corpus-v2 draft collected 20 intended development cases and 20 intended
+  held-out cases from Fettle, AlphaAgent, and AlphaOS history. Its 13 subsystem
+  groups do not cross splits. Review showed that not all collected cases met the
+  predeclared ranking-eligibility floor. Rank-blind packets are retained in
+  `docs/contextual-impact-corpus/`.
+- Corpus-v2 reconciliation resolved all 434 disagreements across 37 cases. After
+  applying the predeclared minimum of two relevant and two irrelevant candidates,
+  only 10 development and 7 held-out cases remained ranking-eligible, below the
+  required 20 per split. Labels were not altered to satisfy the threshold.
+- The frozen held-out result was ranker precision 2,000 basis points versus 1,714
+  for stable-key ordering, a 1,669-basis-point relative gain. Its paired 95% gain
+  interval was 0 to 571 basis points, so improvement was not established.
+- Held-out required-impact recall was 7,805 basis points, below the mandatory
+  10,000. This independently falsifies promotion. The complete machine-readable
+  result is retained in `docs/contextual-impact-corpus/evaluation.json`.
 - Full automated verification passed after the unrelated Assurance regression
   was resolved.
 
