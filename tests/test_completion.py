@@ -67,6 +67,58 @@ def test_one_evidence_reference_cannot_confirm_different_outcomes(tmp_path):
     assert "different expected outcomes" in result.errors[0]
 
 
+@pytest.mark.parametrize("surface", ["ui", "agent"])
+def test_user_facing_claim_requires_feature_specific_uat_evidence(tmp_path, surface):
+    root = _copy_fixture(tmp_path, "complete")
+    manifest_path = root / "docs" / "completion" / "P1.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["behavior_surfaces"] = [surface]
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = evaluate_manifests(root)
+
+    assert result.exit_code == 2
+    assert any("missing required evidence types" in error for error in result.errors)
+
+
+def test_user_facing_claim_requires_confirmed_lifecycle_and_recovery_evidence(tmp_path):
+    root = _copy_fixture(tmp_path, "complete")
+    manifest_path = root / "docs" / "completion" / "P1.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["behavior_surfaces"] = ["agent"]
+    template = manifest["criteria"][0]
+    manifest["criteria"] = [
+        dict(template, id=evidence_type, evidence_type=evidence_type)
+        for evidence_type in ("uat", "persistence", "interruption", "partial_write", "recovery")
+    ]
+    manifest["criteria"][2]["verdict"] = "blocked"
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = evaluate_manifests(root)
+
+    assert result.exit_code == 2
+    assert any("interruption evidence must be required and confirmed" in error
+               for error in result.errors)
+
+
+def test_user_facing_claim_passes_with_all_feature_specific_evidence(tmp_path):
+    root = _copy_fixture(tmp_path, "complete")
+    manifest_path = root / "docs" / "completion" / "P1.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["behavior_surfaces"] = ["agent"]
+    template = manifest["criteria"][0]
+    manifest["criteria"] = [
+        dict(template, id=evidence_type, evidence_type=evidence_type)
+        for evidence_type in ("uat", "persistence", "interruption", "partial_write", "recovery")
+    ]
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = evaluate_manifests(root)
+
+    assert result.exit_code == 0
+    assert result.complete is True
+
+
 def test_evidence_reference_cannot_confirm_different_outcomes_across_manifests(tmp_path):
     root = _copy_fixture(tmp_path, "complete")
     original = root / "docs" / "completion" / "P1.json"

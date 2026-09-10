@@ -371,7 +371,23 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
         targets = _collect_py_files(root, ignore_patterns)
         file_count = len(targets)
 
-    findings = run_ruff(targets) + run_semgrep(targets) + scan_spec_audit(root, cfg)
+    scanner_results = [execute_ruff(targets), execute_semgrep(targets)]
+    tool_errors = [
+        {
+            "tool": result.tool,
+            "status": result.status.value,
+            "message": result.message,
+        }
+        for result in scanner_results
+        if result.status in (ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR)
+    ]
+    findings = [
+        finding
+        for result in scanner_results
+        if result.status not in (ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR)
+        for finding in result.findings
+    ]
+    findings += scan_spec_audit(root, cfg)
     for f in findings:
         if os.path.isabs(f.get("file", "")):
             f["file"] = os.path.relpath(f["file"], root)
@@ -397,7 +413,21 @@ def scan_project(root: str, config: dict | None = None, json_output: bool = Fals
     if files is not None:
         rel_targets = {os.path.relpath(f, root) for f in targets}
         normalized = [f for f in normalized if f["file"] in rel_targets]
-    return {"findings": normalized, "file_count": file_count}
+    status = "pass"
+    if tool_errors:
+        status = (
+            ResultStatus.CONFIG_ERROR.value
+            if any(item["status"] == ResultStatus.CONFIG_ERROR.value for item in tool_errors)
+            else ResultStatus.TOOL_ERROR.value
+        )
+    elif normalized:
+        status = ResultStatus.VIOLATION.value
+    return {
+        "status": status,
+        "tool_errors": tool_errors,
+        "findings": normalized,
+        "file_count": file_count,
+    }
 
 
 def main() -> int:

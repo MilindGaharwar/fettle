@@ -1243,6 +1243,16 @@ for the full enterprise arc (WP-133..WP-153).
 
 ## Unreleased
 
+- Added a strict fail-closed runtime secret boundary before tool execution on
+  Claude Code, Codex CLI, Gemini CLI, and OpenCode. Claude Code and Gemini also
+  protect credential-bearing tool output before model exposure; Codex and
+  OpenCode output filtering is explicitly unsupported.
+- `fettle doctor` now distinguishes host installation, registration, trust,
+  execution, and verification instead of treating registration as proof that an
+  integration ran.
+- Added explicit advisory contextual impact analysis and retained its frozen
+  40-case evaluation. Promotion remains blocked by 78.05% held-out required
+  recall, only 7 eligible held-out cases, and inconclusive paired precision gain.
 - Stop-hook import checks understand src-layout packages (`src/<pkg>/`)
   and skip dependencies declared in pyproject/requirements even when no
   .venv exists to probe (ephemeral `uv run --with` envs) — a second

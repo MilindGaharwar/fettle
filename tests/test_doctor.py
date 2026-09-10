@@ -89,22 +89,78 @@ def test_bridge_health_reports_valid_and_tampered_states(tmp_path, monkeypatch):
     assert "fettle init" in stale["detail"]
 
 
-def test_runner_governance_recognizes_registered_hosts(tmp_path, monkeypatch):
+def test_runner_governance_distinguishes_registration_from_verification(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    (home / ".claude" / "plugins" / "fettle").mkdir(parents=True)
+    claude = home / ".claude" / "plugins" / "fettle"
+    (claude / "hooks").mkdir(parents=True)
+    (claude / "hooks" / "hooks.json").write_text(json.dumps({
+        "hooks": {"PreToolUse": [{"hooks": [{
+            "command": "python -m fettle.dispatcher",
+        }]}]},
+    }))
     (home / ".codex").mkdir()
-    (home / ".codex" / "hooks.json").write_text('{"command":"fettle"}')
+    (home / ".codex" / "hooks.json").write_text(json.dumps({
+        "hooks": {"PreToolUse": [{"hooks": [{
+            "command": "python -m fettle.dispatcher",
+        }]}]},
+    }))
     (home / ".gemini").mkdir()
-    (home / ".gemini" / "settings.json").write_text('{"command":"fettle"}')
+    (home / ".gemini" / "settings.json").write_text(json.dumps({
+        "hooks": {"BeforeTool": [{"hooks": [{
+            "command": "python -m fettle.dispatcher",
+        }]}]},
+    }))
     (home / ".config" / "opencode").mkdir(parents=True)
-    (home / ".config" / "opencode" / "config.json").write_text('{"plugin":"fettle"}')
+    plugin = tmp_path / "fettle.ts"
+    plugin.write_text('spawn(python, ["-m", "fettle.dispatcher"])')
+    (home / ".config" / "opencode" / "config.json").write_text(json.dumps({
+        "plugin": [plugin.as_uri()],
+    }))
     monkeypatch.setattr(package_doctor.Path, "home", staticmethod(lambda: home))
     monkeypatch.setattr(package_doctor, "_which", lambda name: f"/bin/{name}")
 
     checks = package_doctor.check_runner_governance()
 
     assert len(checks) == 4
-    assert all(check["ok"] for check in checks)
+    assert all(check["states"]["installed"] for check in checks)
+    assert all(check["states"]["registered"] for check in checks)
+    assert all(not check["states"]["verified"] for check in checks)
+    assert all(not check["ok"] for check in checks)
+
+
+def test_runner_governance_rejects_malformed_registration(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "hooks.json").write_text("{not json")
+    monkeypatch.setattr(package_doctor.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(
+        package_doctor, "_which", lambda name: "/bin/codex" if name == "codex" else None
+    )
+
+    check = package_doctor.check_runner_governance()[0]
+
+    assert check["states"] == {
+        "installed": True,
+        "registered": False,
+        "trusted": False,
+        "executed": False,
+        "verified": False,
+    }
+    assert check["status"] == "installed"
+
+
+def test_runner_governance_does_not_accept_unrelated_fettle_text(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".gemini").mkdir(parents=True)
+    (home / ".gemini" / "settings.json").write_text('{"note":"fettle"}')
+    monkeypatch.setattr(package_doctor.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(
+        package_doctor, "_which", lambda name: "/bin/gemini" if name == "gemini" else None
+    )
+
+    check = package_doctor.check_runner_governance()[0]
+
+    assert check["states"]["registered"] is False
 
 
 def test_mutation_readiness_is_informational_when_disabled(monkeypatch):
@@ -284,8 +340,7 @@ def test_host_enforcement_reports_opencode_notify_only_downgrade(
 
     checks = doctor.check_host_enforcement()
 
-    assert len(checks) == 1
-    check = checks[0]
+    check = next(item for item in checks if item["name"] == "enforcement:opencode")
     assert check["name"] == "enforcement:opencode"
     assert check["ok"] is True  # informational when nothing enforces
     assert "PostToolUse, Stop" in check["detail"]
@@ -313,3 +368,14 @@ def test_host_enforcement_silent_when_gap_host_not_installed(monkeypatch, tmp_pa
     monkeypatch.chdir(tmp_path)
 
     assert doctor.check_host_enforcement() == []
+
+
+def test_host_enforcement_reports_unsupported_output_filtering(monkeypatch):
+    monkeypatch.setattr(doctor, "_which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr("fettle.config.load_config", lambda *args: {"gates": {}})
+
+    checks = doctor.check_host_enforcement()
+
+    unsupported = {check["name"]: check for check in checks if "output-filtering" in check["name"]}
+    assert unsupported["output-filtering:codex"]["status"] == "unsupported"
+    assert unsupported["output-filtering:opencode"]["status"] == "unsupported"

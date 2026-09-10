@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import logging
 import os
 import re
@@ -105,6 +106,211 @@ class RunResult:
     checks: tuple[CheckRecord, ...]
     transcript: str
     metrics: EvalMetrics
+
+
+def evaluate_contextual_rankings(cases: list[dict], *, held_out: bool) -> dict:
+    """Compute aggregate precision@10 for one frozen corpus split."""
+    selected = [case for case in cases if case.get("held_out") is held_out]
+    relevant = 0
+    returned = 0
+    for case in selected:
+        ranked = case.get("ranked_contextual", [])[:10]
+        labels = set(case.get("contextual_relevance", []))
+        relevant += sum(item in labels for item in ranked)
+        returned += len(ranked)
+    precision = round(relevant * 10_000 / returned) if returned else 0
+    return {
+        "split": "held_out" if held_out else "development",
+        "case_count": len(selected),
+        "relevant_in_top_10": relevant,
+        "returned_in_top_10": returned,
+        "precision_at_10_basis_points": precision,
+    }
+
+
+def validate_contextual_corpus(corpus: dict) -> list[str]:
+    """Validate the frozen v2 ranking corpus without requiring collected cases."""
+    if corpus.get("schema_version") != 2:
+        raise ValueError("contextual corpus schema_version must be 2")
+    review = corpus.get("review")
+    cases = corpus.get("cases")
+    if not isinstance(review, dict) or not isinstance(cases, list):
+        raise ValueError("contextual corpus requires review metadata and cases")
+    reviewers = review.get("reviewers", [])
+    if len(reviewers) < 2 or review.get("labeling") != "blind-randomized":
+        raise ValueError("contextual corpus requires two reviewers and blind-randomized labeling")
+    roles = review.get("reviewer_roles")
+    model_classes = review.get("reviewer_model_classes")
+    if (
+        not isinstance(roles, dict)
+        or set(roles) != set(reviewers)
+        or set(roles.values()) != {"ai"}
+        or not isinstance(model_classes, dict)
+        or set(model_classes) != set(reviewers)
+        or len(set(model_classes.values())) != len(reviewers)
+        or review.get("ai_independence") != "fresh-context-blinded"
+        or review.get("disagreement_resolution")
+        != "owner-reconciles-after-both-ai-reviews"
+    ):
+        raise ValueError(
+            "contextual corpus requires two distinct fresh-context blinded AI reviewers "
+            "and owner reconciliation"
+        )
+    limits = {
+        "minimum_ranking_cases_per_split": 1,
+        "minimum_candidates_per_case": 10,
+        "minimum_relevant_per_case": 1,
+        "minimum_irrelevant_per_case": 1,
+    }
+    for name, floor in limits.items():
+        if not isinstance(review.get(name), int) or review[name] < floor:
+            raise ValueError(f"{name} must be an integer of at least {floor}")
+
+    seen_ids: set[str] = set()
+    groups: dict[str, str] = {}
+    for case in cases:
+        case_id = case.get("id")
+        split = case.get("split")
+        group = case.get("group")
+        if not case_id or case_id in seen_ids:
+            raise ValueError("contextual case ids must be unique and non-empty")
+        seen_ids.add(case_id)
+        if split not in {"development", "held_out"} or not group:
+            raise ValueError(f"{case_id}: split and group are required")
+        identity_fields = (
+            "repository_digest", "revision", "graph_digest", "provider_digest", "oracle_digest",
+        )
+        if not all(case.get(name) for name in identity_fields):
+            raise ValueError(f"{case_id}: immutable identity fields are required")
+        if group in groups and groups[group] != split:
+            raise ValueError(f"split leakage: group {group} appears in both splits")
+        groups[group] = split
+        if not case.get("ranking_eligible", False):
+            continue
+        candidates = case.get("candidates")
+        if not isinstance(candidates, list):
+            raise ValueError(f"{case_id}: candidates must be a list")
+        if len(candidates) < review["minimum_candidates_per_case"]:
+            raise ValueError(
+                f"{case_id}: requires at least {review['minimum_candidates_per_case']} candidates"
+            )
+        keys: set[str] = set()
+        counts = {"relevant": 0, "irrelevant": 0}
+        for candidate in candidates:
+            key = candidate.get("stable_key")
+            relevance = candidate.get("relevance")
+            if not key or key in keys:
+                raise ValueError(f"{case_id}: candidate stable keys must be unique and non-empty")
+            keys.add(key)
+            if relevance not in counts:
+                raise ValueError(f"{case_id}: candidate relevance must be relevant or irrelevant")
+            counts[relevance] += 1
+            if not candidate.get("rationale"):
+                raise ValueError(f"{case_id}: every candidate requires a rationale")
+            reviews = candidate.get("reviews")
+            if not isinstance(reviews, list) or {
+                item.get("reviewer") for item in reviews if isinstance(item, dict)
+            } != set(reviewers):
+                raise ValueError(f"{case_id}: every candidate requires one blind review per declared reviewer")
+            if any(
+                item.get("relevance") not in counts or not item.get("rationale")
+                for item in reviews
+            ):
+                raise ValueError(f"{case_id}: blind reviews require relevance and rationale")
+            score = candidate.get("score")
+            depth = candidate.get("depth")
+            if (
+                not isinstance(score, int) or isinstance(score, bool) or score < 0
+                or not isinstance(depth, int) or isinstance(depth, bool) or depth < 0
+            ):
+                raise ValueError(f"{case_id}: score and depth must be non-negative integers")
+        for relevance in ("relevant", "irrelevant"):
+            minimum = review[f"minimum_{relevance}_per_case"]
+            if counts[relevance] < minimum:
+                raise ValueError(f"{case_id}: requires at least {minimum} {relevance} candidates")
+        required = case.get("required_targets")
+        actual = case.get("actual_required")
+        if not isinstance(required, list) or not isinstance(actual, list):
+            raise ValueError(f"{case_id}: required target and actual-required lists are required")
+    return []
+
+
+def evaluate_contextual_corpus(corpus: dict, *, split: str) -> dict:
+    """Evaluate paired stable-key and deterministic ranker orderings for one split."""
+    validate_contextual_corpus(corpus)
+    if split not in {"development", "held_out"}:
+        raise ValueError("split must be development or held_out")
+    selected = [
+        case for case in corpus["cases"]
+        if case["split"] == split and case.get("ranking_eligible", False)
+    ]
+    ranker_hits = baseline_hits = returned = required = required_found = 0
+    paired_deltas = []
+    for case in selected:
+        candidates = case["candidates"]
+        baseline = sorted(candidates, key=lambda item: item["stable_key"])[:10]
+        ranker = sorted(
+            candidates,
+            key=lambda item: (-item["score"], item["depth"], item["stable_key"]),
+        )[:10]
+        baseline_case_hits = sum(item["relevance"] == "relevant" for item in baseline)
+        ranker_case_hits = sum(item["relevance"] == "relevant" for item in ranker)
+        baseline_hits += baseline_case_hits
+        ranker_hits += ranker_case_hits
+        returned += len(ranker)
+        paired_deltas.append(round((ranker_case_hits - baseline_case_hits) * 10_000 / len(ranker)))
+        expected_required = set(case["required_targets"])
+        actual_required = set(case["actual_required"])
+        required += len(expected_required)
+        required_found += len(expected_required & actual_required)
+    ranker_precision = round(ranker_hits * 10_000 / returned) if returned else 0
+    baseline_precision = round(baseline_hits * 10_000 / returned) if returned else 0
+    required_recall = round(required_found * 10_000 / required) if required else None
+    minimum = corpus["review"]["minimum_ranking_cases_per_split"]
+    blockers = []
+    if len(selected) < minimum:
+        blockers.append(f"requires at least {minimum} ranking-eligible {split} cases")
+    if required_recall is None:
+        blockers.append("requires at least one required-impact label")
+    elif required_recall < 10_000:
+        blockers.append("required-impact recall must be 100%")
+    relative_gain = (
+        round((ranker_precision - baseline_precision) * 10_000 / baseline_precision)
+        if baseline_precision else None
+    )
+    confidence_interval = _paired_bootstrap_interval(paired_deltas)
+    if split != "held_out":
+        blockers.append("promotion requires the frozen held_out split")
+    elif not blockers and relative_gain is None:
+        blockers.append("baseline precision is zero; relative gain is undefined")
+    elif not blockers and relative_gain < 1000:
+        blockers.append("held-out relative precision gain must be at least 10%")
+    elif not blockers and confidence_interval[0] <= 0:
+        blockers.append("paired 95% gain interval must be above zero")
+    return {
+        "split": split,
+        "case_count": len(selected),
+        "ranker_precision_at_10_basis_points": ranker_precision,
+        "baseline_precision_at_10_basis_points": baseline_precision,
+        "relative_gain_basis_points": relative_gain,
+        "paired_case_deltas_basis_points": paired_deltas,
+        "paired_gain_ci95_basis_points": list(confidence_interval),
+        "required_recall_basis_points": required_recall,
+        "evaluation_ready": len(selected) >= minimum,
+        "promotion_ready": not blockers,
+        "blocking_reasons": blockers,
+    }
+
+
+def _paired_bootstrap_interval(deltas: list[int]) -> tuple[int, int]:
+    if not deltas:
+        return (0, 0)
+    randomizer = random.Random(0)
+    means = sorted(
+        round(sum(randomizer.choice(deltas) for _ in deltas) / len(deltas))
+        for _ in range(10_000)
+    )
+    return means[249], means[9749]
 
 
 def discover_scenarios(root: str | Path) -> list[Path]:

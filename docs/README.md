@@ -38,6 +38,18 @@ external services, and non-Python toolchains remain separate. Run
 | Audit governance history | `fettle ledger verify` | Precise validation of the tamper-evident evidence chain |
 | Integrate an enterprise analyzer | [Configuration: integrations](CONFIG.md#integrations-integrations-wp-14b) | Explicit, opt-in SonarQube, Black Duck, or Pact evidence |
 
+Contextual impact analysis is available as an experimental, advisory-only view:
+
+```bash
+fettle graph impact src/service.py --contextual
+fettle graph impact src/service.py --contextual --detailed
+fettle graph impact src/service.py --contextual --json
+```
+
+It groups deterministic required and contextual impacts, exposes exclusions and
+typed paths in detailed or JSON output, and reports incomplete or bounded analysis
+as a non-success state. It does not change the default closure, Assurance, or CI.
+
 ## The Core Journey
 
 1. Run `fettle init --dry-run` and inspect what would change.
@@ -86,6 +98,7 @@ external services, and non-Python toolchains remain separate. Run
 |---|---|---|
 | Inspect effective policy | `fettle config --explain` | [Configuration](CONFIG.md) |
 | Diagnose this machine | `fettle doctor` | [Operational boundaries](../README.md#one-package-the-complete-python-toolkit) |
+| Inspect contextual impact | `fettle graph impact <paths> --contextual` | [Advisory UX contract](contextual-impact.ux-spec.md) |
 | Check changed code | `fettle check --changed` | [Capability map](../README.md#capabilities) |
 | Bind tests to a change | `fettle verify` | [Canonical verification contract](canonical-evidence-verification.ux-spec.md) |
 | Assess repository trust | `fettle assurance` | [Evidence artifact contract](evidence-artifact-contract.md) |
@@ -99,7 +112,8 @@ external services, and non-Python toolchains remain separate. Run
 
 | Surface | Current scope | Important boundary |
 |---|---|---|
-| Agent lifecycle | Claude Code, Codex CLI, OpenCode live-verified; Gemini CLI contract-tested | Host transports differ; normalized policy is shared |
+| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, and OpenCode transports are implemented and contract-tested | Local installation, registration, trust, execution, verification, and enforcement remain distinct |
+| Runtime secret boundary | Pre-tool blocking on all four hosts; output replacement/withholding on Claude Code and Gemini | Codex and OpenCode pre-model output filtering is unsupported |
 | Post-edit adapters | Python, JavaScript/TypeScript, Go, Rust | Native tools must be available |
 | `fettle check` | Python Ruff and bundled Semgrep rules | Not the full polyglot adapter surface |
 | `fettle verify` | Every affected discovered workspace with a test command | Impacted-test narrowing is Python-specific |
@@ -109,7 +123,7 @@ external services, and non-Python toolchains remain separate. Run
 | Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
 | Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Changed-scope survivors are enforced in this repository; adoption elsewhere remains policy-controlled |
 | Specifications and UAT | Living Markdown specs, trace coverage, agent/manual acceptance verdicts | UAT is report-only; unavailable automation remains visible |
-| Change intelligence | Snapshot-bound graph status, impact, and shadow comparison | Advisory; it does not authorize a change |
+| Change intelligence | Snapshot-bound graph status, impact, shadow comparison, and explicit contextual analysis | Advisory; contextual promotion failed its frozen evaluation and does not authorize a change |
 | State consistency | Contract creation, lint, listing, and execution | Adapter reach is contract-specific |
 | Assurance | Nine-dimension record plus collect, review, and summarize tooling for frozen shadow comparisons | Stronger enforcement remains evidence-gated |
 

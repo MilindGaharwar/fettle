@@ -99,7 +99,7 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += chunk))
     child.stderr.on("data", (chunk) => (stderr += chunk))
-    child.on("error", (error) => resolve({{ blocked: false, message: `Fettle unavailable — failing open: ${{error.message}}` }}))
+    child.on("error", () => resolve({{ blocked: event === "PreToolUse", message: event === "PreToolUse" ? "Secret protection unavailable. Run `fettle doctor`." : "Fettle unavailable" }}))
     child.on("close", (code) => {{
       try {{
         const result = JSON.parse(stdout || "{{}}")
@@ -109,10 +109,10 @@ function runFettle(event: string, tool: string | undefined, args: Record<string,
           message: result.reason ?? output.permissionDecisionReason ?? output.additionalContext ?? result.systemMessage ?? stderr.trim(),
         }})
       }} catch {{
-        resolve({{ blocked: false, message: `Fettle returned invalid output — failing open: ${{(stderr.trim() || stdout.trim()).slice(0, 300)}}` }})
+        resolve({{ blocked: event === "PreToolUse", message: event === "PreToolUse" ? "Secret protection returned invalid output. Run `fettle doctor`." : "Fettle returned invalid output" }})
       }}
     }})
-    child.stdin.end(JSON.stringify({{ hook_event_name: event, tool_name: tool, tool_input: normalizeArgs(args), cwd: directory, session_id: sessionID }}))
+    child.stdin.end(JSON.stringify({{ hook_event_name: event, tool_name: tool, tool_input: normalizeArgs(args), fettle_host: "opencode", cwd: directory, session_id: sessionID }}))
   }})
 }}
 
@@ -123,8 +123,7 @@ export const FettlePlugin = (async ({{ client, directory }}) => {{
   }}
   return {{
     "tool.execute.before": async (input, output) => {{
-      const tool = toolNames[input.tool]
-      if (!tool || !["Bash", "Edit", "Write"].includes(tool)) return
+      const tool = toolNames[input.tool] ?? input.tool
       const result = await runFettle("PreToolUse", tool, output.args ?? {{}}, directory, input.sessionID)
       if (result.blocked) throw new Error(result.message || "Blocked by Fettle")
       await notify(result.message, "warning")
@@ -156,7 +155,7 @@ def _write_tree(root: Path, published_root: Path) -> None:
     hooks = {
         "description": "Fettle installed-package hooks",
         "hooks": {
-            "PreToolUse": [{"matcher": "Write|Edit|Bash", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
             "PostToolUse": [{"matcher": "Write|Edit|Bash|Read", "hooks": [{"type": "command", "command": command, "timeout": 15}]}],
             "SubagentStart": [{"hooks": [{"type": "command", "command": _shell_command(["node", str(published_root / "hooks" / "subagent_inject.js")]), "timeout": 5}]}],
             "Stop": [{"hooks": [{"type": "command", "command": command, "timeout": 60}]}],

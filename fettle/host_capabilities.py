@@ -59,6 +59,7 @@ def host_capabilities() -> dict[str, dict]:
             "translation": {},
             "subagent_start": True,
             "enforcement": {event: "block" for event in CLAUDE_EVENTS},
+            "output_filtering": "replace",
         },
         "codex": {
             "native": CODEX_EVENTS,
@@ -66,6 +67,7 @@ def host_capabilities() -> dict[str, dict]:
             "translation": {},
             "subagent_start": False,
             "enforcement": {event: "block" for event in CODEX_EVENTS},
+            "output_filtering": "unsupported",
         },
         "gemini": {
             "native": GEMINI_NATIVE,
@@ -74,6 +76,7 @@ def host_capabilities() -> dict[str, dict]:
             "subagent_start": False,
             "enforcement": {event: "block" for event in
                             _translated(GEMINI_NATIVE, GEMINI_TRANSLATION)},
+            "output_filtering": "replace",
         },
         "opencode": {
             "native": OPENCODE_NATIVE,
@@ -85,6 +88,7 @@ def host_capabilities() -> dict[str, dict]:
             # can only toast — a block decision cannot stop the host there.
             "enforcement": {"PreToolUse": "block", "PostToolUse": "notify",
                             "Stop": "notify"},
+            "output_filtering": "unsupported",
         },
     }
 

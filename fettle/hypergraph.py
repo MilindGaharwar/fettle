@@ -42,6 +42,7 @@ class EphemeralGraph:
         # find_by_stable_key / stable_keys().
         self._nodes = {node.id: node for node in nodes.values()}
         self._edges = dict(edges)
+        self._provider_results = tuple(sorted(results, key=lambda result: result.fact_set_id))
         self._node_to_edges: dict[str, list[tuple[str, str]]] = {}
         self._edge_endpoints: dict[str, list[tuple[str, str, str]]] = {}
         for inc in incidences:
@@ -61,6 +62,10 @@ class EphemeralGraph:
 
     def edge(self, edge_id: str) -> Hyperedge | None:
         return self._edges.get(edge_id)
+
+    @property
+    def provider_results(self) -> tuple[ProviderResult, ...]:
+        return self._provider_results
 
     def node_count(self) -> int:
         return len(self._nodes)
@@ -157,12 +162,12 @@ def assemble(
 
 
 def _missing_endpoints(
-    edge_drafts: list[tuple[str, str, str, dict]],
+    edge_drafts: list[tuple[str, str, str, dict, str]],
     key_to_node: dict[str, Node],
 ) -> list[str]:
     return sorted({
         endpoint
-        for _t, src, dst, _a in edge_drafts
+        for _t, src, dst, _a, _provider in edge_drafts
         for endpoint in (src, dst)
         if endpoint not in key_to_node
     })
@@ -170,9 +175,9 @@ def _missing_endpoints(
 
 def _collect_drafts(
     results: tuple[ProviderResult, ...],
-) -> tuple[dict[str, tuple[str, dict]], list[tuple[str, str, str, dict]]] | AssemblyError:
+) -> tuple[dict[str, tuple[str, dict]], list[tuple[str, str, str, dict, str]]] | AssemblyError:
     node_drafts: dict[str, tuple[str, dict]] = {}
-    edge_drafts: list[tuple[str, str, str, dict]] = []
+    edge_drafts: list[tuple[str, str, str, dict, str]] = []
     for result in results:
         for draft in result.nodes:
             existing = node_drafts.get(draft.stable_key)
@@ -185,24 +190,25 @@ def _collect_drafts(
                 continue
             node_drafts[draft.stable_key] = (draft.kind, draft.attributes)
         edge_drafts.extend(
-            (d.edge_type, d.src_key, d.dst_key, d.attributes) for d in result.edges
+            (d.edge_type, d.src_key, d.dst_key, d.attributes, result.fact_set_id)
+            for d in result.edges
         )
     return node_drafts, edge_drafts
 
 
 def _build_edges(
-    edge_drafts: list[tuple[str, str, str, dict]],
+    edge_drafts: list[tuple[str, str, str, dict, str]],
     key_to_node: dict[str, Node],
     results: tuple[ProviderResult, ...],
 ) -> tuple[dict[str, Hyperedge], list[Incidence]] | AssemblyError:
     edges: dict[str, Hyperedge] = {}
     incidence_list: list[Incidence] = []
-    for edge_type, src, dst, attributes in sorted(edge_drafts):
+    for edge_type, src, dst, attributes, provider_fact_set_id in sorted(edge_drafts):
         edge = Hyperedge.create(
             edge_type,
             ((key_to_node[src].id, "src", "out", 0),
              (key_to_node[dst].id, "dst", "in", 0)),
-            provider_fact_set_id=_fact_set_for(results, edge_type),
+            provider_fact_set_id=provider_fact_set_id,
             attributes=attributes,
         )
         if edge.id in edges:
@@ -214,10 +220,3 @@ def _build_edges(
         ):
             incidence_list.append(Incidence(edge.id, node_id, role, direction))
     return edges, incidence_list
-
-
-def _fact_set_for(results: tuple[ProviderResult, ...], edge_type: str) -> str:
-    owner = next((r for r in results if any(
-        e.edge_type == edge_type for e in r.edges
-    )), None)
-    return owner.fact_set_id if owner else "unattributed"

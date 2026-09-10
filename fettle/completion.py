@@ -18,6 +18,8 @@ VERDICTS = {
 }
 STATUSES = {"in_progress", "complete"}
 UAT_DECISIONS = {"FIX_FIRST", "SHIP", "REJECT"}
+USER_FACING_SURFACES = {"ui", "agent"}
+USER_FACING_EVIDENCE = {"uat", "persistence", "interruption", "partial_write", "recovery"}
 
 
 @dataclass
@@ -103,6 +105,7 @@ def _evaluate_manifest(
 
     criteria: list[CriterionResult] = []
     criterion_ids: set[str] = set()
+    evidence_types: dict[str, tuple[bool, str]] = {}
     for index, raw in enumerate(raw_criteria):
         label = f"{path}: criteria[{index}]"
         if not isinstance(raw, dict):
@@ -124,6 +127,12 @@ def _evaluate_manifest(
             errors.append(f"{label}: unsupported kind {kind}")
         if verdict and verdict not in VERDICTS:
             errors.append(f"{label}: unsupported verdict {verdict}")
+        evidence_type = raw.get("evidence_type")
+        if evidence_type is not None:
+            if not isinstance(evidence_type, str) or not evidence_type.strip():
+                errors.append(f"{label}.evidence_type must be a non-empty string")
+            else:
+                evidence_types[evidence_type] = (required, verdict)
 
         evidence = raw.get("evidence")
         evidence_ref = ""
@@ -157,6 +166,26 @@ def _evaluate_manifest(
             criterion_id, kind, required, verdict, observed, evidence_ref,
             recovery, passed, reason,
         ))
+
+    behavior_surfaces = data.get("behavior_surfaces", [])
+    if not isinstance(behavior_surfaces, list) or not all(
+        isinstance(surface, str) and surface.strip() for surface in behavior_surfaces
+    ):
+        errors.append(f"{path}: behavior_surfaces must be a list of non-empty strings")
+        behavior_surfaces = []
+    if USER_FACING_SURFACES.intersection(behavior_surfaces):
+        missing = USER_FACING_EVIDENCE - evidence_types.keys()
+        if missing:
+            errors.append(
+                f"{path}: user-facing claim is missing required evidence types: "
+                + ", ".join(sorted(missing))
+            )
+        for evidence_type in sorted(USER_FACING_EVIDENCE - missing):
+            required, verdict = evidence_types[evidence_type]
+            if not required or verdict != "confirmed":
+                errors.append(
+                    f"{path}: {evidence_type} evidence must be required and confirmed"
+                )
 
     derived_complete = bool(criteria) and all(c.passed for c in criteria if c.required)
     contradiction = (status == "complete" or uat_decision == "SHIP") and not derived_complete

@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult
+from fettle.provider_contract import TrustClass
+from fettle.providers.base import EdgeDraft, NodeDraft, ProviderResult, implementation_digest
 
 _COVERAGE_NOTE = (
     "python-only coverage; JS/TS, Go, and Rust import edges are out of "
@@ -57,4 +58,7 @@ def python_import_provider(root: str) -> ProviderResult:
         "python_imports", tuple(nodes), tuple(edges),
         complete=True,
         notes=(_COVERAGE_NOTE,) + tuple(sorted(unresolved)[:10]),
+        provider_version="1", implementation_digest=implementation_digest(__file__),
+        deterministic=True, trust_class=TrustClass.DERIVED,
+        completeness_scope=("python_imports",),
     )

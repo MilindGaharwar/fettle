@@ -134,3 +134,12 @@ def test_opencode_post_and_stop_are_notify_only():
     from fettle.host_capabilities import enforcement_gaps
 
     assert enforcement_gaps() == {"opencode": ("PostToolUse", "Stop")}
+
+
+def test_output_filtering_capabilities_are_truthful():
+    capabilities = host_capabilities()
+
+    assert capabilities["claude_code"]["output_filtering"] == "replace"
+    assert capabilities["gemini"]["output_filtering"] == "replace"
+    assert capabilities["codex"]["output_filtering"] == "unsupported"
+    assert capabilities["opencode"]["output_filtering"] == "unsupported"

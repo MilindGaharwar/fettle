@@ -28,6 +28,23 @@ def _lazy(module: str, attr: str = "run_check") -> CheckRunner:
     return run
 
 CHECKS: tuple[CheckSpec, ...] = (
+    CheckSpec(
+        name="runtime_secret_guard",
+        run=_lazy("fettle.runtime_secret_guard"),
+        events=frozenset({"PreToolUse"}),
+        tools=None,
+        order=0,
+        budget_ms=100,
+        fail_closed=True,
+    ),
+    CheckSpec(
+        name="runtime_output_guard",
+        run=_lazy("fettle.runtime_output_guard"),
+        events=frozenset({"PostToolUse"}),
+        tools=None,
+        order=0,
+        budget_ms=100,
+    ),
     # PreToolUse — first, every tool: delegated-policy tamper guard (Stage A)
     CheckSpec(
         name="capsule_guard",
