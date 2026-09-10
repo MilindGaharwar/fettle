@@ -27,6 +27,18 @@ sandbox. Shell mediation, policy capsules, worktrees, and agent hooks are
 defense-in-depth controls; use least-privilege credentials, isolated runners,
 repository protections, and independent CI for hard boundaries.
 
+Fettle's strict runtime secret boundary can block protected file reads,
+environment dumps, and recognized nested shell reads before execution on Claude
+Code, Codex CLI, Gemini CLI, and OpenCode. Scanner failures on this boundary fail
+closed. Pre-model tool-output protection is transport-dependent: Claude Code can
+receive replacement output and Gemini can withhold affected output, while Codex
+and OpenCode output filtering is unsupported. Detection is not exhaustive and
+does not replace secret managers, host isolation, or credential scoping.
+
+Host registration is not proof of trust, execution, or verification. Use
+`fettle doctor` for the separate local states and exercise the integration before
+depending on it.
+
 The default installation includes Fettle's Python analyzers and execution
 runtimes. Agent hosts, browser binaries, Git, non-Python language toolchains,
 and external services retain their own supply chains and permissions. Pin and

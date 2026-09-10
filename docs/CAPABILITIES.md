@@ -5,7 +5,8 @@ Fettle describes support by surface. A broad label such as "polyglot" or
 
 | Area | Current scope | Important boundary |
 |---|---|---|
-| Agent lifecycle | Claude Code, Codex CLI, and OpenCode live-verified; Gemini CLI contract-tested | Host transports and enforcement differ; `fettle doctor` reports the installed reality |
+| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, and OpenCode transports are implemented and contract-tested | Local installation, registration, trust, execution, verification, and enforcement differ; `fettle doctor` does not infer verification from registration |
+| Runtime secret boundary | Strict pre-tool blocking on all four hosts; output replacement on Claude Code and withholding on Gemini | Pre-model output filtering is unsupported on Codex and OpenCode; this is defense in depth, not a sandbox |
 | Post-edit adapters | Python, JavaScript/TypeScript, Go, Rust | Native tools must be installed for their workspace |
 | `fettle check` | Python Ruff plus bundled language-neutral Semgrep rules | Not the complete polyglot adapter surface |
 | `fettle verify` | Affected discovered workspaces with configured test commands | Impacted-test narrowing is Python-specific; local verification does not replace CI |
@@ -16,7 +17,7 @@ Fettle describes support by surface. A broad label such as "polyglot" or
 | Delegation | Plans, worktrees, claims, topology, spawn, capsules, role authority, completion, and lineage reports | Defense in depth, not process or credential isolation |
 | Living specifications | Markdown spec lint, inventory, scenario-to-test coverage, and canonical drift evidence | A declared link is not verified until its execution evidence passes |
 | User acceptance | CLI, API, web, and library sessions; manual walkthroughs; operator attestation; seeded benchmark | Automation requires consent; unavailable observation remains visible |
-| Change intelligence | Deterministic source snapshots and advisory graph `status`, `impact`, and `shadow` | Graph output advises; it does not authorize |
+| Change intelligence | Deterministic source snapshots and advisory graph `status`, `impact`, `shadow`, and explicit contextual ranking | Contextual promotion failed required-recall, sample-size, and precision-evidence gates; graph output does not authorize |
 | State consistency | Contract template, validation, listing, and execution | Comparator/model support and reach are explicit in each contract |
 | Governance ledger | Hash-chained records with commit and CI-artifact anchoring | Unknown anchor coverage remains unknown |
 | External integrations | SonarQube, Black Duck/Polaris, Pact | Disabled by default; credentials stay in environment-managed integrations |

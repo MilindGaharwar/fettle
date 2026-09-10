@@ -26,7 +26,7 @@ routing information.
 | **Producers** | Agent hosts, translated per transport into `HookContext` |
 | **Host support** | Claude Code · Codex CLI · Gemini CLI · OpenCode |
 | **Durability** | Durable (decision logged) + Live (hook response) |
-| **Consumers** | 12 checks: `agent_spawn_gate`, `artifact_gate`, `authorship_gate`, `capsule_guard`, `commit_message`, `config_protect`, `deploy_gate`, `destructive_guard`, `mcp_trust_gate`, `quality_gate`, `release_gate`, `tdd_gate` |
+| **Consumers** | 13 checks: `runtime_secret_guard`, `agent_spawn_gate`, `artifact_gate`, `authorship_gate`, `capsule_guard`, `commit_message`, `config_protect`, `deploy_gate`, `destructive_guard`, `mcp_trust_gate`, `quality_gate`, `release_gate`, `tdd_gate` |
 
 Fires before a tool executes. Checks may block (enforce), advise
 (advisory), or allow. This is where file-authority (P52) and destructive-
@@ -43,6 +43,11 @@ command protection live.
 
 Fires after a tool completes. Returns findings and recovery steps while the
 generation loop can still act on them.
+
+`runtime_output_guard` replaces credential-bearing output before model exposure
+on Claude Code and Gemini. Codex and OpenCode are explicitly unsupported for
+pre-model output filtering until their installed transport contract proves a
+replacement API.
 
 ### Stop
 

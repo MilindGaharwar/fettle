@@ -11,9 +11,11 @@ Usage:
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 def _version_of(binary: str, args: list[str] | None = None) -> str | None:
@@ -282,28 +284,100 @@ def check_dispatch_health(days: int = 7) -> list[dict]:
     return checks
 
 
+def _dispatch_command_registered(command: object) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        arguments = shlex.split(command)
+    except ValueError:
+        return False
+    return (
+        len(arguments) >= 3
+        and arguments[-2:] == ["-m", "fettle.dispatcher"]
+    ) or (
+        len(arguments) >= 3
+        and arguments[-1] == "dispatcher.py"
+        and Path(arguments[-2]).name == "run.sh"
+    )
+
+
+def _hook_registered(path: Path, event: str) -> bool:
+    try:
+        config = json.loads(path.read_text())
+        groups = config["hooks"][event]
+    except (OSError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    if not isinstance(groups, list):
+        return False
+    return any(
+        _dispatch_command_registered(hook.get("command"))
+        for group in groups if isinstance(group, dict)
+        for hook in group.get("hooks", []) if isinstance(hook, dict)
+    )
+
+
+def _opencode_registered(path: Path) -> bool:
+    try:
+        plugins = json.loads(path.read_text())["plugin"]
+    except (OSError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    if not isinstance(plugins, list):
+        return False
+    for value in plugins:
+        if not isinstance(value, str):
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme != "file":
+            continue
+        plugin = Path(unquote(parsed.path))
+        try:
+            if plugin.is_file() and "fettle.dispatcher" in plugin.read_text():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def check_runner_governance() -> list[dict]:
-    """Per-runner visibility for host registrations created by `fettle init`."""
+    """Report distinct host installation, registration, and evidence states."""
     checks: list[dict] = []
     probes = {
-        "claude": Path.home() / ".claude" / "plugins" / "fettle",
-        "codex": Path.home() / ".codex" / "hooks.json",
-        "gemini": Path.home() / ".gemini" / "settings.json",
-        "opencode": Path.home() / ".config" / "opencode" / "config.json",
+        "claude": (Path.home() / ".claude" / "plugins" / "fettle" / "hooks" / "hooks.json",
+                   "PreToolUse"),
+        "codex": (Path.home() / ".codex" / "hooks.json", "PreToolUse"),
+        "gemini": (Path.home() / ".gemini" / "settings.json", "BeforeTool"),
     }
-    for name, path in sorted(probes.items()):
-        if not _which(name):
-            continue
-        try:
-            wired = path.exists() and (path.is_dir() or "fettle" in path.read_text())
-        except OSError:
-            wired = False
-        detail = ("fettle hooks wired" if wired else
-                  "installed but no fettle hooks — run: fettle init")
+    installed_hosts = {
+        name for name in ("claude", "codex", "gemini", "opencode") if _which(name)
+    }
+    for name in sorted(installed_hosts):
+        if name == "opencode":
+            registered = _opencode_registered(
+                Path.home() / ".config" / "opencode" / "config.json"
+            )
+        else:
+            path, event = probes[name]
+            registered = _hook_registered(path, event)
+        # No supported host exposes machine-readable local trust or execution
+        # evidence. Do not infer either state from a registration file.
+        states = {
+            "installed": True,
+            "registered": registered,
+            "trusted": False,
+            "executed": False,
+            "verified": False,
+        }
+        status = "registered" if registered else "installed"
+        if registered:
+            detail = "registered; trust and execution are not locally verified"
+        else:
+            detail = "installed but not registered — run: fettle init"
         checks.append({
             "name": f"runner:{name}",
             "required": False,
-            "ok": wired,
+            "ok": states["verified"],
+            "status": status,
+            "states": states,
             "detail": detail,
         })
     return checks
@@ -332,7 +406,7 @@ def check_host_enforcement() -> list[dict]:
     configures enforce-mode gates that the installed host cannot honor.
     """
     from fettle.config import load_config
-    from fettle.host_capabilities import enforcement_gaps
+    from fettle.host_capabilities import enforcement_gaps, host_capabilities
 
     binaries = {"claude_code": "claude"}
     gates = load_config().get("gates", {})
@@ -353,6 +427,18 @@ def check_host_enforcement() -> list[dict]:
             "required": False,
             "ok": not enforcing,
             "detail": detail,
+        })
+    for host, capabilities in sorted(host_capabilities().items()):
+        if capabilities["output_filtering"] != "unsupported":
+            continue
+        if not _which(binaries.get(host, host)):
+            continue
+        checks.append({
+            "name": f"output-filtering:{host}",
+            "required": False,
+            "ok": False,
+            "status": "unsupported",
+            "detail": f"pre-model tool-output filtering is unsupported on {host}",
         })
     return checks
 

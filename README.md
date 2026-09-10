@@ -149,7 +149,8 @@ invalidates an older assurance record so stale approval cannot look current.
 
 | Area | Shipped capability | Boundary |
 |---|---|---|
-| Agent lifecycle | Claude Code, Codex CLI, and OpenCode live-verified; Gemini CLI contract-tested | Host enforcement differs and `fettle doctor` reports it |
+| Agent lifecycle | Claude Code, Codex CLI, Gemini CLI, and OpenCode transports are implemented and contract-tested | Installation, registration, trust, execution, verification, and enforcement differ; `fettle doctor` reports local evidence without inferring verification |
+| Runtime secret boundary | Pre-tool secret access blocking on all four hosts; pre-model output protection on Claude Code and Gemini | Codex and OpenCode output filtering is unsupported; Fettle is not a sandbox |
 | Quality | Ruff, bundled Semgrep rules, baselines, suppressions, noise budgets, dependency and boundary checks | `fettle check` is Python plus language-neutral Semgrep; post-edit routing is broader |
 | Polyglot workspaces | Python, JavaScript/TypeScript, Go, and Rust post-edit and verification routing | Native toolchains remain external |
 | Verification | Test execution with canonical source, policy, scope, producer, and occurrence bindings | Local evidence does not replace remote CI |
@@ -227,6 +228,8 @@ fettle consistency lint
   intentionally not bundled into the Python environment.
 - Graph intelligence is advisory. UAT and stronger assurance policies graduate
   only from retained evidence and explicit operator decisions.
+- Runtime secret checks reduce accidental disclosure at agent tool boundaries,
+  but Codex and OpenCode cannot filter tool output before model exposure.
 - Fettle records decisions and observable evidence, not hidden chain-of-thought.
 
 ## Documentation

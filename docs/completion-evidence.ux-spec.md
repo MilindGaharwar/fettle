@@ -83,6 +83,11 @@ losing valid implementation or error-path evidence.
 - One evidence reference cannot satisfy criteria with different expected
   outcomes.
 - Missing, malformed, stale, or unsupported evidence is never a pass.
+- A manifest that declares `behavior_surfaces` containing `ui` or `agent` must
+  include required, confirmed criteria whose `evidence_type` values cover
+  `uat`, `persistence`, `interruption`, `partial_write`, and `recovery`.
+  Existing manifests without `behavior_surfaces` retain their historical
+  contract.
 - Scope digest version 2 binds the work item's declared scope patterns, not the
   current bytes of every matched file. Later work may edit shared files without
   rewriting historical completion evidence; changing the declared scope still
@@ -116,6 +121,13 @@ And no success criterion is confirmed by the same observation.
 Given a required criterion has no evidence reference
 When completion is validated
 Then validation exits 2 with a missing-evidence reason.
+
+### Scenario: User-facing evidence is incomplete
+
+Given a manifest declares UI or agent behavior
+And its evidence omits persistence, interruption, partial-write, or recovery proof
+When completion is validated
+Then validation exits 2 and names every missing evidence type.
 
 ### Scenario: Completion claim contradicts evidence
 

@@ -87,7 +87,7 @@ def _validate_schema(output: dict, expected_event: str, expect_block: bool = Fal
     # No unexpected hookSpecificOutput keys
     allowed_hso_keys = {
         "hookEventName", "permissionDecision", "permissionDecisionReason",
-        "additionalContext", "updatedInput",
+        "additionalContext", "updatedInput", "updatedToolOutput",
     }
     for key in hso:
         assert key in allowed_hso_keys, f"Unexpected hookSpecificOutput key: '{key}'"

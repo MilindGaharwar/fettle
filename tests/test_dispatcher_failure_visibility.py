@@ -51,6 +51,18 @@ def _crashing_spec() -> CheckSpec:
     )
 
 
+def _crashing_security_spec() -> CheckSpec:
+    def boom(_ctx):
+        raise RuntimeError("scanner leaked ghp_1234567890abcdefghijklmnopqrstuvwxyz")
+    return CheckSpec(
+        name="runtime_secret_guard",
+        run=boom,
+        events=frozenset({"PreToolUse"}),
+        tools=frozenset({"Read"}),
+        fail_closed=True,
+    )
+
+
 def _run_main(monkeypatch, capsys, stdin_text: str) -> tuple[int, dict]:
     monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
     rc = dispatcher_mod.main()
@@ -59,6 +71,28 @@ def _run_main(monkeypatch, capsys, stdin_text: str) -> tuple[int, dict]:
 
 
 class TestCheckCrashVisibility:
+    def test_security_check_crash_blocks_without_exception_detail(
+        self, monkeypatch, capsys, caplog, isolated_trace
+    ):
+        monkeypatch.setattr(
+            dispatcher_mod, "select_checks", lambda ctx: [_crashing_security_spec()]
+        )
+        payload = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/config.json"},
+            "cwd": "/tmp",
+            "session_id": "s0-test",
+        })
+
+        rc, out = _run_main(monkeypatch, capsys, payload)
+
+        serialized = json.dumps(out)
+        assert rc == 2
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "fettle doctor" in out["reason"]
+        assert "ghp_" not in serialized
+        assert "ghp_" not in caplog.text
     def test_check_crash_writes_check_error_trace(self, monkeypatch, capsys, isolated_trace):
         monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [_crashing_spec()])
         rc, out = _run_main(monkeypatch, capsys, _payload())
@@ -179,6 +213,32 @@ class TestDispatchLevelFailures:
         assert entries
         assert entries[0]["findings"][0]["skipped_from"] == "never_runs"
         del slow_then_skipped
+
+    def test_security_check_budget_exhaustion_blocks(self, monkeypatch, capsys, isolated_trace):
+        spec = CheckSpec(
+            name="runtime_secret_guard",
+            run=lambda ctx: CheckResult.allow(),
+            events=frozenset({"PreToolUse"}),
+            tools=frozenset({"Read"}),
+            fail_closed=True,
+        )
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
+        monkeypatch.setattr(
+            dispatcher_mod, "load_config", lambda cwd: {"dispatcher": {"global_budget_ms": 1}}
+        )
+        ticks = iter((10.0, 10.01))
+        monkeypatch.setattr(dispatcher_mod.time, "monotonic", lambda: next(ticks))
+
+        rc, out = _run_main(monkeypatch, capsys, json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/config.json"},
+            "cwd": "/tmp",
+            "session_id": "s0-test",
+        }))
+
+        assert rc == 2
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 class TestTraceWriteFailureVisibility:

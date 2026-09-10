@@ -45,6 +45,16 @@ class TestCheckRegistry:
 
 
 class TestSelectChecks:
+    def test_pretooluse_read_selects_runtime_secret_guard(self, tmp_path):
+        ctx = _ctx(tmp_path, event="PreToolUse", tool="Read")
+        names = [spec.name for spec in select_checks(ctx)]
+        assert names[0] == "runtime_secret_guard"
+
+    def test_pretooluse_mcp_selects_runtime_secret_guard(self, tmp_path):
+        ctx = _ctx(tmp_path, event="PreToolUse", tool="mcp__filesystem__read_file")
+        names = [spec.name for spec in select_checks(ctx)]
+        assert names[0] == "runtime_secret_guard"
+
     def test_pretooluse_write_returns_checks(self, tmp_path):
         ctx = _ctx(tmp_path, event="PreToolUse", tool="Write")
         selected = select_checks(ctx)
@@ -98,7 +108,8 @@ class TestLazyRegistry:
             "import fettle.dispatcher_registry\n"
             "heavy = [m for m in sys.modules if m in ("
             "'fettle.quality_gate', 'fettle.verify_gate', 'fettle.ci_gate',"
-            "'fettle.mcp_trust_gate', 'fettle.lean_sniffers', 'fettle.post_edit')]\n"
+            "'fettle.mcp_trust_gate', 'fettle.runtime_secret_guard', "
+            "'fettle.lean_sniffers', 'fettle.post_edit')]\n"
             "assert not heavy, heavy\n"
         )
         proc = subprocess.run([sys.executable, "-c", code],

@@ -58,6 +58,17 @@ govern. Install these only for the surfaces you use:
 `fettle doctor` reports available, missing, and degraded capabilities instead of
 silently treating unavailable tooling as a pass.
 
+For agent hosts, diagnostics keep five states separate: `installed`,
+`registered`, `trusted`, `executed`, and `verified`. `fettle init` can establish
+registration, but registration alone does not prove host trust, execution, or
+verification. Exercise the host flow after installation and follow the first
+missing-state action reported by `fettle doctor`.
+
+The strict pre-tool secret boundary is implemented for Claude Code, Codex CLI,
+Gemini CLI, and OpenCode. Pre-model tool-output protection is available only on
+Claude Code and Gemini; Codex and OpenCode are reported as `unsupported` for
+output filtering.
+
 This is an intentional boundary, not a partial installer: system package
 managers, browser vendors, agent vendors, and language toolchains own those
 runtimes and their update channels. Embedding them in a Python wheel would make

@@ -9,6 +9,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Goal | Mechanism |
 |---|---|
 | Add a PreToolUse guard (block/advise before a tool runs) | New check module + register in `fettle/dispatcher_registry.py::CHECKS`; wire config under `[gates.<name>]` |
+| Prevent secrets entering agent context | Strict runtime secret boundary before Read/Bash/nested execution; replace output only on transports with pre-model interception; report unsupported hosts truthfully |
 | Add a PostToolUse quality/finding check | Same as above with `events={"PostToolUse"}`; return findings + recovery steps |
 | Add an end-of-session verdict | Check with `events={"Stop"}`; bind evidence via `fettle.trace` / `EvidenceArtifact` |
 | Add or change a quality rule | Rule implementation + registration, then exercise it through `fettle check`, `fettle rules`, and `fettle verification` |

@@ -31,6 +31,7 @@ class Aggregator:
     timings: list[CheckTiming] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     budget_exhausted_before: str | None = None
+    output_replacements: dict[str, Any] = field(default_factory=dict)
     _advisories_suppressed: int = 0
 
     @property
@@ -45,6 +46,10 @@ class Aggregator:
                 self.first_block = result
                 self.first_block_name = check_name
             return
+
+        for key in ("updatedToolOutput", "updatedMCPToolOutput"):
+            if key in result.hook_specific_output:
+                self.output_replacements[key] = result.hook_specific_output[key]
 
         context = result.hook_specific_output.get("additionalContext")
         if isinstance(context, str) and context.strip():
@@ -143,7 +148,7 @@ class Aggregator:
                 return {"systemMessage": advisory_context}, 0
             return {}, 0
 
-        hso = {}
+        hso = dict(self.output_replacements)
         if self.hook_event_name:
             hso["hookEventName"] = self.hook_event_name
         if advisory_context:

@@ -15,6 +15,7 @@ import pytest
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PLUGIN_DIR)
 
+from fettle import __version__  # noqa: E402
 from fettle import init_cmd  # noqa: E402
 from fettle.init_cmd import run_init  # noqa: E402
 
@@ -140,7 +141,7 @@ class TestAgentDetection:
             groups = config["hooks"][event]
             assert any("dispatcher.py" in h["command"]
                        for g in groups for h in g["hooks"])
-        assert config["hooks"]["PreToolUse"][0]["matcher"] == "shell|local_shell|apply_patch"
+        assert config["hooks"]["PreToolUse"][0]["matcher"] == "*"
 
     def test_codex_idempotent_and_preserves_existing(self, repo) -> None:
         codex_dir = Path.home() / ".codex"
@@ -183,7 +184,7 @@ class TestAgentDetection:
             group for group in groups
             if any("dispatcher.py" in hook["command"] for hook in group["hooks"])
         )
-        assert fettle_group["matcher"] == "shell|local_shell|apply_patch"
+        assert fettle_group["matcher"] == "*"
         post = json.loads((codex_dir / "hooks.json").read_text())["hooks"]["PostToolUse"]
         assert post[0]["matcher"] == "shell|local_shell|apply_patch"
 
@@ -204,7 +205,7 @@ class TestAgentDetection:
             assert any("dispatcher.py" in h["command"]
                        for g in groups for h in g["hooks"])
         before = config["hooks"]["BeforeTool"][0]
-        assert before["matcher"] == "run_shell_command|write_file|replace"
+        assert before["matcher"] == ".*"
         assert before["hooks"][0]["timeout"] == 10000  # Gemini timeouts are ms
 
     def test_gemini_idempotent_and_preserves_existing(self, repo) -> None:
@@ -364,13 +365,29 @@ class TestPreCommit:
     def test_writes_config(self, repo) -> None:
         named = _by_name(run_init(repo)[0])
         assert named["pre-commit-config"].status == "created"
-        assert "fettle-check" in (repo / ".pre-commit-config.yaml").read_text()
+        config = (repo / ".pre-commit-config.yaml").read_text()
+        assert "fettle-check" in config
+        assert f"rev: v{__version__}" in config
 
     def test_existing_config_untouched(self, repo) -> None:
         (repo / ".pre-commit-config.yaml").write_text("repos: []\n")
         named = _by_name(run_init(repo)[0])
         assert named["pre-commit-config"].status == "ok"
         assert (repo / ".pre-commit-config.yaml").read_text() == "repos: []\n"
+
+    def test_stale_fettle_revision_is_reported_without_overwrite(self, repo) -> None:
+        config = """repos:
+  - repo: https://github.com/MilindGaharwar/fettle
+    rev: v0.1.0
+"""
+        path = repo / ".pre-commit-config.yaml"
+        path.write_text(config)
+
+        named = _by_name(run_init(repo)[0])
+
+        assert named["pre-commit-config"].status == "action"
+        assert f"v{__version__}" in named["pre-commit-config"].detail
+        assert path.read_text() == config
 
 
 class TestInstallTools:
