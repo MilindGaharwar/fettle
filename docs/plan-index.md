@@ -8,6 +8,7 @@ this index is the navigation layer.
 
 | Program | Detailed plan | Status | Next actions |
 |---|---|---|---|
+| Application audit hardening (2026-09-18) | [Prioritized work packages](audit-hardening-implementation-plan.md) + [UX contract](audit-hardening.ux-spec.md) + [worklog](audit-hardening-worklog.md) | Authorized; six repairs implemented with focused regressions; independent acceptance pending | Verify final candidate, retain limitations, and execute admitted follow-up measurements |
 | Evidence convergence | `fettle-evolution-implementation-plan.md` P66–P71 (inline) | P66–P69 complete; P70/P71 evidence-gated | Accumulate qualifying runs via required PR mutation gate |
 | Mutation quality | `mutation-quality-implementation-plan.md` + playbook | Baseline complete; advisory graduation | P64 methodology automation; ratchet decision after qualifying runs |
 | Change integrity (hypergraph) | `change-integrity-implementation-plan.md` (+ architecture, UX spec) | P44-P47 complete; P48 contextual advisory implemented but not promoted | Preserve existing authority; P49 remains deferred on P41 |

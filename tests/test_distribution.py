@@ -5,6 +5,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 
 
+def test_wheel_declares_every_owned_python_package():
+    with (ROOT / "pyproject.toml").open("rb") as stream:
+        declared = set(tomllib.load(stream)["tool"]["setuptools"]["packages"])
+    owned = {".".join(path.parent.relative_to(ROOT).parts)
+             for path in (ROOT / "fettle").rglob("__init__.py")}
+    assert owned <= declared, f"Missing wheel packages: {sorted(owned - declared)}"
+
+
 def test_default_install_includes_every_python_runtime_capability():
     with (ROOT / "pyproject.toml").open("rb") as stream:
         project = tomllib.load(stream)["project"]

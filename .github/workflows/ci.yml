@@ -29,6 +29,11 @@ jobs:
       - name: Require provenance for every rule asset
         run: python scripts/check_rule_provenance.py
 
+      - name: Typecheck hardened trust boundaries
+        run: |
+          python -m pip install --quiet mypy==2.3.0
+          mypy --follow-imports=silent --ignore-missing-imports fettle/evidence_ledger.py fettle/dispatcher.py fettle/dispatcher_types.py fettle/dispatcher_registry.py fettle/action_entrypoint.py fettle/quality_scan.py fettle/config.py
+
   # WP-B5: honesty for the `Typing :: Typed` classifier — mypy runs on every
   # push but does not block yet. Promote to blocking once the baseline is 0.
   typecheck:
@@ -184,6 +189,9 @@ jobs:
           python -m venv $venv
           $python = Join-Path $venv "Scripts\python.exe"
           & $python -m pip install --quiet $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { throw "package installation failed" }
+          & $python -m pytest tests/test_evidence_ledger.py -q -k "concurrent_append or independent_processes or lock_timeout or interrupted_writer"
+          if ($LASTEXITCODE -ne 0) { throw "ledger concurrency and interruption tests failed" }
           & $python -m fettle demo
           if ($LASTEXITCODE -ne 0) { throw "offline demo failed" }
           $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"
@@ -232,6 +240,8 @@ jobs:
           export PIPX_BIN_DIR=/tmp/bin
           pipx install dist/*.whl
           /tmp/bin/fettle demo || exit 1
+          cd /tmp
+          /tmp/pipx/venvs/finefettle/bin/python -I -c "from fettle.providers import default_providers; import fettle.graph_cli; assert len(default_providers()) == 5"
 
       - name: Configure detected OpenCode host without a clone
         run: |

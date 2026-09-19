@@ -5,8 +5,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
+import pytest
+
+from fettle import evidence_ledger as ledger_module
 from fettle.evidence_ledger import (
     anchor,
     append_record,
@@ -15,6 +21,124 @@ from fettle.evidence_ledger import (
     verify_anchor,
     verify_chain,
 )
+
+
+@pytest.mark.parametrize("operation", ["append", "rotate", "anchor"])
+def test_concurrent_append_waits_for_complete_transaction(tmp_path, monkeypatch, operation):
+    append_record(str(tmp_path), "seed")
+    entered = threading.Event()
+    release = threading.Event()
+    original = ledger_module._record_hash
+
+    def held_hash(seq, timestamp, kind, payload, previous):
+        if payload.get("worker") == "first":
+            entered.set()
+            assert release.wait(5)
+        return original(seq, timestamp, kind, payload, previous)
+
+    monkeypatch.setattr(ledger_module, "_record_hash", held_hash)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(append_record, str(tmp_path), "test", worker="first")
+        assert entered.wait(5)
+        if operation == "append":
+            second = pool.submit(append_record, str(tmp_path), "test", worker="second")
+        elif operation == "rotate":
+            second = pool.submit(rotate, str(tmp_path), keep_last=1)
+        else:
+            second = pool.submit(anchor, str(tmp_path), commit="fixture")
+        try:
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.1)
+        finally:
+            release.set()
+        assert first.result(timeout=5)["seq"] == 2
+        result = second.result(timeout=5)
+        if operation == "append":
+            assert result["seq"] == 3
+        else:
+            assert result["status"] == "completed"
+    if operation == "anchor":
+        assert verify_anchor(str(tmp_path))["records_since_anchor"] == 0
+    elif operation == "rotate":
+        assert read_ledger(str(tmp_path))[-1]["payload"]["worker"] == "first"
+    assert verify_chain(str(tmp_path))["status"] == "verified"
+
+
+def test_independent_processes_preserve_ledger_chain(tmp_path):
+    command = [sys.executable, "-c",
+               "import sys; from fettle.evidence_ledger import append_record; "
+               "[append_record(sys.argv[1], 'test', index=index) for index in range(10)]",
+               str(tmp_path)]
+    workers = [subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+               for _ in range(4)]
+    try:
+        for worker in workers:
+            _, stderr = worker.communicate(timeout=20)
+            assert worker.returncode == 0, stderr.decode()
+    finally:
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
+                worker.communicate()
+    state = verify_chain(str(tmp_path))
+    assert state["status"] == "verified"
+    assert state["records"] == 40
+
+
+@pytest.mark.parametrize("phase,records", [("before_write", 1), ("after_flush", 2)])
+def test_interrupted_writer_releases_lock_and_preserves_complete_records(tmp_path, phase, records):
+    append_record(str(tmp_path), "seed")
+    script = """
+import os
+import sys
+from fettle import evidence_ledger as ledger
+
+if sys.argv[2] == "before_write":
+    ledger._record_hash = lambda *args: os._exit(17)
+else:
+    original = ledger.os.fsync
+    def interrupt_after_flush(descriptor):
+        original(descriptor)
+        os._exit(17)
+    ledger.os.fsync = interrupt_after_flush
+ledger.append_record(sys.argv[1], "interrupted")
+"""
+
+    interrupted = subprocess.run([sys.executable, "-c", script, str(tmp_path), phase],
+                                 capture_output=True, text=True, timeout=20)
+
+    assert interrupted.returncode == 17, interrupted.stderr
+    state = verify_chain(str(tmp_path))
+    assert state["status"] == "verified"
+    assert state["records"] == records
+    assert append_record(str(tmp_path), "retry")["seq"] == records + 1
+    assert verify_chain(str(tmp_path))["status"] == "verified"
+
+
+def test_lock_timeout_preserves_chain_and_allows_retry(tmp_path, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    original = ledger_module._record_hash
+
+    def held_hash(seq, timestamp, kind, payload, previous):
+        if payload.get("worker") == "first":
+            entered.set()
+            assert release.wait(5)
+        return original(seq, timestamp, kind, payload, previous)
+
+    monkeypatch.setattr(ledger_module, "_record_hash", held_hash)
+    monkeypatch.setattr(ledger_module, "LOCK_TIMEOUT_S", 0.01)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(append_record, str(tmp_path), "test", worker="first")
+        assert entered.wait(5)
+        try:
+            with pytest.raises(TimeoutError, match="ledger is busy"):
+                append_record(str(tmp_path), "test", worker="second")
+        finally:
+            release.set()
+        first.result(timeout=5)
+    assert append_record(str(tmp_path), "test", worker="retry")["seq"] == 2
+    assert verify_chain(str(tmp_path))["status"] == "verified"
 
 
 def _init_repo(tmp_path):

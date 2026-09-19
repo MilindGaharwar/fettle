@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -79,6 +80,20 @@ class FakeRunner:
 
 
 class TestScenariosAndPrompt:
+    def test_profile_values_preserve_declared_classes(self):
+        profile = generate_profile("audit")
+        values = {item["equivalence_class"]: item["value"] for item in profile["inputs"]}
+        assert values["boundary_zero"] == "0"
+        assert values["boundary_large"].isdecimal()
+        assert int(values["boundary_large"]) == 999999999
+        assert re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", values["email"])
+        assert re.fullmatch(r"\+1-202-555-\d{4}", values["phone"])
+        assert values["whitespace"].startswith("  ") and values["whitespace"].endswith("  ")
+        assert values["ascii_name"].isascii()
+        assert not values["unicode_name"].isascii()
+        assert profile["equivalence_class_count"] == len(values)
+        assert generate_profile("another-seed")["seed_sha256"] != profile["seed_sha256"]
+
     def test_collect_scenarios_active_only(self, tmp_path):
         repo = _git_repo(tmp_path)
         (repo / "specs" / "draft.md").write_text(

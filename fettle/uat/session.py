@@ -134,9 +134,7 @@ def generate_profile(seed: str) -> dict:
         ("punctuation", "Unit #4 / A&B"),
     )
     inputs = []
-    for equivalence_class, template in values:
-        suffix = hashlib.sha256(f"{seed}:{equivalence_class}".encode()).hexdigest()[:8]
-        value = f"{template} [{suffix}]"
+    for equivalence_class, value in values:
         inputs.append({
             "equivalence_class": equivalence_class,
             "value": value,
@@ -145,7 +143,7 @@ def generate_profile(seed: str) -> dict:
     return {
         "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
         "inputs": inputs,
-        "equivalence_class_count": len({item["sha256"] for item in inputs}),
+        "equivalence_class_count": len({item["equivalence_class"] for item in inputs}),
     }
 
 
