@@ -12,9 +12,10 @@ human acceptance is authorized. The existing AH07 dependency still gates P2/P3.
   inventory, help, demo, graph status, and harmless failure/recovery flows.
 - [x] Obtain independent review; resolve findings with focused regressions.
 - [x] Run candidate tests, Fettle, completion validation, and diff hygiene.
-- [ ] Commit verified changes and push; watch exact-candidate remote CI to completion.
-- [ ] Record platform/live-host evidence and remaining human UAT prerequisites.
-- [ ] Reassess AH08-AH15 admission in dependency order; do not bypass missing gates.
+- [x] Commit verified changes and push through the protected-branch PR path.
+- [ ] Watch exact-candidate remote CI to completion; see PR checks for final verdict.
+- [x] Record live-host evidence and remaining human UAT prerequisites.
+- [x] Reassess AH08-AH15 admission in dependency order; do not bypass missing gates.
 - [ ] Finalize evidence and release the work claim.
 
 Artifact hypothesis: explicit provider packaging and current dispatcher/config
@@ -52,6 +53,49 @@ Evidence so far:
   Gemini/Antigravity unavailable. Operator authorized bounded authenticated
   disposable host probes and explicitly deferred human acceptance. Human timing,
   accessibility observations and P77's ten human sessions remain missing.
+  - Hardening commit: `229e224`. All commit and full pre-push hooks passed.
+    Direct main push was rejected by branch protection; no bypass attempted.
+    Operator explicitly authorized branch `audit/hardening-acceptance` and
+    [PR #44](https://github.com/MilindGaharwar/fettle/pull/44), now published.
+  - Initial scrub hook rejected generated coverage/mypy binary caches containing
+    local paths. Moved only those generated caches outside the checkout and reran
+    the enabled hook successfully. No source changes or hook suppression needed.
+
+  ### Current Candidate Live-Host Evidence
+
+  Both probes used the September 19 installed wheel, disposable repositories,
+  90-second session bounds, and only the harmless command
+  `printf FETTLE_AUDIT_MARKER`. No permission bypass or global settings edits.
+  Host process exit 0 is not the oracle: actual tool-result events determine deny
+  and allow. These probes cover PreToolUse policy failure/recovery, not every hook.
+
+  | Host | Corrupt local policy | Repaired policy | Limit |
+  |---|---|---|---|
+  | Claude Code 2.1.234 | Tool error names unavailable policy and doctor/retry; no marker executed | Tool succeeds and emits marker | Explicit candidate hook settings, not global installed registration |
+  | OpenCode 1.18.20 | Bash tool state error names unavailable policy | Bash tool completed, exit 0 and marker output | Candidate-generated project plugin; no global registration changes |
+  | Codex 0.155.0-alpha.9 | Not run | Not run | Candidate hooks require operator review/trust through `/hooks`; bypass flag deliberately unused |
+  | Gemini / Antigravity | Unavailable | Unavailable | Executables absent |
+
+  Claude deny tool ID `toolu_01FND1AxWCBHYBEcSk4zFjcx`; recovery
+  `toolu_01NcNRVWRwWuhSsQhXvtDvdn`. Total reported model cost approximately $0.118.
+  OpenCode deny session `ses_f481c1920ffeJn3sRgezu1HL9B`; recovery
+  `ses_f481c0641ffe9dBxQQEPoi6pbL`. Its harness cleanup raced with a late state
+  write after both observed outcomes; subsequent process inspection found no probe
+  process, only disposable state files. This cleanup failure is not a product pass.
+
+  ### Remaining Priority Gates
+
+  1. Required PR CI must be green for the exact candidate, including Windows ledger
+    and installed Linux wheel. No merge or release is implied by branch publication.
+  2. Codex candidate hook trust needs operator interaction. Human acceptance was
+    explicitly deferred; the 30-second recovery target and P77 parity remain unknown.
+  3. AH07 is consequently incomplete. AH08 branch ratchet and AH09 representative
+    performance benchmark remain dependency-gated; existing measurements are retained,
+    not promoted to acceptance. AH10 extraction lacks measured justification.
+  4. AH11-AH14 still require their user evidence/design/research admission. The request
+    to proceed does not supply absent human observations or frozen research budgets.
+  5. Public 1.13.1 remains unrepaired until a separately authorized release; current
+    artifact/host evidence is not substituted for public distribution acceptance.
 
 ## 2026-09-19: Dispatcher Continuation
 
@@ -214,6 +258,7 @@ inferred. Concurrent and slow-check benchmark accounting remains to be frozen.
 
 ### Open Acceptance Gates
 
+Historical September 18 state (superseded by the September 19 continuation):
 AH03 remains partial: config-load and registry failures retain legacy fail-open
 behavior; compound enabled-only quality gates and other policy associations need
 review. No claim that every mandatory path is now covered. AH04 needs platform and
