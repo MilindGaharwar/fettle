@@ -1672,15 +1672,35 @@ def cmd_uat(args: argparse.Namespace) -> None:
         print("Error: not inside a repository (no .git or .fettle.toml found)", file=sys.stderr)
         sys.exit(2)
     root = str(repo_root)
-    config = load_config(root)
+    try:
+        config = load_config(root, strict=True)
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"Error: invalid UAT configuration: {exc}; repair policy and retry", file=sys.stderr)
+        sys.exit(2)
 
     if getattr(args, "uat_action", "doctor") == "run":
         from fettle.uat.reconcile import format_verdicts, reconcile_session
         from fettle.uat.session import run_session
-        result = run_session(root, config, args.surface, consent=args.yes)
+        contract = getattr(args, "contract", None)
+        approval = getattr(args, "approve_contract", None)
+        proposal = getattr(args, "proposal", None)
+        if proposal and not contract:
+            print("Error: --proposal requires a separately approved --contract", file=sys.stderr)
+            sys.exit(2)
+        if bool(contract) != bool(approval):
+            print("Error: --contract and --approve-contract are required together for capture",
+                  file=sys.stderr)
+            sys.exit(2)
+        if contract:
+            from fettle.uat.controller import run_contract_session
+
+            result = run_contract_session(root, config, contract, approval, args.yes, args.surface,
+                                          proposal_path=proposal)
+        else:
+            result = run_session(root, config, args.surface, consent=args.yes)
         verdicts = []
         _cp = {}
-        if result.status == "completed":
+        if result.status == "completed" or contract and result.worktree:
             verdicts, _cp, rec_err = reconcile_session(root, result.worktree)
             if rec_err:
                 result.error = rec_err
@@ -1690,6 +1710,8 @@ def cmd_uat(args: argparse.Namespace) -> None:
                 "worktree": result.worktree, "transcript": result.transcript_path,
                 "scenarios": result.scenario_ids, "status": result.status,
                 "error": result.error,
+                "acceptance_complete": _cp.get("acceptance_complete", False),
+                "session_error": _cp.get("session_error", ""),
                 "judgment": _cp.get("judgment", {"status": "NOT_APPLICABLE",
                                                    "findings": []}),
                 "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
@@ -1713,8 +1735,7 @@ def cmd_uat(args: argparse.Namespace) -> None:
             if result.error:
                 print(f"  error: {result.error}", file=sys.stderr)
         ok = (result.status == "completed" and not result.error
-              and all(v.verdict == "CONFIRMED" for v in verdicts)
-              and (not verdicts or _cp.get("judgment_pass", True)))
+              and _cp.get("acceptance_complete", False))
         sys.exit(0 if ok else 1)
 
     if getattr(args, "uat_action", "doctor") == "report":
@@ -1726,6 +1747,8 @@ def cmd_uat(args: argparse.Namespace) -> None:
         if args.json:
             print(json.dumps({
                 "session_id": cp.get("session_id", ""),
+                "acceptance_complete": cp.get("acceptance_complete", False),
+                "session_error": cp.get("session_error", ""),
                 "judgment": cp.get("judgment", {"status": "NOT_APPLICABLE",
                                                   "findings": []}),
                 "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
@@ -1734,22 +1757,31 @@ def cmd_uat(args: argparse.Namespace) -> None:
             }, indent=2))
         else:
             print(format_verdicts(verdicts))
-        ok = all(v.verdict == "CONFIRMED" for v in verdicts) and cp.get(
-            "judgment_pass", True)
+            if cp.get("session_error"):
+                print(f"  session: {cp['session_error']}")
+        ok = cp.get("acceptance_complete", False)
         sys.exit(0 if ok else 1)
 
     if getattr(args, "uat_action", "doctor") == "manual":
         from fettle.uat.manual import format_manual_guide
         from fettle.uat.session import collect_scenarios
-        print(format_manual_guide(collect_scenarios(root)))
+        try:
+            print(format_manual_guide(collect_scenarios(root)))
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
         sys.exit(0)
 
     if getattr(args, "uat_action", "doctor") == "attest":
         import os
         from fettle.uat.manual import record_attestation
-        entry, err = record_attestation(
-            root, args.scenario_id, args.outcome, args.observed,
-            operator=os.environ.get("USER", ""))
+        try:
+            entry, err = record_attestation(
+                root, args.scenario_id, args.outcome, args.observed,
+                operator=os.environ.get("USER", ""))
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
         if err:
             print(f"Error: {err}", file=sys.stderr)
             sys.exit(2)
@@ -1779,11 +1811,20 @@ def cmd_uat(args: argparse.Namespace) -> None:
         sys.exit(0 if scored["graduation"]["ready"] else 1)
 
     # default action: doctor
-    surfaces, err = resolve_surfaces(root, config)
-    if err:
-        print(f"Error: {err}", file=sys.stderr)
-        sys.exit(2)
-    caps, err = probe(root, config)
+    contract = getattr(args, "contract", None)
+    approval = getattr(args, "approve_contract", None)
+    if contract or approval:
+        from fettle.uat.doctor import probe_contract
+
+        caps = [probe_contract(root, config, contract or "", approval or "")]
+        surfaces = [{"name": caps[0].surface,
+                 "evidence": "approved read-only contract" if caps[0].surface == "cli"
+                 else "approved isolated controller contract"}]
+        err = ""
+    else:
+        surfaces, err = resolve_surfaces(root, config)
+        if not err:
+            caps, err = probe(root, config)
     if err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(2)
@@ -2284,13 +2325,18 @@ def main() -> None:
     uat_sub = p_uat.add_subparsers(dest="uat_action")
     p_uat_doc = uat_sub.add_parser("doctor", help="Surface detection + capability probe")
     p_uat_doc.add_argument("--json", action="store_true", help="JSON output")
+    p_uat_doc.add_argument("--contract", help="Check approved CLI/API/web contract and qualified runtime prerequisites")
+    p_uat_doc.add_argument("--approve-contract", help="Operator-approved sha256:<digest> of contract bytes")
     p_uat_run = uat_sub.add_parser("run", help="Run a UAT session on one surface")
     p_uat_run.add_argument("--surface", default="cli",
                            help="Surface to test (default: cli)")
     p_uat_run.add_argument("--yes", action="store_true",
-                           help="Consent: the session runs an autonomous agent "
-                                "with permission checks disabled in an isolated worktree")
+                          help="Consent to isolated agent execution with normal host "
+                              "permission checks; does not grant tool permissions")
     p_uat_run.add_argument("--json", action="store_true", help="JSON output")
+    p_uat_run.add_argument("--contract", help="Approved CLI/API/web action/oracle JSON contract")
+    p_uat_run.add_argument("--approve-contract", help="Operator-approved sha256:<digest> of contract bytes")
+    p_uat_run.add_argument("--proposal", help="Untrusted action-only JSON; must match the separately approved contract")
     p_uat_rep = uat_sub.add_parser("report", help="Reconcile a session's transcript into verdicts")
     p_uat_rep.add_argument("--worktree", required=True, help="Session worktree path")
     p_uat_rep.add_argument("--json", action="store_true", help="JSON output")

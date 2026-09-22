@@ -166,18 +166,238 @@ class TestStructuredResultVisibility:
 
 
 class TestDispatchLevelFailures:
+    def test_corrupt_policy_file_blocks_before_checks(
+        self, tmp_path, monkeypatch, capsys, isolated_trace
+    ):
+        config = tmp_path / "policy.toml"
+        config.write_text("[gates.tests\nenabled = true\n")
+        monkeypatch.setenv("FETTLE_CONFIG", str(config))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setattr(dispatcher_mod, "select_checks",
+                            lambda ctx: pytest.fail("corrupt policy must not run checks"))
+
+        code, output = _run_main(monkeypatch, capsys, _payload("Stop"))
+
+        assert code == 2
+        assert "fettle doctor" in output["reason"]
+
+    @pytest.mark.parametrize("config", [
+        None,
+        {"gates": []},
+        {"dispatcher": []},
+        {"dispatcher": {"checks": []}},
+        {"gates": {"advisory": {"max_per_turn": "not-an-integer"}}},
+        {"gates": {"tests": []}},
+    ])
+    def test_malformed_runtime_policy_is_nonpass(
+        self, monkeypatch, capsys, isolated_trace, config
+    ):
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: config)
+        monkeypatch.setattr(dispatcher_mod, "select_checks",
+                            lambda ctx: pytest.fail("invalid policy must not select checks"))
+
+        code, output = _run_main(monkeypatch, capsys, _payload("Stop"))
+
+        assert code == 2
+        assert "hookSpecificOutput" not in output
+        assert "fettle doctor" in output["reason"]
+
+    @pytest.mark.parametrize("name,event,active,expected", [
+        ("mcp_trust_gate", "PreToolUse", True, 2),
+        ("mcp_trust_gate", "PreToolUse", False, 0),
+        ("capsule_guard", "PreToolUse", True, 2),
+        ("capsule_guard", "PreToolUse", False, 0),
+        ("stop_quality_gate", "Stop", True, 2),
+    ])
+    def test_enabled_only_guards_cannot_fail_open(
+        self, monkeypatch, capsys, isolated_trace, name, event, active, expected
+    ):
+        from dataclasses import replace
+        from fettle.dispatcher_registry import CHECKS
+
+        guard = next(spec for spec in CHECKS if spec.name == name)
+        monkeypatch.setattr(dispatcher_mod, "select_checks",
+                            lambda ctx: [replace(guard, run=_crashing_spec().run)])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "gates": {"mcp_trust": {"enabled": active}},
+        })
+        monkeypatch.delenv("FETTLE_POLICY_CAPSULE", raising=False)
+        if name == "capsule_guard" and active:
+            monkeypatch.setenv("FETTLE_POLICY_CAPSULE", "/missing/fixture-capsule.json")
+
+        code, output = _run_main(monkeypatch, capsys, _payload(event))
+
+        assert code == expected
+        if expected:
+            assert name in output["reason"]
+
+    @pytest.mark.parametrize("event,gate,tool,expected", [
+        ("Stop", "tests", "Write", 2),
+        ("PreToolUse", "plan", "Write", 2),
+        ("PreToolUse", "ux_spec", "Edit", 2),
+        ("PreToolUse", "ci_bootstrap", "Write", 2),
+        ("PostToolUse", "plan", "Write", 0),
+        ("PostToolUse", "ux_spec", "Edit", 0),
+        ("PreToolUse", "plan", "Bash", 0),
+        ("PreToolUse", "ui_colors", "Write", 0),
+    ])
+    @pytest.mark.parametrize("failure", ["exception", "unknown", "budget"])
+    def test_compound_quality_gate_preserves_event_policy(
+        self, monkeypatch, capsys, isolated_trace, event, gate, tool, expected, failure
+    ):
+        from dataclasses import replace
+        from fettle.dispatcher_registry import CHECKS
+
+        quality = next(spec for spec in CHECKS if spec.name == "quality_gate")
+        runner = (_crashing_spec().run if failure == "exception" else
+                  lambda ctx: CheckResult.unknown("unavailable", action="retry"))
+        monkeypatch.setattr(dispatcher_mod, "select_checks",
+                            lambda ctx: [replace(quality, run=runner)])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "dispatcher": {"global_budget_ms": 1 if failure == "budget" else 1000},
+            "gates": {gate: {"enabled": True, "mode": "enforce"}},
+        })
+        if failure == "budget":
+            ticks = iter((10.0, 10.01))
+            monkeypatch.setattr(dispatcher_mod.time, "monotonic", lambda: next(ticks))
+        payload = json.loads(_payload(event))
+        payload["tool_name"] = tool
+
+        code, output = _run_main(monkeypatch, capsys, json.dumps(payload))
+
+        assert code == expected
+        if expected:
+            assert "quality_gate" in output["reason"]
+
+    @pytest.mark.parametrize("event,gate", [("Stop", "completion"), ("PostToolUse", "lint")])
+    @pytest.mark.parametrize("mode,expected", [("enforce", 2), ("advisory", 0)])
+    def test_registry_failure_preserves_required_policy(
+        self, monkeypatch, capsys, isolated_trace, event, gate, mode, expected
+    ):
+        def bad_registry(_ctx):
+            raise RuntimeError("injected registry fault")
+
+        monkeypatch.setattr(dispatcher_mod, "select_checks", bad_registry)
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "dispatcher": {"disabled_checks": ["stop_quality_gate"]},
+            "gates": {gate: {"enabled": True, "mode": mode}},
+        })
+
+        code, output = _run_main(monkeypatch, capsys, _payload(event))
+
+        assert code == expected
+        assert "fettle doctor" in json.dumps(output)
+        if expected:
+            assert output["decision"] == "block"
+        if event == "Stop":
+            assert "hookSpecificOutput" not in output
+
+    def test_registry_failure_cannot_bypass_secret_guard(
+        self, monkeypatch, capsys, isolated_trace
+    ):
+        def bad_registry(_ctx):
+            raise RuntimeError("injected registry fault")
+
+        monkeypatch.setattr(dispatcher_mod, "select_checks", bad_registry)
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {})
+
+        code, output = _run_main(monkeypatch, capsys, _payload("PreToolUse"))
+
+        assert code == 2
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    @pytest.mark.parametrize("state", ["tool_error", "unknown", "missing"])
+    @pytest.mark.parametrize("mode,expected", [("enforce", 2), ("advisory", 0)])
+    def test_incomplete_required_result_is_nonpass(
+        self, monkeypatch, capsys, isolated_trace, state, mode, expected
+    ):
+        result = None if state == "missing" else getattr(CheckResult, state)("unavailable", action="retry")
+        spec = CheckSpec(name="required", run=lambda ctx: result,
+                         events=frozenset({"PreToolUse"}), policy_gates=("destructive",))
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "gates": {"destructive": {"enabled": True, "mode": mode}},
+        })
+
+        code, output = _run_main(monkeypatch, capsys, _payload("PreToolUse"))
+
+        assert code == expected
+        if expected:
+            assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert "fettle doctor" in output["reason"]
+
+    def test_artifact_policy_uses_owning_config_key(self):
+        from fettle.dispatcher_registry import CHECKS
+
+        artifact = next(spec for spec in CHECKS if spec.name == "artifact_gate")
+        assert artifact.requires_execution({"gates": {
+            "artifact_integrity": {"enabled": True, "mode": "enforce"},
+        }})
+        assert not artifact.requires_execution({"gates": {
+            "artifact_integrity": {"enabled": False, "mode": "enforce"},
+        }})
+
+    @pytest.mark.parametrize("mode,expected", [("enforce", 2), ("advisory", 0)])
+    def test_budget_checks_all_remaining_required_gates(
+        self, monkeypatch, capsys, isolated_trace, mode, expected
+    ):
+        from fettle.dispatcher_registry import CHECKS
+
+        destructive = next(spec for spec in CHECKS if spec.name == "destructive_guard")
+        optional = CheckSpec(name="optional", run=lambda ctx: pytest.fail("budget exhausted"),
+                             events=frozenset({"PreToolUse"}))
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [optional, destructive])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "dispatcher": {"global_budget_ms": 1},
+            "gates": {"destructive": {"enabled": True, "mode": mode}},
+        })
+        ticks = iter((10.0, 10.01))
+        monkeypatch.setattr(dispatcher_mod.time, "monotonic", lambda: next(ticks))
+
+        code, output = _run_main(monkeypatch, capsys, _payload("PreToolUse"))
+
+        assert code == expected
+        if expected == 2:
+            assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert "destructive_guard" in output["reason"]
+
+    def test_enforced_check_exception_blocks(self, monkeypatch, capsys, isolated_trace):
+        from dataclasses import replace
+        from fettle.dispatcher_registry import CHECKS
+
+        destructive = next(spec for spec in CHECKS if spec.name == "destructive_guard")
+        destructive = replace(destructive, run=_crashing_spec().run)
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [destructive])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "gates": {"destructive": {"enabled": True, "mode": "enforce"}},
+        })
+
+        code, output = _run_main(monkeypatch, capsys, _payload("PreToolUse"))
+
+        assert code == 2
+        assert "fettle doctor" in output["reason"]
+        assert "injected fault" not in json.dumps(output)
+
     def test_bad_stdin_traces_input_error(self, monkeypatch, capsys, isolated_trace):
         rc, out = _run_main(monkeypatch, capsys, "{not json")
         assert rc == 0
         statuses = [e["status"] for e in isolated_trace() if e.get("hook") == "dispatcher"]
         assert "input_error" in statuses
 
-    def test_config_failure_traces_config_error(self, monkeypatch, capsys, isolated_trace):
-        def bad_config(_cwd):
+    @pytest.mark.parametrize("event", ["PreToolUse", "PostToolUse", "Stop"])
+    def test_config_failure_traces_config_error(self, monkeypatch, capsys, isolated_trace, event):
+        def bad_config(_cwd, **kwargs):
             raise ValueError("injected config fault")
         monkeypatch.setattr(dispatcher_mod, "load_config", bad_config)
-        rc, _ = _run_main(monkeypatch, capsys, _payload())
-        assert rc == 0
+        monkeypatch.setattr(dispatcher_mod, "select_checks",
+                            lambda ctx: pytest.fail("unknown policy must not run checks"))
+        rc, output = _run_main(monkeypatch, capsys, _payload(event))
+        assert rc == 2
+        assert output["decision"] == "block"
+        assert "fettle doctor" in output["reason"]
+        assert "injected config fault" not in json.dumps(output)
+        if event == "Stop":
+            assert "hookSpecificOutput" not in output
         entries = [e for e in isolated_trace()
                    if e.get("hook") == "dispatcher" and e.get("status") == "config_error"]
         assert entries and "injected config fault" in entries[0]["findings"][0]["detail"]
@@ -205,7 +425,7 @@ class TestDispatchLevelFailures:
         ]
         monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: specs)
         monkeypatch.setattr(dispatcher_mod, "load_config",
-                            lambda cwd: {"dispatcher": {"global_budget_ms": 1}})
+                            lambda cwd, **kwargs: {"dispatcher": {"global_budget_ms": 1}})
         rc, _ = _run_main(monkeypatch, capsys, _payload())
         assert rc == 0
         entries = [e for e in isolated_trace()
@@ -224,7 +444,7 @@ class TestDispatchLevelFailures:
         )
         monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
         monkeypatch.setattr(
-            dispatcher_mod, "load_config", lambda cwd: {"dispatcher": {"global_budget_ms": 1}}
+            dispatcher_mod, "load_config", lambda cwd, **kwargs: {"dispatcher": {"global_budget_ms": 1}}
         )
         ticks = iter((10.0, 10.01))
         monkeypatch.setattr(dispatcher_mod.time, "monotonic", lambda: next(ticks))

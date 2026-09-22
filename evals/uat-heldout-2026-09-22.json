@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "purpose": "Independent held-out qualification of deterministic approved API acceptance only; not native AI discovery, autonomous exploration, or human parity. Requirements and exact response oracles are frozen before evaluation.",
+  "criteria": {
+    "immutable": true,
+    "minimum_distinct_seeds": 10,
+    "required_case_count": 12,
+    "required_pass_controls": 6,
+    "required_violation_controls": 6,
+    "required_runs_per_case": 1,
+    "required_runs_per_step": 1,
+    "step_order": "Execute every listed step in order, including steps after an oracle disagreement. Do not skip, retry, restart, substitute, or tune cases.",
+    "max_steps_per_case": 10,
+    "case_timeout_seconds": 60,
+    "allowed_case_timeout_seconds": [1, 60],
+    "max_observed_response_bytes": 65536,
+    "allowed_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+    "network_scope": "Only the case product on port 8080. No external network access.",
+    "writable_filesystem": "/state tmpfs only; fixtures use memory and perform no filesystem writes.",
+    "dependencies": "Python standard library only.",
+    "max_false_positives": 0,
+    "max_state_mismatches": 0,
+    "unknown_counts_as_success": false,
+    "all_behavioral_captures_required": true,
+    "capture_contract": "Retain an observed response for every listed step, bound to its seed and step index, including request method, path, UTF-8 body, observed integer status and exact UTF-8 response body. An expectation or inferred result is not an observation.",
+    "oracle_comparison": "Compare each observed status_code and decoded UTF-8 body exactly to expect. Do not normalize whitespace, Unicode, JSON, ordering or status classes. HEAD bodies must be empty.",
+    "state_derivation": "With every required capture valid, a case is pass only if every exact oracle agrees; it is violation if at least one exact oracle disagrees. Compare the derived state with expected_state. The expected_state is a label, not evidence.",
+    "non_pass_evidence": ["unknown", "missing", "malformed", "partial", "stale", "skipped", "blocked", "contradictory", "indeterminate", "timeout", "transport_failure", "invalid_utf8", "response_limit_exceeded", "duplicate_execution"],
+    "qualification_rule": "Qualification passes only when all 12 distinct cases and every listed step ran exactly once, all behavioral captures were observed and valid, both control classes were exercised, false positives are zero and derived-state mismatches are zero. Infrastructure errors and absent evidence cannot stand in for an expected violation. Retain all misses as qualification failures without tuning."
+  },
+  "cases": [
+    {
+      "seed_id": "heldout-20260922-01",
+      "expected_state": "pass",
+      "requirement": "A single note starts absent. POST /note creates it with status 201 and the supplied text. GET returns the stored text with 200. PATCH replaces that text with 200. DELETE removes it with 204 and an empty body. Reading an absent note returns 404 and missing.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nnote = None\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_GET(self):\n        self.reply(404 if note is None else 200, 'missing' if note is None else note)\n\n    def do_POST(self):\n        global note\n        note = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        self.reply(201, note)\n\n    def do_PATCH(self):\n        global note\n        note = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        self.reply(200, note)\n\n    def do_DELETE(self):\n        global note\n        note = None\n        self.reply(204, '')\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/note", "body": "", "expect": {"status_code": 404, "body": "missing"}},
+        {"method": "POST", "path": "/note", "body": "first note", "expect": {"status_code": 201, "body": "first note"}},
+        {"method": "GET", "path": "/note", "body": "", "expect": {"status_code": 200, "body": "first note"}},
+        {"method": "PATCH", "path": "/note", "body": "revised note", "expect": {"status_code": 200, "body": "revised note"}},
+        {"method": "GET", "path": "/note", "body": "", "expect": {"status_code": 200, "body": "revised note"}},
+        {"method": "DELETE", "path": "/note", "body": "", "expect": {"status_code": 204, "body": ""}},
+        {"method": "GET", "path": "/note", "body": "", "expect": {"status_code": 404, "body": "missing"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-02",
+      "expected_state": "violation",
+      "requirement": "POST /reservation creates an absent reservation with status 201 and created. A second POST to the occupied reservation must return 409 and conflict, and must not replace the first reservation. GET /reservation returns its original stored text with 200.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nreservation = None\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_POST(self):\n        global reservation\n        reservation = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        self.reply(201, 'created')\n\n    def do_GET(self):\n        self.reply(404 if reservation is None else 200, 'missing' if reservation is None else reservation)\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "POST", "path": "/reservation", "body": "seat-A", "expect": {"status_code": 201, "body": "created"}},
+        {"method": "POST", "path": "/reservation", "body": "seat-B", "expect": {"status_code": 409, "body": "conflict"}},
+        {"method": "GET", "path": "/reservation", "body": "", "expect": {"status_code": 200, "body": "seat-A"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-03",
+      "expected_state": "pass",
+      "requirement": "POST /echo returns 200 and the exact UTF-8 request text, preserving combining characters, precomposed characters, non-Latin characters, supplementary-plane characters, spaces, and newlines without normalization or trimming.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def do_POST(self):\n        text = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        payload = text.encode('utf-8')\n        self.send_response(200)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "POST", "path": "/echo", "body": "  cafe\u0301\n", "expect": {"status_code": 200, "body": "  cafe\u0301\n"}},
+        {"method": "POST", "path": "/echo", "body": "caf\u00e9 / \u6771\u4eac / \ud83d\ude80", "expect": {"status_code": 200, "body": "caf\u00e9 / \u6771\u4eac / \ud83d\ude80"}},
+        {"method": "POST", "path": "/echo", "body": "\n\tend  ", "expect": {"status_code": 200, "body": "\n\tend  "}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-04",
+      "expected_state": "violation",
+      "requirement": "GET /tags returns 200 and a comma-separated sequence of every tag query value in original order, preserving repeated values and empty values. Percent-encoded plus is a literal plus, whereas an unescaped plus decodes to a space. A query with no tag values returns an empty body.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\nfrom urllib.parse import parse_qs, urlsplit\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def do_GET(self):\n        values = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('tag', [])\n        text = ','.join(dict.fromkeys(values))\n        payload = text.encode('utf-8')\n        self.send_response(200)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/tags", "body": "", "expect": {"status_code": 200, "body": ""}},
+        {"method": "GET", "path": "/tags?tag=red&tag=red&tag=&tag=%2B&tag=a+b", "body": "", "expect": {"status_code": 200, "body": "red,red,,+,a b"}},
+        {"method": "GET", "path": "/tags?tag=blue&tag=green", "body": "", "expect": {"status_code": 200, "body": "blue,green"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-05",
+      "expected_state": "pass",
+      "requirement": "PUT /value stores the complete request body, including an empty string, and returns 200 and stored. GET of an existing empty value returns 200 with an empty body, not missing. DELETE returns 204 with an empty body. GET before creation or after deletion returns 404 and missing.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nvalue = None\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_PUT(self):\n        global value\n        value = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        self.reply(200, 'stored')\n\n    def do_GET(self):\n        self.reply(404 if value is None else 200, 'missing' if value is None else value)\n\n    def do_DELETE(self):\n        global value\n        value = None\n        self.reply(204, '')\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/value", "body": "", "expect": {"status_code": 404, "body": "missing"}},
+        {"method": "PUT", "path": "/value", "body": "", "expect": {"status_code": 200, "body": "stored"}},
+        {"method": "GET", "path": "/value", "body": "", "expect": {"status_code": 200, "body": ""}},
+        {"method": "DELETE", "path": "/value", "body": "", "expect": {"status_code": 204, "body": ""}},
+        {"method": "GET", "path": "/value", "body": "", "expect": {"status_code": 404, "body": "missing"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-06",
+      "expected_state": "violation",
+      "requirement": "PUT /setting is idempotent. Its response is 200 with value|revision, where the revision starts at 1 on first assignment and increases only if the value changes. Repeating an identical assignment must preserve the revision. GET /setting returns the same value|revision with 200.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nvalue = ''\nrevision = 0\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self):\n        payload = (value + '|' + str(revision)).encode('utf-8')\n        self.send_response(200)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_PUT(self):\n        global value, revision\n        value = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        revision += 1\n        self.reply()\n\n    def do_GET(self):\n        self.reply()\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "PUT", "path": "/setting", "body": "quiet", "expect": {"status_code": 200, "body": "quiet|1"}},
+        {"method": "PUT", "path": "/setting", "body": "quiet", "expect": {"status_code": 200, "body": "quiet|1"}},
+        {"method": "GET", "path": "/setting", "body": "", "expect": {"status_code": 200, "body": "quiet|1"}},
+        {"method": "PUT", "path": "/setting", "body": "active", "expect": {"status_code": 200, "body": "active|2"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-07",
+      "expected_state": "pass",
+      "requirement": "The level starts at 0. PUT /level accepts only a nonempty string of ASCII decimal digits representing an integer from 0 through 100 inclusive. Accepted values return 200 with the canonical decimal integer. Invalid text or an out-of-range number returns 422 and invalid without changing the stored level. GET /level returns 200 and the current canonical decimal level.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nlevel = 0\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_PUT(self):\n        global level\n        text = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        if not text or any(character < '0' or character > '9' for character in text):\n            self.reply(422, 'invalid')\n            return\n        canonical = text.lstrip('0') or '0'\n        if len(canonical) > 3 or int(canonical) > 100:\n            self.reply(422, 'invalid')\n            return\n        level = int(canonical)\n        self.reply(200, str(level))\n\n    def do_GET(self):\n        self.reply(200, str(level))\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/level", "body": "", "expect": {"status_code": 200, "body": "0"}},
+        {"method": "PUT", "path": "/level", "body": "100", "expect": {"status_code": 200, "body": "100"}},
+        {"method": "PUT", "path": "/level", "body": "101", "expect": {"status_code": 422, "body": "invalid"}},
+        {"method": "GET", "path": "/level", "body": "", "expect": {"status_code": 200, "body": "100"}},
+        {"method": "PUT", "path": "/level", "body": "\u0661\u0660", "expect": {"status_code": 422, "body": "invalid"}},
+        {"method": "GET", "path": "/level", "body": "", "expect": {"status_code": 200, "body": "100"}},
+        {"method": "PUT", "path": "/level", "body": "000", "expect": {"status_code": 200, "body": "0"}},
+        {"method": "GET", "path": "/level", "body": "", "expect": {"status_code": 200, "body": "0"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-08",
+      "expected_state": "violation",
+      "requirement": "The draft initially exists with text pending. GET /draft returns 200 and pending while it exists. DELETE /draft must remove the draft, returning 204 and an empty body; repeated deletion also returns 204 and an empty body. GET after either deletion must return 404 and missing.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\ndraft = 'pending'\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_GET(self):\n        self.reply(404 if draft is None else 200, 'missing' if draft is None else draft)\n\n    def do_DELETE(self):\n        self.reply(204, '')\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/draft", "body": "", "expect": {"status_code": 200, "body": "pending"}},
+        {"method": "DELETE", "path": "/draft", "body": "", "expect": {"status_code": 204, "body": ""}},
+        {"method": "GET", "path": "/draft", "body": "", "expect": {"status_code": 404, "body": "missing"}},
+        {"method": "DELETE", "path": "/draft", "body": "", "expect": {"status_code": 204, "body": ""}},
+        {"method": "GET", "path": "/draft", "body": "", "expect": {"status_code": 404, "body": "missing"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-09",
+      "expected_state": "pass",
+      "requirement": "GET /document returns 200 and stable. HEAD /document returns 200 with no response body and does not modify the document. GET for any other path returns 404 and missing; HEAD for an absent path returns 404 with no response body. A missing resource is an ordinary observed API result, not an unknown evaluation case.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def respond(self, head_only):\n        present = self.path == '/document'\n        payload = ('stable' if present else 'missing').encode('utf-8')\n        self.send_response(200 if present else 404)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        if not head_only:\n            self.wfile.write(payload)\n\n    def do_GET(self):\n        self.respond(False)\n\n    def do_HEAD(self):\n        self.respond(True)\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/document", "body": "", "expect": {"status_code": 200, "body": "stable"}},
+        {"method": "HEAD", "path": "/document", "body": "", "expect": {"status_code": 200, "body": ""}},
+        {"method": "HEAD", "path": "/absent", "body": "", "expect": {"status_code": 404, "body": ""}},
+        {"method": "GET", "path": "/absent", "body": "", "expect": {"status_code": 404, "body": "missing"}},
+        {"method": "GET", "path": "/document", "body": "", "expect": {"status_code": 200, "body": "stable"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-10",
+      "expected_state": "violation",
+      "requirement": "The profile starts with name Ada and role reader. PATCH /profile accepts a JSON object and merges supplied fields into the profile, preserving fields omitted from the patch. GET and successful PATCH return 200 with the full profile as compact JSON using alphabetically sorted keys and no trailing newline. An empty object patch changes nothing.",
+      "app_source": "import json\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\nprofile = {'name': 'Ada', 'role': 'reader'}\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_GET(self):\n        self.reply(200, json.dumps(profile, sort_keys=True, separators=(',', ':')))\n\n    def do_PATCH(self):\n        global profile\n        text = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        try:\n            patch = json.loads(text)\n        except ValueError:\n            self.reply(400, 'invalid')\n            return\n        if not isinstance(patch, dict):\n            self.reply(400, 'invalid')\n            return\n        profile = patch\n        self.do_GET()\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/profile", "body": "", "expect": {"status_code": 200, "body": "{\"name\":\"Ada\",\"role\":\"reader\"}"}},
+        {"method": "PATCH", "path": "/profile", "body": "{\"role\":\"editor\"}", "expect": {"status_code": 200, "body": "{\"name\":\"Ada\",\"role\":\"editor\"}"}},
+        {"method": "PATCH", "path": "/profile", "body": "{}", "expect": {"status_code": 200, "body": "{\"name\":\"Ada\",\"role\":\"editor\"}"}},
+        {"method": "GET", "path": "/profile", "body": "", "expect": {"status_code": 200, "body": "{\"name\":\"Ada\",\"role\":\"editor\"}"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-11",
+      "expected_state": "pass",
+      "requirement": "PUT /items/<key> stores a text value under a key obtained by percent-decoding the path suffix exactly once, returning 200 and stored. Keys containing a slash and keys containing a literal percent-encoded slash are distinct. GET returns the corresponding value with 200, or 404 and missing for an absent key. Updating one key must not change another.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\nfrom urllib.parse import unquote, urlsplit\n\nitems = {}\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def key(self):\n        return unquote(urlsplit(self.path).path[len('/items/'):], encoding='utf-8', errors='strict')\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_PUT(self):\n        items[self.key()] = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        self.reply(200, 'stored')\n\n    def do_GET(self):\n        key = self.key()\n        self.reply(200 if key in items else 404, items.get(key, 'missing'))\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "PUT", "path": "/items/a%2Fb", "body": "slash", "expect": {"status_code": 200, "body": "stored"}},
+        {"method": "PUT", "path": "/items/a%252Fb", "body": "percent", "expect": {"status_code": 200, "body": "stored"}},
+        {"method": "GET", "path": "/items/a%2Fb", "body": "", "expect": {"status_code": 200, "body": "slash"}},
+        {"method": "GET", "path": "/items/a%252Fb", "body": "", "expect": {"status_code": 200, "body": "percent"}},
+        {"method": "PUT", "path": "/items/a%2Fb", "body": "updated", "expect": {"status_code": 200, "body": "stored"}},
+        {"method": "GET", "path": "/items/a%252Fb", "body": "", "expect": {"status_code": 200, "body": "percent"}},
+        {"method": "GET", "path": "/items/a%2Fb", "body": "", "expect": {"status_code": 200, "body": "updated"}},
+        {"method": "GET", "path": "/items/absent", "body": "", "expect": {"status_code": 404, "body": "missing"}}
+      ]
+    },
+    {
+      "seed_id": "heldout-20260922-12",
+      "expected_state": "violation",
+      "requirement": "An account starts with balance 10. POST /withdraw accepts a positive ASCII decimal integer amount. An affordable withdrawal subtracts the amount and returns 200 with the new balance. An amount greater than the balance returns 422 and insufficient without changing any state. GET /balance returns 200 with the current decimal balance. A rejected withdrawal must not prevent a later affordable withdrawal.",
+      "app_source": "from http.server import BaseHTTPRequestHandler, HTTPServer\n\nbalance = 10\n\nclass Handler(BaseHTTPRequestHandler):\n    def log_message(self, *args):\n        pass\n\n    def reply(self, status, text):\n        payload = text.encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', 'text/plain; charset=utf-8')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n\n    def do_GET(self):\n        self.reply(200, str(balance))\n\n    def do_POST(self):\n        global balance\n        text = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')\n        if not text or any(character < '0' or character > '9' for character in text):\n            self.reply(422, 'invalid')\n            return\n        canonical = text.lstrip('0') or '0'\n        if len(canonical) > 3 or int(canonical) == 0:\n            self.reply(422, 'invalid')\n            return\n        balance -= int(canonical)\n        if balance < 0:\n            self.reply(422, 'insufficient')\n            return\n        self.reply(200, str(balance))\n\nHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()\n",
+      "steps": [
+        {"method": "GET", "path": "/balance", "body": "", "expect": {"status_code": 200, "body": "10"}},
+        {"method": "POST", "path": "/withdraw", "body": "11", "expect": {"status_code": 422, "body": "insufficient"}},
+        {"method": "GET", "path": "/balance", "body": "", "expect": {"status_code": 200, "body": "10"}},
+        {"method": "POST", "path": "/withdraw", "body": "3", "expect": {"status_code": 200, "body": "7"}},
+        {"method": "GET", "path": "/balance", "body": "", "expect": {"status_code": 200, "body": "7"}}
+      ]
+    }
+  ]
+}

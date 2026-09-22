@@ -68,7 +68,7 @@ def test_scenario_blocks_are_never_mistaken_for_candidates():
     verdicts = reconcile(SCENARIOS, transcript)
     candidates = parse_candidates(transcript)
 
-    assert [v.verdict for v in verdicts] == ["CONFIRMED"]
+    assert [v.verdict for v in verdicts] == ["INDETERMINATE"]
     assert len(candidates) == 2
     assert all("SCENARIO" not in c["candidate_id"] for c in candidates)
 

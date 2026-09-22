@@ -40,6 +40,11 @@ jobs:
       - name: Verify authored release notes
         run: test -f "docs/engagement/${GITHUB_REF_NAME}-release-notes.md"
 
+      - name: Typecheck hardened trust boundaries
+        run: |
+          python -m pip install --quiet mypy==2.3.0
+          mypy --follow-imports=silent --ignore-missing-imports fettle/evidence_ledger.py fettle/dispatcher.py fettle/dispatcher_types.py fettle/dispatcher_registry.py fettle/action_entrypoint.py fettle/quality_scan.py fettle/config.py
+
       - name: Verify production Assurance policy
         timeout-minutes: 15
         run: |
@@ -124,6 +129,7 @@ jobs:
           /tmp/smoke/bin/fettle demo
           /tmp/smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; r = rules_dir(); c = commands_dir(); assert r.is_dir() and any(r.glob('*.yml')), r; assert c.is_dir() and len(list(c.glob('*.md'))) == 17, c"
           /tmp/smoke/bin/python -c "import playwright, pytest, yaml"
+          /tmp/smoke/bin/python -I -c "from fettle.providers import default_providers; import fettle.graph_cli; assert len(default_providers()) == 5"
           /tmp/smoke/bin/python -c "from pathlib import Path; bindir = Path('/tmp/smoke/bin'); assert all((bindir / tool).is_file() for tool in ('fettle', 'mutmut', 'ruff', 'semgrep'))"
 
       - name: Smoke-test compatibility all extra
@@ -161,6 +167,7 @@ jobs:
           /tmp/sdist-smoke/bin/python -c "from fettle._resources import rules_dir, commands_dir; assert any(rules_dir().glob('*.yml')); assert len(list(commands_dir().glob('*.md'))) == 17"
           /tmp/sdist-smoke/bin/fettle workflows list
           /tmp/sdist-smoke/bin/fettle demo
+          /tmp/sdist-smoke/bin/python -I -c "from fettle.providers import default_providers; import fettle.graph_cli; assert len(default_providers()) == 5"
           /tmp/sdist-smoke/bin/python -c "from fettle.bridge import _source_subagent_hook; assert _source_subagent_hook().is_file()"
 
       # WP-147: SLSA provenance + Sigstore signatures for every artifact,

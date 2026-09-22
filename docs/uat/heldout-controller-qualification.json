@@ -1,0 +1,420 @@
+{
+  "canonical_calibration": {
+    "calibration_passed": true,
+    "canonical_identity": "sha256:0ea4fb3b60bcb7190bb904d367898905b01a90db59f5f913bca62d0a72b2c5d3",
+    "errors": [],
+    "expected_states_matched": true,
+    "graduation": {
+      "blockers": [
+        "deterministic controller calibration does not establish native-agent discovery or human parity",
+        "independently held-out qualification and explicit enforcement promotion remain required"
+      ],
+      "ready": false
+    },
+    "metrics": {
+      "controller": {
+        "coverage_observed": 12,
+        "coverage_rate": 1.0,
+        "coverage_total": 12,
+        "discovered": 6,
+        "discovery_rate": 1.0,
+        "false_passes": 0,
+        "false_verdicts": 0,
+        "seeds": 12
+      }
+    },
+    "status": "complete"
+  },
+  "cases": [
+    {
+      "contract_digest": "sha256:1adb799f59743a92bc2bfca12ddea255ac94123bc299d14c3d7b3f5e78143a6e",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-01",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"missing\",\"status_code\":404},{\"body\":\"first note\",\"status_code\":201},{\"body\":\"first note\",\"status_code\":200},{\"body\":\"revised note\",\"status_code\":200},{\"body\":\"revised note\",\"status_code\":200},{\"body\":\"\",\"status_code\":204},{\"body\":\"missing\",\"status_code\":404}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:2a00473358829ee9652359fc229e2000f39329a9b322b215f62f3da28270ce48",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-02",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"created\",\"status_code\":201},{\"body\":\"created\",\"status_code\":201},{\"body\":\"seat-B\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:13afe08fdb646c75a0e3ab64e1d4b2334dc9b9716331551235e20caa1a4de264",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-03",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"  cafe\\u0301\\n\",\"status_code\":200},{\"body\":\"caf\\u00e9 / \\u6771\\u4eac / \\ud83d\\ude80\",\"status_code\":200},{\"body\":\"\\n\\tend  \",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:9326e5c9181050f368a32cbe91766de9a8cf01028fd4327b26920ec48337ad04",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-04",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"\",\"status_code\":200},{\"body\":\"red,,+,a b\",\"status_code\":200},{\"body\":\"blue,green\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:a34dc01a502199089915c308b338d4f9c153360382d07440ea390aab8811ba63",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-05",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"missing\",\"status_code\":404},{\"body\":\"stored\",\"status_code\":200},{\"body\":\"\",\"status_code\":200},{\"body\":\"\",\"status_code\":204},{\"body\":\"missing\",\"status_code\":404}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:ee14f569b7944bc18f023c9a22106ee9bcc24933fbb54b0ff53ea968ec3b4f57",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-06",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"quiet|1\",\"status_code\":200},{\"body\":\"quiet|2\",\"status_code\":200},{\"body\":\"quiet|2\",\"status_code\":200},{\"body\":\"active|3\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:c3851044d04c2136b349cf9cd6c458933a9a837dd74a6d8b0d6d328fc13a291d",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-07",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"0\",\"status_code\":200},{\"body\":\"100\",\"status_code\":200},{\"body\":\"invalid\",\"status_code\":422},{\"body\":\"100\",\"status_code\":200},{\"body\":\"invalid\",\"status_code\":422},{\"body\":\"100\",\"status_code\":200},{\"body\":\"0\",\"status_code\":200},{\"body\":\"0\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:f4c91bcfbf360c5d4892c4c97e74bf7932c254b592bdfa28e4a4f83d8a8afae1",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-08",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"pending\",\"status_code\":200},{\"body\":\"\",\"status_code\":204},{\"body\":\"pending\",\"status_code\":200},{\"body\":\"\",\"status_code\":204},{\"body\":\"pending\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:c31095067578224cb94ae3a06501497bac864c33ce08143061203f168e4f3ad0",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-09",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"stable\",\"status_code\":200},{\"body\":\"\",\"status_code\":200},{\"body\":\"\",\"status_code\":404},{\"body\":\"missing\",\"status_code\":404},{\"body\":\"stable\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:a84d6a068a13040d772f02969f0a728fd7a42d4976732cd8a1c947e5b7106c24",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-10",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"{\\\"name\\\":\\\"Ada\\\",\\\"role\\\":\\\"reader\\\"}\",\"status_code\":200},{\"body\":\"{\\\"role\\\":\\\"editor\\\"}\",\"status_code\":200},{\"body\":\"{}\",\"status_code\":200},{\"body\":\"{}\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:7628b28e710bdfe168e5e2fadebda2622aaf3a0c1a1e6567412fe740fe05c843",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "heldout-20260922-11",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"stored\",\"status_code\":200},{\"body\":\"stored\",\"status_code\":200},{\"body\":\"slash\",\"status_code\":200},{\"body\":\"percent\",\"status_code\":200},{\"body\":\"stored\",\"status_code\":200},{\"body\":\"percent\",\"status_code\":200},{\"body\":\"updated\",\"status_code\":200},{\"body\":\"missing\",\"status_code\":404}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:131bead1ddbfabea3b05bd484a348085599b311f0bf1d59922525d1b508a769f",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "heldout-20260922-12",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"10\",\"status_code\":200},{\"body\":\"insufficient\",\"status_code\":422},{\"body\":\"-1\",\"status_code\":200},{\"body\":\"insufficient\",\"status_code\":422},{\"body\":\"-4\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    }
+  ],
+  "heldout_corpus_digest": "sha256:c0109c3d8994fc9028cf955c2cc2857bff724f321c184215111bfd4570db484f",
+  "heldout_criteria": {
+    "all_behavioral_captures_required": true,
+    "allowed_case_timeout_seconds": [
+      1,
+      60
+    ],
+    "allowed_methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "HEAD"
+    ],
+    "capture_contract": "Retain an observed response for every listed step, bound to its seed and step index, including request method, path, UTF-8 body, observed integer status and exact UTF-8 response body. An expectation or inferred result is not an observation.",
+    "case_timeout_seconds": 60,
+    "dependencies": "Python standard library only.",
+    "immutable": true,
+    "max_false_positives": 0,
+    "max_observed_response_bytes": 65536,
+    "max_state_mismatches": 0,
+    "max_steps_per_case": 10,
+    "minimum_distinct_seeds": 10,
+    "network_scope": "Only the case product on port 8080. No external network access.",
+    "non_pass_evidence": [
+      "unknown",
+      "missing",
+      "malformed",
+      "partial",
+      "stale",
+      "skipped",
+      "blocked",
+      "contradictory",
+      "indeterminate",
+      "timeout",
+      "transport_failure",
+      "invalid_utf8",
+      "response_limit_exceeded",
+      "duplicate_execution"
+    ],
+    "oracle_comparison": "Compare each observed status_code and decoded UTF-8 body exactly to expect. Do not normalize whitespace, Unicode, JSON, ordering or status classes. HEAD bodies must be empty.",
+    "qualification_rule": "Qualification passes only when all 12 distinct cases and every listed step ran exactly once, all behavioral captures were observed and valid, both control classes were exercised, false positives are zero and derived-state mismatches are zero. Infrastructure errors and absent evidence cannot stand in for an expected violation. Retain all misses as qualification failures without tuning.",
+    "required_case_count": 12,
+    "required_pass_controls": 6,
+    "required_runs_per_case": 1,
+    "required_runs_per_step": 1,
+    "required_violation_controls": 6,
+    "state_derivation": "With every required capture valid, a case is pass only if every exact oracle agrees; it is violation if at least one exact oracle disagrees. Compare the derived state with expected_state. The expected_state is a label, not evidence.",
+    "step_order": "Execute every listed step in order, including steps after an oracle disagreement. Do not skip, retry, restart, substitute, or tune cases.",
+    "unknown_counts_as_success": false,
+    "writable_filesystem": "/state tmpfs only; fixtures use memory and perform no filesystem writes."
+  },
+  "limits": [
+    "local installed deterministic controller qualification, not agent discovery",
+    "independently authored frozen API corpus; no tuning or retries",
+    "no human baseline, native explorer qualification or enforcement graduation",
+    "sanitized observations are reproducibility evidence, not portable authority"
+  ],
+  "manifest": [
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-01",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-02",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-03",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-04",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-05",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-06",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-07",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-08",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-09",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-10",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "heldout-20260922-11",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "heldout-20260922-12",
+      "surface": "api"
+    }
+  ],
+  "manifest_digest": "sha256:db661cc60ce4250e96b396cc900cb371bd34e162c8e2812a29a8d06db0a5a767",
+  "metrics": {
+    "cases": 12,
+    "contradicted_defects": 6,
+    "false_passes": 0,
+    "matched_expected_states": 12,
+    "observed_scenarios": 12,
+    "seeded_defects": 6
+  },
+  "passed": true,
+  "recorded_at": "2026-09-22T04:47:35.302782+00:00",
+  "runtime": {
+    "browser": "sha256:0b5a9b1dd96db0948671a77d0dee1fd17653c51c7bfc8133a6e6f343164e8e54",
+    "image": "docker.io/library/python@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b"
+  },
+  "schema_version": 1,
+  "wheel_digest": "sha256:1bc2d0b9d0e989ff0285232471bd04000037567979b15d083991b7ac7e419af0"
+}

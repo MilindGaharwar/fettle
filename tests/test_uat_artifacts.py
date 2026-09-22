@@ -58,7 +58,7 @@ def test_confirmed_without_artifact_degrades_when_required(tmp_path):
     assert "no observation artifact" in by_id["demo/S1"].note
 
 
-def test_matching_artifact_preserves_confirmation(tmp_path):
+def test_matching_claim_artifact_cannot_confirm_execution(tmp_path):
     worktree = tmp_path / "wt"
     worktree.mkdir()
     artifacts = write_scenario_artifacts(str(worktree), TRANSCRIPT, SCENARIOS, "cli")
@@ -70,7 +70,22 @@ def test_matching_artifact_preserves_confirmation(tmp_path):
     )
 
     by_id = {v.scenario_id: v for v in verdicts}
-    assert by_id["demo/S1"].verdict == "CONFIRMED"
+    assert by_id["demo/S1"].verdict == "INDETERMINATE"
+    assert "independent execution" in by_id["demo/S1"].note
+
+
+def test_tampered_artifact_body_is_rejected(tmp_path):
+    artifacts = write_scenario_artifacts(str(tmp_path), TRANSCRIPT, SCENARIOS, "cli")
+    loaded = load_scenario_artifacts(artifacts)
+    loaded["demo/S1"]["block"]["observed"] = "actually crashed"
+    verdict = reconcile(SCENARIOS, TRANSCRIPT, loaded, require_artifacts=True)[0]
+    assert verdict.verdict == "INDETERMINATE"
+    assert "content" in verdict.note
+
+
+def test_malformed_artifact_shape_is_ignored(tmp_path):
+    (tmp_path / "bad.json").write_text("[]")
+    assert load_scenario_artifacts(str(tmp_path)) == {}
 
 
 def test_tampered_transcript_drifts_from_artifact(tmp_path):
@@ -108,8 +123,8 @@ def test_differs_verdicts_do_not_need_artifacts(tmp_path):
     assert by_id["demo/S1"].verdict == "INDETERMINATE"  # artifact required, absent
 
 
-def test_backward_compatible_without_artifact_arguments():
+def test_legacy_claims_without_artifact_arguments_cannot_confirm():
     verdicts = reconcile(SCENARIOS, TRANSCRIPT)
 
     by_id = {v.scenario_id: v for v in verdicts}
-    assert by_id["demo/S1"].verdict == "CONFIRMED"
+    assert by_id["demo/S1"].verdict == "INDETERMINATE"

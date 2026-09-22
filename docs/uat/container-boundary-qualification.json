@@ -1,0 +1,192 @@
+{
+  "cleanup": [
+    {
+      "exit_code": 0,
+      "operation": "rm",
+      "stderr": ""
+    },
+    {
+      "exit_code": 0,
+      "operation": "network",
+      "stderr": ""
+    }
+  ],
+  "context": "colima-fettle-uat",
+  "error": "",
+  "image": "docker.io/library/alpine@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0",
+  "image_id": "sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0",
+  "limits": [
+    "single pinned Alpine image on named local Docker VM",
+    "trusted Docker daemon and VM kernel; not a VM escape proof",
+    "isolated bridge has no gateway; arbitrary daemon/network reconfiguration is outside scope",
+    "not API/browser acceptance or unrestricted-agent qualification"
+  ],
+  "observations": [
+    {
+      "name": "product-configuration",
+      "passed": true
+    },
+    {
+      "name": "observer-configuration",
+      "passed": true
+    },
+    {
+      "name": "internal-network",
+      "passed": true
+    },
+    {
+      "name": "no-bridge-gateway",
+      "passed": true
+    },
+    {
+      "exit_code": 0,
+      "name": "local-product-http",
+      "passed": true,
+      "stderr": "",
+      "stdout": "boundary-ok\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-identity",
+      "passed": true,
+      "stderr": "",
+      "stdout": "65534\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-root-write-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-no-host-or-evidence",
+      "passed": true,
+      "stderr": "",
+      "stdout": "absent"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-kernel-restrictions",
+      "passed": true,
+      "stderr": "",
+      "stdout": "CapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-memory-bound",
+      "passed": true,
+      "stderr": "",
+      "stdout": "67108864\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-process-bound",
+      "passed": true,
+      "stderr": "",
+      "stdout": "32\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-no-default-route",
+      "passed": true,
+      "stderr": "",
+      "stdout": ""
+    },
+    {
+      "exit_code": 0,
+      "name": "product-external-tcp-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "product-external-dns-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-identity",
+      "passed": true,
+      "stderr": "",
+      "stdout": "65534\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-root-write-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-no-host-or-evidence",
+      "passed": true,
+      "stderr": "",
+      "stdout": "absent"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-kernel-restrictions",
+      "passed": true,
+      "stderr": "",
+      "stdout": "CapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-memory-bound",
+      "passed": true,
+      "stderr": "",
+      "stdout": "67108864\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-process-bound",
+      "passed": true,
+      "stderr": "",
+      "stdout": "32\n"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-no-default-route",
+      "passed": true,
+      "stderr": "",
+      "stdout": ""
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-external-tcp-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-external-dns-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    },
+    {
+      "exit_code": 0,
+      "name": "bounded-product-write",
+      "passed": true,
+      "stderr": "",
+      "stdout": "state"
+    },
+    {
+      "exit_code": 0,
+      "name": "observer-write-denied",
+      "passed": true,
+      "stderr": "",
+      "stdout": "denied"
+    }
+  ],
+  "passed": true,
+  "recorded_at": "2026-09-21T12:46:18.815482+00:00",
+  "schema_version": 1
+}

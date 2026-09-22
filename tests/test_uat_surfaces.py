@@ -14,6 +14,27 @@ from fettle.uat.surfaces import detect_surfaces, resolve_surfaces
 CLI = [sys.executable, "-m", "fettle.cli"]
 
 
+def test_controller_unavailable_platform_is_explicitly_blocked(monkeypatch, tmp_path):
+    from fettle.uat import controller
+    from fettle.uat.doctor import probe_contract
+
+    monkeypatch.setattr(controller.sys, "platform", "linux")
+    capability = probe_contract(str(tmp_path), {}, "missing.json", "unapproved")
+    assert not capability.ready
+    assert "no unsandboxed fallback" in capability.why
+
+
+def test_controller_readiness_failure_does_not_run_actions(monkeypatch, tmp_path):
+    from fettle.uat import controller
+
+    monkeypatch.setattr(controller, "capability_error", lambda: "sandbox unavailable")
+    with patch("fettle.uat.controller._execute") as execute:
+        result = controller.run_contract_session(str(tmp_path), {}, "missing", "invalid", True)
+    assert result.status == "error"
+    assert "sandbox unavailable" in result.error
+    execute.assert_not_called()
+
+
 def _repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
     return tmp_path
@@ -103,6 +124,23 @@ def _cfg(**uat) -> dict:
 
 
 class TestProbe:
+    def test_missing_startup_executable_cannot_report_ready(self, tmp_path):
+        repo = _repo(tmp_path)
+        with patch("fettle.runners.detect_runners", return_value={"claude": True}):
+            caps, error = probe(str(repo), _cfg(surfaces=["cli"],
+                                start_command="/definitely/missing/uat-app"))
+        assert not error
+        assert not caps[0].ready
+        assert "start_command" in caps[0].why
+
+    def test_missing_browser_runtime_cannot_report_available(self, tmp_path):
+        from fettle.uat.doctor import _playwright_available
+
+        with patch("playwright.sync_api.sync_playwright") as factory:
+            factory.return_value.__enter__.return_value.chromium.executable_path = str(
+                tmp_path / "absent-chromium")
+            assert not _playwright_available()
+
     def test_ready_cli_surface(self, tmp_path):
         repo = _repo(tmp_path)
         (repo / "pyproject.toml").write_text("[project.scripts]\nx = \"x:main\"\n")
@@ -158,6 +196,15 @@ class TestProbe:
 
 
 class TestCLI:
+    def test_corrupt_configuration_cannot_report_ready(self, tmp_path):
+        repo = _repo(tmp_path)
+        (repo / ".fettle.toml").write_text("[uat")
+        result = subprocess.run([*CLI, "uat", "doctor", "--json"],
+                                cwd=repo, capture_output=True, text=True)
+        assert result.returncode == 2
+        assert "invalid UAT configuration" in result.stderr
+        assert "Traceback" not in result.stderr
+
     def test_uat_doctor_json(self, tmp_path):
         repo = _repo(tmp_path)
         (repo / "pyproject.toml").write_text("[project.scripts]\nx = \"x:main\"\n")

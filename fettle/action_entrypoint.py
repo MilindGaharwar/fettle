@@ -11,6 +11,30 @@ import sys
 from fettle import __version__
 
 
+def _validated_findings(data: object, returncode: int) -> list[dict]:
+    if not isinstance(data, dict) or data.get("tool_errors") != []:
+        raise ValueError("missing or failed scanner result")
+    findings = data.get("findings")
+    count = data.get("file_count")
+    if not isinstance(findings, list) or type(count) is not int or count < 0:
+        raise ValueError("invalid scanner scope or findings")
+    for finding in findings:
+        if not isinstance(finding, dict):
+            raise ValueError("invalid finding object")
+        if any(not isinstance(finding.get(key), str)
+               for key in ("severity", "file", "code", "message")):
+            raise ValueError("invalid finding fields")
+        if finding["severity"].lower() not in {"error", "warning", "info"}:
+            raise ValueError("invalid finding severity")
+        if type(finding.get("line")) is not int or finding["line"] < 0:
+            raise ValueError("invalid finding line")
+    expected_status = "violation" if findings else "pass"
+    expected_exit = int(any(finding["severity"].lower() == "error" for finding in findings))
+    if data.get("status") != expected_status or returncode != expected_exit:
+        raise ValueError("scanner status, exit code, and findings disagree")
+    return findings
+
+
 def main() -> int:
     mode = os.environ.get("INPUT_MODE", "advisory").lower()
     if mode not in {"advisory", "enforce"}:
@@ -18,7 +42,14 @@ def main() -> int:
         return 2
     sarif_enabled = os.environ.get("INPUT_SARIF", "true").lower() == "true"
     config_path = os.environ.get("INPUT_CONFIG", "")
-    paths = shlex.split(os.environ.get("INPUT_PATHS", "."))
+    try:
+        paths = shlex.split(os.environ.get("INPUT_PATHS", "."))
+    except ValueError:
+        print("::error::Invalid scan paths: check quoting", file=sys.stderr)
+        return 2
+    if not paths or any(not path.strip() or not os.path.isdir(path) for path in paths):
+        print("::error::Scan paths must name at least one existing directory", file=sys.stderr)
+        return 2
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     runner_temp = os.environ.get("RUNNER_TEMP", "/tmp")
 
@@ -39,12 +70,11 @@ def main() -> int:
         if result.stdout.strip():
             try:
                 data = json.loads(result.stdout)
-                findings = data.get("findings", []) if isinstance(data, dict) else data
+                findings = _validated_findings(data, result.returncode)
                 all_findings.extend(findings)
                 parsed = True
-            except json.JSONDecodeError:
-                print(f"::error::Could not parse fettle output for path '{path}'")
-                print(result.stdout[:500], file=sys.stderr)
+            except ValueError as exc:
+                print(f"::error::Invalid fettle result for path '{path}': {exc}", file=sys.stderr)
         if result.returncode not in (0, 1) or not parsed:
             scan_failed = True
         for line in result.stderr.strip().splitlines()[:10]:

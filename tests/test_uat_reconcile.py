@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from fettle.evidence import parse_artifact
 from fettle.uat.reconcile import (
     Verdict,
@@ -45,22 +47,22 @@ class TestParseTranscript:
         assert "Hello, Ada!" in blocks["greeter/S1"]["observed"]  # multi-line
         assert blocks["greeter/S1"]["notes"] == "exit code 0"
 
-    def test_later_block_wins(self):
+    def test_conflicting_retry_is_unresolved(self):
         text = ("SCENARIO: greeter/S1\nOUTCOME: differs\n"
                 "SCENARIO: greeter/S1\nOBSERVED: retried ok\nOUTCOME: matches\n")
-        assert parse_transcript(text)["greeter/S1"]["outcome"] == "matches"
+        assert parse_transcript(text)["greeter/S1"]["outcome"] == "conflicting-attempts"
 
     def test_empty_transcript(self):
         assert parse_transcript("") == {}
 
 
 class TestReconcile:
-    def test_confirmed_with_real_evidence(self):
+    def test_claimed_command_output_is_not_independent_evidence(self):
         text = ("SCENARIO: greeter/S1\nOBSERVED: $ greet Ada -> Hello, Ada!\n"
                 "OUTCOME: matches\n"
                 "SCENARIO: greeter/S2\nOBSERVED: usage: greet NAME\nOUTCOME: matches\n")
         verdicts = reconcile(SCENARIOS, text)
-        assert [v.verdict for v in verdicts] == ["CONFIRMED", "CONFIRMED"]
+        assert [v.verdict for v in verdicts] == ["INDETERMINATE", "INDETERMINATE"]
 
     def test_unobserved_is_first_class(self):
         text = ("SCENARIO: greeter/S1\nOBSERVED: $ greet Ada -> Hello, Ada!\n"
@@ -96,14 +98,15 @@ class TestReconcile:
 
 class TestIndependentJudgment:
     class Runner:
-        def __init__(self, transcript: str, error: str = ""):
+        def __init__(self, transcript: str, error: str = "", exit_code: int = 0):
             self.transcript = transcript
             self.error = error
+            self.exit_code = exit_code
             self.calls = []
 
         def run(self, prompt, cwd, timeout_s=600):
             self.calls.append({"prompt": prompt, "cwd": cwd, "timeout_s": timeout_s})
-            return RunnerResult(self.transcript, 0, 0.1, self.error)
+            return RunnerResult(self.transcript, self.exit_code, 0.1, self.error)
 
     def test_flags_wrong_reason_pass_with_exact_artifact_reference(self, tmp_path):
         artifact = {"scenario_id": "greeter/S1", "block_sha": "abc123",
@@ -148,6 +151,13 @@ class TestIndependentJudgment:
         assert malformed["status"] == "indeterminate"
         assert unavailable["status"] == "tool_error"
 
+    def test_failed_evaluator_cannot_confirm_empty_findings(self, tmp_path):
+        result = evaluate_judgment(
+            str(tmp_path), "t", {}, self.Runner('{"findings":[]}', exit_code=7))
+        assert result["status"] == "tool_error"
+        assert result["findings"] == []
+        assert "7" in result["error"]
+
     def test_judgment_finding_makes_report_incomplete_without_changing_verdict(self,
                                                                               tmp_path):
         judgment = {"status": "completed", "findings": [{"severity": "high"}]}
@@ -157,7 +167,7 @@ class TestIndependentJudgment:
         )
         assert err == ""
         report = json.loads(Path(path).read_text())
-        assert report["verdicts"][0]["verdict"] == "CONFIRMED"
+        assert report["verdicts"][0]["verdict"] == "INDETERMINATE"
         assert report["completion"]["complete"] is False
 
 
@@ -210,7 +220,14 @@ class TestArtifactsAndSummary:
 
     def test_canonical_write_failure_preserves_report_and_returns_diagnostic(self, tmp_path):
         verdicts = reconcile(SCENARIOS, "")
-        with patch("fettle.uat.reconcile._write_bytes_atomic", side_effect=OSError("full")):
+        from fettle.uat.reconcile import _write_bytes_atomic
+
+        def fail_sidecar(path, content):
+            if path.name == "uat-report.evidence.json":
+                raise OSError("full")
+            _write_bytes_atomic(path, content)
+
+        with patch("fettle.uat.reconcile._write_bytes_atomic", side_effect=fail_sidecar):
             path, err = write_report(
                 str(tmp_path), {"session_id": "uat-x", "surface": "cli"}, verdicts,
             )
@@ -252,7 +269,56 @@ class TestArtifactsAndSummary:
         assert "observed: Hola" in out and "note: wrong language" in out
 
 
+def test_completion_counts_product_scenarios_not_lifecycle_checks():
+    from fettle.uat.reconcile import _completion
+
+    verdicts = [{"scenario_id": "greeter/S1", "verdict": "CONFIRMED"},
+                {"scenario_id": "__lifecycle__/restart", "verdict": "BLOCKED"}]
+    completion = _completion(verdicts, {"scenario_ids": ["greeter/S1"]},
+                             {"status": "NOT_APPLICABLE"}, "")
+    assert completion == {"complete": False, "required_total": 1, "required_confirmed": 1}
+
+
+@pytest.mark.parametrize("identifiers", [[], ["greeter/S1", "greeter/S1"], ["other/S1"]])
+def test_completion_rejects_inexact_product_inventory(identifiers):
+    from fettle.uat.reconcile import _completion
+
+    verdicts = [{"scenario_id": identifier, "verdict": "CONFIRMED"} for identifier in identifiers]
+    assert not _completion(verdicts, {"scenario_ids": ["greeter/S1"]},
+                           {"status": "NOT_APPLICABLE"}, "")["complete"]
+
+
 class TestReconcileSession:
+    @pytest.mark.parametrize("scenario_ids", [[], None, ["greeter/S1", "greeter/S1"],
+                                               ["greeter/missing"]])
+    def test_invalid_inventory_never_succeeds(self, tmp_path, scenario_ids):
+        folder = tmp_path / ".fettle"
+        folder.mkdir()
+        transcript = folder / "t.txt"
+        transcript.write_text("SCENARIO: greeter/S1\nOUTCOME: matches\n")
+        (folder / "uat-session.json").write_text(json.dumps({
+            "status": "completed", "transcript": str(transcript),
+            "scenario_ids": scenario_ids,
+        }))
+        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS):
+            verdicts, checkpoint, error = reconcile_session(str(tmp_path), str(tmp_path))
+        assert error
+        assert not verdicts
+        assert not checkpoint.get("acceptance_complete")
+
+    @pytest.mark.parametrize("status", ["error", "timeout", "running", None])
+    def test_failed_session_cannot_be_promoted_by_verdicts(self, tmp_path, status):
+        path, error = write_report(str(tmp_path), {
+            "session_id": "failed", "surface": "cli", "status": status,
+            "scenario_ids": ["greeter/S1"],
+        }, [Verdict("greeter/S1", "CONFIRMED", observed="claimed pass")])
+        assert not error
+        report = json.loads(Path(path).read_text())
+        assert report["completion"]["complete"] is False
+        assert "did not complete" in report["session_error"]
+        artifact = parse_artifact((tmp_path / ".fettle" / "uat-report.evidence.json").read_bytes())
+        assert artifact.result_state == "unknown"
+
     def test_end_to_end_from_checkpoint(self, tmp_path):
         wt = tmp_path / "wt"
         (wt / ".fettle").mkdir(parents=True)
@@ -268,10 +334,10 @@ class TestReconcileSession:
         write_scenario_artifacts(str(wt), transcript.read_text(encoding="utf-8"),
                                  SCENARIOS, surface="cli")
         with patch("fettle.uat.session.collect_scenarios",
-                   return_value=SCENARIOS):
+                   return_value=SCENARIOS[:1]):
             verdicts, cp, err = reconcile_session(str(tmp_path), str(wt))
         assert err == ""
-        assert [v.verdict for v in verdicts] == ["CONFIRMED"]  # S2 not in session
+        assert [v.verdict for v in verdicts] == ["INDETERMINATE"]
         assert (wt / ".fettle" / "uat-report.json").exists()
 
     def test_missing_checkpoint(self, tmp_path):
@@ -308,14 +374,14 @@ class TestReconcileSession:
         from fettle.uat.artifacts import write_scenario_artifacts
 
         write_scenario_artifacts(str(wt), text, SCENARIOS, surface="cli")
-        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS):
+        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS[:1]):
             verdicts, _, err = reconcile_session(str(tmp_path), str(wt))
 
         assert err == ""
-        assert [v.verdict for v in verdicts] == ["CONFIRMED", "CONFIRMED"]
+        assert [v.verdict for v in verdicts] == ["INDETERMINATE", "INDETERMINATE"]
         assert verdicts[-1].scenario_id == "__lifecycle__/restart-persistence"
         report = json.loads((wt / ".fettle" / "uat-report.json").read_text())
-        assert report["lifecycle"]["restart_probe"]["verdict"] == "CONFIRMED"
+        assert report["lifecycle"]["restart_probe"]["verdict"] == "INDETERMINATE"
 
     def test_configured_restart_probe_missing_evidence_cannot_pass(self, tmp_path):
         wt = tmp_path / "wt"
@@ -332,7 +398,7 @@ class TestReconcileSession:
         from fettle.uat.artifacts import write_scenario_artifacts
 
         write_scenario_artifacts(str(wt), transcript.read_text(), SCENARIOS, "cli")
-        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS):
+        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS[:1]):
             verdicts, _, err = reconcile_session(str(tmp_path), str(wt))
 
         assert err == ""
@@ -354,10 +420,10 @@ class TestReconcileSession:
         from fettle.uat.artifacts import write_scenario_artifacts
 
         write_scenario_artifacts(str(wt), transcript.read_text(), SCENARIOS, "cli")
-        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS):
+        with patch("fettle.uat.session.collect_scenarios", return_value=SCENARIOS[:1]):
             verdicts, _, err = reconcile_session(str(tmp_path), str(wt))
 
         assert err == ""
-        assert [v.verdict for v in verdicts] == ["CONFIRMED"]
+        assert [v.verdict for v in verdicts] == ["INDETERMINATE"]
         report = json.loads((wt / ".fettle" / "uat-report.json").read_text())
         assert report["lifecycle"]["restart_probe"]["verdict"] == "NOT_APPLICABLE"

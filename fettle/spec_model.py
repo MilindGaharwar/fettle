@@ -202,7 +202,8 @@ def discover_specs(root: str) -> list[tuple[Spec | None, list[dict]]]:
     root_path = Path(root)
     results: list[tuple[Spec | None, list[dict]]] = []
     for md in sorted(root_path.rglob("*.md")):
-        if any(part in _SKIP_DIRS for part in md.parts):
+        if any(part in _SKIP_DIRS or part == ".fettle"
+               for part in md.relative_to(root_path).parts):
             continue
         try:
             text = md.read_text(encoding="utf-8", errors="replace")
