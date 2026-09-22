@@ -1,0 +1,373 @@
+{
+  "canonical_calibration": {
+    "calibration_passed": false,
+    "canonical_identity": "sha256:b1b1b89c356ecee7fbe3cf638fb8031a46c878db383cdd7e5d3e3aaf8f4f6cba",
+    "errors": [],
+    "expected_states_matched": true,
+    "graduation": {
+      "blockers": [
+        "deterministic controller calibration does not establish native-agent discovery or human parity",
+        "independently held-out qualification and explicit enforcement promotion remain required"
+      ],
+      "ready": false
+    },
+    "metrics": {
+      "controller": {
+        "coverage_observed": 9,
+        "coverage_rate": 0.75,
+        "coverage_total": 12,
+        "discovered": 5,
+        "discovery_rate": 1.0,
+        "false_passes": 0,
+        "false_verdicts": 0,
+        "seeds": 12
+      }
+    },
+    "status": "complete"
+  },
+  "cases": [
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "api-success",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"Hello, Ada\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "api-wrong-body",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"wrong output\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "api-server-error",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"Hello, Ada\",\"status_code\":500}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "api-redirect",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"Hello, Ada\",\"status_code\":302}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "unknown",
+      "id": "api-overflow",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "isolated Docker operation failed: Traceback (most recent call last):\n  File \"<string>\", line 24, in <module>\nRuntimeError: response output limit exceeded\n",
+          "exit_code": 1,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "unknown",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:b72512e9341f3bccea422f48092fb05ec1e7998ce39a91761f843e6d72a734ed",
+      "doctor_exit": 0,
+      "expected_state": "unknown",
+      "id": "api-timeout",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "isolated operation timed out; rerun the approved contract",
+          "exit_code": 1,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "unknown",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:e1ad6160774e7e1df92ca7945c446176ac1e2686044ee46fba9ca3a1cd2375f9",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "state-restart",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"<html lang=\\\"en\\\"><title>Result</title><main><p role=\\\"status\\\">Hello, Ada</p></main></html>\",\"status_code\":200},{\"restart\":true},{\"body\":\"Ada\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:e1ad6160774e7e1df92ca7945c446176ac1e2686044ee46fba9ca3a1cd2375f9",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "state-loss",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"body\":\"<html lang=\\\"en\\\"><title>Result</title><main><p role=\\\"status\\\">Hello, Ada</p></main></html>\",\"status_code\":200},{\"restart\":true},{\"body\":\"missing\",\"status_code\":200}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "api"
+    },
+    {
+      "contract_digest": "sha256:4ab9938bb796e8eb73b5025a47da7ff0603c1ede7c92299419013955da39e1df",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "web-desktop",
+      "observations": [
+        {
+          "artifacts": [],
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"text\":\"Hello, Ada\"}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "web"
+    },
+    {
+      "contract_digest": "sha256:06ce39232e8c670141d0b18201f16f6f5f9ad7852a877466c6a70beba131509a",
+      "doctor_exit": 0,
+      "expected_state": "pass",
+      "id": "web-mobile",
+      "observations": [
+        {
+          "artifacts": [],
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"text\":\"Hello, Ada\"}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "state": "pass",
+      "surface": "web"
+    },
+    {
+      "contract_digest": "sha256:4ab9938bb796e8eb73b5025a47da7ff0603c1ede7c92299419013955da39e1df",
+      "doctor_exit": 0,
+      "expected_state": "violation",
+      "id": "web-wrong-body",
+      "observations": [
+        {
+          "artifacts": [],
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": "[{\"text\":\"wrong output\"}]\n"
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "violation",
+      "surface": "web"
+    },
+    {
+      "contract_digest": "sha256:4ab9938bb796e8eb73b5025a47da7ff0603c1ede7c92299419013955da39e1df",
+      "doctor_exit": 0,
+      "expected_state": "unknown",
+      "id": "web-missing-control",
+      "observations": [
+        {
+          "artifacts": [],
+          "attempt": 1,
+          "error": "isolated operation timed out; rerun the approved contract",
+          "exit_code": 1,
+          "scenario_id": "greeter/S1",
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "state": "unknown",
+      "surface": "web"
+    }
+  ],
+  "heldout_corpus_digest": null,
+  "heldout_criteria": null,
+  "limits": [
+    "local installed deterministic controller qualification, not agent discovery",
+    "fixture manifest frozen before execution; not an independently held-out parity study",
+    "no human baseline, native explorer qualification or enforcement graduation",
+    "sanitized observations are reproducibility evidence, not portable authority"
+  ],
+  "manifest": [
+    {
+      "expected_state": "pass",
+      "id": "api-success",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "api-wrong-body",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "api-server-error",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "api-redirect",
+      "surface": "api"
+    },
+    {
+      "expected_state": "unknown",
+      "id": "api-overflow",
+      "surface": "api"
+    },
+    {
+      "expected_state": "unknown",
+      "id": "api-timeout",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "state-restart",
+      "surface": "api"
+    },
+    {
+      "expected_state": "violation",
+      "id": "state-loss",
+      "surface": "api"
+    },
+    {
+      "expected_state": "pass",
+      "id": "web-desktop",
+      "surface": "web"
+    },
+    {
+      "expected_state": "pass",
+      "id": "web-mobile",
+      "surface": "web"
+    },
+    {
+      "expected_state": "violation",
+      "id": "web-wrong-body",
+      "surface": "web"
+    },
+    {
+      "expected_state": "unknown",
+      "id": "web-missing-control",
+      "surface": "web"
+    }
+  ],
+  "manifest_digest": "sha256:7ce7bc413448f53d0e582c93ca437840ab5973511b7bf2c36b9978e3dd22cbf0",
+  "metrics": {
+    "cases": 12,
+    "contradicted_defects": 5,
+    "false_passes": 0,
+    "matched_expected_states": 12,
+    "observed_scenarios": 12,
+    "seeded_defects": 5
+  },
+  "passed": true,
+  "recorded_at": "2026-09-22T04:46:06.831580+00:00",
+  "runtime": {
+    "browser": "sha256:0b5a9b1dd96db0948671a77d0dee1fd17653c51c7bfc8133a6e6f343164e8e54",
+    "image": "docker.io/library/python@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b"
+  },
+  "schema_version": 1,
+  "wheel_digest": "sha256:1bc2d0b9d0e989ff0285232471bd04000037567979b15d083991b7ac7e419af0"
+}

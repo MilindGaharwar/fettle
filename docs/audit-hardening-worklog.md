@@ -1,5 +1,335 @@
 # Audit Hardening Worklog
 
+## 2026-09-22: Checkpoint Review And Full Verification
+
+Operator authorized review, verification and checkpoint commits/push on the
+existing review branch. Merge, tag, release and enforcement promotion remain
+separate decisions. The accumulated implementation, tests and evaluator form
+one runnable checkpoint; documentation and frozen historical evidence follow
+separately. Runtime/controller and browser/recovery tests are coupled, and the
+runner tests import the evaluator, so finer file-level commits would be incomplete.
+
+Review found a failed judgment subprocess could return valid empty-findings JSON
+and be classified completed when `run.error` was empty. A regression reproduced
+exit 7 becoming completed. Judgment now requires exit 0 as well as no transport
+error; all 39 reconciliation tests passed after repair. The public privacy audit
+also found three host-specific paths in unpublished acceptance notes; replaced
+their prefixes with `$TMPDIR`, preserving artifact names and results. Generated
+mypy caches were moved outside the source tree without changing the audit policy.
+
+Final combined-tree verification: **3,466 tests passed in 508.40 seconds**, with
+Docker and real VM-restart opt-ins enabled and no skips. Repository-wide Ruff,
+CI blocking trust-boundary mypy, focused UAT/evaluator mypy, config validation,
+evaluation-schema validation, rule provenance, privacy audit, Fettle changed-file
+scan and whitespace checks all passed. The Docker suite left no containers or
+volumes. Commit hooks and fresh remote CI must still pass before push completion
+is claimed. Existing seven completion records do not establish this UAT program.
+
+No held-out trial was rerun. The review repair changes the report-producer bytes;
+previous installed-wheel studies remain historical evidence tied to their exact
+wheel/evaluator identities, not qualification of the repaired checkout. Remaining
+limits include local digest-pinned browser provisioning, trusted runtime/daemon,
+buffered Docker/native subprocess output before size checks, heuristic screenshot
+secret screening, missing structured native refusal evidence and nongeneralized
+discovery. This is a reviewed development checkpoint, not a release declaration.
+
+## 2026-09-22: Structured Read And Native Input Discovery
+
+Investigated the exact interactive-denial thread through the pinned Codex 0.155.1
+local app-server `thread/read` API, not by opening credential or session files.
+The bounded temporary probe sent only initialize/initialized/read requests; it
+neither resumed the agent nor answered permissions. Thread
+`01a0c7f3-54b6-79c0-aa52-b9dc9916f643` returned turn
+`01a0c7f3-5531-7ba3-b84b-190bb951d718` as `interrupted` with no command items.
+Response SHA-256: `9f3c7a3ded88e85c88df00e499d8625af0afc888a49f1449e301b6433e0213fb`.
+Although the pinned protocol defines `declined`, this saved trial does not retain
+it. The TUI refusal and absent side effect remain verified, but structured denial
+is still non-pass. No further manual retry was requested. A future trial needs
+live request/decision correlation, not another uninstrumented TUI recording.
+
+Added evaluation-only native input discovery to `evals/uat_cli_controller.py`.
+The agent receives only written requirements and a one-string CLI interface. It
+selects up to 12 distinct, bounded inputs; no source, seeded defects or expected
+verdicts are supplied. Exact output expectations come from a separately reviewed,
+digest-approved integer-range policy. Existing installed doctor/run/report and
+canonical validation execute and judge each selected probe. Native tool attempts,
+malformed/duplicate fields, invalid proposals and incomplete output fail closed.
+All installed Python module bytes must match the supplied wheel. Output is
+exclusively reserved before native execution, partial progress stays non-pass,
+and reruns cannot overwrite a consumed trial. Native transport still buffers
+output before its size check; the subprocess deadline remains the resource bound.
+
+Developmental study: four expected states matched, including two detected defects
+and one blocked write. This was not held-out evidence. Focused runner tests:
+78 passed; Ruff and focused evaluator mypy passed. Adjacent preflight: 159 passed,
+20 opt-in Docker/VM-restart tests skipped, Fettle clean. Those skipped gates were
+not newly verified; prior full-suite evidence belongs to its earlier checkpoint.
+The available `kgraph impact FILE` graph was stale and treated as advisory only.
+
+An independently delegated author produced two suites and twelve variants without
+reading implementation, candidate prompts, developmental cases or selected inputs.
+The author disclosed inherited platform context and static-only fixture checks in
+[provenance](uat/native-discovery-corpus-provenance.md). The main agent reviewed
+source safety and requirement/oracle consistency before executing the frozen corpus
+once, sequentially, with no prompt/corpus tuning or retries.
+
+- Corpus SHA-256: `6067cee014a6e86dd529d630d687e1e730ba866e4a35d13903022ba3016d6b37`.
+- Evaluator SHA-256: `249514a3f4fe14843703b8d6a89f8f88fb9f0337ad60ab90a4b3a5d01c02961a`.
+- Installed wheel SHA-256: `3118991c1c9a3d231c663ffdad44c1ea24420dacc1638593b5cd42474032b29b`.
+- Result: 12/12 expected states, 8/8 defects discovered, two healthy passes,
+  two timeouts retained as unknown, zero false passes/alarms/missed defects.
+- Retained 144 observations and both native-selected input lists in
+  [qualification](uat/native-discovery-qualification.json). These sanitized records
+  are not portable canonical authority; canonical validation occurred in the live
+  isolated evaluation before temporary products and receipts were cleaned up.
+
+The study qualifies bounded requirements-derived input selection for synthetic
+range classifiers, not adaptive exploration, arbitrary oracle synthesis, a new
+production discovery command, human parity or enforcement promotion. Production
+implementation was unchanged in this slice. `fettle completion validate` passed
+the seven existing records, none of which covers this UAT program. Structured
+native denial and general discovery remain open. No commit/push/release authorized.
+
+## 2026-09-22: Interactive Permission Refusal
+
+The operator directly declined the exact command permission request for
+`/usr/bin/touch /tmp/fettle-native-interactive-denial` in the isolated native VM.
+The output-only recording shows the native approval menu, selection of
+`No, and tell Codex what to do differently`, and `You canceled the request`.
+The session was interrupted and the operator exited with `/quit`. Independent
+checks found the target absent both afterward and after fresh-session recovery.
+No approval was automatically answered, and no credential files were accessed.
+
+Recording: `/home/lima.guest/native-denial-output.t6XcMelH`, 38,597 bytes,
+2026-09-22 07:10:05 through 07:10:32 UTC, recorder command exit 0. SHA-256:
+`fe54f204d818201a3512f56c291836cec62c8f62c7df4a526810139e4d897db6`.
+An output-only copy is retained in the host session temporary directory.
+The recording also displays `Ran ... (no output)` after cancellation. This is
+conflicting UI evidence, not proof that the command executed or that a structured
+denial event was captured. The verified scope is the displayed permission request,
+operator refusal, absent side effect and successful fresh-session recovery;
+machine-verifiable denial classification remains non-pass pending unambiguous
+native event evidence. No overall UAT or enforcement graduation is inferred.
+
+Fresh recovery session `01a0c7f4-757a-71f0-82a9-9f35a1cf948c` retained normal
+on-request approval and read-only sandbox settings. Its completed command event
+reported `/usr/bin/printf fettle-after-interactive-denial-ok`, exact output,
+exit 0 and `turn.completed`. The synthetic denied-write target remained absent.
+
+Two setup attempts are not counted as command-denial evidence: the first recorder
+stopped on terminal access because GNU timeout created a background process group
+(fixed with `--foreground` and a real terminal probe); the second ended when the
+operator declined the initial directory-trust prompt. The empty test directory
+was checked before the operator explicitly trusted it in the final trial.
+No application code changed in this verification step, and no held-out corpus
+was rerun. Independent native defect discovery remains unqualified.
+
+## 2026-09-22: Authenticated Native Proposal Bridge
+
+Operator completed direct device authentication. Status independently reported
+`Logged in using ChatGPT`; no credentials were read or copied. Authenticated
+Codex in `fettle-native` executed the exact printf smoke with a completed command
+event and exit 0. A read-only write-denial attempt left the synthetic target
+absent, but its JSON stream contained only denial prose, not a command event.
+That native denial evidence remains incomplete; it is not promoted to a pass.
+Fresh-session printf subsequently succeeded. A separate actual one-second
+interruption exited 124 with no terminal success; a new session then executed
+host-source/controller-path/Docker-socket absence tests with command exit 0.
+No permission request was auto-answered or bypassed. These absence probes are
+not a general network attack or VM escape qualification.
+
+Added optional `fettle uat run --proposal <json>` on the existing approved-contract
+path. The untrusted proposal must exactly match action order, scenario digest,
+coverage, arguments/steps and timeouts, excluding expected-output oracles. Duplicate
+fields, malformed/oversized/symlink files, boolean substitution, missing coverage,
+command replacement and oracle injection reject before capture. Proposals cannot
+approve contracts or become acceptance evidence. JSON format is
+`{schema_version: 1, scenario_digest: ..., actions: [...]}`; action/step `expect`
+fields stay solely in the separately approved contract. This gate checks matching
+actions, not native authorship, and does not introduce an automatic agent launcher.
+
+Extended the installed evaluator to obtain action-only JSON over stdin from the
+separate signed-in VM, with on-request approval, read-only sandbox, ephemeral
+sessions and bounded execution. No product source, expected outputs or controller
+receipts are sent to the agent. Three installed cases passed through public
+CLI/run/report/canonical validation: success, seeded contradiction and sandbox
+write blocked as unknown. Each case also rejected injected oracle fields before
+execution; forged reports remained non-pass. Native transcript hashes identify
+transport output, not independent product evidence. See
+[native bridge qualification](uat/native-proposal-qualification.json).
+
+Wheel SHA-256 `3118991c1c9a3d231c663ffdad44c1ea24420dacc1638593b5cd42474032b29b`.
+Focused runner/controller tests: 72 passed. Full current suite including Docker
+and real VM restart: **3,427 passed in 489.24 seconds**. Editor diagnostics clean;
+Ruff and focused controller/evaluator mypy passed. `kgraph` unavailable in PATH.
+Earlier independently held-out API corpus was not rerun or tuned; its evidence
+belongs to its recorded older wheel, not this updated candidate.
+
+Remaining: interactive native approval/denial event capture and independently
+authored end-to-end native defect-discovery trials. The bridge only echoes approved
+actions, so it is not autonomous scenario discovery or broad native UAT completion.
+No commit, push, release or promotion authorization. Authentication remains only
+on the dedicated VM disk; stop VMs at checkpoint without removing that state.
+
+## 2026-09-22: Plain Native VM Prerequisite
+
+Operator authorized autonomous continuation until direct authentication or a
+genuine blocker. Created a separate Lima 2.2.0 `fettle-native` plain VZ VM:
+2 CPUs, 4 GiB RAM, 12 GiB disk. Debian 13 ARM64 image dated 20260712-2537,
+SHA-512 `8543d795f2fde630eb66c492f245a8c1da19dedc636e0a8e7b3d0f95920e1a05aa911ef2d82d177d41cc53ced5fccbd2a3945d07fa5e15018914c4d864bb07ed`.
+Removed floating-image fallbacks. No host mounts, application port forwarding,
+containerd, Docker socket, SSH-agent or X11 forwarding. Lima's management SSH
+remains host-initiated over vsock. Guest mount inspection confirmed no shared
+host filesystem; controller receipts stay outside the VM. The VM has outbound
+networking for authentication/provider access; this is not an egress-isolation
+claim. The controller's Colima VM remains stopped.
+
+Transferred only the previously verified Codex 0.155.1 archive and public CA.
+Guest binary SHA-256 matches
+`298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335`.
+This Linux build uses `codex sandbox <command>`, not `sandbox linux <command>`.
+With on-request approvals and read-only sandbox, printf succeeded and touch in
+`/tmp` failed with `Read-only file system`; the target remained absent. No kernel,
+AppArmor, seccomp, elevated-capability or native sandbox bypass was needed.
+This resolves the nested-container prerequisite blocker, not agent integration.
+
+Public CA fingerprint matches the previously approved host trust root. TLS
+verification to `auth.openai.com` returned verify result 0; its root URL returned
+HTTP 403, so device authentication availability is not yet established.
+`codex login status` returned `Not logged in`. Native state is private to
+`/home/lima.guest/native-state`. No existing credentials were copied or read.
+
+**Pending operator action:** direct device sign-in in the dedicated VM. Leave
+credentials and device codes outside chat. VM is intentionally running for this
+step. Authenticated proposals, approval-denial/recovery, evidence-access attacks
+and independent native qualification remain unverified. No shipping authorized.
+
+## 2026-09-22: Recovery, Browser Audit And Independent Qualification
+
+Implemented external atomic resource journals and exclusive per-product leases.
+Docker clients inherit the lease, ownership is recorded before create, and
+recovery requires both journaled names and owner labels on the original daemon
+and socket. Acquired reruns invalidate prior acceptance before recovery; rejected
+concurrent runs leave the active checkpoint alone. Cleanup is verified before
+publishing receipts. Actual controller SIGKILL, surviving-client exclusion,
+Colima stop/start, orphan cleanup, unrelated-volume preservation and fresh
+acceptance passed. Recovery is a full new run, never partial-evidence merging.
+
+Opt-in browser audits now retain bounded viewport PNGs, axe-core 4.10.3 WCAG A/AA
+violations/incomplete checks, page/console errors and failed/error HTTP requests.
+Axe runs in an isolated JavaScript world. Qualified offline observer image:
+`sha256:0b5a9b1dd96db0948671a77d0dee1fd17653c51c7bfc8133a6e6f343164e8e54`.
+Desktop/mobile positive captures and seeded label/page/console/HTTP/external
+request failures passed; retained PNGs were viewed, and altered screenshot
+hashes rejected. Screenshots are evidence, not visual oracles; synthetic inputs
+only, single-frame audit, heuristic secret screening, no comprehensive a11y claim.
+
+Review found unreachable per-scenario assertion validation and a misplaced API
+runtime return; both repaired with focused regressions before qualification.
+Full current suite: **3,411 passed in 489.64 seconds**, Docker and dedicated VM
+restart explicitly enabled. Installed wheel digest:
+`sha256:1bc2d0b9d0e989ff0285232471bd04000037567979b15d083991b7ac7e419af0`.
+Installed developmental CLI3/network12 controls matched expected states; the
+three expected unknown network controls still prevent developmental calibration.
+
+Operator explicitly authorized an independent evaluator. A separate agent,
+without implementation/test access, authored and froze twelve API cases before
+execution. Corpus SHA-256:
+`c0109c3d8994fc9028cf955c2cc2857bff724f321c184215111bfd4570db484f`.
+One installed-wheel trial: 12/12 expected states, 12/12 observed captures, zero
+false passes/verdicts, canonical calibration passed; graduation remains false.
+No retries or tuning on held-out outcomes. See the
+[retained trial](uat/heldout-controller-qualification.json). This is independent
+deterministic API qualification, not native-agent discovery or human parity.
+
+Operator also authorized a dedicated native runtime and normal separate sign-in.
+Built Codex 0.155.1 Linux ARM64 from npm-integrity-verified bytes, image
+`sha256:7620e39c31ce90e770490d86ce9c36dba71438e8c0c2c8e797368716453c274c`.
+Before authentication, networkless native sandbox probe failed: default Docker
+seccomp denied namespaces; the existing scoped namespace profile progressed to
+`bwrap: Failed to make / slave: Operation not permitted`. Native integration is
+**blocked**, not qualified. No credentials copied, sign-in started, Docker socket
+or controller storage exposed, SYS_ADMIN granted, AppArmor/sysctl changed, or
+sandbox/approval bypass used. A compatible separately isolated native host is
+required before normal sign-in and approval/recovery qualification can proceed.
+
+No commit, push, merge, release or enforcement promotion. Prior remote CI does
+not cover these uncommitted changes. Seven existing completion records do not
+establish completion of this program.
+
+## 2026-09-21: Ordered Container And Network Acceptance
+
+Operator authorized the four recommended steps in order. Container boundary
+qualification passed 25 actual checks before API implementation. API contracts,
+browser actions and stateful restart then ran through the controller receipt and
+public report/canonical path. Full suite checkpoint: 3,398 passed with Docker
+tests enabled. Later focused source-byte, deadline and calibration checks passed.
+
+Browser startup initially failed under default seccomp. The version-matched
+Playwright profile permitted namespace creation, then exposed a conditional
+`chroot` denial. A digest-bound per-container syscall allowance resolved startup
+with Chromium sandbox enabled, no added capabilities, and no VM-wide AppArmor
+change. Initial restart lost tmpfs state; a read-only networkless keeper fixed the
+mount lifecycle, verified by actual POST/restart/GET and seeded state-loss tests.
+
+Fresh installed-wheel evaluation used isolated imports and actual CLI/API/web
+flows. Twelve fixed network cases matched expected states, with five observed
+seeded contradictions and zero false passes. Three deliberate blocked cases have
+no successful behavioral observation: coverage is 9/12, not 100%. Corrected the
+calibration predicate to require full observed coverage rather than treating
+expected unknowns as calibration success. No parity or enforcement graduation.
+
+Installed Codex runner smoke used Fettle's read-only/on-request arguments in a
+disposable repository. Exit 0, 21.6 seconds, expected printf marker returned, no
+elevation requested. Retained as smoke evidence only; it cannot substitute for
+independent capture or native-agent approval/recovery qualification.
+
+The [detailed checkpoint](uat-strength-plan.md) records reproducible tooling,
+runtime identities, required contract fields and the remaining gates. No agent
+was attached to the host controller store; native-agent isolated capture, browser
+visual/accessibility breadth and hard-kill recovery remain unqualified. No current
+changes have been committed or pushed; earlier remote CI is not current evidence.
+
+## 2026-09-21: Container CA Recovery
+
+Operator asked the agent to locate the approved CA rather than requiring manual
+certificate details. Read-only inspection identified an existing administrator-
+trusted root in the macOS System keychain. Its public export matched the keychain
+SHA-256 fingerprint, had valid CA constraints, and verified the corporate proxy
+chain. Explicit host TLS validation with that root succeeded.
+
+Installed only that root into the task-owned `fettle-uat` VM and verified the guest
+fingerprint. Docker Hub image acquisition then succeeded without weakening TLS.
+The [UAT plan](uat-strength-plan.md) records the root fingerprint, guest path and
+pinned image digest. Host trust was unchanged; no private keys were accessed.
+API/browser/stateful transport and isolation qualification remain pending.
+
+## 2026-09-21: Evidence Reconciliation
+
+The September 19 pending CI and Codex entries below are historical. Candidate
+`c83f3b455fca4b8c299c701324df322279837541` passed required CI run
+`35426206197` and mutation run `35426206213`. PR #44 remains open; these results
+do not cover the subsequent uncommitted UAT integrity repairs.
+
+The isolated Codex retry observed an actual corrupt-policy denial followed by
+successful marker execution after repair, using normal host trust and read-only
+sandboxing. Denial thread: `01a0b8cf-56f3-7ae2-bc9c-e3e6be80e8fa`; recovery
+thread: `01a0b8cf-b7f5-75f2-8d85-b031a0ab4858`. An initial fixture was valid TOML
+and was excluded from failure-path evidence. The final candidate record is
+retained in [PR #44's evidence addendum](https://github.com/MilindGaharwar/fettle/pull/44#issuecomment-5740531348).
+This is host policy enforcement evidence, not qualification of the new UAT driver.
+
+Human timing/accessibility acceptance remains deferred. AH07 is not declared
+complete, and its dependent expansion packages remain gated. The public wheel
+was not replaced by this work. The current authorized priority is the
+[UAT integrity repair checklist](uat-strength-plan.md): independent observation
+and requirement-based acceptance, not human-parity measurement.
+
+The safety migration's last recorded full suite passed 3,343 tests; its final
+documentation check passed six tests. Temporary raw UAT probe directories are
+not durable acceptance records. Preserve sanitized controller observations and
+their requirement bindings as part of the new capture path before graduation.
+
 ## 2026-09-19: Candidate Acceptance And Shipping
 
 Operator requested all next steps in priority order, including commit and push
