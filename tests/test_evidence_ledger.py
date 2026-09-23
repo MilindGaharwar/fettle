@@ -23,6 +23,29 @@ from fettle.evidence_ledger import (
 )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock contract")
+def test_successful_lock_acquisition_runs_operation_without_reacquiring(tmp_path, monkeypatch):
+    import fcntl
+
+    original = fcntl.flock
+    expected = [fcntl.LOCK_EX | fcntl.LOCK_NB, fcntl.LOCK_UN]
+    observed = []
+
+    def lock_once(descriptor, operation):
+        observed.append(operation)
+        assert observed == expected[:len(observed)]
+        return original(descriptor, operation)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(fcntl, "flock", lock_once)
+        record = append_record(str(tmp_path), "test", worker="single")
+
+    assert observed == expected
+    assert record["seq"] == 1
+    assert read_ledger(str(tmp_path))[0]["payload"]["worker"] == "single"
+    assert verify_chain(str(tmp_path))["status"] == "verified"
+
+
 @pytest.mark.parametrize("operation", ["append", "rotate", "anchor"])
 def test_concurrent_append_waits_for_complete_transaction(tmp_path, monkeypatch, operation):
     append_record(str(tmp_path), "seed")

@@ -1,5 +1,86 @@
 # Audit Hardening Worklog
 
+## 2026-09-23: Mutation Evidence Repair In Progress
+
+Retained all 256 initial reports from run `35729628122`: 245 completed and
+11 tool errors, with 3,838 killed, 4,476 survived and one timeout in the retained
+counts. The aggregate remains non-pass; these incomplete counts are not a valid
+global mutation score. No new commit or push is authorized while mutation
+failures remain without explicit operator permission. Local commit `8797060`
+predates that instruction and remains unpublished; the remote head is `c8e80a2`.
+
+Canonical fingerprint comparison exposed a harness defect: mutmut 2.5.1 stores
+zero-based cache line numbers, but range collection compared them directly with
+one-based source ranges. This omitted each range's first line and could admit
+the following line from an existing cache. Three boundary fixtures failed
+before the coordinate conversion and passed afterward. Mutation and specification
+modules passed 222 tests. Older range-filtered corpora must not be reused as
+complete qualification evidence; the failed historical reports remain retained.
+
+Strengthened specification evidence tests for empty reports, missing IDs,
+dependency-directory exclusion, unreadable and malformed text, unknown-marker
+continuation, exact evidence fields, zero scenarios and fractional coverage.
+A fresh bounded replay with the corrected harness generated 44 mutants and
+included all 20 historical survivor fingerprints in the selected coverage lines:
+44 killed, zero survivors, timeouts, suspicious or untested outcomes (45.45 s).
+The ledger acquisition regression catches repeated successful lock acquisition
+before concurrent tests can hang. Ledger tests: 47 passed. Its exact historical
+timeout fingerprint was killed in 4.10 s with the ledger-only narrow mapping;
+this does not establish the outcome under the full CI test mapping.
+
+A disposable environment installed the hash-pinned mutation requirements and
+confirmed Playwright was absent. The formerly failing controller/surface
+baseline passed 102 tests, with 20 existing Docker/VM opt-in skips. This verifies
+optional-dependency isolation, not browser runtime acceptance. Explicit CLI
+mappings now include nine existing subprocess-based test files missed by direct
+import discovery. All 21 selected files passed their baseline: 576 passed,
+20 opt-in skips, 49.17 s. A fresh one-line CLI replay included both retained
+`spec coverage` dispatch fingerprints and killed both in 105.54 s.
+
+Network evidence follow-up added runtime-independent contract tests in the
+existing session suite. Canonical replay included every historical target in
+each selected function: browser steps 70/70 killed, browser settings 37/37
+killed (36 historical targets), and expected-observation formatting 29/29
+killed. Shared API/web contract replay initially killed 206/222; its range
+also included two lines of the formatter subsequently verified separately.
+Focused sequencing, printable-path and precise-diagnostic regressions then
+killed 30/31 mutants on the remaining contract lines. Screenshot validation
+initially killed 54/56; malformed high-byte dimensions exposed the remaining
+two truncation mutants, and the follow-up dimension slice killed all ten.
+These checks use synthetic pinned profile bytes and generated PNG data, not
+claims about real browser execution or visual quality.
+
+The remaining contract survivor is fingerprint
+`0f2973914b8dc36dc283a990592a18d9ec37e6cde2f01af1e1b317140f0e3656`:
+`LIMIT // 2` becomes `LIMIT / 2`. With the fixed `LIMIT = 65536`, this changes
+an integer threshold of 32768 into the exactly representable float 32768.0;
+comparison with integer UTF-8 byte totals has the same result. This is a
+reasoned equivalence classification, not a killed mutant or approved waiver.
+No survivor waiver or scoring policy was changed. Intermediate combined
+verification passed 550 tests with 20 runtime opt-in skips; Ruff, Fettle and
+editor diagnostics were clean. Later screenshot/formatting tests have focused
+passing evidence; accumulated verification must be refreshed before shipping.
+
+The refreshed verification passed all **3,692 tests in 557.07 seconds**, with
+Docker and VM-restart opt-ins enabled and no skips. The dedicated runtime had
+no remaining containers or volumes after its preceding 337-test integration
+check. Docker transport replay killed 18/18 mutants, including all 14 historical
+targets. Runtime identity replay killed 55/56 and classified one slow failure
+as suspicious; its separately retained one-line replay killed both generated
+mutants, including that fingerprint. The changed range-coordinate line itself
+was mutation-tested against the full harness test module: 3/3 killed.
+
+A developmental fingerprint inventory now has narrow kill evidence for 379 of
+4,478 distinct retained non-killed fingerprints; 4,099 have no such evidence
+yet. This inventory combines scoped development checks for progress tracking
+only, not authoritative calibration outcomes or a mutation score. The original
+11 tool errors and the historical range-filter defect still require fresh full
+evidence on a qualified revision. No new commit or push has been made.
+
+These are scoped developmental checks, not a full mutation qualification or
+completion claim. Other survivor clusters, runtime-enabled checks, fresh full
+evidence and remote verification remain open. No threshold or waiver was relaxed.
+
 ## 2026-09-22: Remote Checkpoint Dependency Repair
 
 Signed-off checkpoints `235c176` and `c8e80a2` were pushed with all commit and

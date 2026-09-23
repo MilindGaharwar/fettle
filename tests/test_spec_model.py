@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -245,6 +246,17 @@ class TestTraceMarkers:
 
 
 class TestScenarioCoverage:
+    def test_empty_repository_returns_complete_empty_report(self, tmp_path, monkeypatch):
+        def unexpected_scan(root):
+            pytest.fail("test files must not be scanned without specifications")
+
+        monkeypatch.setattr("fettle.spec_model._iter_test_files", unexpected_scan)
+        assert scenario_coverage(str(tmp_path)) == {
+            "specs": [],
+            "unknown_traces": [],
+            "totals": {"scenarios": 0, "covered": 0, "coverage_percent": 100.0},
+        }
+
     @pytest.fixture
     def repo(self, tmp_path):
         (tmp_path / ".git").mkdir()
@@ -262,8 +274,48 @@ class TestScenarioCoverage:
         assert s1["covered"] and s1["covered_by"] == ["tests/test_cart.py"]
         s2 = next(r for r in spec["scenarios"] if r["id"] == "S2")
         assert not s2["covered"] and s2["covered_by"] == []
+        assert spec["path"] == "docs/checkout.md"
+        assert spec["covered"] == 1
+        assert spec["total"] == 2
         assert report["totals"] == {
             "scenarios": 2, "covered": 1, "coverage_percent": 50.0}
+
+    def test_spec_without_id_does_not_create_coverage_rows(self, repo):
+        (repo / "docs" / "missing-id.md").write_text(
+            VALID_SPEC.replace("id: checkout-flow\n", ""))
+        report = scenario_coverage(str(repo))
+        assert [spec["id"] for spec in report["specs"]] == ["checkout-flow"]
+        assert report["totals"]["scenarios"] == 2
+
+    def test_dependency_test_markers_do_not_count_as_evidence(self, repo):
+        dependency = repo / "node_modules" / "package" / "test_cart.py"
+        dependency.parent.mkdir(parents=True)
+        dependency.write_text("# traces: checkout-flow/S1\n")
+        report = scenario_coverage(str(repo))
+        assert report["totals"]["covered"] == 0
+        assert report["specs"][0]["scenarios"][0]["covered_by"] == []
+
+    def test_unreadable_test_does_not_hide_later_evidence(self, repo, monkeypatch):
+        unreadable = repo / "tests" / "test_a.py"
+        unreadable.write_text("# traces: checkout-flow/S1\n")
+        (repo / "tests" / "test_z.py").write_text("# traces: checkout-flow/S2\n")
+        read_text = Path.read_text
+
+        def read_unless_unavailable(path, *args, **kwargs):
+            if path == unreadable:
+                raise OSError("unavailable")
+            return read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", read_unless_unavailable)
+        report = scenario_coverage(str(repo))
+        assert report["totals"]["covered"] == 1
+        assert report["specs"][0]["scenarios"][1]["covered_by"] == ["tests/test_z.py"]
+
+    def test_invalid_utf8_does_not_hide_trace_markers(self, repo):
+        (repo / "tests" / "test_cart.py").write_bytes(
+            b"\xff\n# traces: checkout-flow/S1\n")
+        report = scenario_coverage(str(repo))
+        assert report["specs"][0]["scenarios"][0]["covered_by"] == ["tests/test_cart.py"]
 
     def test_spec_level_marker_is_coarse_not_coverage(self, repo):
         (repo / "tests" / "test_cart.py").write_text(
@@ -276,12 +328,20 @@ class TestScenarioCoverage:
     def test_unknown_scenario_marker_surfaced(self, repo):
         (repo / "tests" / "test_cart.py").write_text("# traces: checkout-flow/S9\n")
         report = scenario_coverage(str(repo))
-        assert report["unknown_traces"][0]["reason"] == "spec 'checkout-flow' has no scenario S9"
+        assert report["unknown_traces"] == [{
+            "test": "tests/test_cart.py", "marker": "checkout-flow/S9",
+            "reason": "spec 'checkout-flow' has no scenario S9",
+        }]
 
     def test_unknown_spec_marker_surfaced(self, repo):
-        (repo / "tests" / "test_cart.py").write_text("# traces: no-such-spec/S1\n")
+        (repo / "tests" / "test_cart.py").write_text(
+            "# traces: no-such-spec/S1, checkout-flow/S2\n")
         report = scenario_coverage(str(repo))
-        assert "no spec with id" in report["unknown_traces"][0]["reason"]
+        assert report["unknown_traces"] == [{
+            "test": "tests/test_cart.py", "marker": "no-such-spec/S1",
+            "reason": "no spec with id 'no-such-spec'",
+        }]
+        assert report["specs"][0]["scenarios"][1]["covered_by"] == ["tests/test_cart.py"]
 
     def test_non_spec_shaped_marker_ignored(self, repo):
         (repo / "tests" / "test_cart.py").write_text("# traces: WP-154\n")
@@ -298,6 +358,22 @@ class TestScenarioCoverage:
         (tmp_path / ".git").mkdir()
         report = scenario_coverage(str(tmp_path))
         assert report["totals"]["coverage_percent"] == 100.0
+
+    def test_empty_specification_has_complete_zero_totals(self, repo):
+        (repo / "docs" / "checkout.md").write_text(
+            "---\nfettle-spec: v1\nid: checkout-flow\n---\n# Empty\n")
+        report = scenario_coverage(str(repo))
+        assert report["specs"][0]["scenarios"] == []
+        assert report["totals"] == {
+            "scenarios": 0, "covered": 0, "coverage_percent": 100.0}
+
+    def test_fractional_coverage_rounded_to_one_decimal(self, repo):
+        (repo / "docs" / "checkout.md").write_text(
+            VALID_SPEC + "\n### S3. retry payment (traces R2)\n- Then payment succeeds\n")
+        (repo / "tests" / "test_cart.py").write_text("# traces: checkout-flow/S1\n")
+        report = scenario_coverage(str(repo))
+        assert report["totals"] == {
+            "scenarios": 3, "covered": 1, "coverage_percent": 33.3}
 
     def test_cli_coverage_json(self, repo):
         (repo / "tests" / "test_cart.py").write_text(

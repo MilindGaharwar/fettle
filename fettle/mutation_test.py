@@ -1657,7 +1657,7 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     allowed = {(item["file"], line) for item in line_ranges for line in range(item["start"], item["end"] + 1)}
     ids = {state: [] for state in _STATES}
     for mutant_id, filename, line, status in rows:
-        if (filename, line) not in allowed:
+        if (filename, line + 1) not in allowed:
             continue
         state = _CACHE_STATES.get(status)
         if state is None:

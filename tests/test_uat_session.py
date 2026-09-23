@@ -197,6 +197,610 @@ class TestNetworkController:
         path.write_text(json.dumps(contract))
         return root, path, contract, load_config(str(root), strict=True)
 
+    @pytest.fixture
+    def browser_settings(self, tmp_path, monkeypatch):
+        import hashlib
+        from fettle.uat import network_controller
+
+        profile = tmp_path / "profile.json"
+        content = b'{"defaultAction":"SCMP_ACT_ERRNO"}'
+        profile.write_bytes(content)
+        monkeypatch.setattr(network_controller, "BROWSER_PROFILE", hashlib.sha256(content).hexdigest())
+        return {"browser": {"image": network_controller.BROWSER_IMAGE,
+                            "seccomp_path": str(profile),
+                            "viewport": {"width": 320, "height": 2560}}}
+
+    @pytest.fixture
+    def contract_payload(self):
+        from fettle.uat.network_controller import IMAGE
+        from fettle.uat.session import _digest
+
+        scenarios = [{"id": "greeter/S1"}]
+        contract = {
+            "schema_version": 2, "scenario_digest": _digest(scenarios), "surface": "api",
+            "runtime_image": IMAGE, "context": "qualified-runtime",
+            "product": {"argv": ["/product/app.py"], "port": 8080},
+            "actions": [{"scenario_id": "greeter/S1", "timeout_s": 3,
+                         "steps": [{"method": "GET", "path": "/", "body": "",
+                                    "expect": {"status_code": 200, "body": "ready"}}]}],
+        }
+        return contract, scenarios
+
+    def test_expected_observations_preserve_order_and_canonical_format(self):
+        from fettle.uat.network_controller import expected
+
+        action = {"steps": [
+            {"op": "goto", "path": "/"},
+            {"op": "fill", "label": "Name", "value": "Ada"},
+            {"op": "click", "role": "button", "name": "Go"},
+            {"restart": True},
+            {"op": "text", "role": "heading", "name": "Greeting", "expect": "Hello"},
+            {"op": "audit", "expect": {"page_errors": [], "console_errors": []}},
+            {"method": "GET", "path": "/", "body": "",
+             "expect": {"status_code": 200, "body": "ready"}},
+        ]}
+        assert expected(action) == {
+            "exit_code": 0,
+            "stdout": '[{"restart":true},{"text":"Hello"},'
+                      '{"audit":{"console_errors":[],"page_errors":[]}},'
+                      '{"body":"ready","status_code":200}]\n',
+            "stderr": "",
+        }
+
+    def test_expected_observations_can_be_empty(self):
+        from fettle.uat.network_controller import expected
+
+        assert expected({"steps": []}) == {"exit_code": 0, "stdout": "[]\n", "stderr": ""}
+
+    @pytest.mark.parametrize("timeout", [None, 7])
+    def test_docker_transport_passes_exact_context_and_lease(self, timeout):
+        from fettle.uat.network_controller import _docker
+
+        with (patch("fettle.uat.network_controller.shutil.which", return_value="/qualified/docker") as locate,
+              patch("fettle.uat.recovery.inherited_fds", return_value=(7,)),
+              patch("fettle.uat.network_controller.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, "result\n", "")) as run):
+            options = {} if timeout is None else {"timeout": timeout}
+            assert _docker("qualified-runtime", ["info"], data="input", **options) == "result\n"
+        locate.assert_called_once_with("docker")
+        run.assert_called_once_with(
+            ["/qualified/docker", "--context", "qualified-runtime", "info"], input="input",
+            capture_output=True, text=True, timeout=30 if timeout is None else timeout, pass_fds=(7,))
+
+    def test_docker_transport_rejects_missing_executable(self):
+        from fettle.uat.network_controller import _docker
+
+        with (patch("fettle.uat.network_controller.shutil.which", return_value=None),
+              patch("fettle.uat.network_controller.subprocess.run") as run,
+              pytest.raises(ValueError) as caught):
+            _docker("qualified-runtime", ["info"])
+        run.assert_not_called()
+        assert str(caught.value) == "Docker CLI unavailable; install and start the qualified isolated runtime"
+
+    def test_docker_transport_reports_timeout_with_cause(self):
+        from fettle.uat.network_controller import _docker
+
+        failure = subprocess.TimeoutExpired("docker", 30)
+        with (patch("fettle.uat.network_controller.shutil.which", return_value="/qualified/docker"),
+              patch("fettle.uat.network_controller.subprocess.run", side_effect=failure),
+              pytest.raises(ValueError) as caught):
+            _docker("qualified-runtime", ["info"])
+        assert str(caught.value) == "isolated operation timed out; rerun the approved contract"
+        assert caught.value.__cause__ is failure
+
+    def test_docker_transport_bounds_and_redacts_failure(self):
+        from fettle.uat.network_controller import _docker
+
+        stderr = "x" * 4096 + "not-retained"
+        with (patch("fettle.uat.network_controller.shutil.which", return_value="/qualified/docker"),
+              patch("fettle.uat.network_controller.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 2, "unused", stderr)),
+              patch("fettle.uat.network_controller._redact_secrets",
+                    return_value=("redacted error", ["synthetic finding"])) as redact,
+              pytest.raises(ValueError) as caught):
+            _docker("qualified-runtime", ["info"])
+        redact.assert_called_once_with("x" * 4096)
+        assert str(caught.value) == "isolated Docker operation failed: redacted error"
+
+    @pytest.mark.parametrize("output,accepted", [("\u00e9" * 4, True), ("\u00e9" * 4 + "a", False)])
+    def test_docker_transport_bounds_utf8_output(self, monkeypatch, output, accepted):
+        from fettle.uat import network_controller
+
+        monkeypatch.setattr(network_controller, "SOURCE_LIMIT", 8)
+        with (patch("fettle.uat.network_controller.shutil.which", return_value="/qualified/docker"),
+              patch("fettle.uat.network_controller.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, output, ""))):
+            if accepted:
+                assert network_controller._docker("qualified-runtime", ["info"]) == output
+            else:
+                with pytest.raises(ValueError) as caught:
+                    network_controller._docker("qualified-runtime", ["info"])
+                assert str(caught.value) == "Docker response exceeds capture budget"
+
+    @pytest.fixture
+    def screenshot_payload(self):
+        import base64
+        import hashlib
+        import struct
+        import zlib
+
+        def chunk(kind, data):
+            return (struct.pack(">I", len(data)) + kind + data
+                    + struct.pack(">I", zlib.crc32(kind + data)))
+
+        image = (b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", 320, 320, 8, 2, 0, 0, 0))
+                 + chunk(b"IDAT", zlib.compress((b"\0" + b"\xff" * 960) * 320))
+                 + chunk(b"IEND", b""))
+        contract = {"browser": {"viewport": {"width": 320, "height": 320}}}
+        action = {"steps": [{"op": "goto", "path": "/"}, {"op": "audit"}]}
+        observed = {"error": "", "artifacts": [{"kind": "viewport-png",
+                    "sha256": hashlib.sha256(image).hexdigest(),
+                    "data": base64.b64encode(image).decode()}]}
+        return contract, action, observed
+
+    def test_screenshot_artifacts_accept_bound_capture(self, screenshot_payload):
+        from fettle.uat.network_controller import validate_artifacts
+
+        assert validate_artifacts(*screenshot_payload) is None
+
+    @pytest.mark.parametrize("error,audits,count,accepted", [
+        ("", 0, 0, True), ("", 1, 0, False), ("", 0, 1, False),
+        ("", 2, 2, True), ("", 2, 1, False),
+        ("blocked", 1, 0, True), ("blocked", 1, 1, False),
+    ])
+    def test_screenshot_artifacts_require_exact_coverage(self, screenshot_payload, error, audits, count, accepted):
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        action["steps"] = [{"op": "audit"}] * audits
+        observed["error"] = error
+        observed["artifacts"] *= count
+        if accepted:
+            assert validate_artifacts(contract, action, observed) is None
+        else:
+            with pytest.raises(ValueError) as caught:
+                validate_artifacts(contract, action, observed)
+            assert str(caught.value) == "browser artifact coverage is incomplete"
+
+    @pytest.mark.parametrize("artifacts", [None, {}, "", [None], [{}]])
+    def test_screenshot_artifacts_reject_malformed_records(self, screenshot_payload, artifacts):
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        observed["artifacts"] = artifacts
+        with pytest.raises(ValueError):
+            validate_artifacts(contract, action, observed)
+
+    @pytest.mark.parametrize("field,value", [
+        ("kind", "jpeg"), ("data", None), ("extra", "value"), ("data", "A" * 700001),
+    ])
+    def test_screenshot_artifacts_reject_invalid_schema(self, screenshot_payload, field, value):
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        observed["artifacts"][0][field] = value
+        with pytest.raises(ValueError) as caught:
+            validate_artifacts(contract, action, observed)
+        assert str(caught.value) == "invalid bounded screenshot"
+
+    @pytest.mark.parametrize("case", ["signature", "header", "width", "height",
+                                     "width-high-byte", "height-high-byte", "digest", "encoded-limit"])
+    def test_screenshot_artifacts_bind_png_identity(self, screenshot_payload, case):
+        import base64
+        import hashlib
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        artifact = observed["artifacts"][0]
+        image = base64.b64decode(artifact["data"])
+        if case == "signature":
+            artifact["data"] = base64.b64encode(b"invalid!" + image[8:]).decode()
+        elif case == "header":
+            artifact["data"] = base64.b64encode(image[:12] + b"JUNK" + image[16:]).decode()
+        elif case in ("width", "height"):
+            contract["browser"]["viewport"][case] = 321
+        elif case in ("width-high-byte", "height-high-byte"):
+            offset = 16 if case == "width-high-byte" else 20
+            artifact["data"] = base64.b64encode(image[:offset] + b"\x01" + image[offset + 1:]).decode()
+        elif case == "digest":
+            artifact["sha256"] = "0" * 64
+        else:
+            artifact["data"] = "A" * 700000
+        if case in ("signature", "header", "width-high-byte", "height-high-byte", "encoded-limit"):
+            artifact["sha256"] = hashlib.sha256(base64.b64decode(artifact["data"])).hexdigest()
+        with pytest.raises(ValueError) as caught:
+            validate_artifacts(contract, action, observed)
+        assert str(caught.value) == "screenshot identity or viewport differs from capture"
+
+    def test_screenshot_artifacts_reject_noncanonical_base64(self, screenshot_payload):
+        import binascii
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        observed["artifacts"][0]["data"] += "\n"
+        with pytest.raises(binascii.Error):
+            validate_artifacts(contract, action, observed)
+
+    @pytest.mark.parametrize("size,accepted", [(524288, True), (524289, False)])
+    def test_screenshot_artifacts_bound_decoded_size(self, screenshot_payload, size, accepted):
+        import base64
+        import hashlib
+        from fettle.uat.network_controller import validate_artifacts
+
+        contract, action, observed = screenshot_payload
+        artifact = observed["artifacts"][0]
+        image = base64.b64decode(artifact["data"]).ljust(size, b"\0")
+        artifact.update(data=base64.b64encode(image).decode(), sha256=hashlib.sha256(image).hexdigest())
+        if accepted:
+            assert validate_artifacts(contract, action, observed) is None
+        else:
+            with pytest.raises(ValueError) as caught:
+                validate_artifacts(contract, action, observed)
+            assert str(caught.value) == "screenshot identity or viewport differs from capture"
+
+    @pytest.mark.parametrize("path,value", [
+        (("schema_version",), 1), (("schema_version",), True),
+        (("scenario_digest",), "wrong"), (("surface",), "native"),
+        (("runtime_image",), "python:latest"),
+        *[(("context",), value) for value in (None, "", "-runtime", "a" * 101, "a/b")],
+        *[(("product",), value) for value in (None, {}, [])],
+        *[(("product", "port"), value) for value in (True, 1023, 65536, "8080")],
+        *[(("product", "argv"), value) for value in
+          (None, [], ["/product/app.py"] * 101, [1], ["/app.py"],
+           ["/product/../app.py"], ["/product/app.py", "bad\0arg"])],
+        *[(("actions",), value) for value in (None, [], [None])],
+        (("actions", 0, "scenario_id"), 1),
+        *[(("actions", 0, "timeout_s"), value) for value in (True, 0, 61, "3")],
+        *[(("actions", 0, "steps"), value) for value in (None, [], [None], [{"restart": False}])],
+        (("actions", 0, "steps", 0, "method"), "CONNECT"),
+        *[(("actions", 0, "steps", 0, "path"), value) for value in
+          (None, "", "relative", "//other/", "/" + "a" * 4096, "/ ", "/\x7f", "/\u00e9")],
+        *[(("actions", 0, "steps", 0, "body"), value) for value in
+          (None, "a" * 65537, "\u00e9" * 32769)],
+        *[(("actions", 0, "steps", 0, "expect"), value) for value in (None, {}, [])],
+        *[(("actions", 0, "steps", 0, "expect", "status_code"), value)
+          for value in (True, 99, 600, "200")],
+        *[(("actions", 0, "steps", 0, "expect", "body"), value)
+          for value in (None, "a" * 65537, "\u00e9" * 32769)],
+    ])
+    def test_api_contract_rejects_invalid_boundaries(self, contract_payload, path, value):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        target = contract
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        with pytest.raises(ValueError):
+            validate_contract(contract, scenarios)
+
+    @pytest.mark.parametrize("path", [(), ("product",), ("actions", 0),
+                                     ("actions", 0, "steps", 0),
+                                     ("actions", 0, "steps", 0, "expect")])
+    @pytest.mark.parametrize("change", ["missing", "extra"])
+    def test_api_contract_requires_exact_fields(self, contract_payload, path, change):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        target = contract
+        for key in path:
+            target = target[key]
+        if change == "missing":
+            target.pop(next(iter(target)))
+        else:
+            target["extra"] = "unexpected"
+        with pytest.raises(ValueError):
+            validate_contract(contract, scenarios)
+
+    @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+    @pytest.mark.parametrize("upper", [False, True])
+    def test_api_contract_accepts_inclusive_bounds(self, contract_payload, method, upper):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        contract["context"] = "a" * 100 if upper else "a"
+        contract["product"]["port"] = 65535 if upper else 1024
+        contract["product"]["argv"] = ["/product/app.py"] * (100 if upper else 1)
+        action = contract["actions"][0]
+        action["timeout_s"] = 60 if upper else 1
+        step = action["steps"][0]
+        step.update(method=method, path="/~" + "!" * 4094 if upper else "/!",
+                    body="\u00e9" * (32768 if upper else 0))
+        step["expect"] = {"status_code": 599 if upper else 100, "body": ""}
+        if upper:
+            action["steps"] = [{"restart": True}] * 9 + [step]
+        assert validate_contract(contract, scenarios) is None
+
+    @pytest.mark.parametrize("case", ["too-many-steps", "restart-only", "unknown-scenario",
+                                     "missing-scenario", "duplicate-scenario", "too-many-actions"])
+    def test_api_contract_requires_bounded_exact_scenarios(self, contract_payload, case):
+        from copy import deepcopy
+        from fettle.uat.network_controller import validate_contract
+        from fettle.uat.session import _digest
+
+        contract, scenarios = contract_payload
+        action = contract["actions"][0]
+        if case == "too-many-steps":
+            action["steps"] *= 11
+        elif case == "restart-only":
+            action["steps"] = [{"restart": True}]
+        elif case == "unknown-scenario":
+            action["scenario_id"] = "other/S1"
+        elif case == "missing-scenario":
+            scenarios.append({"id": "greeter/S2"})
+        elif case == "duplicate-scenario":
+            contract["actions"].append(deepcopy(action))
+        else:
+            scenarios[:] = [{"id": f"greeter/S{index}"} for index in range(31)]
+            contract["actions"] = [{**deepcopy(action), "scenario_id": scenario["id"]}
+                                   for scenario in scenarios]
+        contract["scenario_digest"] = _digest(scenarios)
+        with pytest.raises(ValueError):
+            validate_contract(contract, scenarios)
+
+    @pytest.mark.parametrize("size,accepted", [(16384, True), (16385, False)])
+    def test_api_contract_bounds_total_expected_utf8_bytes(self, contract_payload, size, accepted):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        contract["actions"][0]["steps"][0]["expect"]["body"] = "\u00e9" * size
+        if accepted:
+            assert validate_contract(contract, scenarios) is None
+        else:
+            with pytest.raises(ValueError) as caught:
+                validate_contract(contract, scenarios)
+            assert str(caught.value) == "scenario expected response total exceeds capture budget"
+
+    @pytest.mark.parametrize("path,value,message", [
+        (("schema_version",), 1, "invalid version-2 API contract or unqualified runtime image"),
+        (("product", "port"), 1, "product requires a /product/ Python script, bounded arguments and port"),
+        (("actions",), [], "API contract requires 1-30 scenario actions"),
+        (("actions", 0, "timeout_s"), 0, "invalid API scenario action"),
+        (("actions", 0, "steps", 0, "path"), "//other", "invalid bounded local HTTP request"),
+        (("actions", 0, "steps", 0, "expect", "status_code"), 600,
+         "HTTP oracle requires an exact status_code and bounded UTF-8 body"),
+        (("actions", 0, "steps"), [{"restart": True}], "API scenario needs an observed response assertion"),
+        (("actions", 0, "scenario_id"), "other/S1", "API contract must cover every active scenario exactly once"),
+        (("actions", 0, "steps", 0, "expect", "body"), "a" * 65536,
+         "scenario expected response total exceeds capture budget"),
+    ])
+    def test_api_contract_reports_precise_rejection(self, contract_payload, path, value, message):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        target = contract
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        with pytest.raises(ValueError) as caught:
+            validate_contract(contract, scenarios)
+        assert str(caught.value) == message
+
+    def test_api_contract_validates_requests_after_restart(self, contract_payload):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = contract_payload
+        steps = contract["actions"][0]["steps"]
+        steps[0]["path"] = "//other.invalid/"
+        steps.insert(0, {"restart": True})
+        with pytest.raises(ValueError, match="invalid bounded local HTTP request"):
+            validate_contract(contract, scenarios)
+
+    @pytest.mark.parametrize("count", [1, 30])
+    def test_api_contract_accepts_complete_action_bounds(self, contract_payload, count):
+        from copy import deepcopy
+        from fettle.uat.network_controller import validate_contract
+        from fettle.uat.session import _digest
+
+        contract, scenarios = contract_payload
+        action = contract["actions"][0]
+        scenarios[:] = [{"id": f"greeter/S{index}"} for index in range(count)]
+        contract["actions"] = [{**deepcopy(action), "scenario_id": scenario["id"]}
+                               for scenario in reversed(scenarios)]
+        contract["scenario_digest"] = _digest(scenarios)
+        assert validate_contract(contract, scenarios) is None
+
+    @pytest.fixture
+    def web_contract_payload(self, contract_payload, browser_settings):
+        from fettle.uat.network_controller import AUDIT_EXPECTATION
+
+        contract, scenarios = contract_payload
+        contract.update(surface="web", **browser_settings)
+        contract["actions"][0]["steps"] = [
+            {"op": "goto", "path": "/"}, {"restart": True},
+            {"op": "text", "role": "heading", "name": "Greeting", "expect": "Hello"},
+            {"op": "audit", "expect": dict(AUDIT_EXPECTATION)},
+        ]
+        return contract, scenarios
+
+    def test_web_contract_accepts_observed_text_and_audit(self, web_contract_payload):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = web_contract_payload
+        assert validate_contract(contract, scenarios) is None
+
+    def test_web_contract_validates_every_browser_step(self, web_contract_payload):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = web_contract_payload
+        contract["actions"][0]["steps"].insert(1, {"op": "goto", "path": "//other.invalid/"})
+        with pytest.raises(ValueError, match="browser navigation must be product-local"):
+            validate_contract(contract, scenarios)
+
+    @pytest.mark.parametrize("case,message", [
+        ("not-object", "browser step must be an object"),
+        ("no-text", "browser scenario needs an observed text assertion"),
+        ("two-audits", "at most one audit per browser scenario"),
+    ])
+    def test_web_contract_rejects_unobserved_or_duplicate_audits(self, web_contract_payload, case, message):
+        from fettle.uat.network_controller import validate_contract
+
+        contract, scenarios = web_contract_payload
+        steps = contract["actions"][0]["steps"]
+        if case == "not-object":
+            steps[0] = "goto"
+        elif case == "no-text":
+            steps[:] = [step for step in steps if step.get("op") != "text"]
+        else:
+            steps.append(dict(steps[-1]))
+        with pytest.raises(ValueError) as caught:
+            validate_contract(contract, scenarios)
+        assert str(caught.value) == message
+
+    @pytest.mark.parametrize("count,accepted", [(8, True), (9, False)])
+    def test_web_contract_bounds_total_audits(self, web_contract_payload, count, accepted):
+        from copy import deepcopy
+        from fettle.uat.network_controller import validate_contract
+        from fettle.uat.session import _digest
+
+        contract, scenarios = web_contract_payload
+        action = contract["actions"][0]
+        scenarios[:] = [{"id": f"greeter/S{index}"} for index in range(count)]
+        contract["actions"] = [{**deepcopy(action), "scenario_id": scenario["id"]}
+                               for scenario in scenarios]
+        contract["scenario_digest"] = _digest(scenarios)
+        if accepted:
+            assert validate_contract(contract, scenarios) is None
+        else:
+            with pytest.raises(ValueError) as caught:
+                validate_contract(contract, scenarios)
+            assert str(caught.value) == "at most eight browser audits per bounded receipt"
+
+    def test_browser_settings_accepts_inclusive_viewport_bounds(self, browser_settings):
+        from fettle.uat.network_controller import _browser_settings
+
+        assert _browser_settings(browser_settings) == browser_settings["browser"]
+        browser_settings["browser"]["viewport"] = {"width": 2560, "height": 320}
+        assert _browser_settings(browser_settings) == browser_settings["browser"]
+
+    @pytest.mark.parametrize("viewport", [
+        None, [], {}, {"width": 320}, {"width": 320, "height": 320, "extra": 1},
+        *[{"width": value, "height": 320}
+          for value in (True, "320", 320.0, 319, 2561)],
+        *[{"width": 320, "height": value}
+          for value in (False, "320", 320.0, 319, 2561)],
+    ])
+    def test_browser_settings_rejects_invalid_viewport(self, browser_settings, viewport):
+        from fettle.uat.network_controller import _browser_settings
+
+        browser_settings["browser"]["viewport"] = viewport
+        with pytest.raises(ValueError) as caught:
+            _browser_settings(browser_settings)
+        assert str(caught.value) == "browser viewport dimensions must be integers from 320 to 2560"
+
+    @pytest.mark.parametrize("case", ["missing", "list", "extra", "image", "profile-type"])
+    def test_browser_settings_rejects_unqualified_identity(self, browser_settings, case):
+        from fettle.uat.network_controller import _browser_settings
+
+        if case == "missing":
+            browser_settings.pop("browser")
+        elif case == "list":
+            browser_settings["browser"] = []
+        elif case == "extra":
+            browser_settings["browser"]["extra"] = True
+        elif case == "image":
+            browser_settings["browser"]["image"] = "browser:latest"
+        else:
+            browser_settings["browser"]["seccomp_path"] = None
+        with pytest.raises(ValueError) as caught:
+            _browser_settings(browser_settings)
+        assert str(caught.value) == "browser requires the qualified pinned image and seccomp profile"
+
+    @pytest.mark.parametrize("case", ["relative", "absent", "directory", "changed"])
+    def test_browser_settings_rejects_unqualified_profile(self, browser_settings, monkeypatch, case):
+        from fettle.uat.network_controller import _browser_settings
+
+        profile = Path(browser_settings["browser"]["seccomp_path"])
+        if case == "relative":
+            monkeypatch.chdir(profile.parent)
+            browser_settings["browser"]["seccomp_path"] = profile.name
+        elif case == "absent":
+            profile.unlink()
+        elif case == "directory":
+            profile.unlink()
+            profile.mkdir()
+        else:
+            profile.write_bytes(b"changed profile")
+        with pytest.raises(ValueError) as caught:
+            _browser_settings(browser_settings)
+        assert str(caught.value) == (
+            "browser seccomp profile is missing or differs from the qualified identity")
+
+    @pytest.mark.parametrize("size,accepted", [(1048576, True), (1048577, False)])
+    def test_browser_settings_bounds_profile_size(self, browser_settings, monkeypatch, size, accepted):
+        import hashlib
+        from fettle.uat import network_controller
+
+        content = b" " * size
+        Path(browser_settings["browser"]["seccomp_path"]).write_bytes(content)
+        monkeypatch.setattr(network_controller, "BROWSER_PROFILE", hashlib.sha256(content).hexdigest())
+        if accepted:
+            assert network_controller._browser_settings(browser_settings) == browser_settings["browser"]
+        else:
+            with pytest.raises(ValueError) as caught:
+                network_controller._browser_settings(browser_settings)
+            assert str(caught.value) == (
+                "browser seccomp profile is missing or differs from the qualified identity")
+
+    @pytest.mark.parametrize("step", [
+        {"op": "goto", "path": "/"},
+        {"op": "goto", "path": "/!~"},
+        {"op": "fill", "label": "Name", "value": "Ada"},
+        {"op": "fill", "label": "Name", "value": "a" * 4096},
+        {"op": "fill", "label": "Name", "value": "\u00e9" * 2048},
+        *[{"op": operation, "role": role, "name": "Target",
+           **({"expect": "Ready"} if operation == "text" else {})}
+          for operation in ("click", "text")
+          for role in ("button", "link", "heading", "status", "alert", "cell")],
+    ])
+    def test_browser_step_accepts_qualified_operations(self, step):
+        from fettle.uat.network_controller import _validate_browser_step
+
+        assert _validate_browser_step(step) is None
+
+    @pytest.mark.parametrize("step,message", [
+        ({}, "unsupported browser step; use goto/fill/click/text/audit"),
+        ({"op": []}, "unsupported browser step; use goto/fill/click/text/audit"),
+        ({"op": "evaluate"}, "unsupported browser step; use goto/fill/click/text/audit"),
+        ({"op": "goto"}, "unsupported browser step; use goto/fill/click/text/audit"),
+        ({"op": "goto", "path": "/", "extra": "value"},
+         "unsupported browser step; use goto/fill/click/text/audit"),
+        *[({"op": "goto", "path": path}, "browser navigation must be product-local")
+          for path in ("", "relative", "//other.invalid/", "https://other.invalid/",
+                       "/bad path", "/bad\npath", "/\x7f", "/\u00e9")],
+        *[({"op": "fill", "label": "Name", "value": value},
+           "browser steps require bounded string fields")
+          for value in (None, True, 12, "a" * 4097, "\u00e9" * 2049, "before\0after")],
+        *[({"op": operation, "role": "textbox", "name": "Name",
+            **({"expect": "Ready"} if operation == "text" else {})},
+           "unsupported browser role") for operation in ("click", "text")],
+    ])
+    def test_browser_step_rejects_invalid_fields(self, step, message):
+        from fettle.uat.network_controller import _validate_browser_step
+
+        with pytest.raises(ValueError) as caught:
+            _validate_browser_step(step)
+        assert str(caught.value) == message
+
+    def test_browser_audit_requires_complete_empty_diagnostics(self):
+        from fettle.uat.network_controller import AUDIT_EXPECTATION, _validate_browser_step
+
+        assert _validate_browser_step({"op": "audit", "expect": dict(AUDIT_EXPECTATION)}) is None
+        invalid = [
+            {"op": "audit"},
+            {"op": "audit", "expect": dict(AUDIT_EXPECTATION), "extra": "value"},
+            {"op": "audit", "expect": None},
+            {"op": "audit", "expect": {}},
+            *[{"op": "audit", "expect": {**AUDIT_EXPECTATION, key: ["finding"]}}
+              for key in AUDIT_EXPECTATION],
+        ]
+        for step in invalid:
+            with pytest.raises(ValueError) as caught:
+                _validate_browser_step(step)
+            assert str(caught.value) == (
+                "browser audit requires all diagnostics empty, including incomplete checks")
+
     @pytest.mark.parametrize("field,value", [
         ("runtime_image", "python:latest"), ("context", "--host=evil"),
         ("surface", "web"), ("schema_version", True), ("actions", []),
@@ -403,20 +1007,60 @@ class TestNetworkController:
         for name, source in (("browser", BROWSE), ("api", COLLECT), ("seed", SEED)):
             compile(source, name, "exec")
 
-    def test_api_runtime_binds_controller_and_daemon(self, api_fixture):
+    @pytest.mark.parametrize("web", [False, True])
+    def test_api_runtime_binds_controller_and_daemon(self, contract_payload, browser_settings, web):
+        import hashlib
+        import json
+        from unittest.mock import call
+        from fettle.uat import network_controller
+
+        contract, scenarios = contract_payload
+        endpoint = {"Host": "unix:///trusted/docker.sock", "SkipTLSVerify": False}
+        server = {"ID": "daemon", "ServerVersion": "1", "KernelVersion": "2", "OSType": "linux"}
+        responses = [[{"Endpoints": {"docker": endpoint}}], [{"Id": "immutable", "Config": {}}], server]
+        calls = [call(contract["context"], ["context", "inspect", contract["context"]]),
+                 call(contract["context"], ["image", "inspect", network_controller.IMAGE]),
+                 call(contract["context"], ["info", "--format", "{{json .}}"])]
+        expected_browser = {}
+        if web:
+            contract.update(surface="web", **browser_settings)
+            responses.append([{"Id": "browser-immutable", "Config": {}}])
+            calls.append(call(contract["context"], ["image", "inspect", network_controller.BROWSER_IMAGE]))
+            expected_browser = {"image": "browser-immutable", "seccomp": network_controller.BROWSER_PROFILE}
+        with patch("fettle.uat.network_controller._docker", side_effect=[json.dumps(row) for row in responses]) as docker:
+            captured = network_controller.runtime(contract)
+        source = Path(network_controller.__file__)
+        assert captured == {
+            "controller": "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest(),
+            "capture": "sha256:" + hashlib.sha256(source.with_name("controller.py").read_bytes()).hexdigest(),
+            "recovery": "sha256:" + hashlib.sha256(source.with_name("recovery.py").read_bytes()).hexdigest(),
+            "image": "immutable", "browser": expected_browser, "endpoint": endpoint, "server": server,
+        }
+        assert docker.call_args_list == calls
+
+    @pytest.mark.parametrize("case,message", [
+        ("remote", "API capture requires a local Unix-socket Docker context"),
+        ("tls-bypass", "API capture requires a local Unix-socket Docker context"),
+        ("product-volume", "runtime declares unapproved image volumes"),
+        ("browser-volume", "browser image declares unexpected volumes"),
+    ])
+    def test_api_runtime_rejects_unqualified_endpoint_or_volume(self, contract_payload, browser_settings, case, message):
         import json
         from fettle.uat.network_controller import runtime
 
-        root, path, contract, config = api_fixture
-        with patch("fettle.uat.network_controller._docker", side_effect=[
-            json.dumps([{"Endpoints": {"docker": {"Host": "unix:///trusted/docker.sock"}}}]),
-            json.dumps([{"Id": "immutable", "Config": {}}]),
-            json.dumps({"ID": "daemon", "ServerVersion": "1", "KernelVersion": "1", "OSType": "linux"}),
-        ]):
-            captured = runtime(contract)
-        assert captured["server"]["ID"] == "daemon"
-        assert captured["capture"].startswith("sha256:")
-        assert captured["recovery"].startswith("sha256:")
+        contract, scenarios = contract_payload
+        contract.update(surface="web", **browser_settings)
+        endpoint = {"Host": "tcp://remote:2375" if case == "remote" else "unix:///trusted/docker.sock",
+                    "SkipTLSVerify": case == "tls-bypass"}
+        product_config = {"Volumes": {"/unapproved": {}}} if case == "product-volume" else {}
+        browser_config = {"Volumes": {"/unapproved": {}}} if case == "browser-volume" else {}
+        responses = [[{"Endpoints": {"docker": endpoint}}], [{"Id": "immutable", "Config": product_config}],
+                     {"ID": "daemon", "ServerVersion": "1", "KernelVersion": "2", "OSType": "linux"},
+                     [{"Id": "browser-immutable", "Config": browser_config}]]
+        with (patch("fettle.uat.network_controller._docker", side_effect=[json.dumps(row) for row in responses]),
+              pytest.raises(ValueError) as caught):
+            runtime(contract)
+        assert str(caught.value) == message
 
     def test_restart_only_contract_is_not_behavioral_coverage(self, api_fixture):
         from fettle.uat.network_controller import validate_contract

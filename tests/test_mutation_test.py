@@ -1618,25 +1618,33 @@ def test_patch_for_ranges_marks_only_selected_lines_as_added(tmp_path):
     assert patch_text == "--- a/src/a.py\n+++ b/src/a.py\n@@ -2,0 +2,2 @@\n+two\n+three\n"
 
 
-def test_range_results_exclude_mutants_outside_shard_lines(tmp_path):
+@pytest.mark.parametrize(("start", "end", "expected"), [
+    (1, 1, ["1"]),
+    (10, 10, ["3"]),
+    (10, 11, ["3", "4"]),
+])
+def test_range_results_exclude_mutants_outside_shard_lines(tmp_path, start, end, expected):
     connection = sqlite3.connect(tmp_path / ".mutmut-cache")
     connection.executescript(
         "CREATE TABLE SourceFile (id INTEGER PRIMARY KEY, filename TEXT, hash TEXT);"
         "CREATE TABLE Line (id INTEGER PRIMARY KEY, sourcefile INTEGER, line TEXT, line_number INTEGER);"
         "CREATE TABLE Mutant (id INTEGER PRIMARY KEY, line INTEGER, idx INTEGER, tested_against_hash TEXT, status TEXT);"
         "INSERT INTO SourceFile VALUES (1, 'src/app.py', 'hash');"
-        "INSERT INTO Line VALUES (1, 1, 'a', 10), (2, 1, 'b', 11);"
-        "INSERT INTO Mutant VALUES (1, 1, 0, 'tests', 'ok_killed'), (2, 2, 0, 'tests', 'untested');"
+        "INSERT INTO Line VALUES (1, 1, 'first', 0), (2, 1, 'before', 8), "
+        "(3, 1, 'start', 9), (4, 1, 'end', 10), (5, 1, 'after', 11);"
+        "INSERT INTO Mutant VALUES (1, 1, 0, 'tests', 'ok_killed'), "
+        "(2, 2, 0, 'tests', 'ok_killed'), (3, 3, 0, 'tests', 'ok_killed'), "
+        "(4, 4, 0, 'tests', 'ok_killed'), (5, 5, 0, 'tests', 'ok_killed');"
     )
     connection.commit()
     connection.close()
 
     ids, error = _collect_range_results(
-        str(tmp_path), [{"file": "src/app.py", "start": 10, "end": 10}], "2.5.1", 0
+        str(tmp_path), [{"file": "src/app.py", "start": start, "end": end}], "2.5.1", 0
     )
 
     assert error is None
-    assert ids == {"killed": ["1"], "survived": [], "timeout": [], "suspicious": [], "untested": [], "skipped": []}
+    assert ids == {"killed": expected, "survived": [], "timeout": [], "suspicious": [], "untested": [], "skipped": []}
 
 
 def test_mapped_tests_combines_filename_and_direct_imports(tmp_path):
