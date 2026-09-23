@@ -1,5 +1,175 @@
 # Audit Hardening Worklog
 
+## 2026-09-23: Authorized Local Preservation Checkpoint
+
+The operator explicitly requested a local commit to preserve the current work
+after disclosure of the outstanding mutation findings. This checkpoint includes
+the mutation mapping, candidate isolation, regression tests, and worklog only;
+the two unrelated executable-bit changes remain excluded. No push is authorized.
+This is not mutation qualification or milestone completion: 3,420 historical
+findings still lack narrow kill evidence, and full runtime-enabled verification,
+equivalence review, and fresh full mutation qualification remain pending.
+
+## 2026-09-23: Post-Checkpoint Mutation Repair
+
+Operator approved local checkpoint `941c6cf`, including DCO sign-off and all
+applicable commit hooks. Its seven intended files were committed; unrelated
+executable-bit changes remain untouched. Neither it nor `8797060` was pushed.
+Further commits with mutation failures require new explicit approval.
+
+The full ledger mapping ran assurance tests before the bounded lock regression.
+Mapping now retains every discovered and explicit test, but runs the existing
+convention-named owner test first, then the remaining tests deterministically.
+The mapping fixture failed before the change; all 175 harness tests passed
+afterward. Fresh full-mapping replay killed the historical lock-loop timeout
+fingerprint with all four files in 14.085 seconds, without timeout, suspicious,
+or untested outcomes. Mutation testing the changed ordering line killed 4/4.
+The mapping digest changes, so previous cache identities cannot authorize reuse.
+`kgraph` was unavailable; execution and mapping call sites were inspected directly.
+
+The expanded 21-file CLI baseline passed 791 tests with 20 expected runtime
+opt-in skips in the pinned minimal environment (40.159 seconds wall time).
+This is not browser acceptance or proof every shard fits its budget. No timeout
+budget, mapped test set, waiver, or score threshold was weakened.
+
+Added 65 focused CLI cases for UAT capture consent, strict configuration,
+reconciliation, acceptance exit status, exact evidence output, human diagnostics,
+reporting, manual attestation, benchmark rendering, and capability readiness.
+These use real result dataclasses with mocked execution boundaries; frozen
+benchmark studies were not rerun. First scoped replay killed 67/69, retaining
+one suspicious failure and one apparent equivalent. The next replay killed
+137/143, including the suspicious fingerprint, with no timing failures. The
+missing-operator follow-up killed 3/3. The acceptance-decision replay also killed
+9/9 using all 21 CLI files in 54.156 seconds.
+
+Developmental canonical inventory now covers 197/201 historical `cmd_uat`
+findings. Four historical and two newly generated survivors appear equivalent:
+five change the default `doctor` string in comparisons against other actions;
+the sixth changes a local no-error sentinel from the empty string to `None`,
+both false before the same output path. None is waived or counted as killed.
+Artifacts are retained under `$TMPDIR` in `fettle-ledger-full-mapping.E5VKrG3P`,
+`fettle-owner-order-replay.UOyvwmJr`, `fettle-cli-uat-dispatch.GKpM57C9`,
+`fettle-cli-uat-reporting.13hDpoJj`, `fettle-cli-uat-operator.7AxdNff8`, and
+`fettle-cli-uat-full-mapping.AbxwBhZW`. Scoped outcomes are not combined into
+an authoritative mutation score. Full qualification and remote checks remain open.
+
+The operator explicitly selected the final gate: **zero unresolved actionable
+survivors**, separately reviewed equivalents, complete fresh mutation evidence,
+and no tool errors, timeouts, or untested outcomes. The existing advisory score
+policy alone cannot establish this gate. No new commit or push has occurred.
+
+Specification CLI tests now assert complete subprocess output, warning/error
+separation, missing-repository behavior, discovery continuation, and multiple
+trace sources. All 54 specification tests pass. Initial command replay killed
+85/92, including all 91 historical targets in its corpus; seven observed gaps
+were then covered and a fresh focused replay killed 19/19. Artifacts:
+`fettle-cli-spec-contract.JqwLaa0T`, `fettle-cli-spec-followup.P72oyruB`.
+
+Reconciliation tests now cover exact transcript boundaries, conflicting retries,
+restart artifact identity, judgment schema and artifact references, completion
+criteria, verdict rendering, and canonical session identity. Restart replay
+killed 129/136; judgment replay killed 82/92 (its range also included adjacent
+auto-answer logic). Follow-ups covered the actionable heuristic and diagnostic
+gaps. Completion replay killed every one of its 50 mutants; its combined
+heuristic range retained one equivalent-candidate whitespace mutation. Early
+session-error/formatting replay killed 48/53. A valid retained-artifact fixture
+then killed the five web-readiness survivors: full session identity replay
+killed 87/93, and canonical payload/non-pass follow-up killed 7/7.
+
+Remaining scoped equivalence candidates are retained, not waived: unevaluated
+local annotations, equivalent falsey parser sentinels, defaults for guaranteed
+parser keys, valid-grammar whitespace removal, and judgment/session defaults
+whose values do not reach an accepted evidence path. These classifications still
+require review. A recovery-action mutation also needs explicit classification;
+no claim is made that all reconciliation findings are resolved.
+
+Reconciliation artifacts are under `$TMPDIR`: `fettle-reconcile-restart.rWNvfMyp`,
+`fettle-reconcile-judgment.HbEDSEfv`, `fettle-reconcile-heuristic.3QDxUPJ3`,
+`fettle-reconcile-completion.GIUhQvy2`, `fettle-reconcile-session-errors.Pi3FwarE`,
+`fettle-reconcile-session-identity.Cb1OIWEw`, and
+`fettle-reconcile-identity-followup.kNlP3Rni`. The accumulated edited test modules
+and documentation checks passed **561 tests in 7.04 seconds**, with clean pinned
+Ruff. This is not a refreshed full runtime-enabled suite.
+
+Report persistence now has exact projection, capture replacement, directory,
+canonical failure, and optional trace-failure tests. Its replay killed 99/110;
+the follow-up killed 25/25, including all eleven survivors. Session orchestration
+replay killed 89/104, then 25/25 on the survivor expressions. An intermediate
+single-line preflight omitted one multiline Boolean expression and was stopped
+before execution; expanding that expression included every target fingerprint.
+All 41 historical report and 64 orchestration findings have narrow kill evidence.
+
+Canonical report producer/validator tests use a valid retained session and
+regenerated sidecars to distinguish semantic conflicts from stale hashes.
+Replay killed 155/162, then 12/12 on captured-pass and disagreement boundaries.
+All 28 historical targets in that slice have narrow kill evidence. Atomic-write
+and digest checks cover flush-before-replace, failure cleanup, recursive parent
+creation, strict Unicode JSON, and non-finite values. Replay killed 14/17, then
+3/4; the remaining empty-string-to-None cleanup sentinel is an equivalent
+candidate, not waived or counted as killed. Capture-validator mocks establish
+orchestration contracts only, not independent runtime acceptance.
+
+New artifacts under `$TMPDIR`: `fettle-reconcile-report.sASfTZKs`,
+`fettle-reconcile-report-followup.YZPgDCc7`,
+`fettle-reconcile-orchestration.4DfFjxmN`,
+`fettle-reconcile-orchestration-followup.bf1bmGE6` (incomplete target selection),
+`fettle-reconcile-orchestration-complete.yFy9WQdp`,
+`fettle-reconcile-canonical.ybMroVCg`,
+`fettle-reconcile-canonical-followup.S2cRh3i6`,
+`fettle-reconcile-atomic.XzdxQLsE`, and
+`fettle-reconcile-atomic-followup.8WhXNyYF`.
+Accumulated edited-module and documentation checks now pass **702 tests in
+8.42 seconds**, with clean Ruff and editor diagnostics. Full runtime-enabled
+qualification remains pending; no new commit or push has occurred.
+
+Candidate-isolation tests exposed a production defect: removing only scenario
+headers let subsequent scenario/restart fields overwrite a preceding candidate's
+observation. Four regression cases failed before the fix. The masking helper now
+excludes complete verdict sections until the next candidate header; all 14
+charter tests pass. Candidate replay killed 40/45. Exact claim-integrity tests
+and a no-space candidate-field boundary killed 63/65 in the next slice; both
+remaining claim mutants were subsequently killed with the full seven-file
+mapping. Constant/default replay killed 10/10. Five historical masking mutations
+belong to replaced code and are not counted as kills. New masking sentinels and
+an unevaluated annotation remain equivalent candidates pending explicit review.
+
+Observation artifact tests now cover exact serialized claims, canonical hashes,
+safe filenames, duplicate-ID ambiguity, malformed/unreadable input continuation,
+repeat writes, and browser capture parameters and diagnostics. Bundle replay
+killed 61/62; browser/repeat-write follow-up killed 34/34. All 47 historical
+artifact findings have narrow kill evidence. Browser boundaries use injected
+optional-dependency-safe mocks, not a new runtime-browser qualification.
+
+The owner-first mapping now falls back to the nested-module convention when the
+flat owner is absent, while preserving flat-owner precedence, entry-point
+exclusions, and every imported/explicit mapping. Its regression failed before
+the change; all 179 harness tests pass. Self-mutation killed 20/23, then 10/10
+on the remaining boundaries. A controlled seven-file comparison retained the
+same test bytes, 13 fingerprints, and outcomes (10 killed, three equivalent
+candidates): observed runtime decreased from 218.060 to 181.783 seconds.
+This single comparison is not proof all shards fit their budgets. No timeout,
+selection coverage, score threshold, or waiver was weakened.
+
+Additional artifacts under `$TMPDIR`: `fettle-reconcile-candidates.G0RGXpGf`,
+`fettle-reconcile-claims.hYAwfebt`, `fettle-reconcile-full-mapping.MljJKdp4`,
+`fettle-reconcile-constants.ozSIn0RZ`, `fettle-observation-artifacts.n1Ht54ns`,
+`fettle-browser-artifacts.D7jK9SfK`, `fettle-nested-owner-replay.bDBMsRWq`,
+`fettle-nested-owner-followup.XGlQCdoz`, and
+`fettle-reconcile-owner-first.V0J2VS0h`.
+
+The complete affected mappings plus edited CLI/specification/documentation
+modules passed **1,165 tests with 20 runtime opt-in skips in 49.07 seconds**.
+An initial sandboxed attempt failed during Git fixture initialization because
+Git could not read its normal user configuration; the unchanged suite passed
+unsandboxed. Ruff and editor diagnostics are clean. The full runtime-enabled
+suite, fresh full mutation qualification, equivalence review, and remote checks
+remain pending. No new commit or push has occurred.
+
+The developmental inventory now has narrow kill evidence for **1,058/4,478**
+historical fingerprints, with **3,420 remaining**. Each counted replay has a
+completed preflight and execution with matching generated/outcome cardinality;
+the union is progress tracking only, never an authoritative aggregate or score.
+
 ## 2026-09-23: Mutation Evidence Repair In Progress
 
 Retained all 256 initial reports from run `35729628122`: 245 completed and

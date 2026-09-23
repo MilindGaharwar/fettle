@@ -1653,18 +1653,50 @@ def test_mapped_tests_combines_filename_and_direct_imports(tmp_path):
     (tmp_path / "fettle/widget.py").write_text("")
     (tmp_path / "tests/test_widget.py").write_text("from fettle.widget import run\n")
     (tmp_path / "tests/test_integration.py").write_text("from fettle import widget\n")
+    (tmp_path / "tests/test_adversary.py").write_text("import fettle.widget\n")
 
-    assert _mapped_tests(str(tmp_path), ["fettle/widget.py"]) == {
-        "fettle/widget.py": ["tests/test_integration.py", "tests/test_widget.py"]
+    assert _mapped_tests(
+        str(tmp_path), ["fettle/widget.py"],
+        {"fettle/widget.py": ["tests/test_widget.py", "tests/test_integration.py"]},
+    ) == {
+        "fettle/widget.py": ["tests/test_widget.py", "tests/test_adversary.py", "tests/test_integration.py"]
     }
+
+
+@pytest.mark.parametrize("flat_owner", [True, False])
+def test_mapped_tests_prioritizes_nested_owner_without_dropping_importers(tmp_path, flat_owner):
+    (tmp_path / "fettle/uat").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    source = "fettle/uat/widget.py"
+    (tmp_path / source).write_text("")
+    (tmp_path / "tests/test_uat_widget.py").write_text("from fettle.uat.widget import run\n")
+    (tmp_path / "tests/test_adversary.py").write_text("import fettle.uat.widget\n")
+    if flat_owner:
+        (tmp_path / "tests/test_widget.py").write_text("")
+    expected = (["tests/test_widget.py", "tests/test_adversary.py", "tests/test_uat_widget.py"]
+                if flat_owner else ["tests/test_uat_widget.py", "tests/test_adversary.py"])
+    assert _mapped_tests(str(tmp_path), [source]) == {source: expected}
 
 
 def test_mapped_tests_leaves_unmapped_modules_visible(tmp_path):
     (tmp_path / "fettle").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "fettle/orphan.py").write_text("")
+    (tmp_path / "script.py").write_text("")
 
-    assert _mapped_tests(str(tmp_path), ["fettle/orphan.py"]) == {"fettle/orphan.py": []}
+    assert _mapped_tests(str(tmp_path), ["fettle/orphan.py", "script.py"]) == {
+        "fettle/orphan.py": [], "script.py": []}
+
+
+@pytest.mark.parametrize("stem", ["__init__", "__main__"])
+def test_mapped_tests_entry_points_require_import_or_explicit_mapping(tmp_path, stem):
+    (tmp_path / "fettle/uat").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    source = f"fettle/uat/{stem}.py"
+    (tmp_path / source).write_text("")
+    (tmp_path / f"tests/test_{stem}.py").write_text("")
+    (tmp_path / "tests/test_uat.py").write_text("")
+    assert _mapped_tests(str(tmp_path), [source]) == {source: []}
 
 
 def test_mapped_tests_uses_supplied_project_mapping(tmp_path):

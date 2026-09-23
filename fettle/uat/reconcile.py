@@ -300,16 +300,17 @@ _CANDIDATE_RE = re.compile(r"^CANDIDATE:\s*(.+)$")
 
 
 def _outside_scenario_blocks(transcript: str) -> str:
-    """Mask SCENARIO verdict blocks so candidate scanning skips them."""
-    matches = list(_BLOCK_RE.finditer(transcript))
-    if not matches:
-        return transcript
+    """Mask scenario and restart verdict sections during candidate scanning."""
     parts: list[str] = []
-    last = 0
-    for m in matches:
-        parts.append(transcript[last:m.start()])
-        last = m.end()
-    parts.append(transcript[last:])
+    in_verdict_block = False
+    for line in transcript.splitlines():
+        stripped = line.strip()
+        if _BLOCK_RE.match(stripped) or _RESTART_RE.match(stripped):
+            in_verdict_block = True
+        elif _CANDIDATE_RE.match(stripped):
+            in_verdict_block = False
+        if not in_verdict_block:
+            parts.append(line)
     return "\n".join(parts)
 
 

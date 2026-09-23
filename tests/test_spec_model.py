@@ -198,33 +198,100 @@ class TestCLI:
             capture_output=True, text=True, cwd=str(repo),
         )
 
+    def test_outside_repository_exits_two(self, tmp_path):
+        result = self._run(tmp_path, "lint")
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert result.stderr == "Error: not inside a repository (no .git or .fettle.toml found)\n"
+
+    def test_list_continues_after_missing_spec(self, repo, monkeypatch, capsys):
+        from argparse import Namespace
+        from fettle.cli import cmd_spec
+
+        spec, findings = parse_spec(VALID_SPEC, "docs/checkout.md")
+        monkeypatch.setattr("fettle.paths.find_repo_root", lambda: repo)
+        monkeypatch.setattr("fettle.spec_model.discover_specs", lambda root: [(None, []), (spec, findings)])
+        with pytest.raises(SystemExit) as exit_info:
+            cmd_spec(Namespace(spec_action="list", json=True))
+        assert exit_info.value.code == 0
+        assert json.loads(capsys.readouterr().out) == [{
+            "id": "checkout-flow", "path": "docs/checkout.md", "status": "active",
+            "requirements": 2, "scenarios": 2, "lint_errors": 0,
+        }]
+
+    def test_warning_is_not_lint_error(self, repo):
+        (repo / "docs" / "checkout.md").write_text(VALID_SPEC.replace("(traces R1)", ""))
+        result = self._run(repo, "lint", "--json")
+        assert result.returncode == 0
+        report = json.loads(result.stdout)
+        assert report["error_count"] == 0
+        assert len(report["findings"]) == 1
+        assert report["findings"][0]["severity"] == "WARNING"
+        listed = self._run(repo, "list", "--json")
+        assert listed.returncode == 0
+        assert json.loads(listed.stdout)[0]["lint_errors"] == 0
+
     def test_lint_clean_exit_zero(self, repo):
         result = self._run(repo, "lint")
         assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == "\u2713 All specs valid.\n"
+        assert result.stderr == ""
 
     def test_lint_error_exit_one(self, repo):
         (repo / "docs" / "checkout.md").write_text(
             VALID_SPEC.replace("(traces R1)", "(traces R9)"))
         result = self._run(repo, "lint")
         assert result.returncode == 1
-        assert "fix:" in result.stdout
+        assert result.stdout == (
+            "  [ERROR] docs/checkout.md:18 \u2014 Scenario S1 traces R9, which does not exist.\n"
+            "      fix: Add 'R9.' under ## Requirements or fix the traces list.\n"
+            "  [WARNING] docs/checkout.md:1 \u2014 Requirement R1 has no scenario tracing it.\n"
+            "      fix: Add a scenario with '(traces R1)' or remove R1.\n"
+            "\n2 finding(s).\n"
+        )
+        assert result.stderr == ""
 
     def test_lint_json(self, repo):
         result = self._run(repo, "lint", "--json")
-        data = json.loads(result.stdout)
-        assert data["error_count"] == 0
+        assert result.returncode == 0
+        assert result.stdout == json.dumps({"findings": [], "error_count": 0}, indent=2) + "\n"
+        assert result.stderr == ""
 
     def test_list_shows_spec(self, repo):
         result = self._run(repo, "list", "--json")
-        rows = json.loads(result.stdout)
-        assert rows[0]["id"] == "checkout-flow"
-        assert rows[0]["requirements"] == 2
-        assert rows[0]["scenarios"] == 2
+        assert result.returncode == 0
+        assert result.stdout == json.dumps([{
+            "id": "checkout-flow", "path": "docs/checkout.md", "status": "active",
+            "requirements": 2, "scenarios": 2, "lint_errors": 0,
+        }], indent=2) + "\n"
+        assert result.stderr == ""
+
+    @pytest.mark.parametrize("invalid", [False, True])
+    def test_list_human_reports_lint_errors(self, repo, invalid):
+        if invalid:
+            (repo / "docs" / "checkout.md").write_text(VALID_SPEC.replace("(traces R1)", "(traces R9)"))
+        result = self._run(repo, "list")
+        assert result.returncode == 0
+        assert result.stdout == (
+            f"  {'checkout-flow':<24} {'active':<11} 2R/2S  docs/checkout.md"
+            + ("  (1 lint error(s))" if invalid else "") + "\n"
+        )
+        assert result.stderr == ""
+
+    @pytest.mark.parametrize("json_output", [False, True])
+    def test_list_ignores_non_specs(self, repo, json_output):
+        (repo / "docs" / "checkout.md").write_text("---\nfettle-spec: v1\n# unterminated frontmatter\n")
+        result = self._run(repo, "list", *(["--json"] if json_output else []))
+        assert result.returncode == 0
+        assert result.stdout == ("[]\n" if json_output else
+                                 "No specs found (markdown files with 'fettle-spec' frontmatter).\n")
+        assert result.stderr == ""
 
     def test_default_action_is_lint(self, repo):
         result = self._run(repo)
         assert result.returncode == 0
-        assert "valid" in result.stdout
+        assert result.stdout == "\u2713 All specs valid.\n"
+        assert result.stderr == ""
 
 
 class TestTraceMarkers:
@@ -383,13 +450,22 @@ class TestScenarioCoverage:
             capture_output=True, text=True, cwd=str(repo),
         )
         assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert data["totals"]["covered"] == 2
+        assert result.stdout == json.dumps(scenario_coverage(str(repo)), indent=2) + "\n"
+        assert result.stderr == ""
 
     def test_cli_coverage_human(self, repo):
+        (repo / "tests" / "test_cart.py").write_text("# traces: checkout-flow/S1, missing/S1\n")
+        (repo / "tests" / "test_checkout.py").write_text("# traces: checkout-flow/S1\n")
         result = subprocess.run(
             [sys.executable, "-m", "fettle.cli", "spec", "coverage"],
             capture_output=True, text=True, cwd=str(repo),
         )
         assert result.returncode == 0
-        assert "0/2 scenarios covered" in result.stdout
+        assert result.stdout == (
+            "  checkout-flow (active): 1/2 scenarios covered\n"
+            "    \u2713 S1. quantity change updates total \u2190 tests/test_cart.py, tests/test_checkout.py\n"
+            "    \u2717 S2. payment declined\n"
+            "  [WARNING] tests/test_cart.py: marker 'missing/S1' \u2014 no spec with id 'missing'\n"
+            "\n1/2 scenarios covered (50.0%).\n"
+        )
+        assert result.stderr == ""

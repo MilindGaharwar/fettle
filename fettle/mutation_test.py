@@ -199,7 +199,7 @@ def _mapped_tests(
     files: list[str],
     test_mappings: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
-    """Map each production module to convention and direct-import tests."""
+    """Map each module to all matching tests, running its convention test first."""
     root_path = Path(root)
     test_paths = sorted((root_path / "tests").glob("test_*.py"))
     imports: dict[str, set[str]] = {}
@@ -225,11 +225,16 @@ def _mapped_tests(
             module = module.removesuffix(".__init__")
         matches = set(imports.get(module, set())) | set((test_mappings or {}).get(file, []))
         stem = Path(file).stem
+        owner = f"tests/test_{stem}.py"
         if stem not in {"__init__", "__main__"}:
-            candidate = root_path / "tests" / f"test_{stem}.py"
+            candidate = root_path / owner
+            if not candidate.is_file():
+                nested_name = module.split(".", 1)[-1].replace(".", "_")
+                owner = f"tests/test_{nested_name}.py"
+                candidate = root_path / owner
             if candidate.is_file():
                 matches.add(candidate.relative_to(root_path).as_posix())
-        mapped[file] = sorted(matches)
+        mapped[file] = sorted(matches, key=lambda test: (test != owner, test))
     return mapped
 
 
