@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fettle.uat.doctor import format_report, probe
 from fettle.uat.surfaces import detect_surfaces, resolve_surfaces
@@ -136,9 +136,18 @@ class TestProbe:
     def test_missing_browser_runtime_cannot_report_available(self, tmp_path):
         from fettle.uat.doctor import _playwright_available
 
-        with patch("playwright.sync_api.sync_playwright") as factory:
-            factory.return_value.__enter__.return_value.chromium.executable_path = str(
-                tmp_path / "absent-chromium")
+        api = MagicMock()
+        factory = api.sync_playwright
+        factory.return_value.__enter__.return_value.chromium.executable_path = str(
+            tmp_path / "absent-chromium")
+        with patch.dict(sys.modules, {"playwright": MagicMock(), "playwright.sync_api": api}):
+            assert not _playwright_available()
+        factory.assert_called_once_with()
+
+    def test_missing_browser_package_cannot_report_available(self):
+        from fettle.uat.doctor import _playwright_available
+
+        with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
             assert not _playwright_available()
 
     def test_ready_cli_surface(self, tmp_path):

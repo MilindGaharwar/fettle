@@ -1,5 +1,34 @@
 # Audit Hardening Worklog
 
+## 2026-09-22: Remote Checkpoint Dependency Repair
+
+Signed-off checkpoints `235c176` and `c8e80a2` were pushed with all commit and
+pre-push hooks enabled. CI run `35729628089` passed on `c8e80a2`. Mutation run
+`35729628122` failed: all 11 unsuccessful replay reports retained a `tool_error`
+because the missing-browser unit test imported Playwright while constructing its
+mock, but the pinned mutation environment does not install that package. This
+was a baseline-test setup failure, not a valid mutation score. The failed run
+remains non-pass; no historical qualification result is replaced.
+
+The test now supplies a fake Playwright API through `sys.modules` and verifies
+the factory was called, so an unavailable package cannot accidentally satisfy
+the missing-executable assertion. No production behavior or workflow dependency
+policy changed. All 26 surface tests passed; the controller/surface mapping
+passed 101 tests with Playwright imports explicitly unavailable (20 runtime
+opt-ins skipped). Fresh verification of the repaired checkpoint remains required.
+
+Follow-up on 2026-09-23: the mistakenly repository-wide local preflight hit its
+1,800-second limit and remains `tool_error`, not a pass. Its raw cache and the
+working diff were preserved before further work. The replacement check used a
+disposable checkout, Python 3.12, mutmut 2.5.1 and the pinned whatthepatch 1.0.7,
+restricted to `_playwright_available` with 120-second preflight and 300-second
+replay limits. Initial preflight completed in 0.82 seconds. Narrow replay exposed
+an uncovered missing-package return; an explicit unavailable-import regression
+now covers it. Final surface tests: 27 passed. Final narrow replay: one mutant
+killed, zero survivors/timeouts/untested outcomes, completed in 1.73 seconds.
+This is scoped developmental evidence, not a replacement full qualification.
+Unrelated executable-bit changes were left untouched and excluded from the repair.
+
 ## 2026-09-22: Checkpoint Review And Full Verification
 
 Operator authorized review, verification and checkpoint commits/push on the
