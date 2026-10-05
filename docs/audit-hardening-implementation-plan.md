@@ -70,7 +70,7 @@ Estimates are focused engineering days including review, not calendar promises.
 | [ ] | WP-AH04 | P0 | Concurrent ledger operations preserve valid history | AH00 | 2-3 | POSIX concurrency/interruption verified; Windows gate added, run pending |
 | [ ] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | September 19 wheel/sdist isolated smoke passed; remote acceptance open |
 | [ ] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Implemented; 23 focused tests pass |
-| [ ] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent automated review found no blockers; platform/host acceptance open |
+| [ ] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent automated review is required; platform, host, remote-CI, artifact-portability, and participant evidence remain blockers until confirmed |
 | [ ] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Narrow type gate added; branch baseline measured |
 | [ ] | WP-AH09 | P2 | Measured hook and ledger performance | AH07 | 2-3 | Exploratory local baseline; frozen benchmark pending |
 | [ ] | WP-AH10 | P2 | One justified CLI or mutation responsibility extraction | AH08-AH09 | 3-5 | Measurement-gated |
