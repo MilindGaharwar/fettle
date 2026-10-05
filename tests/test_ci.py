@@ -248,50 +248,49 @@ def test_mutation_workflow_creates_required_check_for_every_pull_request():
     assert "paths:" not in pull_request_trigger
 
 
-def test_changed_mutation_workflow_fans_out_bounded_exact_scope():
+def test_changed_mutation_workflow_prepares_scope_without_pr_execution_fanout():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "--prepare-changed-manifests mutation-changed-manifests" in workflow
-    assert "fromJSON(needs.changed-prepare.outputs.matrix)" in workflow
-    assert "--manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json" in workflow
-    assert "--manifest-scope mutation-changed-manifests" in workflow
-    assert "--aggregate mutation-changed-shards --aggregate-scope mutation-changed-manifests" in workflow
-    assert "needs: [changed-prepare, changed-shard, changed-replay-prepare, changed-replay]" in workflow
-    assert "if: needs.changed-prepare.outputs.shard_count == '0'" in workflow
+    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
+    assert "fromJSON(needs.changed-prepare.outputs.matrix)" not in pull_request_jobs
+    assert "mutmut run" not in pull_request_jobs
+    assert "needs: changed-prepare" in pull_request_jobs
+    assert "Mutation execution requires explicit maintainer dispatch" in pull_request_jobs
+    assert '\"status\":\"unknown\"' in pull_request_jobs
+    assert '\"passed\":false' in pull_request_jobs
     assert "if: needs.changed-prepare.result != 'success'" in workflow
-    assert "needs.changed-replay-prepare.outputs.shard_count == ''" in workflow
+    assert "needs.changed-prepare.outputs.shard_count != '0'" in workflow
 
 
-def test_changed_mutation_workflow_preseeds_timeout_evidence_and_truthful_summary():
+def test_changed_mutation_workflow_retains_truthful_nonpass_summary():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert "--initialize-timeout-report mutation-report.json" in workflow
-    assert "--manifest mutation-changed-manifests/partition-${{ matrix.shard }}.json --timeout 1800" in workflow
-    assert "name: Bounded changed-scope mutation evidence\n        timeout-minutes: 30" in workflow
-    assert "--timeout 1740" in workflow
-    assert workflow.index("--initialize-timeout-report") < workflow.index("Bounded changed-scope mutation evidence")
+    assert '\"qualification_executed\":false' in workflow
+    assert '\"status\":\"not_applicable\"' in workflow
+    assert '\"status\":\"unknown\"' in workflow
     assert "--github-summary mutation-report.json" in workflow
     assert "mutation-evidence-${{ github.run_id }}" in workflow
     assert "if-no-files-found: error" in workflow
 
 
-def test_changed_mutation_workflow_replays_only_incomplete_shards_before_aggregate():
+def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert "changed-replay-prepare:" in workflow
-    assert "needs: [changed-prepare, changed-shard]" in workflow
-    assert "--prepare-replay-matrix mutation-changed-initial" in workflow
-    assert "fromJSON(needs.changed-replay-prepare.outputs.matrix)" in workflow
-    assert "--timeout 3540" in workflow
-    assert "mutation-changed-replay-${{ github.run_id }}-${{ matrix.shard }}" in workflow
-    assert workflow.index("changed-replay:") < workflow.index("\n  changed:")
+    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
+    dispatched_jobs = workflow.split("\n  prepare:", 1)[1]
+    assert "changed-replay" not in pull_request_jobs
+    assert "github.event_name == 'workflow_dispatch'" in dispatched_jobs
+    assert "--resume-manifest" in dispatched_jobs
+    assert "--timeout 1740" in dispatched_jobs
 
 
 def test_changed_mutation_workflow_has_one_authoritative_pr_check():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert workflow.count("continue-on-error: true") >= 4
-    assert "name: mutation evidence" in workflow
+    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
+    assert pull_request_jobs.count("name: mutation evidence") == 1
+    assert "continue-on-error: true" not in pull_request_jobs.split("\n  changed:", 1)[1]
 
 
 def test_full_mutation_workflow_gates_fanout_on_retained_preflight():

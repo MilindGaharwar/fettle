@@ -41,9 +41,12 @@ def test_item26_workers_bind_manifest_and_preflight_identity():
     assert 'aggregate["revision"]==os.environ["GITHUB_SHA"]' in text
 
 
-def test_replay_preparation_is_wired_before_aggregate():
+def test_replay_execution_requires_explicit_dispatch_and_retained_preflight():
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    prepare = text.index("--prepare-replay-matrix")
-    aggregate = text.index("--aggregate mutation-changed-shards")
-    assert prepare < aggregate
+    pull_request_jobs, dispatched_jobs = text.split("\n  prepare:", 1)
+    assert "--resume-manifest" not in pull_request_jobs
+    assert "github.event_name == 'workflow_dispatch'" in dispatched_jobs
+    assert "Require retained preflight run" in dispatched_jobs
+    assert dispatched_jobs.index("Verify retained SHA-bound preflight") \
+        < dispatched_jobs.index("full-shard:")

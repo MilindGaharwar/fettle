@@ -54,7 +54,7 @@ def test_todo_s55_web_claim_matches_drivable_surfaces():
 
 
 def test_readme_replay_gate_claim_matches_workflow():
-    """README's replay and survivor-enforcement claims must match required CI."""
+    """README's explicit replay and survivor-enforcement claims match CI."""
     readme = _read("README.md")
     workflow = _read(".github/workflows/mutation.yml")
 
@@ -62,13 +62,15 @@ def test_readme_replay_gate_claim_matches_workflow():
         (line for line in readme.splitlines() if line.startswith("| Mutation quality |")),
         "",
     )
-    assert "replay" in mutation_row and "survivor enforcement" in mutation_row, (
+    assert "explicit-dispatch replay" in mutation_row and "survivor enforcement" in mutation_row, (
         "README mutation capability must state replay and survivor enforcement"
     )
-    assert "needs: [changed-prepare, changed-shard, changed-replay-prepare, changed-replay]" \
-        in workflow
-    assert "--prepare-replay-matrix" in workflow
-    assert "mutation evidence" in workflow
+    pull_request_jobs, dispatched_jobs = workflow.split("\n  prepare:", 1)
+    assert "name: mutation evidence" in pull_request_jobs
+    assert '"status":"unknown"' in pull_request_jobs
+    assert '"passed":false' in pull_request_jobs
+    assert "--resume-manifest" not in pull_request_jobs
+    assert "--resume-manifest" in dispatched_jobs
 
 
 def test_readme_single_install_claim_matches_pyproject():
