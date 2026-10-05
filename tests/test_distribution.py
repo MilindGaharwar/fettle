@@ -1,8 +1,16 @@
 import tomllib
+import os
 from pathlib import Path
 
 
 ROOT = Path(__file__).parent.parent
+
+
+def test_directly_executable_maintenance_scripts_keep_executable_mode():
+    for relative in ("fettle/cross_review.py", "fettle/import_graph.py"):
+        path = ROOT / relative
+        assert path.read_bytes().startswith(b"#!"), relative
+        assert os.access(path, os.X_OK), f"{relative} must support direct execution"
 
 
 def test_wheel_declares_every_owned_python_package():
