@@ -2,7 +2,8 @@
 
 Date: 2026-09-18
 Status: Implementation authorized 2026-09-18; hardening in progress, acceptance pending.
-Owner: Milind (approval); implementing engineer (delivery); independent reviewer (acceptance).
+Owner: Milind (approval); implementing engineer (delivery); independent automated
+reviewer in an isolated session (acceptance review).
 
 Related artifacts: [UX acceptance contract](audit-hardening.ux-spec.md),
 [worklog](audit-hardening-worklog.md), [program index](plan-index.md),
@@ -39,6 +40,11 @@ An audit observation is not a completed fix. Green lint alone is not acceptance.
   release and feature/research admission constraints remain unchanged.
 - Existing roadmap programs retain ownership. Later packages extend or feed those
   programs rather than duplicating their schemas, trackers, or experiments.
+- On 2026-10-05 the owner replaced AH07's previously required human-independent
+  review with independent automated acceptance because no human reviewer is
+  available. This changes reviewer type only. No human acceptance or human-usability
+  validation was performed, and no platform, host, artifact, remote-CI, participant,
+  or completion criterion is waived.
 - Before a multi-file implementation slice, run `kgraph impact <owner> --json`;
   if unavailable, record a references/call-site impact review, not a claimed pass.
 - Resolve existing work and dirty changes before edits. Claim the actual work item
@@ -194,7 +200,11 @@ uniqueness does not mutate the semantic class; invalid-format cases are explicit
 
 ### WP-AH07: Independent Hardening Acceptance
 
-Owner: implementing engineer plus independent reviewer; no automatic release.
+Owner: implementing engineer plus independent automated reviewer operating read-only
+in a separate session and isolated review environment; no automatic release. Before
+2026-10-05 this package required an independent human reviewer. The owner explicitly
+replaced only that requirement because no human reviewer is available. No human
+acceptance or human-usability validation was performed or inferred.
 Acceptance: every AH01-AH06 criterion has current evidence; blocked/skipped checks
 remain non-pass. No remote verification or installed-host claim is inferred.
 
@@ -203,7 +213,7 @@ remain non-pass. No remote verification or installed-host claim is inferred.
 | [ ] 07.1 | Replay all six audit cases against final candidate and record source/policy identity | VERIFY | Named regressions and safe end-to-end fixtures pass |
 | [ ] 07.2 | Run full suite, Ruff, Fettle, applicable rule packs, and completion validation | VERIFY | `python -m pytest tests -q`, `ruff check fettle tests`, `fettle check --all`, `fettle completion validate` |
 | [ ] 07.3 | Perform supported-platform wheel/host smoke checks and failure-path UAT | REVIEW | Unsupported or inaccessible host remains unverified, not pass |
-| [ ] 07.4 | Review diff, migration notes, operator recovery, and evidence completeness | REVIEW | Independent reviewer accepts criteria; user separately authorizes any commit/push/release |
+| [ ] 07.4 | Independently inspect the candidate diff, artifacts, migration notes, operator recovery, and evidence completeness; execute relevant checks without repairing the candidate | REVIEW | Independent automated reviewer records criterion-by-criterion verdicts, evidence references, findings, and limitations; user separately authorizes commit/push/release, and unavailable evidence remains non-pass |
 
 ### WP-AH08: Critical Type And Branch Ratchets
 
