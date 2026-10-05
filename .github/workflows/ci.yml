@@ -127,7 +127,7 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Validate completion evidence
-        run: fettle completion validate
+        run: fettle completion validate --checkpoint
 
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null
@@ -253,10 +253,26 @@ jobs:
           /tmp/bin/fettle init --json > /tmp/init.json
           /tmp/pipx/venvs/finefettle/bin/python -c "import json; from pathlib import Path; from fettle.bridge import validate_bridge; data=json.loads(Path('/tmp/init.json').read_text()); steps={item['name']: item for item in data}; assert steps['bridge']['status'] == 'created'; assert steps['opencode']['status'] == 'created'; assert validate_bridge().ok"
 
+  completion-strict:
+    name: Completion evidence (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install fettle (editable)
+        run: python -m pip install --quiet -e .
+
+      - name: Require complete milestone evidence
+        run: fettle completion validate
+
   required:
     name: CI required
     if: always()
-    needs: [lint, test, coverage, windows-bridge, linux-wheel]
+    needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking CI job
@@ -266,12 +282,14 @@ jobs:
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}
           LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}
+          COMPLETION_RESULT: ${{ needs.completion-strict.result }}
         run: |
           if [ "$LINT_RESULT" != "success" ] || \
              [ "$TEST_RESULT" != "success" ] || \
              [ "$COVERAGE_RESULT" != "success" ] || \
              [ "$WINDOWS_BRIDGE_RESULT" != "success" ] || \
-             [ "$LINUX_WHEEL_RESULT" != "success" ]; then
-            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT"
+             [ "$LINUX_WHEEL_RESULT" != "success" ] || \
+             [ "$COMPLETION_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT completion=$COMPLETION_RESULT"
             exit 1
           fi

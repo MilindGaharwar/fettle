@@ -129,5 +129,49 @@ def test_integration_scan_repo_honors_boundary_specific_exclusions():
 
         findings = scan_repo(d, {"boundary": {"exclude": ["tests/security_fixture.py"]}})
 
-        assert not any(f.path == "tests/security_fixture.py" for f in findings)
-        assert any(f.path == "src.py" for f in findings)
+    assert not any(f.path == "tests/security_fixture.py" for f in findings)
+    assert any(f.path == "src.py" for f in findings)
+
+
+def test_integration_scan_repo_honors_fettle_ignore(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    ignored = tmp_path / "generated.py"
+    scanned = tmp_path / "src.py"
+    ignored.write_text(f'k = "{SYNTH_AWS}"\n')
+    scanned.write_text(f'k = "{SYNTH_AWS}"\n')
+    (tmp_path / ".fettle-ignore").write_text("generated.py\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    findings = scan_repo(str(tmp_path), {})
+
+    assert not any(f.path == "generated.py" for f in findings)
+    assert any(f.path == "src.py" for f in findings)
+
+
+def test_integration_scan_repo_scans_only_git_tracked_files(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    tracked = tmp_path / "tracked.py"
+    untracked = tmp_path / "untracked.py"
+    tracked.write_text(f'k = "{SYNTH_AWS}"\n')
+    untracked.write_text(f'k = "{SYNTH_AWS}"\n')
+    subprocess.run(["git", "add", "tracked.py"], cwd=tmp_path, check=True)
+
+    findings = scan_repo(str(tmp_path), {})
+
+    assert any(f.path == "tracked.py" for f in findings)
+    assert not any(f.path == "untracked.py" for f in findings)
+
+
+def test_scan_repo_falls_back_to_visible_files_outside_git(tmp_path):
+    visible = tmp_path / "src.py"
+    hidden_dir = tmp_path / ".hidden"
+    skipped_dir = tmp_path / "node_modules"
+    visible.write_text(f'k = "{SYNTH_AWS}"\n')
+    hidden_dir.mkdir()
+    skipped_dir.mkdir()
+    (hidden_dir / "secret.py").write_text(f'k = "{SYNTH_AWS}"\n')
+    (skipped_dir / "secret.py").write_text(f'k = "{SYNTH_AWS}"\n')
+
+    findings = scan_repo(str(tmp_path), {})
+
+    assert [f.path for f in findings] == ["src.py"]

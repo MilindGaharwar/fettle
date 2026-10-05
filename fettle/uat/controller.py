@@ -139,12 +139,12 @@ def _profile(root: str, entries: dict, actions: list[dict]) -> str:
         '(subpath "/System")(subpath "/usr/lib")(subpath "/usr/share")'
         '(subpath "/opt/homebrew")(subpath "/Library/Apple")'
         '(literal "/dev/null")(literal "/dev/urandom")(literal "/dev/random"))'
-        "(deny file-write* (with send-signal SIGKILL))"
+        "(deny file-write*)"
         '(allow file-write* (literal "/dev/dtracehelper"))'
-        "(deny network* (with send-signal SIGKILL))"
-        "(deny process-fork (with send-signal SIGKILL))"
+        "(deny network*)"
+        "(deny process-fork)"
         f"(deny file-read* (subpath {json.dumps(str(_store_root().resolve()))})"
-        " (with send-signal SIGKILL))"
+        ")"
     )
 
 
@@ -193,6 +193,8 @@ def _execute(root: str, action: dict, profile: str) -> dict:
     except UnicodeDecodeError:
         decoded = {"stdout": "", "stderr": ""}
         error = "non-UTF-8 output is unsupported by this contract"
+    if exit_code > 0 and "Operation not permitted" in decoded["stderr"]:
+        error = error or "command denied by read-only sandbox; review authorized action"
     if any(_redact_secrets(text)[1] for text in decoded.values()):
         decoded = {"stdout": "", "stderr": ""}
         error = "possible secret output suppressed; use synthetic acceptance inputs"

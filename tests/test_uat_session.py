@@ -226,6 +226,448 @@ class TestNetworkController:
         }
         return contract, scenarios
 
+    @pytest.fixture
+    def owned_execution(self, tmp_path, contract_payload, monkeypatch):
+        import hashlib
+        import json
+        from types import SimpleNamespace
+        from fettle.uat import network_controller
+
+        content = b"print('product')\n"
+        (tmp_path / "app.py").write_bytes(content)
+        entries = {"app.py": {"content_sha": hashlib.sha256(content).hexdigest()}}
+        calls = []
+
+        def docker(context, arguments, **kwargs):
+            calls.append((context, arguments, kwargs))
+            if arguments[:2] == ["network", "inspect"]:
+                return json.dumps([{"Internal": True, "EnableIPv6": False, "IPAM": {"Config": [{}]}}])
+            if arguments[0] == "inspect":
+                return json.dumps([{"State": {"Running": True, "OOMKilled": False, "Error": "", "StartedAt": "start-1"}}])
+            if "--name" in arguments and arguments[arguments.index("--name") + 1].endswith("-observer"):
+                return json.dumps([{"status_code": 200, "body": "ready"}])
+            return "created"
+
+        monkeypatch.setattr(network_controller.uuid, "uuid4", lambda: SimpleNamespace(hex="fixture"))
+        monkeypatch.setattr(network_controller.time, "monotonic", lambda: 100.0)
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        with patch("fettle.uat.recovery.plan_resources", return_value=["--label", "owner=fixture"]) as plan:
+            yield contract_payload[0], entries, calls, plan
+
+    def test_owned_api_execution_preserves_isolation_and_cleanup(self, tmp_path, owned_execution):
+        import base64
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, plan = owned_execution
+        assert network_controller._execute_owned(str(tmp_path), contract, entries) == [{
+            "scenario_id": "greeter/S1", "attempt": 1, "exit_code": 0,
+            "stdout": '[{"body":"ready","status_code":200}]\n', "stderr": "", "error": ""}]
+        plan.assert_called_once_with("fettle-uat-fixture")
+        prefix = "fettle-uat-fixture"
+        network, volume, state = prefix + "-network", prefix + "-source", prefix + "-state"
+        keeper, seed, product, observer = [prefix + suffix for suffix in ("-state-keeper", "-seed", "-product", "-observer")]
+        ownership = ["--label", "owner=fixture"]
+        options = ["--read-only", "--user", "65534:65534", "--cap-drop", "ALL",
+                   "--security-opt", "no-new-privileges:true", "--pids-limit", "64",
+                   "--memory", "128m", "--memory-swap", "128m", "--cpus", "1",
+                   "--dns", "127.0.0.1", "--log-driver", "none", "--pull", "never",
+                   "--entrypoint", "/usr/local/bin/python3"]
+        image = network_controller.IMAGE
+        expected = [
+            (["network", "create", *ownership, "--internal", "--opt", "com.docker.network.bridge.gateway_mode_ipv4=isolated", network], {}),
+            (["network", "inspect", network], {}),
+            (["volume", "create", *ownership, volume], {}),
+            (["volume", "create", *ownership, "--driver", "local", "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+              "--opt", "o=size=16m,uid=65534,gid=65534,mode=0700", state], {}),
+            (["run", *ownership, "--detach", "--name", keeper, "--network", "none", *options,
+              "--mount", f"type=volume,src={state},dst=/state,readonly", image, "-I", "-c", "import signal; signal.pause()"], {}),
+            (["run", *ownership, "--name", seed, "--network", "none", *options, "--user", "0:0",
+              "--mount", f"type=volume,src={volume},dst=/source", "-i", image, "-I", "-c", network_controller.SEED],
+             {"data": json.dumps({"app.py": base64.b64encode(b"print('product')\n").decode("ascii")})}),
+            (["run", *ownership, "--detach", "--name", product, "--network", network, "--network-alias", "product", *options,
+              "--mount", f"type=volume,src={volume},dst=/product,readonly", "--mount", f"type=volume,src={state},dst=/state",
+              "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777", "--workdir", "/product", image, "-I", "-B", "/product/app.py"], {}),
+            (["run", *ownership, "--name", observer, "--network", network, *options, "-i", image, "-I", "-c", network_controller.COLLECT],
+             {"data": json.dumps({"port": 8080, "timeout_s": 3.0, "viewport": None,
+                                   "steps": [{"method": "GET", "path": "/", "body": ""}]}), "timeout": 3}),
+            (["rm", "--force", observer], {}), (["inspect", product], {}),
+            (["rm", "--force", product], {}), (["rm", "--force", seed], {}), (["rm", "--force", keeper], {}),
+            (["volume", "rm", volume], {}), (["volume", "rm", state], {}), (["network", "rm", network], {}),
+        ]
+        assert calls == [("qualified-runtime", arguments, kwargs) for arguments, kwargs in expected]
+
+    def test_owned_source_limit_is_inclusive(self, tmp_path, owned_execution, monkeypatch):
+        from fettle.uat import network_controller
+
+        contract, entries, _, _ = owned_execution
+        monkeypatch.setattr(network_controller, "SOURCE_LIMIT", (tmp_path / "app.py").stat().st_size)
+        assert network_controller._execute_owned(str(tmp_path), contract, entries)[0]["exit_code"] == 0
+
+    def test_network_capture_policy_has_qualified_identities_and_budgets(self):
+        from fettle.uat import network_controller
+
+        assert network_controller.MODE == "isolated-api-v1"
+        assert network_controller.IMAGE == "docker.io/library/python@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b"
+        assert network_controller.BROWSER_IMAGE == "sha256:0b5a9b1dd96db0948671a77d0dee1fd17653c51c7bfc8133a6e6f343164e8e54"
+        assert network_controller.BROWSER_PROFILE == "fe3f122e31547eebf303b60472c5a08db0f8d1d53e576d3881d2a68a76878b8c"
+        assert network_controller.LIMIT == 65536
+        assert network_controller.SOURCE_LIMIT == 16777216
+        assert network_controller.AUDIT_EXPECTATION == {
+            "page_errors": [], "console_errors": [], "failed_requests": [], "http_errors": [],
+            "accessibility_violations": [], "accessibility_incomplete": []}
+
+    @pytest.fixture
+    def owned_browser(self, owned_execution, browser_settings, screenshot_payload, monkeypatch):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        browser_settings["browser"]["viewport"] = screenshot_payload[0]["browser"]["viewport"]
+        contract.update(surface="web", **browser_settings)
+        contract["actions"][0]["steps"] = [{"op": "audit", "expect": dict(network_controller.AUDIT_EXPECTATION)}]
+        contract["actions"].append({"scenario_id": "greeter/S2", "timeout_s": 3, "steps": [
+            {"op": "text", "role": "heading", "name": "Greeting", "expect": "Hello"}]})
+        responses = [{"observations": [{"audit": dict(network_controller.AUDIT_EXPECTATION)}],
+                      "artifacts": screenshot_payload[2]["artifacts"], "sensitive": []},
+                     {"observations": [{"text": "Hello"}], "artifacts": [], "sensitive": []}]
+        original = network_controller._docker
+        attempted = []
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "run" and "fettle-uat-fixture-observer" in arguments:
+                response = responses[len(attempted)]
+                attempted.append(True)
+                return json.dumps(response)
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        return contract, entries, calls, responses
+
+    def test_owned_browser_preserves_runtime_and_per_action_artifacts(self, tmp_path, owned_browser):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, responses = owned_browser
+        with patch.object(network_controller, "validate_artifacts", wraps=network_controller.validate_artifacts) as validate:
+            results = network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert results == [{"scenario_id": action["scenario_id"], "attempt": 1, "exit_code": 0,
+                            "stdout": json.dumps(response["observations"], sort_keys=True, separators=(",", ":")) + "\n",
+                            "stderr": "", "error": "", "artifacts": response["artifacts"]}
+                           for action, response in zip(contract["actions"], responses)]
+        assert validate.call_args_list == [((contract, action, result),) for action, result in zip(contract["actions"], results)]
+        observer_calls = [call for call in calls if call[1][0] == "run" and "fettle-uat-fixture-observer" in call[1]]
+        assert observer_calls == [("qualified-runtime", [
+            "run", "--label", "owner=fixture", "--name", "fettle-uat-fixture-observer", "--network", "fettle-uat-fixture-network",
+            *network_controller.OPTIONS, "--entrypoint", "/usr/bin/python3", "--memory", "1g", "--memory-swap", "1g",
+            "--pids-limit", "128", "--security-opt", "seccomp=" + contract["browser"]["seccomp_path"],
+            "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777", "-i", network_controller.BROWSER_IMAGE,
+            "-I", "-c", network_controller.BROWSE], {"timeout": 3, "data": json.dumps({
+                "port": 8080, "timeout_s": 3.0, "viewport": {"width": 320, "height": 320},
+                "steps": [{key: value for key, value in action["steps"][0].items() if key != "expect"}]})})
+            for action in contract["actions"]]
+
+    @pytest.mark.parametrize("fault", ["list", "extra-field", "missing-field", "sensitive", "observations", "overflow"])
+    def test_owned_browser_suppresses_invalid_output_and_continues(self, tmp_path, owned_browser, monkeypatch, fault):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, responses = owned_browser
+        if fault == "list":
+            responses[0] = []
+        elif fault == "extra-field":
+            responses[0]["extra"] = True
+        elif fault == "missing-field":
+            del responses[0]["sensitive"]
+        elif fault == "sensitive":
+            responses[0]["sensitive"] = ["synthetic sensitive text"]
+            original = network_controller._redact_secrets
+            monkeypatch.setattr(network_controller, "_redact_secrets", lambda text: ("redacted", ["finding"])
+                                if text == json.dumps(responses[0]["sensitive"]) else original(text))
+        elif fault == "observations":
+            responses[0]["observations"] = {}
+        else:
+            monkeypatch.setattr(network_controller, "LIMIT", len(json.dumps(responses[0]["observations"], sort_keys=True, separators=(",", ":"))))
+        results = network_controller._execute_owned(str(tmp_path), contract, entries)
+        message = ("collector returned malformed observations" if fault == "observations" else
+                   "oversized or possible secret response suppressed" if fault == "overflow" else
+                   "malformed or possible secret browser output suppressed")
+        assert results == [
+            {"scenario_id": "greeter/S1", "attempt": 1, "exit_code": 1, "stdout": "", "stderr": "", "error": message, "artifacts": []},
+            {"scenario_id": "greeter/S2", "attempt": 1, "exit_code": 0, "stdout": '[{"text":"Hello"}]\n',
+             "stderr": "", "error": "", "artifacts": []}]
+        assert sum(arguments == ["rm", "--force", "fettle-uat-fixture-observer"] for _, arguments, _ in calls) == 2
+
+    @pytest.mark.parametrize("restart", [False, True])
+    def test_owned_fractional_deadline_preserves_groups_and_minimum_timeout(self, tmp_path, owned_execution, monkeypatch, restart):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        request = contract["actions"][0]["steps"][0]
+        contract["actions"][0]["steps"] = [{"restart": True}] if restart else [request, {**request, "path": "/second"}]
+        ticks = iter([100.0, 102.5])
+        monkeypatch.setattr(network_controller.time, "monotonic", lambda: next(ticks))
+        result = network_controller._execute_owned(str(tmp_path), contract, entries)
+        if restart:
+            assert result[0]["error"] == "required product restart did not complete"
+            assert [kwargs for _, arguments, kwargs in calls if arguments[0] == "restart"] == [{"timeout": 1}]
+        else:
+            assert result[0]["exit_code"] == 0
+            assert [kwargs for _, arguments, kwargs in calls if arguments[0] == "run" and "fettle-uat-fixture-observer" in arguments] == [{
+                "data": json.dumps({"port": 8080, "timeout_s": 0.5, "viewport": None, "steps": [
+                    {"method": "GET", "path": "/", "body": ""},
+                    {"method": "GET", "path": "/second", "body": ""}]}), "timeout": 1}]
+
+    @pytest.mark.parametrize("fault", ["malformed", "exact-budget", "over-budget", "secret"])
+    def test_owned_response_validation_suppresses_untrusted_output(self, tmp_path, owned_execution, monkeypatch, fault):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        original = network_controller._docker
+        observed = [{"body": "ready", "status_code": 200}]
+        stdout = json.dumps(observed, sort_keys=True, separators=(",", ":")) + "\n"
+        if fault in {"exact-budget", "over-budget"}:
+            monkeypatch.setattr(network_controller, "LIMIT", len(stdout.encode()) - (fault == "over-budget"))
+        if fault == "secret":
+            monkeypatch.setattr(network_controller, "_redact_secrets", lambda text: ("redacted", ["secret"]) if text == stdout else (text, []))
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "run" and "fettle-uat-fixture-observer" in arguments:
+                return json.dumps({} if fault == "malformed" else observed)
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        result = network_controller._execute_owned(str(tmp_path), contract, entries)
+        error = ("collector returned malformed observations" if fault == "malformed" else
+                 "" if fault == "exact-budget" else "oversized or possible secret response suppressed")
+        assert result == [{"scenario_id": "greeter/S1", "attempt": 1, "exit_code": 1 if error else 0,
+                           "stdout": "" if error else stdout, "stderr": "", "error": error}]
+        assert sum(arguments == ["rm", "--force", "fettle-uat-fixture-observer"] for _, arguments, _ in calls) == 1
+
+    @pytest.mark.parametrize("position", ["middle", "first", "last"])
+    def test_owned_restart_preserves_group_order_and_deadline(self, tmp_path, owned_execution, monkeypatch, position):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        request = contract["actions"][0]["steps"][0]
+        contract["actions"][0]["steps"] = ({"middle": [request, {"restart": True}, request],
+                                          "first": [{"restart": True}, request],
+                                          "last": [request, {"restart": True}]}[position])
+        original = network_controller._docker
+        inspections = []
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "inspect":
+                inspections.append(arguments)
+                return json.dumps([{"State": {"Running": True, "OOMKilled": False, "Error": "",
+                                              "StartedAt": f"start-{len(inspections)}"}}])
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        result = network_controller._execute_owned(str(tmp_path), contract, entries)
+        expected = [{"restart": True} if "restart" in step else {"status_code": 200, "body": "ready"}
+                    for step in contract["actions"][0]["steps"]]
+        assert result == [{"scenario_id": "greeter/S1", "attempt": 1, "exit_code": 0,
+                           "stdout": json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n", "stderr": "", "error": ""}]
+        assert len(inspections) == 3
+        assert [call for call in calls if call[1][0] == "restart"] == [
+            ("qualified-runtime", ["restart", "--time", "1", "fettle-uat-fixture-product"], {"timeout": 3})]
+        requests = [json.loads(kwargs["data"])["steps"] for _, arguments, kwargs in calls if "data" in kwargs and "-observer" in " ".join(arguments)]
+        assert requests == [[{"method": "GET", "path": "/", "body": ""}]] * (2 if position == "middle" else 1)
+
+    @pytest.mark.parametrize("fault", ["deadline", "stopped", "unchanged"])
+    def test_owned_restart_failure_remains_nonpass(self, tmp_path, owned_execution, monkeypatch, fault):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        contract["actions"][0]["steps"].insert(0, {"restart": True})
+        original = network_controller._docker
+        inspections = []
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "inspect":
+                inspections.append(arguments)
+                return json.dumps([{"State": {"Running": not (fault == "stopped" and len(inspections) == 2),
+                                              "StartedAt": "same" if fault == "unchanged" else str(len(inspections)),
+                                              "OOMKilled": False, "Error": ""}}])
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        if fault == "deadline":
+            ticks = iter([100.0, 103.0])
+            monkeypatch.setattr(network_controller.time, "monotonic", lambda: next(ticks))
+        result = network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert result == [{"scenario_id": "greeter/S1", "attempt": 1, "exit_code": 1, "stdout": "", "stderr": "",
+                           "error": "scenario deadline exceeded" if fault == "deadline" else "required product restart did not complete"}]
+        assert not any("-observer" in " ".join(arguments) for _, arguments, _ in calls)
+
+    @pytest.mark.parametrize("failure,message", [
+        (OSError("observer unavailable"), "observer unavailable"),
+        (ValueError("invalid response"), "invalid response"),
+        (subprocess.SubprocessError("runtime failed"), "runtime failed"),
+        (subprocess.TimeoutExpired("sensitive command", 3), "collector interrupted; rerun the approved contract"),
+        (OSError("x" * 4096 + "not-retained"), "x" * 4096),
+    ])
+    def test_owned_observer_failure_cleans_and_continues(self, tmp_path, owned_execution, monkeypatch, failure, message):
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        contract["actions"].append({**contract["actions"][0], "scenario_id": "greeter/S2"})
+        original = network_controller._docker
+        attempted = []
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "run" and "fettle-uat-fixture-observer" in arguments:
+                attempted.append(True)
+                if len(attempted) == 1:
+                    raise failure
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        results = network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert results == [
+            {"scenario_id": "greeter/S1", "attempt": 1, "exit_code": 1, "stdout": "", "stderr": "", "error": message},
+            {"scenario_id": "greeter/S2", "attempt": 1, "exit_code": 0,
+             "stdout": '[{"body":"ready","status_code":200}]\n', "stderr": "", "error": ""},
+        ]
+        assert sum(arguments == ["rm", "--force", "fettle-uat-fixture-observer"] for _, arguments, _ in calls) == 2
+
+    @pytest.mark.parametrize("field,value", [("Running", False), ("OOMKilled", True), ("Error", "runtime error")])
+    def test_owned_product_failure_rejects_otherwise_successful_capture(self, tmp_path, owned_execution, monkeypatch, field, value):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        original = network_controller._docker
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[0] == "inspect":
+                return json.dumps([{"State": {"Running": True, "OOMKilled": False, "Error": "", field: value}}])
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        with pytest.raises(ValueError, match="^product exited or exceeded runtime resources during capture$"):
+            network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert calls[-1][1] == ["network", "rm", "fettle-uat-fixture-network"]
+
+    def test_owned_cleanup_attempts_every_resource_and_reports_all_failures(self, tmp_path, owned_execution, monkeypatch):
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        original = network_controller._docker
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments == ["rm", "--force", "fettle-uat-fixture-product"]:
+                raise OSError("product cleanup failed")
+            if arguments == ["volume", "rm", "fettle-uat-fixture-state"]:
+                raise ValueError("state cleanup failed")
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        with pytest.raises(ValueError) as error:
+            network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert str(error.value) == "container cleanup incomplete: product cleanup failed; state cleanup failed"
+        assert [arguments[-1] for _, arguments, _ in calls[-6:]] == [
+            "fettle-uat-fixture-" + suffix for suffix in ("product", "seed", "state-keeper", "source", "state", "network")]
+
+    @pytest.mark.parametrize("fault", ["external", "ipv6", "gateway"])
+    def test_owned_network_rejects_nonisolated_inspection(self, tmp_path, owned_execution, monkeypatch, fault):
+        import json
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        original = network_controller._docker
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if arguments[:2] == ["network", "inspect"]:
+                info = {"Internal": fault != "external", "EnableIPv6": fault == "ipv6",
+                        "IPAM": {"Config": [{}, {"Gateway": "172.18.0.1" if fault == "gateway" else ""}]}}
+                return json.dumps([info])
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        with pytest.raises(ValueError) as error:
+            network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert str(error.value) == "isolated network has an unexpected gateway or IPv6 configuration"
+        assert len(calls) == 3
+        assert calls[-1] == ("qualified-runtime", ["network", "rm", "fettle-uat-fixture-network"], {})
+
+    @pytest.mark.parametrize("failure_call,cleanup", [
+        (1, []), (2, [["network", "rm", "network"]]),
+        (3, [["network", "rm", "network"]]),
+        (4, [["volume", "rm", "source"], ["network", "rm", "network"]]),
+        (5, [["rm", "--force", "state-keeper"], ["volume", "rm", "source"], ["volume", "rm", "state"], ["network", "rm", "network"]]),
+        (6, [["rm", "--force", "seed"], ["rm", "--force", "state-keeper"], ["volume", "rm", "source"],
+             ["volume", "rm", "state"], ["network", "rm", "network"]]),
+        (7, [["rm", "--force", "product"], ["rm", "--force", "seed"], ["rm", "--force", "state-keeper"],
+             ["volume", "rm", "source"], ["volume", "rm", "state"], ["network", "rm", "network"]]),
+    ])
+    def test_owned_setup_failure_cleans_only_planned_resources(self, tmp_path, owned_execution, monkeypatch, failure_call, cleanup):
+        from fettle.uat import network_controller
+
+        contract, entries, calls, _ = owned_execution
+        original = network_controller._docker
+
+        def docker(context, arguments, **kwargs):
+            result = original(context, arguments, **kwargs)
+            if len(calls) == failure_call:
+                raise OSError("setup unavailable")
+            return result
+
+        monkeypatch.setattr(network_controller, "_docker", docker)
+        with pytest.raises(OSError, match="^setup unavailable$"):
+            network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert calls[failure_call:] == [("qualified-runtime", [*arguments[:-1], "fettle-uat-fixture-" + arguments[-1]], {})
+                                        for arguments in cleanup]
+
+    @pytest.mark.parametrize("fault,message", [
+        ("symlink", "unsupported or oversized product input"),
+        ("missing", "unsupported or oversized product input"),
+        ("directory", "unsupported or oversized product input"),
+        ("size", "unsupported or oversized product input"),
+        ("digest", "product bytes differ from the frozen source inventory"),
+        ("total", "product source exceeds 16 MiB capture budget"),
+        ("startup", "startup script is outside the frozen source inventory"),
+    ])
+    def test_owned_execution_rejects_source_before_resource_creation(self, tmp_path, owned_execution, monkeypatch, fault, message):
+        from fettle.uat import network_controller
+
+        contract, entries, calls, plan = owned_execution
+        source = tmp_path / "app.py"
+        if fault in {"symlink", "missing", "directory"}:
+            source.unlink()
+            if fault == "symlink":
+                source.symlink_to(tmp_path / "absent")
+            elif fault == "directory":
+                source.mkdir()
+        elif fault == "size":
+            monkeypatch.setattr(network_controller, "SOURCE_LIMIT", source.stat().st_size - 1)
+        elif fault == "digest":
+            entries["app.py"]["content_sha"] = "changed"
+        elif fault == "total":
+            monkeypatch.setattr(network_controller, "SOURCE_LIMIT", source.stat().st_size)
+            (tmp_path / "second.py").write_bytes(source.read_bytes())
+            entries["second.py"] = entries["app.py"]
+        else:
+            contract["product"]["argv"] = ["/product/absent.py"]
+        with pytest.raises(ValueError) as error:
+            network_controller._execute_owned(str(tmp_path), contract, entries)
+        assert str(error.value) == message
+        assert calls == []
+        plan.assert_not_called()
+
     def test_expected_observations_preserve_order_and_canonical_format(self):
         from fettle.uat.network_controller import expected
 
@@ -1338,14 +1780,55 @@ class TestReadOnlyController:
         assert validation.returncode == 0, validation.stderr
         assert (validation.stdout.strip() == "pass") == (case == "success")
 
+    @pytest.mark.parametrize("code", [
+        "open('forbidden', 'w').write('bad')",
+        "import os; os.fork()",
+        "import socket; socket.socket().connect(('127.0.0.1', 9))",
+    ])
+    def test_native_denial_is_nonpass_without_crashing_python(self, capture_fixture, code):
+        import json
+        from fettle.uat import controller
+        from fettle.uat.session import _digest, _file_digest
+
+        root, path, approval, config = capture_fixture
+        contract = json.loads(path.read_text())
+        contract["actions"][0]["argv"] = [str(Path(sys.executable).resolve()), "-I", "-c", code]
+        contract["actions"][0]["timeout_s"] = 1
+        path.write_text(json.dumps(contract))
+        captured = controller.capture(str(root), config, str(path), _file_digest(path))
+        observed = captured["observations"][0]
+        assert observed["exit_code"] > 0
+        assert "sandbox" in observed["error"]
+        assert not (root / "forbidden").exists()
+
+        session = {
+            "session_id": captured["session_id"], "capture_digest": _digest(captured),
+            "capture_mode": controller.MODE, "surface": "cli",
+            "canonical_evidence_reference": {
+                "kind": "fettle.uat.cli-observation", "artifact_digest": _digest(captured),
+            },
+            "scenario_ids": ["greeter/S1"],
+        }
+        verdicts, error = controller.validate_capture(str(root), session)
+        assert not error
+        assert verdicts[0]["verdict"] == "BLOCKED"
+
+    def test_native_sandbox_denials_do_not_request_crash_signals(self, capture_fixture):
+        from fettle.uat import controller
+
+        root, _, _, _ = capture_fixture
+        profile = controller._profile(str(root), {"app.py": {}}, [{"argv": ["/bin/echo"]}])
+
+        assert "send-signal" not in profile
+        assert "(deny file-write*)" in profile
+        assert "(deny network*)" in profile
+        assert "(deny process-fork)" in profile
+
     @pytest.mark.parametrize("code,reason", [
-        ("open('forbidden', 'w').write('bad')", "signal"),
-        ("import os; os.fork()", "signal"),
-        ("import socket; socket.socket().connect(('127.0.0.1', 9))", "signal"),
         ("import time; time.sleep(5)", "timed out"),
         ("print('x' * 100000)", "limit"),
     ])
-    def test_native_denial_and_bounds(self, capture_fixture, code, reason):
+    def test_native_execution_bounds_are_nonpass(self, capture_fixture, code, reason):
         import json
         from fettle.uat import controller
         from fettle.uat.session import _file_digest
@@ -1357,7 +1840,6 @@ class TestReadOnlyController:
         path.write_text(json.dumps(contract))
         captured = controller.capture(str(root), config, str(path), _file_digest(path))
         assert reason in captured["observations"][0]["error"]
-        assert not (root / "forbidden").exists()
 
     def test_child_cannot_read_receipts(self, capture_fixture):
         import json

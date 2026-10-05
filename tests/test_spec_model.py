@@ -181,6 +181,20 @@ class TestRepoLevel:
         (hidden / "spec.md").write_text(VALID_SPEC)
         assert len(discover_specs(str(repo))) == 1
 
+    def test_fettle_state_dir_excluded(self, repo):
+        hidden = repo / ".fettle" / "sub"
+        hidden.mkdir(parents=True)
+        (hidden / "spec.md").write_text(VALID_SPEC)
+        assert len(discover_specs(str(repo))) == 1
+
+    def test_skip_dirs_match_only_within_scanned_root(self, tmp_path):
+        # A skip-dir name as an ancestor of the scanned root (not inside it)
+        # must not exclude the root's own contents.
+        root = tmp_path / "build" / "actual-root"
+        root.mkdir(parents=True)
+        (root / "checkout.md").write_text(VALID_SPEC)
+        assert len(discover_specs(str(root))) == 1
+
 
 class TestCLI:
     @pytest.fixture

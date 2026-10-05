@@ -1859,7 +1859,8 @@ def cmd_completion(args: argparse.Namespace) -> None:
         print(json.dumps(result.as_dict(), indent=2))
     else:
         print(render_completion(result), end="")
-    sys.exit(result.exit_code)
+    process_exit = 0 if getattr(args, "checkpoint", False) and result.valid else result.exit_code
+    sys.exit(process_exit)
 
 
 def main() -> None:
@@ -1941,6 +1942,10 @@ def main() -> None:
     )
     p_completion_validate.add_argument("--milestone", help="Validate one milestone ID")
     p_completion_validate.add_argument("--json", action="store_true", help="JSON output")
+    p_completion_validate.add_argument(
+        "--checkpoint", action="store_true",
+        help="Accept valid incomplete evidence without claiming completion",
+    )
 
     p_doctor = subparsers.add_parser("doctor", help="Environment self-check")
     p_doctor.add_argument("--json", action="store_true", help="JSON output")

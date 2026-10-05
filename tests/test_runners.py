@@ -217,8 +217,18 @@ class TestRegistry:
     def test_unqualified_uat_runner_is_blocked(self, name):
         from fettle.runners import get_uat_runner
 
-        with pytest.raises(ValueError, match="permission-preserving"):
+        with pytest.raises(ValueError) as error:
             get_uat_runner(name)
+        assert str(error.value) == (
+            f"runner '{name}' has no qualified permission-preserving UAT mode; "
+            "use claude or codex with normal host permissions")
+
+    def test_uat_runner_defaults_to_600s_timeout(self, tmp_path):
+        from fettle.runners import get_uat_runner
+
+        with patch("fettle.runners._subprocess.run_cli", return_value=RunnerResult("", 0, 0)) as run:
+            get_uat_runner("codex").run("probe", tmp_path)
+        assert run.call_args.args[-1] == 600
 
     def test_get_runner_claude(self):
         runner = get_runner("claude")
@@ -229,8 +239,20 @@ class TestRegistry:
         assert sorted(RUNNER_NAMES) == ["claude", "codex", "gemini", "opencode"]
 
     def test_get_runner_unknown_raises_with_names(self):
-        with pytest.raises(ValueError, match="claude"):
+        with pytest.raises(ValueError) as error:
             get_runner("nonexistent-agent")
+        assert str(error.value) == (
+            "unknown agent runner 'nonexistent-agent' "
+            "(registered: claude, codex, gemini, opencode)")
+
+    def test_runner_result_is_frozen(self):
+        result = RunnerResult("transcript", 0, 1.0)
+        with pytest.raises(AttributeError):
+            result.exit_code = 1
+
+    def test_runner_result_default_error_is_empty_string(self):
+        result = RunnerResult("transcript", 0, 1.0)
+        assert result.error == ""
 
     def test_registry_names_all_resolvable(self):
         for name in RUNNER_NAMES:
@@ -312,8 +334,10 @@ class TestCliRunners:
             runner = cls()
             assert runner.available() is False
             result = runner.run("do things", Path("/tmp"))
-            assert result.error  # fail-visible, no raise
+            assert result.error == f"{binary} CLI not on PATH — live runs unavailable"
             assert result.exit_code == -1
+            assert result.transcript == ""
+            assert result.duration_s == 0.0
 
     @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
     def test_successful_run(self, cls, binary, flags, tmp_path):
@@ -332,26 +356,52 @@ class TestCliRunners:
         assert cmd[-1] == "prompt"
         assert mock_run.call_args.kwargs["timeout"] == 30
         assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
+        assert mock_run.call_args.kwargs["capture_output"] is True
+        assert mock_run.call_args.kwargs["text"] is True
 
     @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
     def test_nonzero_exit_sets_error_keeps_transcript(self, cls, binary, flags, tmp_path):
         proc = subprocess.CompletedProcess(
             args=[], returncode=2, stdout="partial output", stderr="boom")
+        ticks = iter([100.0, 102.5])
+        with patch("fettle.runners._subprocess.shutil.which", return_value=f"/usr/bin/{binary}"), \
+             patch("fettle.runners._subprocess.subprocess.run", return_value=proc), \
+             patch("fettle.runners._subprocess.time.monotonic", lambda: next(ticks)):
+            result = cls().run("prompt", tmp_path)
+        assert result.transcript == "partial output"  # partial evidence kept
+        assert result.error == f"{binary} exited 2: boom"
+        assert result.duration_s == 2.5
+
+    @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
+    def test_nonzero_exit_with_empty_stderr_reports_no_stderr(self, cls, binary, flags, tmp_path):
+        proc = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="")
         with patch("fettle.runners._subprocess.shutil.which", return_value=f"/usr/bin/{binary}"), \
              patch("fettle.runners._subprocess.subprocess.run", return_value=proc):
             result = cls().run("prompt", tmp_path)
-        assert result.transcript == "partial output"  # partial evidence kept
-        assert "exited 2" in result.error
-        assert "boom" in result.error
+        assert result.error == f"{binary} exited 2: no stderr"
+
+    @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
+    def test_nonzero_exit_truncates_stderr_tail_to_500_chars(self, cls, binary, flags, tmp_path):
+        stderr = "x" * 501
+        proc = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=stderr)
+        with patch("fettle.runners._subprocess.shutil.which", return_value=f"/usr/bin/{binary}"), \
+             patch("fettle.runners._subprocess.subprocess.run", return_value=proc):
+            result = cls().run("prompt", tmp_path)
+        assert result.error == f"{binary} exited 1: " + "x" * 500
 
     @pytest.mark.parametrize("cls,binary,flags", CLI_RUNNERS, ids=CLI_IDS)
     def test_timeout_sets_error(self, cls, binary, flags, tmp_path):
         exc = subprocess.TimeoutExpired(cmd=binary, timeout=5)
+        ticks = iter([100.0, 104.0])
         with patch("fettle.runners._subprocess.shutil.which", return_value=f"/usr/bin/{binary}"), \
-             patch("fettle.runners._subprocess.subprocess.run", side_effect=exc):
+             patch("fettle.runners._subprocess.subprocess.run", side_effect=exc), \
+             patch("fettle.runners._subprocess.time.monotonic", lambda: next(ticks)):
             result = cls().run("prompt", tmp_path, timeout_s=5)
-        assert "timed out after 5s" in result.error
+        assert result.error == f"{binary} run timed out after 5s"
         assert result.exit_code == -1
+        assert result.transcript == ""
+        assert result.duration_s == 4.0
+
 
 
 class TestEvalsIntegration:

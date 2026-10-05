@@ -2,11 +2,13 @@
 
 import json
 import importlib.metadata
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sqlite3
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -39,6 +41,7 @@ from fettle.mutation_test import (
     _validate_report_schema,
     _rerun_mutant,
     _run_mutmut,
+    _run_mutmut_process,
     _preflight_mutmut,
     aggregate_preflight_shards,
     _run_shard_modules,
@@ -74,6 +77,158 @@ def test_historical_failure_fixture_references_executable_regressions():
 
 def _proc(code=0, out="", err=""):
     return subprocess.CompletedProcess([], code, out, err)
+
+
+def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    script = (
+        "from pathlib import Path; import time; "
+        "p=Path('src/nested.py'); "
+        "Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\"); p.chmod(0o600); time.sleep(30)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 0.2)
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o744
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+
+    class InterruptedProcess:
+        pid = 123
+        returncode = -2
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                (tmp_path / "src/nested.py.bak").write_text("VALUE = 'original'\n")
+                source.write_text("VALUE = 'mutated'\n")
+                raise KeyboardInterrupt
+            return "", ""
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return self.returncode
+
+    process = InterruptedProcess()
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("fettle.mutation_test._terminate_process_tree", lambda child: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process(["mutmut", "run", "1"], str(tmp_path), 10)
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal contract")
+def test_mutmut_process_sigterm_restores_source(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    child = (
+        "from pathlib import Path; import time; "
+        "p=Path('src/nested.py'); Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\"); time.sleep(30)"
+    )
+    wrapper = (
+        "import sys; from fettle.mutation_test import _run_mutmut_process; "
+        f"_run_mutmut_process([sys.executable, '-c', {child!r}], '.', 60)"
+    )
+    environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    process = subprocess.Popen(
+        [sys.executable, "-c", wrapper], cwd=tmp_path, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = __import__("time").monotonic() + 5
+        while not source.with_name(source.name + ".bak").exists():
+            assert process.poll() is None
+            if __import__("time").monotonic() >= deadline:
+                pytest.fail("mutation child did not apply its fixture mutation")
+            __import__("time").sleep(0.01)
+        process.terminate()
+        process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    assert process.returncode != 0
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+def test_mutmut_process_rejects_unexplained_source_drift_and_residue(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    script = (
+        "from pathlib import Path; "
+        "p=Path('src/nested.py'); p.write_text(\"VALUE = 'mutated'\\n\"); "
+        "Path('src/unrelated.orig').write_text('residue')"
+    )
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+    assert (tmp_path / "src/unrelated.orig").is_file()
+
+
+def test_mutmut_process_repairs_but_rejects_unrestored_success(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    script = (
+        "from pathlib import Path; "
+        "p=Path('src/nested.py'); Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\")"
+    )
+
+    with pytest.raises(OSError, match="returned without restoring"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+def test_mutmut_process_rejects_unexplained_mode_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+def test_mutmut_process_does_not_start_without_complete_source_manifest(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "fettle.mutation_test._mutation_source_state",
+        lambda root: (_ for _ in ()).throw(OSError("unreadable source")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.subprocess.Popen",
+        lambda *args, **kwargs: pytest.fail("mutation process started"),
+    )
+
+    with pytest.raises(OSError, match="pre-run mutation source manifest"):
+        _run_mutmut_process(["mutmut", "run", "1"], str(tmp_path), 10)
 
 
 def test_score_counts_every_non_skipped_outcome_and_rejects_zero():

@@ -147,14 +147,43 @@ def test_ci_exposes_one_stable_required_check():
 
     assert "  required:\n" in workflow
     assert "name: CI required" in workflow
-    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel]" in workflow
+    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]" in workflow
     assert "if: always()" in workflow
     assert "LINT_RESULT: ${{ needs.lint.result }}" in workflow
     assert "TEST_RESULT: ${{ needs.test.result }}" in workflow
     assert "COVERAGE_RESULT: ${{ needs.coverage.result }}" in workflow
     assert "WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}" in workflow
     assert "LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}" in workflow
-    assert workflow.count('!= "success"') == 5
+    assert "COMPLETION_RESULT: ${{ needs.completion-strict.result }}" in workflow
+    assert workflow.count('!= "success"') == 6
+
+
+def test_ci_runs_acceptance_jobs_before_strict_completion_can_pass():
+    workflow = CI_WORKFLOW.read_text()
+    test_job = workflow[workflow.index("  test:"):workflow.index("  coverage:")]
+    strict_job = workflow[
+        workflow.index("  completion-strict:"):workflow.index("  required:")
+    ]
+
+    assert "fettle completion validate --checkpoint" in test_job
+    assert "fettle completion validate\n" in strict_job
+    assert "--checkpoint" not in strict_job
+    assert "needs:" not in strict_job
+    assert "needs:" not in workflow[
+        workflow.index("  windows-bridge:"):workflow.index("  linux-wheel:")
+    ]
+    assert "needs:" not in workflow[
+        workflow.index("  linux-wheel:"):workflow.index("  completion-strict:")
+    ]
+
+
+def test_precommit_uses_checkpoint_but_release_remains_strict():
+    precommit = (ROOT / ".pre-commit-config.yaml").read_text()
+    release = WORKFLOW.read_text()
+
+    assert "completion validate --checkpoint" in precommit
+    assert "fettle completion validate\n" in release
+    assert "completion validate --checkpoint" not in release
 
 
 def test_ci_runs_blocking_windows_bridge_publication_uat():

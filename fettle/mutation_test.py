@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import signal
 import shlex
 import shutil
 import sqlite3
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import uuid
@@ -71,7 +73,185 @@ _MUTATION_CACHE_DIR = Path(".fettle/mutation-cache")
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    if argv[:2] == ["mutmut", "run"]:
+        return _run_mutmut_process(argv, root, timeout)
     return subprocess.run(argv, cwd=root, env=_ENV, capture_output=True, text=True, timeout=timeout)
+
+
+_SOURCE_IGNORES = {
+    ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
+    "__pycache__", "build", "dist", "node_modules", "venv",
+}
+_MUTATION_RESIDUE_SUFFIXES = {".bak", ".orig", ".rej"}
+
+
+def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set[str]]:
+    root_path = Path(root)
+    sources: dict[str, tuple[bytes, int]] = {}
+    residue: set[str] = set()
+    for path in root_path.rglob("*"):
+        relative = path.relative_to(root_path)
+        if any(part in _SOURCE_IGNORES for part in relative.parts):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix == ".py":
+            sources[relative.as_posix()] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+        if path.suffix in _MUTATION_RESIDUE_SUFFIXES:
+            residue.add(relative.as_posix())
+    return sources, residue
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:  # pragma: no cover - exercised by the Windows workflow
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True, timeout=10,
+            )
+    except (OSError, subprocess.SubprocessError):
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def _restore_mutation_source_state(
+    root: str,
+    before_sources: dict[str, tuple[bytes, int]],
+    before_residue: set[str],
+) -> tuple[str, list[str]]:
+    root_path = Path(root)
+    try:
+        after_sources, after_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify source after mutation execution: {exc}", []
+    errors = []
+    restored = []
+    for relative, (content, mode) in before_sources.items():
+        if after_sources.get(relative) == (content, mode):
+            continue
+        target = root_path / relative
+        backup = target.with_name(target.name + ".bak")
+        try:
+            backup_relative = backup.relative_to(root_path).as_posix()
+            if (
+                backup_relative in before_residue
+                or backup.is_symlink()
+                or not backup.is_file()
+                or backup.read_bytes() != content
+            ):
+                errors.append(f"{relative}: changed without a matching mutation backup")
+                continue
+            descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, suffix=".fettle-restore")
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary_name, mode)
+                os.replace(temporary_name, target)
+                backup.unlink()
+                restored.append(relative)
+            finally:
+                if os.path.exists(temporary_name):
+                    os.unlink(temporary_name)
+        except OSError as exc:
+            errors.append(f"{relative}: restoration failed ({exc})")
+    try:
+        restored_sources, restored_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify restored source: {exc}", restored
+    if restored_sources != before_sources:
+        errors.append("whole-source manifest differs after restoration")
+    new_residue = sorted(restored_residue - before_residue)
+    if new_residue:
+        errors.append("new mutation residue remains: " + ", ".join(new_residue))
+    return "; ".join(errors), restored
+
+
+def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run mutmut with whole-source restoration and residue verification."""
+    try:
+        before_sources, before_residue = _mutation_source_state(root)
+    except OSError as exc:
+        raise OSError(f"cannot capture pre-run mutation source manifest: {exc}") from exc
+    popen_kwargs = {"start_new_session": True} if os.name == "posix" else {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+    }
+    stdout = stderr = ""
+    prior_handlers = {}
+    process = None
+    interrupted_by = None
+    if os.name == "posix" and threading.current_thread() is threading.main_thread():
+        def interrupted(signum, _frame):
+            nonlocal interrupted_by
+            interrupted_by = signum
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        for signum in (signal.SIGHUP, signal.SIGTERM):
+            prior_handlers[signum] = signal.signal(signum, interrupted)
+    try:
+        try:
+            process = subprocess.Popen(
+                argv, cwd=root, env=_ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **popen_kwargs,
+            )
+        except (OSError, KeyboardInterrupt) as exc:
+            integrity_error, _ = _restore_mutation_source_state(
+                root, before_sources, before_residue,
+            )
+            if integrity_error:
+                raise OSError("mutation source integrity failure: " + integrity_error) from exc
+            raise
+        if interrupted_by is not None:
+            _terminate_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            if interrupted_by is not None:
+                raise InterruptedError(
+                    f"mutation execution interrupted by signal {interrupted_by}"
+                )
+        except (subprocess.TimeoutExpired, OSError, KeyboardInterrupt) as exc:
+            _terminate_process_tree(process)
+            stdout, stderr = process.communicate()
+            integrity_error, _ = _restore_mutation_source_state(
+                root, before_sources, before_residue,
+            )
+            if integrity_error:
+                raise OSError("mutation source integrity failure: " + integrity_error) from exc
+            if isinstance(exc, subprocess.TimeoutExpired):
+                exc.output = stdout
+                exc.stderr = stderr
+            raise
+    finally:
+        for signum, handler in prior_handlers.items():
+            signal.signal(signum, handler)
+    integrity_error, restored = _restore_mutation_source_state(root, before_sources, before_residue)
+    if integrity_error:
+        raise OSError("mutation source integrity failure: " + integrity_error)
+    if restored:
+        raise OSError(
+            "mutation source integrity failure: mutmut returned without restoring: "
+            + ", ".join(restored)
+        )
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def _bounded(text: str) -> str:
