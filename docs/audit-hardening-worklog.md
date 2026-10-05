@@ -2509,3 +2509,64 @@ the local archive SHA-256 is
 `4de5f7f44fcc591a4d7a566b80658dc51fa7365182bd95ee0099934f0706b7dd`.
 The sanitized copy is distribution material, not historical qualification evidence,
 and was not uploaded.
+
+## 2026-10-05: PR Fan-Out Containment And Mutation Incident Diagnosis
+
+PR #46 remains open and unmerged. Historical candidate `b81ef588de3a20cc3ed8e1938de8c10ef7f295cb`,
+tree `53869aefa41e577db921d487358fa3850033afde`, run-05, and the cancelled
+run `37279176089` remain immutable baselines. No mutation qualification was run.
+
+Containment commit `f52a9bcbada906672595ebe515d43c71f67227d4` keeps the unfiltered
+`pull_request` trigger and required `mutation evidence` context, but PRs now only
+prepare changed-scope manifests. No PR execution or replay matrix is created.
+Mutation-relevant scope emits `status=unknown`, `passed=false`, and fails the
+required check; genuinely empty mutation scope may pass as explicitly
+non-applicable. Preflight, replay, and calibration remain available through
+maintainer `workflow_dispatch`; retained-preflight identity checks, survivor
+enforcement, thresholds, and strict completion are unchanged. Branch protection
+still requires `CI required` and `mutation evidence`; no repository setting was
+changed.
+
+Remote run `37300585637` confirmed containment. It ran one preparation job and one
+required evidence job. All preflight, full-shard, and aggregate jobs were skipped.
+The required evidence job failed as designed because this PR has mutation-relevant
+scope and no dispatched qualification. This is a truthful non-pass, not a waiver.
+
+The retained incident contains 256 distinct shard identities and 289 report
+attempts: 256 initial, 32 replay, and one aggregate. Outcomes are 84 completed,
+185 tool errors, 19 malformed replay artifacts, and one unknown aggregate. The 19
+malformed records are zero-byte files created by shell redirection before their
+cancelled replay commands produced JSON. They contain no mutation verdict. The
+completed reports remain partial diagnostics and were not combined into a score.
+The private attempt-level inventory binds each attempt to its manifest, command,
+candidate revision, outcome, artifact digest, and initial/replay relationship.
+
+The dominant restoration incident is consistent with a demonstrated local
+process-lifecycle defect. Each initial shard used an isolated hosted-runner
+checkout, rejecting shared cross-shard source state as the primary explanation.
+Within each job, however, the wrapper started mutmut as a POSIX process-group
+leader but skipped process-group termination after a normal leader exit. A surviving
+descendant could therefore write a mutant after the wrapper's restoration check.
+A harmless delayed-writer fixture reproduces this against `b81ef588`: the wrapper
+returns success, then `quality_scan.py` changes. The minimal repair terminates the
+POSIX process group immediately after `communicate()` even if the leader has exited,
+before checking source integrity. The same fixture preserves exact bytes and mode
+for both `quality_scan.py` and `import_graph.py` after the repair. Existing timeout,
+SIGTERM, keyboard-interrupt, unexplained-drift, and restoration-integrity tests
+remain enabled; no error is suppressed and no timeout changes.
+
+The retained reports establish the expected state as the exact pre-run bytes and
+mode and the actual state as unequal without a matching byte-identical `.bak`.
+They do not serialize the exact post-failure bytes or mode, so those values are not
+reconstructed. This demonstrated defect is consistent with both restoration
+families, but the retained evidence cannot prove it caused every occurrence.
+Timeouts remain separately classified and unexplained by this repair.
+
+The fix changes mutation infrastructure, so ordinary CI and focused process tests
+must be reassessed for the resulting candidate. Run-05 itself is not relabelled and
+does not need replacement: the acceptance contract requires its already-qualified
+exact dispatcher target, tests, mapping, policy, dependency lock, and frozen
+configuration—not a new broad mutation qualification for workflow/process-wrapper
+changes. The smallest justified verification is the harmless descendant fixture,
+the focused mutation suite, ordinary CI, and strict incomplete completion. A new
+full matrix or failed-shard replay is neither required nor authorized.

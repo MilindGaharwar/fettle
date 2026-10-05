@@ -103,12 +103,13 @@ def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
     try:
         if os.name == "posix":
+            # The session leader can exit before its workers. Kill the process
+            # group even after the leader has returned so no descendant can
+            # mutate source after the integrity check.
             os.killpg(process.pid, signal.SIGKILL)
-        else:  # pragma: no cover - exercised by the Windows workflow
+        elif process.poll() is None:  # pragma: no cover - exercised by the Windows workflow
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(process.pid)],
                 capture_output=True, timeout=10,
@@ -119,7 +120,8 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         except ProcessLookupError:
             pass
     try:
-        process.wait(timeout=10)
+        if process.poll() is None:
+            process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         try:
             process.kill()
@@ -224,6 +226,7 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
             _terminate_process_tree(process)
         try:
             stdout, stderr = process.communicate(timeout=timeout)
+            _terminate_process_tree(process)
             if interrupted_by is not None:
                 raise InterruptedError(
                     f"mutation execution interrupted by signal {interrupted_by}"

@@ -99,6 +99,31 @@ def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(t
     assert not (tmp_path / "src/nested.py.bak").exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")
+@pytest.mark.parametrize("filename", ["quality_scan.py", "import_graph.py"])
+def test_mutmut_process_stops_descendants_after_leader_exits(tmp_path, filename):
+    source = tmp_path / "fettle" / filename
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    child = (
+        "import time; from pathlib import Path; "
+        f"time.sleep(0.15); Path('fettle/{filename}').write_text(\"VALUE = 'late-mutant'\\n\")"
+    )
+    parent = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+
+    result = _run_mutmut_process([sys.executable, "-c", parent], str(tmp_path), 5)
+    __import__("time").sleep(0.35)
+
+    assert result.returncode == 0
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o744
+
+
 def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path):
     source = tmp_path / "src" / "nested.py"
     source.parent.mkdir()
