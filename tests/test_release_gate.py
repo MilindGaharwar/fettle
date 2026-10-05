@@ -1,5 +1,6 @@
 """WP-X3 — CHANGELOG and Semver Enforcement tests."""
 
+import shutil
 from pathlib import Path
 
 from fettle.dispatcher_types import Decision, HookContext, HookInput
@@ -11,6 +12,7 @@ def _make_ctx(
     enabled: bool = True,
     mode: str = "advisory",
     assurance_policy: str = "",
+    completion: bool = False,
 ):
     config = {
         "gates": {
@@ -22,6 +24,7 @@ def _make_ctx(
                 "check_breaking_changes": True,
                 "assurance_policy": assurance_policy,
             },
+            "completion": {"enabled": completion, "mode": "enforce"},
         },
     }
     hook_input = HookInput(
@@ -227,3 +230,17 @@ def test_production_assurance_configuration_error_blocks_tag(tmp_path, monkeypat
     assert result.decision == Decision.BLOCK
     assert "assurance production: CONFIG_ERROR" in result.message
     assert "missing [assurance.release.production] policy" in result.message
+
+
+def test_enforce_mode_blocks_valid_incomplete_completion(tmp_path):
+    from fettle.release_gate import run_check
+
+    fixture = Path(__file__).parent / "fixtures" / "completion" / "timeout"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    (tmp_path / "CHANGELOG.md").write_text("## v1.2.3\n", encoding="utf-8")
+    result = run_check(_make_ctx(
+        "git tag v1.2.3", str(tmp_path), mode="enforce", completion=True,
+    ))
+
+    assert result.decision == Decision.BLOCK
+    assert "completion: milestone evidence is incomplete" in result.message
