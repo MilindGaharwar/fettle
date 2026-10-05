@@ -85,6 +85,10 @@ _SOURCE_IGNORES = {
 _MUTATION_RESIDUE_SUFFIXES = {".bak", ".orig", ".rej"}
 
 
+class _MutationProcessTerminationError(OSError):
+    """The mutation worker tree could not be confirmed stopped."""
+
+
 def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set[str]]:
     root_path = Path(root)
     sources: dict[str, tuple[bytes, int]] = {}
@@ -103,6 +107,7 @@ def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    termination_error = None
     try:
         if os.name == "posix":
             # The session leader can exit before its workers. Kill the process
@@ -114,7 +119,10 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
                 ["taskkill", "/F", "/T", "/PID", str(process.pid)],
                 capture_output=True, timeout=10,
             )
-    except (OSError, subprocess.SubprocessError):
+    except ProcessLookupError:
+        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        termination_error = exc
         try:
             process.kill()
         except ProcessLookupError:
@@ -128,6 +136,10 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         except ProcessLookupError:
             pass
         process.wait()
+    if termination_error is not None:
+        raise _MutationProcessTerminationError(
+            f"mutation process tree termination failed: {termination_error}"
+        ) from termination_error
 
 
 def _restore_mutation_source_state(
@@ -232,13 +244,23 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
                     f"mutation execution interrupted by signal {interrupted_by}"
                 )
         except (subprocess.TimeoutExpired, OSError, KeyboardInterrupt) as exc:
-            _terminate_process_tree(process)
-            stdout, stderr = process.communicate()
+            termination_error = exc if isinstance(exc, _MutationProcessTerminationError) else None
+            if termination_error is None:
+                try:
+                    _terminate_process_tree(process)
+                except _MutationProcessTerminationError as cleanup_exc:
+                    termination_error = cleanup_exc
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
             integrity_error, _ = _restore_mutation_source_state(
                 root, before_sources, before_residue,
             )
             if integrity_error:
-                raise OSError("mutation source integrity failure: " + integrity_error) from exc
+                raise OSError("mutation source integrity failure: " + integrity_error) from (
+                    termination_error or exc
+                )
+            if termination_error is not None:
+                raise termination_error from exc
             if isinstance(exc, subprocess.TimeoutExpired):
                 exc.output = stdout
                 exc.stderr = stderr

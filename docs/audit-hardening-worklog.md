@@ -8,6 +8,70 @@ and external-acceptance preparation. No commit, push, publication, remote job,
 host reconfiguration, policy change, coverage-file relocation, waiver, release, or
 Milestone B/C work occurred.
 
+## 2026-10-05: Acceptance Reconciliation And Remediation Review
+
+The owner-authorized independent automated reviewer inspected containment commit
+`f52a9bcbada906672595ebe515d43c71f67227d4` and process-lifecycle commit
+`3fe5a545fd410b079dde6971545d7acb1ce255ec` at tree
+`5a38d01a2ddf92692d583ae0afc368b743ad64d5`. It accepted the PR containment
+contract and the successful POSIX descendant-termination order, but demonstrated a
+fail-closed defect: when `killpg` raises after the session leader exits, the wrapper
+suppressed the error and could return success before a surviving descendant wrote
+source. The bounded synthetic probe returned success and later observed `LATE`.
+
+The scoped repair now preserves `ProcessLookupError` as the conclusive already-gone
+case and raises a dedicated `OSError` for other process-tree termination failures.
+Restoration verification still runs before the error is surfaced. A regression
+with a delayed descendant and injected `PermissionError` passes, as do all ten
+focused process-wrapper cases. Windows normal-leader-exit descendant termination
+remains unverified and is not claimed; the existing test is POSIX-only.
+
+Acceptance criteria were reconciled against the governing plan. The owner-authorized
+automated reviewer replaces AH07 07.4's former human-reviewer requirement. No human
+acceptance or human-usability validation occurred, and none is inferred. Real-
+participant parity belongs to later WP-AH13/P77, not Milestone A. Public-PyPI canary
+verification belongs to later WP-AH15 and the release contract; AH05 requires the
+candidate-built wheel and sdist outside the checkout, which already have positive
+local and remote Linux evidence.
+
+A private composite archive was created without modifying the original run-05
+files. It contains the original qualification package plus separate package-index,
+verification, independent-review, and equivalence-review attestations. Fresh
+extraction verified all 105 manifest entries, all 73 original package-index entries,
+and the four recorded attestation digests. Local archive SHA-256:
+`12e4cba87f5e13870851f3cff0b62a37882337f17c7099261d029f4b4b1ee7e9`;
+manifest SHA-256:
+`a2a3013f03451c4d3a75d855d3d2831fd97b205e05ca8351b76d351f4a03ddf5`.
+It is private local evidence, not published portable evidence. Storage provider,
+immutable object identifier, retention enforcement, authorized readers, and any
+future publication/sanitization policy remain owner decisions.
+
+An exact-remediation-head wheel was installed in a disposable environment outside
+the checkout. Isolated-home registration and generated transport probes passed for
+Claude Code, Codex, Gemini, and OpenCode without accessing normal configuration,
+credentials, or paid models. Evidence SHA-256:
+`cf249b4162522a8d259e75355ce19b53ea264220ee1f4f997c7a39394c31182f`.
+This is installed-candidate registration/transport evidence, not live-host execution.
+Claude Code 2.1.234 and OpenCode 2.0.20 are locally available, but a real session
+would rely on existing authentication and may incur model cost, so none was run.
+Codex and Gemini are absent from PATH; minimum access is an official disposable
+installation plus an authorized no-cost authentication/provider path, or an
+operator-run candidate-bound transcript.
+
+The lifecycle repair changes `fettle/mutation_test.py`, a mutation infrastructure
+owner outside run-05's AH03 mutation target and mapped tests. Run-05 remains
+authoritative only for its original identity and is not relabelled. The minimum
+real-engine evidence for this repair is one fresh, isolated, pinned-mutmut 2.5.1
+preflight and narrow replay over the changed lifecycle ranges, with source bytes,
+modes, residue, process state, command output, exit, manifest, and compatibility
+identity retained. Use the existing 1,740-second worker limit; stop on timeout,
+termination error, source drift, residue, malformed evidence, or identity mismatch.
+That targeted evidence can validate the infrastructure repair, but the required PR
+check remains unknown/non-pass until explicitly dispatched under its existing
+contract. A full calibration is required only if target/mapped tests, mapping,
+policy, dependencies/runtime, exclusions/selection, or equivalence assumptions
+change. No mutation preflight, replay, calibration, or full matrix was launched.
+
 ### Run-05 execution
 
 The durable worktree is

@@ -42,9 +42,12 @@ An audit observation is not a completed fix. Green lint alone is not acceptance.
   programs rather than duplicating their schemas, trackers, or experiments.
 - On 2026-10-05 the owner replaced AH07's previously required human-independent
   review with independent automated acceptance because no human reviewer is
-  available. This changes reviewer type only. No human acceptance or human-usability
-  validation was performed, and no platform, host, artifact, remote-CI, participant,
-  or completion criterion is waived.
+  available. This satisfies AH07's reviewer-type decision when 07.4 is executed;
+  it does not create human acceptance or human-usability evidence. No such human
+  validation was performed. Platform, host, artifact, remote-CI, and completion
+  criteria remain unchanged. Real-participant parity belongs to later WP-AH13/P77,
+  not Milestone A. Public-PyPI canary verification belongs to WP-AH15 and the release
+  contract, not AH05 or Milestone A.
 - Before a multi-file implementation slice, run `kgraph impact <owner> --json`;
   if unavailable, record a references/call-site impact review, not a claimed pass.
 - Resolve existing work and dirty changes before edits. Claim the actual work item
@@ -70,7 +73,7 @@ Estimates are focused engineering days including review, not calendar promises.
 | [ ] | WP-AH04 | P0 | Concurrent ledger operations preserve valid history | AH00 | 2-3 | POSIX concurrency/interruption verified; Windows gate added, run pending |
 | [ ] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | September 19 wheel/sdist isolated smoke passed; remote acceptance open |
 | [ ] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Implemented; 23 focused tests pass |
-| [ ] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent automated review is required; platform, host, remote-CI, artifact-portability, and participant evidence remain blockers until confirmed |
+| [ ] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent automated review is required; supported-platform, available-host, remote-CI, and inspectable evidence remain blockers until confirmed |
 | [ ] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Narrow type gate added; branch baseline measured |
 | [ ] | WP-AH09 | P2 | Measured hook and ledger performance | AH07 | 2-3 | Exploratory local baseline; frozen benchmark pending |
 | [ ] | WP-AH10 | P2 | One justified CLI or mutation responsibility extraction | AH08-AH09 | 3-5 | Measurement-gated |
@@ -206,7 +209,10 @@ in a separate session and isolated review environment; no automatic release. Bef
 replaced only that requirement because no human reviewer is available. No human
 acceptance or human-usability validation was performed or inferred.
 Acceptance: every AH01-AH06 criterion has current evidence; blocked/skipped checks
-remain non-pass. No remote verification or installed-host claim is inferred.
+remain non-pass. No remote verification or installed-host claim is inferred. AH07
+does not require a separate human-acceptance sign-off or real-participant parity
+study after the owner-authorized reviewer replacement. Those observations must still
+not be fabricated or attributed to automation.
 
 | # | Task | Method | Verify by |
 |---|---|---|---|

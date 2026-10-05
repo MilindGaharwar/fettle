@@ -124,6 +124,34 @@ def test_mutmut_process_stops_descendants_after_leader_exits(tmp_path, filename)
     assert source.stat().st_mode & 0o777 == 0o744
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")
+def test_mutmut_process_fails_closed_when_descendant_termination_fails(
+    monkeypatch, tmp_path,
+):
+    source = tmp_path / "fettle" / "quality_scan.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    child = (
+        "import time; from pathlib import Path; "
+        "time.sleep(0.15); Path('fettle/quality_scan.py').write_text(\"VALUE = 'late-mutant'\\n\")"
+    )
+    parent = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.os.killpg",
+        lambda *_args: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(OSError, match="process tree termination failed"):
+        _run_mutmut_process([sys.executable, "-c", parent], str(tmp_path), 5)
+    __import__("time").sleep(0.35)
+
+    assert source.read_text() == "VALUE = 'late-mutant'\n"
+
+
 def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path):
     source = tmp_path / "src" / "nested.py"
     source.parent.mkdir()
