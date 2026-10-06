@@ -340,6 +340,8 @@ def test_unconfirmed_tree_termination_does_not_restore_source(monkeypatch, tmp_p
             return self.returncode
 
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: FailedProcess())
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", lambda _process: None)
+    monkeypatch.setattr("fettle.mutation_test._resume_windows_process", lambda _process: None)
     monkeypatch.setattr(
         "fettle.mutation_test._terminate_process_tree",
         Mock(side_effect=_MutationProcessTerminationError("unconfirmed", tree_stopped=False)),
