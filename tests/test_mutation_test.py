@@ -2527,6 +2527,114 @@ def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tm
     assert result["outcomes"] == {}
 
 
+def test_pending_execution_fatal_exit_retains_bounded_diagnostics_without_an_outcome(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch(
+            "fettle.mutation_test._run",
+            return_value=_proc(
+                1, "x" * 2001,
+                f"{tmp_path}/src/a.py token=synthetic-secret-value fatal stderr",
+            ),
+        ),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert result["attempts"][-1] == {
+        "fingerprint": "a" * 64,
+        "status": "execution_error",
+        "message": "mutmut exited with 1",
+        "stdout": "x" * 2000,
+        "stderr": "<repo>/src/a.py ***REDACTED*** fatal stderr",
+    }
+
+
+def test_pending_execution_timeout_retains_diagnostics_without_an_outcome(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    timeout = subprocess.TimeoutExpired(
+        ["mutmut", "run", "1"], 60, output="partial stdout", stderr="partial stderr",
+    )
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", side_effect=timeout),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    attempt = result["attempts"][-1]
+    assert result["status"] == "incomplete"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert attempt["status"] == "execution_error"
+    assert attempt["stdout"] == "partial stdout"
+    assert attempt["stderr"] == "partial stderr"
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "x" * 2001,
+        "/home/runner/work/repo/test.py:1",
+        "/.ssh/id_rsa",
+        "'/Users/Jane Doe/private/test.py:1'",
+        "C:\\runner\\repo\\test.py:1",
+        "'C:\\Users\\Jane Doe\\private\\test.py:1'",
+        "\\\\server\\share\\private\\test.py:1",
+        "file:///home/runner/private/test.py:1",
+        "token=synthetic-secret-value",
+    ],
+)
+def test_checkpoint_merge_rejects_unsafe_execution_diagnostics(diagnostic):
+    checkpoint = _checkpoint(attempts=[{
+        "fingerprint": "a" * 64, "status": "execution_error", "message": "runner exited",
+        "stderr": diagnostic,
+    }])
+
+    with pytest.raises(ValueError, match="diagnostic is unsafe"):
+        merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "bounded stderr",
+        "AssertionError: expected killed / survived",
+        "ratio = killed / total",
+        "retry 1 / 3 failed",
+        "./tests/test_a.py and ../fixture.py",
+        "https://example.invalid/diagnostic",
+    ],
+)
+def test_checkpoint_merge_preserves_safe_bounded_execution_diagnostics(diagnostic):
+    checkpoint = _checkpoint(attempts=[{
+        "fingerprint": "a" * 64, "status": "execution_error", "message": "runner exited",
+        "stdout": "bounded stdout", "stderr": diagnostic,
+    }])
+
+    merged = merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+    assert merged["attempts"] == checkpoint["attempts"]
+
+
 def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema():
     corpus = [
         {

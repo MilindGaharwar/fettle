@@ -381,6 +381,15 @@ def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
     assert "if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow
 
 
+def test_explicit_calibration_uses_required_pr_check_name_and_enforces_result():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    aggregate_job = workflow.split("\n  aggregate:", 1)[1]
+
+    assert "name: mutation evidence" in aggregate_job
+    assert "report.get('passed') is True" in aggregate_job
+    assert "mutation (full aggregate, advisory)" not in aggregate_job
+
+
 def test_mutation_replay_uses_retained_canonical_corpus():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 

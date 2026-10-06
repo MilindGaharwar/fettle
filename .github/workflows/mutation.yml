@@ -353,7 +353,7 @@ jobs:
 
   aggregate:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && always()
-    name: mutation (full aggregate, advisory)
+    name: mutation evidence
     needs: [prepare, full-shard]
     runs-on: ubuntu-latest
     steps:
@@ -384,3 +384,9 @@ jobs:
           name: mutation-evidence-${{ github.run_id }}
           path: mutation-report.json
           if-no-files-found: error
+      - name: Enforce mutation evidence result
+        if: always()
+        run: >-
+          uv run --no-sync python -c "import json,sys;
+          report=json.load(open('mutation-report.json'));
+          sys.exit(0 if report.get('passed') is True else 2)"

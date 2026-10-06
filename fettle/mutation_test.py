@@ -35,6 +35,7 @@ from fettle.evidence import (
     Validity,
     validate_artifact,
 )
+from fettle.runtime_secret_guard import redact_secrets
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -432,6 +433,31 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
 
 def _bounded(text: str) -> str:
     return text.strip()[-2000:]
+
+
+_ABSOLUTE_DIAGNOSTIC_PATH = re.compile(
+    r"(?i)(?:file:///|(?<![\w:/>])[A-Z]:[\\/]|(?<![\\])\\\\[^\\]"
+    r"|(?<![\w:/>.])/[A-Z0-9._~-])"
+)
+
+
+def _safe_mutation_diagnostic(value: object, root: str | None = None) -> str:
+    """Return bounded diagnostics without credentials or machine-local paths."""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = ""
+    if root:
+        resolved = str(Path(root).resolve())
+        text = text.replace(resolved, "<repo>").replace(resolved.replace("/", "\\"), "<repo>")
+    text = redact_secrets(text)
+    text = "\n".join(
+        "[REDACTED: absolute path]" if _ABSOLUTE_DIAGNOSTIC_PATH.search(line) else line
+        for line in text.splitlines()
+    )
+    return _bounded(text)
 
 
 def _error(status: str, message: str, **evidence) -> dict:
@@ -893,6 +919,19 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
                 raise ValueError("mutation checkpoint attempt is outside its corpus")
             if attempt.get("status") not in {"completed", "execution_error"}:
                 raise ValueError("mutation checkpoint attempt is malformed")
+            if attempt.get("status") == "execution_error":
+                allowed_attempt = {"fingerprint", "status", "message", "stdout", "stderr"}
+                if (
+                    not set(attempt) <= allowed_attempt
+                    or not isinstance(attempt.get("message"), str)
+                    or attempt["message"] != _safe_mutation_diagnostic(attempt["message"])
+                    or any(
+                        not isinstance(attempt.get(stream, ""), str)
+                        or attempt.get(stream, "") != _safe_mutation_diagnostic(attempt.get(stream, ""))
+                        for stream in ("stdout", "stderr")
+                    )
+                ):
+                    raise ValueError("mutation checkpoint execution diagnostic is unsafe")
             digest = _canonical_digest(attempt)
             if digest not in seen_attempts:
                 attempts.append(dict(attempt))
@@ -963,6 +1002,7 @@ def execute_pending_mutations(
                 break
             engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
             attempt_started = time.monotonic()
+            run = None
             try:
                 run = _run([
                     "mutmut", "run", engine_id, "--test-time-base", str(timeout), "--runner",
@@ -991,10 +1031,21 @@ def execute_pending_mutations(
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                merged["attempts"].append({
+                attempt = {
                     "fingerprint": record["fingerprint"], "status": "execution_error",
-                    "message": str(exc),
-                })
+                    "message": _safe_mutation_diagnostic(str(exc), root),
+                }
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    attempt.update(
+                        stdout=_safe_mutation_diagnostic(exc.output, root),
+                        stderr=_safe_mutation_diagnostic(exc.stderr, root),
+                    )
+                elif run is not None:
+                    attempt.update(
+                        stdout=_safe_mutation_diagnostic(run.stdout, root),
+                        stderr=_safe_mutation_diagnostic(run.stderr, root),
+                    )
+                merged["attempts"].append(attempt)
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
                 break
