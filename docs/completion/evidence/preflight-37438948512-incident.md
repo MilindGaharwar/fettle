@@ -83,13 +83,23 @@ Regression coverage proves normal completion, timeout, `KeyboardInterrupt`, out-
 
 A bounded `diagnostic-canary` dispatch mode was added because the prior workflow could not select one preflight shard. It validates one shard index against manifests generated on the exact candidate SHA, runs one non-matrix preflight job, always retains its diagnostic artifact, skips full-shard fan-out, and forces the sole authoritative `mutation evidence` producer to remain non-pass. It cannot publish qualification.
 
+The authorized remote canary completed on run `37448719286` against exact repair SHA `bdae9225185b9d7497eadd1d2b853d1fa67f5187`. The prepare job and sole diagnostic shard job succeeded. Shard 27 generated and canonicalized 61 details with zero collisions under mutmut 2.5.1. The authoritative `mutation evidence` job then failed closed with exit 2 after retaining `status=unknown`, `passed=false`, and `qualification_executed=false`. No preflight matrix, full-shard execution, or qualification aggregate ran.
+
+The three remote artifacts expire on 2027-01-04 and were copied with job logs and metadata to `external://local/audit-hardening/candidate-bdae922/canary-37448719286`. Key SHA-256 values are:
+
+- diagnostic report: `72fdbae3694a486413a8bc2dcdb19afa1dd2c69269db8b1d70ae130f6327103e`;
+- authoritative non-qualification report: `01403d8d067bd420f2ae274f45410fa99f32b17cabdb7008a402b1965fa27844`;
+- shard 27 manifest: `8fb53a3bc07f2bf61c9b8ccf227c88cae6e0d70bd8764809c29308db1e9ba5f1`;
+- diagnostic job log: `253b1e6611009c8c78f3ddd5b9ddf31694e4b5d32580a7b9483ac4d3139c9bfc`;
+- authoritative job log: `6a75f8530ed4b38928d8a413615c804809abf1d7399f90ce1679dd91eddc05fb`.
+
 ## Resource accounting and staged plan
 
 The monitor's `539.23` runner-minute figure is an estimate from summed observed job intervals, not a provider billing statement. The 480-minute trigger was sampled rather than continuous. At the first over-threshold observation, 230 jobs were still active. The cancellation request was recorded about 12 seconds later, when the estimate had reached `519.41`. GitHub then took about 115 seconds to settle the run; active jobs fell 218 → 17 → 7 → 3 → 0, adding the remaining estimated usage. Monitoring and cancellation therefore cannot guarantee a hard cap.
 
 The 28 shard jobs that reached GitHub success/failure before cancellation account for 28.08 observed job-minutes. The 42 shards with valid reports account for 43.80 observed job-minutes. These durations exclude or only partly represent cancelled setup and teardown and are not billed-usage evidence.
 
-No replacement preflight is ready now. After a successful one-shard remote canary, a future authorization should use staged dispatches with immutable manifests and no automatic retries:
+The successful canary does not authorize a replacement preflight. A future authorization should use staged dispatches with immutable manifests and no automatic retries:
 
 1. 8 representative shards, maximum parallelism 2; stop on any integrity/tool error.
 2. 32 shards, maximum parallelism 4; stop and reconcile every job and artifact.
@@ -99,8 +109,8 @@ Use a planning estimate of 2.0 runner-minutes per shard plus 15% setup/aggregati
 
 ## Readiness and authorization
 
-The code is ready for the already authorized one-shard remote diagnostic canary only after the repair commit is pushed. Use representative shard 27, exact repair SHA, concurrency one, standard public runner, and the existing 35-minute job timeout. Watch to completion and retain the artifact. A passing canary remains diagnostic and does not authorize or satisfy preflight, calibration, or qualification.
+The one-shard remote diagnostic canary is complete and supports readiness for a separately authorized staged preflight. It remains diagnostic and does not satisfy preflight, calibration, or qualification.
 
-Additional authorization needed after the canary: a separately reviewed staged preflight plan, explicit per-wave runner-minute budget/headroom, and exact repair candidate SHA. Calibration remains disabled until a complete accepted preflight and separate calibration authorization. Portable evidence and authenticated host work retain their independent approval requirements.
+Additional authorization now needed: approval of the staged preflight plan, explicit per-wave runner-minute budget/headroom, and exact repair candidate SHA. Calibration remains disabled until a complete accepted preflight and separate calibration authorization. Portable evidence and authenticated host work retain their independent approval requirements.
 
 Milestone A and AH07 remain incomplete.
