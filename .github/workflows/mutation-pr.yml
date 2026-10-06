@@ -1,0 +1,88 @@
+name: Mutation PR containment
+
+on:
+  pull_request:
+
+concurrency:
+  group: mutation-pr-containment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changed-prepare:
+    name: mutation (prepare changed scope)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      shard_count: ${{ steps.prepare.outputs.shard_count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+      - name: Prepare bounded changed-scope partitions
+        id: prepare
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          uv run --no-sync python -m fettle.mutation_test --root . --base "origin/${BASE_REF}" --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
+          echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.prepare.outputs.shard_count != '0'
+        with:
+          name: mutation-changed-manifests-${{ github.run_id }}
+          path: mutation-changed-manifests
+          if-no-files-found: error
+
+  containment:
+    if: always()
+    needs: changed-prepare
+    name: mutation qualification pending
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+      - name: Reject incomplete changed-scope preparation
+        if: needs.changed-prepare.result != 'success' || needs.changed-prepare.outputs.shard_count == ''
+        run: exit 1
+      - name: Record non-applicable changed scope
+        if: needs.changed-prepare.outputs.shard_count == '0'
+        run: |
+          cat > mutation-report.json <<'JSON'
+          {"status":"not_applicable","message":"No mutation-relevant changed scope","score":null,"passed":true,"qualification_executed":false}
+          JSON
+      - name: Record required explicit qualification
+        if: needs.changed-prepare.outputs.shard_count != '0'
+        run: |
+          cat > mutation-report.json <<'JSON'
+          {"status":"unknown","message":"Mutation execution requires explicit maintainer dispatch; automatic PR fan-out is contained","score":null,"passed":false,"qualification_executed":false}
+          JSON
+      - name: Mutation summary
+        if: always() && hashFiles('mutation-report.json') != ''
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json
+          --artifact-name mutation-pr-containment-${{ github.run_id }}
+          --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
+      - name: Retain mutation containment evidence
+        if: always() && hashFiles('mutation-report.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-pr-containment-${{ github.run_id }}
+          path: mutation-report.json
+          if-no-files-found: error
+      - name: Enforce mutation containment result
+        if: always()
+        run: >-
+          uv run --no-sync python -c "import json,sys;
+          report=json.load(open('mutation-report.json'));
+          sys.exit(0 if report.get('passed') is True else 2)"

@@ -1,7 +1,6 @@
 name: Mutation evidence
 
 on:
-  pull_request:
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
@@ -12,6 +11,7 @@ on:
         default: preflight
         type: choice
         options:
+          - binding-probe
           - preflight
           - replay
           - calibration
@@ -27,101 +27,22 @@ on:
         description: "Prior run of this replay/calibration to resume"
         required: false
         type: string
+      candidate_sha:
+        description: "Exact 40-character candidate commit to qualify"
+        required: true
+        type: string
 
 concurrency:
-  group: mutation-authoritative-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.repository }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: mutation-authoritative-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   actions: read
   contents: read
 
 jobs:
-  changed-prepare:
-    if: github.event_name == 'pull_request'
-    name: mutation (prepare changed scope)
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.prepare.outputs.matrix }}
-      shard_count: ${{ steps.prepare.outputs.shard_count }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
-      - name: Prepare bounded changed-scope partitions
-        id: prepare
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          uv run --no-sync python -m fettle.mutation_test --root . --base "origin/${BASE_REF}" --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
-          {
-            echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"], separators=(",", ":")))')"
-            echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')"
-          } >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: steps.prepare.outputs.shard_count != '0'
-        with:
-          name: mutation-changed-manifests-${{ github.run_id }}
-          path: mutation-changed-manifests
-          if-no-files-found: error
-
-  changed:
-    if: github.event_name == 'pull_request' && always()
-    needs: changed-prepare
-    name: mutation evidence
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
-      - name: Reject incomplete changed-scope preparation
-        if: needs.changed-prepare.result != 'success' || needs.changed-prepare.outputs.shard_count == ''
-        run: exit 1
-      - name: Record non-applicable changed scope
-        if: needs.changed-prepare.outputs.shard_count == '0'
-        run: |
-          cat > mutation-report.json <<'JSON'
-          {"status":"not_applicable","message":"No mutation-relevant changed scope","score":null,"passed":true,"qualification_executed":false}
-          JSON
-      - name: Record required explicit qualification
-        if: needs.changed-prepare.outputs.shard_count != '0'
-        run: |
-          cat > mutation-report.json <<'JSON'
-          {"status":"unknown","message":"Mutation execution requires explicit maintainer dispatch; automatic PR fan-out is contained","score":null,"passed":false,"qualification_executed":false}
-          JSON
-      - name: Mutation summary
-        if: always()
-        run: >-
-          uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json
-          --artifact-name mutation-evidence-${{ github.run_id }}
-          --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
-      - name: Retain mutation evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mutation-evidence-${{ github.run_id }}
-          path: mutation-report.json
-          if-no-files-found: error
-      - name: Enforce mutation evidence result
-        if: always()
-        run: >-
-          uv run --no-sync python -c "import json,sys;
-          report=json.load(open('mutation-report.json'));
-          sys.exit(0 if report.get('passed') is True else 2)"
-
   prepare:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event.inputs.mode != 'binding-probe'
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
@@ -139,6 +60,13 @@ jobs:
       - run: uv venv --python 3.12 && uv pip install --quiet -e .
       - name: Validate effective configuration
         run: uv run --no-sync fettle config --validate
+      - name: Bind dispatch to exact candidate
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+        run: >-
+          python -c 'import os,re,sys; candidate=os.environ["CANDIDATE_SHA"];
+          sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", candidate) and candidate == os.environ["GITHUB_SHA"] else 1)'
       - name: Require retained preflight run
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
         env:
@@ -248,7 +176,11 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet -e .
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: mutation-preflight-${{ github.run_id }}-*
@@ -352,7 +284,7 @@ jobs:
           if-no-files-found: error
 
   aggregate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && always()
+    if: github.event_name == 'workflow_dispatch' && always()
     name: mutation evidence
     needs: [prepare, full-shard]
     runs-on: ubuntu-latest
@@ -362,15 +294,54 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet -e .
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - name: Bind authoritative check to exact candidate
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+        run: >-
+          python -c 'import os,re,sys; candidate=os.environ["CANDIDATE_SHA"];
+          sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", candidate) and candidate == os.environ["GITHUB_SHA"] else 1)'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event.inputs.mode == 'calibration'
         with:
           pattern: mutation-shard-${{ github.run_id }}-*
           path: mutation-shards
+      - name: Download current-run partition manifests
+        if: github.event.inputs.mode == 'calibration'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-manifests-${{ github.run_id }}
+          path: mutation-manifests
+      - name: Download retained preflight aggregate
+        if: github.event.inputs.mode == 'calibration'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-preflight-${{ github.event.inputs.preflight_run_id }}
+          path: retained-preflight
+          run-id: ${{ github.event.inputs.preflight_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Validate and aggregate full mutation evidence
+        if: github.event.inputs.mode == 'calibration'
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root . --aggregate mutation-shards
+          --aggregate-scope mutation-manifests
+          --aggregate-preflight-evidence retained-preflight/mutation-preflight.json
+          --calibration-id "$CALIBRATION_ID"
           --shard-count ${{ needs.prepare.outputs.shard_count }} --json > mutation-report.json
+      - name: Record non-qualifying authoritative probe
+        if: github.event.inputs.mode != 'calibration'
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          MODE: ${{ github.event.inputs.mode }}
+        run: >-
+          python -c 'import json,os; mode=os.environ["MODE"];
+          json.dump({"status":"unknown","message":mode+" does not constitute mutation qualification","revision":os.environ["CANDIDATE_SHA"],"score":None,"passed":False,"qualification_executed":False},open("mutation-report.json","w"),separators=(",",":"))'
       - name: Mutation summary
         if: always() && hashFiles('mutation-report.json') != ''
         run: >-

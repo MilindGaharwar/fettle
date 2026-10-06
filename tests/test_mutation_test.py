@@ -23,6 +23,7 @@ from fettle.mutation_test import (
     _checkpoint_environment_digest,
     _canonical_digest,
     _runtime_cache_identity,
+    _source_tree_digest,
     _shard_files,
     _shard_ranges,
     _patch_for_ranges,
@@ -1585,6 +1586,15 @@ def test_dependency_identity_collects_editable_source_and_invalidates_changes(tm
     assert first[0]["editable_source_digest"] != second[0]["editable_source_digest"]
 
 
+def test_source_tree_digest_ignores_downloaded_mutation_shards(tmp_path):
+    (tmp_path / "module.py").write_text("VALUE = 1\n")
+    before = _source_tree_digest(tmp_path)
+    (tmp_path / "mutation-shards" / "shard-0").mkdir(parents=True)
+    (tmp_path / "mutation-shards" / "shard-0" / "mutation-report.json").write_text("{}")
+
+    assert _source_tree_digest(tmp_path) == before
+
+
 def test_dependency_identity_collects_legacy_editable_egg_info_source(tmp_path):
     dist = _mutation_distribution(tmp_path / "legacy")
     metadata = Path(dist._path)
@@ -2017,6 +2027,46 @@ def test_aggregate_scope_rejects_manifest_files_outside_changed_selection(tmp_pa
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "unknown"
     assert "changed-file scope" in report["message"]
+
+
+def test_qualification_aggregate_uses_full_configured_scope(tmp_path, monkeypatch, capsys):
+    manifests = tmp_path / "manifests"
+    reports = tmp_path / "reports"
+    manifests.mkdir()
+    reports.mkdir()
+    (reports / "mutation-report.json").write_text(json.dumps(
+        _shard_report(0, ["src/a.py"], shard_count=1)
+    ))
+    payload = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    digest = _canonical_digest(payload)
+    (manifests / "partition-0.json").write_text(json.dumps({**payload, "digest": digest}))
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text("{}")
+    captured = {}
+    monkeypatch.setattr("fettle.mutation_test._get_all_py_files", lambda *args: ["src/a.py"])
+    monkeypatch.setattr(
+        "fettle.mutation_test._get_changed_py_files",
+        lambda *args: pytest.fail("qualification aggregation must not use changed scope"),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.aggregate_shards",
+        lambda *args, **kwargs: captured.update({"args": args, **kwargs})
+        or {"status": "completed", "passed": True},
+    )
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--aggregate", str(reports), "--aggregate-scope", str(manifests),
+        "--aggregate-preflight-evidence", str(preflight), "--calibration-id", "calibration-a",
+        "--shard-count", "1", "--json",
+    ])
+
+    assert main() == 0
+    assert captured["args"][10] == "calibration-a"
+    assert captured["args"][8][0]["digest"] == digest
+    assert captured["args"][9] == {}
 
 
 def test_manifest_scope_supplies_complete_changed_file_set(tmp_path, monkeypatch, capsys):
@@ -3120,6 +3170,12 @@ def _shard_report(index, files, **changes):
         tests_run=sorted({f"tests/test_{file.rsplit('/', 1)[-1][:-3]}.py" for file in files}),
         line_ranges=[{"file": file, "start": 1, "end": 1} for file in files],
         duration_ms=1000 + index,
+        calibration_id="calibration-a",
+        preflight_digest="1" * 64,
+        preflight_corpus_digest="2" * 64,
+        manifest_digest=("3" if index == 0 else "4") * 64,
+        corpus_digest=("5" if index == 0 else "6") * 64,
+        environment_digest="7" * 64,
         non_killed=[
             {
                 **record,
@@ -3162,7 +3218,9 @@ def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):
     assert result["total_duration_ms"] == 2001
     assert all(re.fullmatch(r"[0-9a-f]{64}", result[field]) for field in (
         "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest",
+        "preflight_digest", "corpus_digest", "execution_identity_digest",
     ))
+    assert result["calibration_id"] == "calibration-a"
     assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2", "3", "4"]
     _validate_report_schema(result)
 
@@ -3261,6 +3319,126 @@ def test_aggregate_shards_rejects_incomplete_evidence(tmp_path, reports, message
     result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
 
     assert result["status"] in {"unknown", "tool_error"}
+    assert message in result["message"]
+
+
+@pytest.mark.parametrize("field", [
+    "calibration_id", "preflight_digest", "preflight_corpus_digest",
+    "manifest_digest", "corpus_digest", "environment_digest",
+])
+def test_aggregate_shards_rejects_missing_qualification_identity(tmp_path, field):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    reports[0].pop(field)
+
+    result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] == "unknown"
+    assert "qualification identity" in result["message"]
+
+
+def test_aggregate_shards_rejects_mixed_qualification_identity(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    reports[1]["preflight_digest"] = "8" * 64
+
+    result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] == "unknown"
+    assert "qualification identities differ" in result["message"]
+
+
+def test_aggregate_shards_rejects_valid_looking_unrelated_qualification(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    manifests = [
+        {
+            "shard_index": index, "shard_count": 2, "revision": "a" * 40,
+            "digest": report["manifest_digest"],
+            "files": report["files_tested"],
+            "ranges": report["line_ranges"],
+        }
+        for index, report in enumerate(reports)
+    ]
+    corpus = [
+        {"fingerprint": "a" * 64, "shard_index": 0},
+        {"fingerprint": "b" * 64, "shard_index": 1},
+    ]
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 2, "corpus": corpus,
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70,
+            manifests=manifests, preflight=preflight, calibration_id="calibration-a",
+        )
+
+    assert result["status"] == "unknown"
+    assert "stale or unrelated" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"revision": "b" * 40}, "revision or topology"),
+        ({"shard_count": 3}, "revision or topology"),
+        ({"ranges": [{"file": "fettle/a.py", "start": 1, "end": 2}]}, "scope differs"),
+    ],
+)
+def test_aggregate_shards_rejects_manifest_linkage_mismatch(tmp_path, change, message):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    manifests = [
+        {
+            "shard_index": index, "shard_count": 2, "revision": "a" * 40,
+            "digest": report["manifest_digest"], "files": report["files_tested"],
+            "ranges": report["line_ranges"],
+        }
+        for index, report in enumerate(reports)
+    ]
+    manifests[0].update(change)
+    corpus = [
+        {"fingerprint": "a" * 64, "shard_index": 0},
+        {"fingerprint": "b" * 64, "shard_index": 1},
+    ]
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 2, "corpus": corpus,
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70,
+            manifests=manifests, preflight=preflight, calibration_id="calibration-a",
+        )
+
+    assert result["status"] == "unknown"
     assert message in result["message"]
 
 

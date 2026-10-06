@@ -1178,6 +1178,12 @@ def run_resumable_mutation_shard(
             "engine_version": MUTMUT_VERSION, "test_runner": _TEST_RUNNER,
             "tests_run": sorted({test for tests in mapping.values() for test in tests}),
             "line_ranges": manifest["ranges"], "shard_index": manifest["shard_index"],
+            "calibration_id": calibration_id,
+            "preflight_digest": identity["preflight_digest"],
+            "preflight_corpus_digest": preflight["corpus_digest"],
+            "manifest_digest": identity["manifest_digest"],
+            "corpus_digest": identity["corpus_digest"],
+            "environment_digest": identity["environment_digest"],
             "shard_count": manifest["shard_count"], **outcome_report, **policy,
             "threshold": float(cfg.get("score_target", 70)),
         }
@@ -1307,7 +1313,8 @@ def _source_tree_digest(root: Path) -> str:
     ignored = {
         ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
         "__pycache__", ".mutmut-cache", "mutation-manifests", "mutation-preflight-shards",
-        "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json", "mutation-report.json",
+        "mutation-shards", "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json",
+        "mutation-report.json",
     }
     files = sorted(
         path for path in root.rglob("*")
@@ -2508,6 +2515,9 @@ def aggregate_shards(
     threshold: float,
     test_mappings: dict[str, list[str]] | None = None,
     policy_config: dict | None = None,
+    manifests: list[dict] | None = None,
+    preflight: dict | None = None,
+    calibration_id: str | None = None,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -2518,6 +2528,45 @@ def aggregate_shards(
     expected_indexes = list(range(shard_count))
     if [report.get("shard_index") for report in reports] != expected_indexes:
         return _error("unknown", "Shard indexes are incomplete or duplicated")
+    qualification_inputs = (manifests, preflight, calibration_id)
+    if any(value is not None for value in qualification_inputs):
+        if not all(value is not None for value in qualification_inputs):
+            return _error("unknown", "Qualification source evidence is incomplete")
+        if (
+            not isinstance(manifests, list)
+            or len(manifests) != shard_count
+            or [manifest.get("shard_index") for manifest in manifests] != expected_indexes
+        ):
+            return _error("unknown", "Qualification manifests are incomplete or unordered")
+        try:
+            current_revision = _revision(root)
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            return _error("tool_error", f"Cannot verify qualification revision: {exc}")
+        if (
+            not isinstance(preflight, dict)
+            or preflight.get("status") != "completed"
+            or preflight.get("passed") is not True
+            or preflight.get("shard_count") != shard_count
+            or preflight.get("revision") != current_revision
+        ):
+            return _error("unknown", "Qualification preflight is incomplete or stale")
+        preflight_corpus = preflight.get("corpus")
+        if (
+            not isinstance(preflight_corpus, list)
+            or preflight.get("corpus_digest") != _canonical_digest(preflight_corpus)
+            or preflight.get("manifest_digests") != [manifest.get("digest") for manifest in manifests]
+        ):
+            return _error("unknown", "Qualification preflight identity is invalid")
+        if any(
+            manifest.get("revision") != current_revision
+            or manifest.get("shard_count") != shard_count
+            for manifest in manifests
+        ):
+            return _error("unknown", "Qualification manifest revision or topology is stale")
+        preflight_digest = _canonical_digest(preflight)
+    else:
+        preflight_corpus = None
+        preflight_digest = None
     for index, report in enumerate(reports):
         if report.get("status") != "completed":
             return _error("tool_error", f"Shard {index} is not completed")
@@ -2531,6 +2580,44 @@ def aggregate_shards(
             return _error("unknown", f"Shard {index} has invalid evidence: {exc}")
         if report.get("shard_count") != shard_count:
             return _error("unknown", f"Shard {index} has inconsistent shard count")
+        execution_fields = (
+            "preflight_digest", "preflight_corpus_digest", "manifest_digest",
+            "corpus_digest", "environment_digest",
+        )
+        if (
+            not isinstance(report.get("calibration_id"), str)
+            or not report["calibration_id"]
+            or any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in execution_fields)
+        ):
+            return _error("unknown", f"Shard {index} has incomplete qualification identity")
+        if manifests is not None and preflight is not None and calibration_id is not None:
+            manifest = manifests[index]
+            if (
+                report.get("files_tested") != manifest.get("files")
+                or report.get("line_ranges") != manifest.get("ranges")
+            ):
+                return _error("unknown", f"Shard {index} scope differs from its qualification manifest")
+            shard_corpus = sorted(
+                (
+                    record for record in preflight_corpus
+                    if isinstance(record, dict) and record.get("shard_index") == index
+                ),
+                key=lambda record: record.get("fingerprint", ""),
+            )
+            mapping = _mapped_tests(root, manifest["files"], test_mappings)
+            environment = _runtime_cache_identity(root, manifest["files"], mapping, policy_config or {})
+            if environment is None:
+                return _error("unknown", f"Shard {index} execution environment cannot be verified")
+            expected_qualification = {
+                "calibration_id": calibration_id,
+                "preflight_digest": preflight_digest,
+                "preflight_corpus_digest": preflight["corpus_digest"],
+                "manifest_digest": manifest["digest"],
+                "corpus_digest": _canonical_digest(shard_corpus),
+                "environment_digest": _checkpoint_environment_digest(environment),
+            }
+            if any(report.get(key) != value for key, value in expected_qualification.items()):
+                return _error("unknown", f"Shard {index} qualification identity is stale or unrelated")
         if report.get("engine_version") != MUTMUT_VERSION or report.get("test_runner") != _TEST_RUNNER:
             return _error("unknown", f"Shard {index} has unsupported execution identity")
         if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
@@ -2555,6 +2642,9 @@ def aggregate_shards(
     identity = ("revision", "engine_version", "test_runner")
     if any(any(report.get(key) != first.get(key) for key in identity) for report in reports[1:]):
         return _error("unknown", "Shard execution identities differ")
+    shared_identity = ("calibration_id", "preflight_digest", "preflight_corpus_digest")
+    if any(any(report.get(key) != first.get(key) for key in shared_identity) for report in reports[1:]):
+        return _error("unknown", "Shard qualification identities differ")
 
     expected = [
         path for path in _get_all_py_files(root, paths)
@@ -2612,6 +2702,18 @@ def aggregate_shards(
         }),
         "test_mapping_digest": _canonical_digest(mapping),
         "line_range_digest": _canonical_digest(line_ranges),
+        "calibration_id": first["calibration_id"],
+        "preflight_digest": first["preflight_digest"],
+        "corpus_digest": first["preflight_corpus_digest"],
+        "execution_identity_digest": _canonical_digest([
+            {
+                "shard_index": report["shard_index"],
+                "manifest_digest": report["manifest_digest"],
+                "corpus_digest": report["corpus_digest"],
+                "environment_digest": report["environment_digest"],
+            }
+            for report in reports
+        ]),
     }
     return {
         "schema_version": "2",
@@ -2989,6 +3091,7 @@ def main() -> int:
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
+    parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
@@ -3097,23 +3200,43 @@ def main() -> int:
             report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
             try:
                 reports = [json.loads(path.read_text()) for path in report_paths]
+                manifests = None
+                retained_preflight = None
                 if args.aggregate_scope:
                     manifests = [
                         load_partition_manifest(path)
                         for path in sorted(Path(args.aggregate_scope).glob("partition-*.json"))
                     ]
+                    manifests.sort(key=lambda manifest: manifest["shard_index"])
                     if len(manifests) != args.shard_count:
                         raise ValueError("aggregate scope manifests are incomplete")
                     paths = sorted({file for manifest in manifests for file in manifest["files"]})
-                    selection = _get_changed_py_files(args.root, mutation["paths"], args.base or mutation["base"])
-                    if selection["status"] != "completed":
-                        raise ValueError(selection["message"])
-                    expected = [
-                        file for file in selection["files"]
-                        if not any(file.startswith(item) for item in excluded)
-                    ]
+                    if args.aggregate_preflight_evidence:
+                        expected = [
+                            file for file in _get_all_py_files(args.root, mutation["paths"])
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
+                    else:
+                        selection = _get_changed_py_files(
+                            args.root, mutation["paths"], args.base or mutation["base"]
+                        )
+                        if selection["status"] != "completed":
+                            raise ValueError(selection["message"])
+                        expected = [
+                            file for file in selection["files"]
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
                     if paths != expected:
-                        raise ValueError("aggregate manifests do not match changed-file scope")
+                        scope = "full configured" if args.aggregate_preflight_evidence else "changed-file"
+                        raise ValueError(f"aggregate manifests do not match {scope} scope")
+                if args.aggregate_preflight_evidence:
+                    if not args.aggregate_scope or not args.calibration_id:
+                        raise ValueError(
+                            "qualification aggregation requires --aggregate-scope and --calibration-id"
+                        )
+                    retained_preflight = json.loads(
+                        Path(args.aggregate_preflight_evidence).read_text(encoding="utf-8")
+                    )
             except (OSError, json.JSONDecodeError) as exc:
                 report = _error("unknown", f"Cannot read shard reports: {exc}")
             except ValueError as exc:
@@ -3128,7 +3251,8 @@ def main() -> int:
                     return 2
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
-                    mutation["test_mappings"], mutation,
+                    mutation["test_mappings"], mutation, manifests, retained_preflight,
+                    args.calibration_id,
                 )
     else:
         if args.manifest_scope:

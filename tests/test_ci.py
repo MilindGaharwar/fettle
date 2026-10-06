@@ -7,6 +7,8 @@ import tempfile
 import json
 from pathlib import Path
 
+import yaml
+
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(PLUGIN_DIR))
 
@@ -241,56 +243,63 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "if: always()" in workflow
 
 
-def test_mutation_workflow_creates_required_check_for_every_pull_request():
-    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
-    pull_request_trigger = workflow.split("  pull_request:", 1)[1].split("  schedule:", 1)[0]
+def test_pr_containment_is_separate_from_authoritative_check_producer():
+    authoritative = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    containment = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
-    assert "paths:" not in pull_request_trigger
+    assert "pull_request:" not in authoritative
+    assert "pull_request:" in containment
+    assert "name: mutation evidence" not in containment
+    assert containment.count("name: mutation qualification pending") == 1
 
 
 def test_changed_mutation_workflow_prepares_scope_without_pr_execution_fanout():
-    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
     assert "--prepare-changed-manifests mutation-changed-manifests" in workflow
-    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
-    assert "fromJSON(needs.changed-prepare.outputs.matrix)" not in pull_request_jobs
-    assert "mutmut run" not in pull_request_jobs
-    assert "needs: changed-prepare" in pull_request_jobs
-    assert "Mutation execution requires explicit maintainer dispatch" in pull_request_jobs
-    assert '\"status\":\"unknown\"' in pull_request_jobs
-    assert '\"passed\":false' in pull_request_jobs
+    assert "fromJSON(needs.changed-prepare.outputs.matrix)" not in workflow
+    assert "mutmut run" not in workflow
+    assert "needs: changed-prepare" in workflow
+    assert "Mutation execution requires explicit maintainer dispatch" in workflow
+    assert '\"status\":\"unknown\"' in workflow
+    assert '\"passed\":false' in workflow
     assert "if: needs.changed-prepare.result != 'success'" in workflow
     assert "needs.changed-prepare.outputs.shard_count != '0'" in workflow
 
 
 def test_changed_mutation_workflow_retains_truthful_nonpass_summary():
-    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
     assert '\"qualification_executed\":false' in workflow
     assert '\"status\":\"not_applicable\"' in workflow
     assert '\"status\":\"unknown\"' in workflow
     assert "--github-summary mutation-report.json" in workflow
-    assert "mutation-evidence-${{ github.run_id }}" in workflow
+    assert "mutation-pr-containment-${{ github.run_id }}" in workflow
     assert "if-no-files-found: error" in workflow
 
 
 def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():
+    containment = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
-    dispatched_jobs = workflow.split("\n  prepare:", 1)[1]
-    assert "changed-replay" not in pull_request_jobs
-    assert "github.event_name == 'workflow_dispatch'" in dispatched_jobs
-    assert "--resume-manifest" in dispatched_jobs
-    assert "--timeout 1740" in dispatched_jobs
+    assert "changed-replay" not in containment
+    assert "--resume-manifest" not in containment
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "--resume-manifest" in workflow
+    assert "--timeout 1740" in workflow
 
 
-def test_changed_mutation_workflow_has_one_authoritative_pr_check():
-    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+def test_mutation_workflows_have_one_authoritative_check_producer():
+    workflows = [
+        yaml.safe_load(path.read_text())
+        for path in (Path(PLUGIN_DIR) / ".github/workflows").glob("*.yml")
+    ]
 
-    pull_request_jobs = workflow.split("\n  prepare:", 1)[0]
-    assert pull_request_jobs.count("name: mutation evidence") == 1
-    assert "continue-on-error: true" not in pull_request_jobs.split("\n  changed:", 1)[1]
+    assert sum(
+        job.get("name") == "mutation evidence"
+        for workflow in workflows
+        for job in workflow.get("jobs", {}).values()
+    ) == 1
 
 
 def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
@@ -315,14 +324,32 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "preflight_run_id:" in workflow
-    assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 3
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 4
+    assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 5
     assert "permissions:\n  actions: read\n  contents: read" in workflow
+    assert "candidate_sha:" in workflow
+    assert 'candidate == os.environ["GITHUB_SHA"]' in workflow
     assert 'aggregate["revision"]==os.environ["GITHUB_SHA"]' in workflow
     assert 'item["revision"]==os.environ["GITHUB_SHA"]' in workflow
     assert 'aggregate["shard_count"]==shard_count' in workflow
     assert 'aggregate["generated"]==aggregate["canonicalized"]' in workflow
     assert 'aggregate["collisions"]==0' in workflow
+    assert "--aggregate-scope mutation-manifests" in workflow
+    assert "--aggregate-preflight-evidence retained-preflight/mutation-preflight.json" in workflow
+    assert '--calibration-id "$CALIBRATION_ID"' in workflow
+
+
+def test_authoritative_check_binds_candidate_and_probe_cannot_qualify():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    prepare_job = workflow.split("\n  prepare:", 1)[1].split("\n  preflight:", 1)[0]
+    aggregate_job = workflow.split("\n  aggregate:", 1)[1]
+
+    assert "github.event.inputs.mode != 'binding-probe'" in prepare_job
+    assert "Bind authoritative check to exact candidate" in aggregate_job
+    assert 'candidate == os.environ["GITHUB_SHA"]' in aggregate_job
+    assert "github.event.inputs.mode != 'calibration'" in aggregate_job
+    assert '"passed":False' in aggregate_job
+    assert "report.get('passed') is True" in aggregate_job
 
 
 def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_only():
@@ -359,10 +386,12 @@ def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
 
 def test_pr_mutation_runs_cancel_stale_work_but_authoritative_runs_remain_durable():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    containment = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
     assert "concurrency:" in workflow
     assert "mutation-authoritative" in workflow
-    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "cancel-in-progress: true" in containment
 
 
 def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
@@ -388,6 +417,8 @@ def test_explicit_calibration_uses_required_pr_check_name_and_enforces_result():
     assert "name: mutation evidence" in aggregate_job
     assert "report.get('passed') is True" in aggregate_job
     assert "mutation (full aggregate, advisory)" not in aggregate_job
+    assert "github.event.inputs.mode != 'calibration'" in aggregate_job
+    assert '"qualification_executed":False' in aggregate_job
 
 
 def test_mutation_replay_uses_retained_canonical_corpus():
