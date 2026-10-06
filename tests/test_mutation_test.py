@@ -13,7 +13,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fettle.mutation_baseline import establish_baseline
 from fettle.mutation_test import (
     build_mutation_cache_identity,
     build_mutation_report_artifact,
@@ -67,6 +66,20 @@ from fettle.mutation_test import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
+
+
+class _OsNameProxy:
+    """Override the mutation module's platform without mutating global os.name."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _use_mutation_os(monkeypatch, name):
+    monkeypatch.setattr("fettle.mutation_test.os", _OsNameProxy(name))
 
 
 def test_historical_failure_fixture_references_executable_regressions():
@@ -131,7 +144,7 @@ def test_windows_cleanup_targets_descendants_after_leader_exit(monkeypatch):
     process = Mock(pid=123)
     process.poll.return_value = 0
     close_job = Mock()
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test._close_windows_kill_job", close_job)
 
     _terminate_process_tree(process)
@@ -142,7 +155,7 @@ def test_windows_cleanup_targets_descendants_after_leader_exit(monkeypatch):
 def test_windows_cleanup_failure_is_not_hidden(monkeypatch):
     process = Mock(pid=123)
     process.poll.return_value = 0
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr(
         "fettle.mutation_test._close_windows_kill_job",
         Mock(side_effect=PermissionError("denied")),
@@ -156,7 +169,7 @@ def test_windows_job_attachment_failure_stops_worker_before_restoration(monkeypa
     process = Mock()
     process._fettle_job_handle = None
     process.communicate.return_value = ("", "")
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
     monkeypatch.setattr(
@@ -178,7 +191,7 @@ def test_windows_attachment_cleanup_failure_blocks_restoration(monkeypatch, tmp_
     process = Mock()
     process._fettle_job_handle = None
     process.kill.side_effect = failure
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
 
@@ -200,7 +213,7 @@ def test_windows_worker_is_attached_before_it_is_resumed(monkeypatch, tmp_path):
     process._fettle_job_handle = None
     process.communicate.return_value = ("", "")
     process.poll.return_value = 0
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     popen = Mock(return_value=process)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", popen)
@@ -224,7 +237,7 @@ def test_windows_resume_failure_closes_attached_job(monkeypatch, tmp_path):
     events = []
     process = Mock()
     process._fettle_job_handle = None
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
     def attach(child):
@@ -252,7 +265,7 @@ def test_windows_resume_cleanup_failure_does_not_restore_source(monkeypatch, tmp
     source.write_text("VALUE = 'original'\n")
     process = Mock()
     process._fettle_job_handle = None
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
 
@@ -279,7 +292,7 @@ def test_windows_interrupt_after_resume_stops_job_before_restoration(monkeypatch
     events = []
     process = Mock()
     process._fettle_job_handle = None
-    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    _use_mutation_os(monkeypatch, "nt")
     monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
     monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
     def attach(child):
@@ -3045,6 +3058,8 @@ def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):
 
 
 def test_aggregate_shards_produces_baseline_compatible_identity(tmp_path):
+    from fettle.mutation_baseline import establish_baseline
+
     (tmp_path / "fettle").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "fettle/a.py").write_text("a")
