@@ -361,14 +361,14 @@ def test_staged_preflight_is_single_run_frozen_and_fail_closed():
     assert "max-parallel: 4" in staged
     assert "max-parallel: 8" in staged
     assert staged.count("fail-fast: true") == 3
-    assert "needs: [staged-prepare, staged-wave-1-gate]" in staged
+    assert "needs: [staged-prepare, staged-wave-1-gate, staged-recovery-gate]" in staged
     assert "needs: [staged-prepare, staged-wave-2-gate]" in staged
     assert "needs: [staged-prepare, staged-wave-3-gate]" in staged
     assert staged.count("validate-wave") == 3
-    assert staged.count("retention-days: 90") == 7
+    assert staged.count("retention-days: 90") == 9
     assert "--aggregate-preflight staged-reports --shard-count 256" in staged
-    assert "run-id:" not in staged
-    assert "github-token:" not in staged
+    assert staged.count("run-id: 37464324954") == 2
+    assert staged.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 2
     assert "merge-multiple: true" not in staged
 
 
@@ -382,7 +382,31 @@ def test_staged_preflight_keeps_authoritative_check_non_qualifying():
     assert "0fc41fdfee13e09f4bda3dc5eee177030882aa36" in staged
     assert 'report.get("passed") is True' in staged
     assert "github.event.inputs.mode != 'staged-preflight'" in aggregate
+    assert "github.event.inputs.mode != 'staged-preflight-recovery'" in aggregate
     assert 'candidate == os.environ["GITHUB_SHA"]' in aggregate
+
+
+def test_staged_recovery_reuses_only_immutable_wave_one_and_charges_both_runs():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    staged = workflow.split("\n  staged-prepare:", 1)[1].split("\n  full-shard:", 1)[0]
+
+    assert "- staged-preflight-recovery" in workflow
+    assert "mutation-staged-plan-37464324954-1" in staged
+    assert "mutation-preflight-wave-1-37464324954-1-*" in staged
+    assert staged.count('python-version: "3.12.14"') >= 3
+    assert "uv venv --python 3.12.14" in staged
+    assert "run-id: 37464324954" in staged
+    assert "--prior-jobs staged-plan/recovery-source-jobs.json" in staged
+    assert "--prior-run-id 37464324954" in staged
+    assert "--prior-run-attempt 1" in staged
+    assert staged.count("actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") == 5
+    assert "name: mutation (validate staged preflight recovery)" in staged
+    assert "staged-wave-1:\n    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'staged-preflight'" in staged
+    assert "cp -R staged-plan/recovery-source-reports/. staged-reports/" in staged
+    assert "--aggregate-preflight staged-reports --shard-count 256" in staged
+    assert "mutation-preflight-recovery-${{ github.run_id }}-${{ github.run_attempt }}" in staged
+    assert 'recovery.get("source_run_verdict")=="permanently non-pass"' in staged
+    assert 'len(recovery.get("origins",{}))==256' in staged
 
 
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():
@@ -390,7 +414,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 5
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 7
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow
@@ -427,7 +451,8 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
         "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
         " && github.event.inputs.mode != 'preflight'"
         " && github.event.inputs.mode != 'diagnostic-canary'"
-        " && github.event.inputs.mode != 'staged-preflight'\n    needs: prepare"
+        " && github.event.inputs.mode != 'staged-preflight'"
+        " && github.event.inputs.mode != 'staged-preflight-recovery'\n    needs: prepare"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow

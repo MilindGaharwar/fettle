@@ -2835,3 +2835,31 @@ configuration—not a new broad mutation qualification for workflow/process-wrap
 changes. The smallest justified verification is the harmless descendant fixture,
 the focused mutation suite, ordinary CI, and strict incomplete completion. A new
 full matrix or failed-shard replay is neither required nor authorized.
+## 2026-10-06 — Staged-preflight recovery accounting and design
+
+- Preserved run `37464324954`, attempt 1, as permanently non-pass. Its eight
+  successful wave-1 reports remain individual execution evidence only.
+- Official GitHub semantics distinguish a condition-skipped job from runner
+  processing. The accounting guard now excludes a skipped job only when every runner
+  identity field is present and null and no steps exist. Its raw timestamps and any
+  anomaly remain in retained evidence. Potentially executed jobs still require
+  complete, ordered timestamps.
+- The retained 22-job response now produces an operational estimate of 11.97
+  runner-minutes, excludes nine conclusively non-executed jobs, and preserves three
+  reversed skipped-job timestamp anomalies. This is not provider billing evidence.
+- Added exact-attempt API reads, complete pagination/attempt validation, cumulative
+  source-plus-recovery accounting, and boundary fixtures for skipped, successful,
+  failed, cancelled, in-progress, missing, malformed, duplicate, and boolean fields.
+- Revalidated the eight report hashes, source plan hash, all 256 manifest identities,
+  candidate, Python `3.12.14`, dependency digest, policy digest, and fixed wave
+  membership. The unchanged `aggregate_preflight_shards()` can accept the exact
+  mixed-origin 256-report union without changing its evidence contract.
+- Added a separately identified recovery mode. It skips wave 1, permits one attempt,
+  executes only waves 2 and 3 at parallelism 4 and 8, retains durable gate artifacts,
+  and emits an exact per-shard origin record while preserving the source verdict.
+- Independent review found and closed fail-open edges for partial runner identity,
+  boolean IDs/indexes, current-run attempt selection, and final linked-record
+  enforcement.
+- Verification: actionlint, Ruff, diff integrity, 96 focused tests, full suite
+  (`4,426 passed, 20 skipped` before the last fixture-only additions), and the
+  421-file Fettle check passed. No recovery run had been dispatched at this point.

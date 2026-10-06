@@ -14,6 +14,7 @@ on:
           - binding-probe
           - diagnostic-canary
           - staged-preflight
+          - staged-preflight-recovery
           - preflight
           - replay
           - calibration
@@ -48,7 +49,7 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'staged-preflight')
+    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery')
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
@@ -249,7 +250,7 @@ jobs:
           if-no-files-found: error
 
   staged-prepare:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'staged-preflight'
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
     name: mutation (freeze staged preflight)
     runs-on: ubuntu-latest
     outputs:
@@ -273,11 +274,11 @@ jobs:
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install frozen candidate
         working-directory: candidate
-        run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+        run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
       - name: Bind frozen candidate and orchestration
         env:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
@@ -292,15 +293,48 @@ jobs:
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --prepare-manifests ../mutation-manifests --json > ../prepare.json
+      - name: Download immutable recovery source plan
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-staged-plan-37464324954-1
+          path: recovery-source-plan
+          run-id: 37464324954
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download immutable recovery source reports
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-preflight-wave-1-37464324954-1-*
+          path: recovery-source-reports
+          run-id: 37464324954
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Retain original attempt accounting input
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --paginate --slurp
+          "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/attempts/1/jobs?per_page=100"
+          > recovery-source-jobs.json
       - name: Record fixed wave plan
         id: plan
         env:
           ORCHESTRATION_SHA: ${{ github.sha }}
         run: |
-          candidate/.venv/bin/python control/scripts/staged_preflight.py plan --root candidate --manifests mutation-manifests \
-            --orchestration-sha "$ORCHESTRATION_SHA" --repository "$GITHUB_REPOSITORY" \
-            --workflow "$GITHUB_WORKFLOW" --workflow-ref "$GITHUB_WORKFLOW_REF" --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" --output staged-preflight-plan.json
+          if [ "${{ github.event.inputs.mode }}" = "staged-preflight-recovery" ]; then
+            candidate/.venv/bin/python control/scripts/staged_preflight.py recovery-plan --root candidate \
+              --manifests mutation-manifests --source-plan recovery-source-plan/staged-preflight-plan.json \
+              --source-reports recovery-source-reports --orchestration-sha "$ORCHESTRATION_SHA" \
+              --repository "$GITHUB_REPOSITORY" --workflow "$GITHUB_WORKFLOW" \
+              --workflow-ref "$GITHUB_WORKFLOW_REF" --run-id "$GITHUB_RUN_ID" \
+              --run-attempt "$GITHUB_RUN_ATTEMPT" --output staged-preflight-plan.json
+          else
+            candidate/.venv/bin/python control/scripts/staged_preflight.py plan --root candidate --manifests mutation-manifests \
+              --orchestration-sha "$ORCHESTRATION_SHA" --repository "$GITHUB_REPOSITORY" \
+              --workflow "$GITHUB_WORKFLOW" --workflow-ref "$GITHUB_WORKFLOW_REF" --run-id "$GITHUB_RUN_ID" \
+              --run-attempt "$GITHUB_RUN_ATTEMPT" --output staged-preflight-plan.json
+          fi
           {
             echo "wave_1=$(python -c 'import json; print(json.dumps({"shard":json.load(open("staged-preflight-plan.json"))["waves"]["wave-1"]["shards"]},separators=(",",":")))')"
             echo "wave_2=$(python -c 'import json; print(json.dumps({"shard":json.load(open("staged-preflight-plan.json"))["waves"]["wave-2"]["shards"]},separators=(",",":")))')"
@@ -314,6 +348,8 @@ jobs:
           path: |
             mutation-manifests
             staged-preflight-plan.json
+            recovery-source-reports
+            recovery-source-jobs.json
           retention-days: 90
           if-no-files-found: error
 
@@ -335,11 +371,11 @@ jobs:
           ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.14
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -380,13 +416,13 @@ jobs:
       - &setup_staged_python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
       - &setup_staged_uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - &install_staged_candidate
         name: Install frozen candidate for validation
         working-directory: candidate
-        run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+        run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-staged-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -407,8 +443,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
-          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json --next-wave wave-2 > wave-1-budget.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --next-wave wave-2 --output wave-1-budget.json
       - name: Retain wave 1 validation
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -421,9 +459,48 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  staged-recovery-gate:
+    if: always() && github.event.inputs.mode == 'staged-preflight-recovery'
+    needs: [staged-prepare]
+    name: mutation (validate staged preflight recovery)
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout_control
+      - *checkout_candidate
+      - *setup_staged_python
+      - *setup_staged_uv
+      - *install_staged_candidate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-staged-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-plan
+      - name: Enforce cumulative wave 2 launch budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+            --prior-jobs staged-plan/recovery-source-jobs.json --prior-run-id 37464324954 \
+            --prior-run-attempt 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --next-wave wave-2 --output recovery-budget.json
+      - name: Retain recovery validation
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-recovery-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            recovery-budget.json
+            jobs.json
+          retention-days: 90
+          if-no-files-found: error
+
   staged-wave-2:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'staged-preflight'
-    needs: [staged-prepare, staged-wave-1-gate]
+    if: >-
+      always() && github.event_name == 'workflow_dispatch'
+      && ((github.event.inputs.mode == 'staged-preflight-recovery' && needs.staged-recovery-gate.result == 'success')
+      || (github.event.inputs.mode == 'staged-preflight' && needs.staged-wave-1-gate.result == 'success'))
+    needs: [staged-prepare, staged-wave-1-gate, staged-recovery-gate]
     name: mutation (staged preflight wave 2 shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -436,7 +513,7 @@ jobs:
     steps: *staged_preflight_steps
 
   staged-wave-2-gate:
-    if: always() && github.event.inputs.mode == 'staged-preflight'
+    if: always() && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
     needs: [staged-prepare, staged-wave-2]
     name: mutation (validate staged preflight wave 2)
     runs-on: ubuntu-latest
@@ -466,8 +543,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
-          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json --next-wave wave-3 > wave-2-budget.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+            ${{ github.event.inputs.mode == 'staged-preflight-recovery' && '--prior-jobs staged-plan/recovery-source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1' || '' }} \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --next-wave wave-3 --output wave-2-budget.json
       - name: Retain wave 2 validation
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -481,7 +561,7 @@ jobs:
           if-no-files-found: error
 
   staged-wave-3:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'staged-preflight'
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
     needs: [staged-prepare, staged-wave-2-gate]
     name: mutation (staged preflight wave 3 shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -495,7 +575,7 @@ jobs:
     steps: *staged_preflight_steps
 
   staged-wave-3-gate:
-    if: always() && github.event.inputs.mode == 'staged-preflight'
+    if: always() && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
     needs: [staged-prepare, staged-wave-3]
     name: mutation (validate staged preflight wave 3)
     runs-on: ubuntu-latest
@@ -525,8 +605,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
-          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json --next-wave aggregate > wave-3-budget.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+            ${{ github.event.inputs.mode == 'staged-preflight-recovery' && '--prior-jobs staged-plan/recovery-source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1' || '' }} \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --next-wave aggregate --output wave-3-budget.json
       - name: Retain wave 3 validation
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -540,7 +623,7 @@ jobs:
           if-no-files-found: error
 
   staged-preflight-aggregate:
-    if: github.event.inputs.mode == 'staged-preflight'
+    if: github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery'
     needs: [staged-prepare, staged-wave-3-gate]
     name: mutation (complete staged preflight corpus)
     runs-on: ubuntu-latest
@@ -548,13 +631,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+      - name: Check out recovery orchestration
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: control
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.14
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -566,9 +654,18 @@ jobs:
           pattern: mutation-preflight-wave-*-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: staged-reports
       - name: Aggregate complete frozen-candidate corpus
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "staged-preflight-recovery" ]; then
+            cp -R staged-plan/recovery-source-reports/. staged-reports/
+          fi
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --aggregate-preflight staged-reports --shard-count 256 --json > mutation-preflight.json
+      - name: Record linked recovery origins
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
         run: >-
-          uv run --no-sync python -m fettle.mutation_test --root .
-          --aggregate-preflight staged-reports --shard-count 256 --json > mutation-preflight.json
+          .venv/bin/python control/scripts/staged_preflight.py recovery-record
+          --plan staged-plan/staged-preflight-plan.json --reports staged-reports
+          --aggregate mutation-preflight.json --output staged-preflight-recovery.json
       - name: Retain complete staged preflight
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -577,9 +674,17 @@ jobs:
           path: mutation-preflight.json
           retention-days: 90
           if-no-files-found: error
+      - name: Retain linked recovery record
+        if: github.event.inputs.mode == 'staged-preflight-recovery' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-preflight-recovery.json
+          retention-days: 90
+          if-no-files-found: error
 
   staged-preflight-evidence:
-    if: always() && github.event.inputs.mode == 'staged-preflight'
+    if: always() && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
     needs: [staged-preflight-aggregate]
     name: mutation staged preflight evidence
     runs-on: ubuntu-latest
@@ -595,31 +700,51 @@ jobs:
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install frozen candidate for evidence validation
         working-directory: candidate
-        run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+        run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-preflight-${{ github.run_id }}
           path: retained-preflight
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-staged-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-plan
+      - name: Download linked recovery record
+        if: github.event.inputs.mode == 'staged-preflight-recovery'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-preflight-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retained-recovery
       - name: Enforce exact frozen-candidate preflight result
         env:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          PREFLIGHT_MODE: ${{ github.event.inputs.mode }}
         run: >-
           python -c 'import json,os,subprocess,sys; expected="0fc41fdfee13e09f4bda3dc5eee177030882aa36";
           report=json.load(open("retained-preflight/mutation-preflight.json"));
+          recovery=(json.load(open("retained-recovery/staged-preflight-recovery.json"))
+          if os.environ["PREFLIGHT_MODE"]=="staged-preflight-recovery" else None);
           actual=subprocess.check_output(["git","-C","candidate","rev-parse","HEAD"],text=True).strip();
           sys.exit(0 if os.environ["CANDIDATE_SHA"]==actual==expected
           and report.get("revision")==expected and report.get("shard_count")==256
-          and report.get("status")=="completed" and report.get("passed") is True else 2)'
+          and report.get("status")=="completed" and report.get("passed") is True
+          and (recovery is None or (recovery.get("status")=="completed"
+          and recovery.get("passed") is True and recovery.get("candidate_sha")==expected
+          and recovery.get("source_run_verdict")=="permanently non-pass"
+          and len(recovery.get("origins",{}))==256)) else 2)'
       - name: Enforce complete operational budget
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
-          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json --next-wave complete > complete-budget.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+          candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+            ${{ github.event.inputs.mode == 'staged-preflight-recovery' && '--prior-jobs staged-plan/recovery-source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1' || '' }} \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --next-wave complete --output complete-budget.json
       - name: Retain final budget evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -632,7 +757,7 @@ jobs:
           if-no-files-found: error
 
   full-shard:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery'
     needs: prepare
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest
@@ -717,7 +842,7 @@ jobs:
           if-no-files-found: error
 
   aggregate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && always()
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery' && always()
     name: mutation evidence
     needs: [prepare, full-shard]
     runs-on: ubuntu-latest

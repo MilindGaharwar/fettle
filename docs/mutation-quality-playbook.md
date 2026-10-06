@@ -45,6 +45,12 @@ polyglot adapters do not imply polyglot mutation support.
   validation.
 - Independent calibrations may share one immutable preflight corpus, but never
   terminal outcomes. Run authoritative calibrations sequentially.
+- A failed staged-preflight run remains non-pass. Its successful shard reports may
+  contribute to a separately identified recovery corpus only when immutable artifact
+  hashes, candidate/runtime/dependency/policy identity, complete manifest topology,
+  exact-once shard origins, and cumulative original-budget accounting all validate.
+  Never rewrite the source run as successful or describe recovery as one uninterrupted
+  run.
 - Keep retained JSON bounded and secret-free. Do not add absolute paths,
   credentials, environment values, or raw unbounded process output.
 
