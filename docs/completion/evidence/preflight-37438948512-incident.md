@@ -149,3 +149,40 @@ The downloaded 268-file corpus digest is
 `d0740e31f2a51fe37d829cf39db7923ada054f450e4edc77e47939ddd9e82a4e`; the complete
 preserved-tree checksum index has SHA-256
 `2254c5f0492427712a97a0bc55d1fdba3ebb16cfa7b69182394e71297af5c9f5`.
+
+## Recovery run 37476889333 stopped after wave 2
+
+The separately identified recovery ran once on 2026-10-06 against the same frozen
+candidate and reviewed orchestration `7da9f5d07884a5913bdbc38f28b34344c839a9f9`.
+Run `37476889333`, attempt 1, did not rerun wave 1. It validated the eight immutable
+source reports and then executed all 32 wave-2 shards at maximum parallelism 4.
+
+All 32 jobs and the manifest-bound wave-2 validator passed. The retained validation
+records 2,405 generated details. Its SHA-256 is
+`be9720e53a65cd794ceb4d446925359e78d92f18af1afd356ef1334de368d4ee`.
+The launch-time cumulative operational estimate was 53.63 minutes, including 11.97
+minutes from source run `37464324954`, and passed the 95-minute wave-3 ceiling. The
+budget artifact SHA-256 is
+`19b92208658b7c17d32f80fe7d2ab600e5529792a9a866d17e248ce21111b908`.
+
+GitHub then created one skipped placeholder for the 216-shard wave-3 matrix instead
+of expanding it. The documented GitHub Actions job-matrix limit is 256 jobs per
+workflow run. The run had already materialized its earlier matrix and control jobs;
+expanding all 216 remaining jobs would have exceeded that fixed limit. The always-run
+wave-3 validator correctly failed because no wave-3 reports existed. Aggregation and
+the linked recovery record did not execute, and final evidence failed closed.
+
+Terminal accounting records 45.13 operational runner-minutes for the recovery and
+57.10 cumulatively with the source run. These are timestamp-based operational
+estimates, not GitHub billing. The run is permanently non-pass; its 32 successful
+reports do not alter the run verdict or establish a complete corpus. No retry,
+substitution, continuation, calibration, or new recovery is authorized.
+
+The 313-file preserved evidence tree is retained at
+`external://local/audit-hardening/candidate-0fc41fd/staged-preflight-recovery-37476889333`.
+The incident summary SHA-256 is
+`5f8fb9a0982a6f4cc8f10af501a428f62ffb6d865c74ca94457e5b2eb5a91786`, the terminal
+accounting SHA-256 is
+`4a9a7185d80a0c5009df9ba174f20b2f06962bd5df4122c96fa42869c4c011cf`, and the
+complete checksum index SHA-256 is
+`05422c408164073ddcd2bba3816bcc222467fb0a7d99f8701278581f22f48714`.

@@ -2863,3 +2863,24 @@ full matrix or failed-shard replay is neither required nor authorized.
 - Verification: actionlint, Ruff, diff integrity, 96 focused tests, full suite
   (`4,426 passed, 20 skipped` before the last fixture-only additions), and the
   421-file Fettle check passed. No recovery run had been dispatched at this point.
+
+## 2026-10-06 — Recovery run 37476889333 terminal reconciliation
+
+- Dispatched exactly one authorized `staged-preflight-recovery` attempt on reviewed
+  orchestration `7da9f5d07884a5913bdbc38f28b34344c839a9f9` and frozen candidate
+  `0fc41fdfee13e09f4bda3dc5eee177030882aa36`.
+- Wave 1 was not rerun. Exact source compatibility and the cumulative launch gate
+  passed. All 32 wave-2 shards passed, producing 2,405 details, and durable read-back
+  accepted every report. Launch-time cumulative usage was 53.63 operational minutes
+  against the 95-minute wave-3 ceiling.
+- GitHub skipped the complete 216-entry wave-3 matrix. The run had already
+  materialized enough matrix and control jobs that expanding wave 3 would exceed the
+  documented 256-job workflow-run limit. The wave-3 validator rejected the absent
+  reports, aggregation did not run, and final evidence remained non-pass.
+- Terminal accounting is 45.13 operational minutes for this run and 57.10 cumulative
+  minutes including source run `37464324954`. These figures are not provider billing.
+- Run `37476889333` is permanently non-pass. Its 32 wave-2 reports remain immutable
+  per-shard evidence only. No retry, substitution, continuation, calibration, or
+  further dispatch is authorized.
+- Preserved 313 files plus checksum index at
+  `external://local/audit-hardening/candidate-0fc41fd/staged-preflight-recovery-37476889333`.
