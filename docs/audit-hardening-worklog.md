@@ -1,5 +1,65 @@
 # Audit Hardening Worklog
 
+## 2026-10-06: Frozen-Candidate Staged Preflight Orchestration
+
+The owner authorized one orchestration-only implementation and push followed by the
+already-authorized preflight. The executable candidate remains
+`0fc41fdfee13e09f4bda3dc5eee177030882aa36`; the orchestration commit is a separate
+identity. Review of the existing workflow showed that one run with three dependent
+matrix jobs is smaller and safer than importing evidence across runs. It avoids
+trusting a supplied run ID and keeps every manifest and shard artifact within one
+repository, workflow ref, run ID, and run attempt.
+
+The predeclared waves are 8 shards at parallelism 2 (`8, 27, 28, 37, 48, 50, 51,
+53`), 32 additional shards at parallelism 4 (`0-7, 9-26, 29-34`), and the remaining
+216 shards at parallelism 8. Wave 1 includes shard 27 and seven shards implicated by
+the cancelled preflight's restoration-risk evidence. Each matrix uses fail-fast and
+has no retry path; the prepare job rejects any workflow run attempt other than one.
+Every succeeding wave depends on a gate that downloads and reads
+back the prior wave, verifies exact membership, frozen manifest digests and topology,
+candidate, orchestration SHA, repository, workflow name/ref, run ID, run attempt,
+engine, counts, corpus, and collision state. Missing, duplicate, failed, malformed,
+or substituted evidence stops the run. Downloaded artifacts are parsed only as JSON.
+Artifacts declare 90-day GitHub retention. The existing
+`aggregate_preflight_shards()` remains the final full-scope authority.
+
+The 740 runner-minute operational allocation is 20/75/500 for waves 1/2/3, 45 for
+setup/gates/aggregation, and 100 cancellation headroom. Launch ceilings are 20 before
+wave 2, 95 before wave 3, 595 before aggregation, and 640 at completion. GitHub job
+timestamps include completed jobs and elapsed time for running jobs; missing,
+partial, empty, non-skipped untimed, or reversed timing evidence is non-pass. These controls make the
+budget observable and fail-closed but do not claim a provider billing cap.
+
+GitHub check applicability is intentionally split. The staged result is published as
+`mutation staged preflight evidence`, checks out and verifies the frozen candidate,
+and cannot satisfy the existing required `mutation evidence` check for a different
+PR head. The required check remains head-bound and non-qualifying unless a separately
+authorized calibration executes. Eventual integration therefore requires either an
+integration commit whose executable tree is proven equivalent to the frozen candidate
+or a separately reviewed branch-protection/integration decision; neither is inferred
+from a passing frozen-candidate preflight.
+
+Acceptance scope was reconciled against the governing plan rather than the latest
+summary alone. Milestone A still requires the platform, artifact, remote-CI, strict
+completion, and live-host evidence retained in AH07. The recorded AH07 matrix names
+Claude Code, Codex CLI, Gemini CLI, and OpenCode, so all four remain required for that
+criterion unless the owner formally changes it; unavailable hosts remain blocked.
+Real-participant parity and ten human sessions belong to later WP-AH13/P77. A public
+PyPI canary and broader release platform/host validation belong to WP-AH15 and the
+release contract. Optional host improvements do not silently alter Milestone A.
+No host was installed or invoked, no credentials were accessed, and no provider funds
+were spent. The pending storage request remains: approve an immutable private store,
+named readers, a retention administrator, and retention through every supported
+release that cites run-05. No upload or relocation is authorized.
+
+Pre-execution checks after implementation: actionlint passed; 49 focused CI and
+staged-preflight tests passed; Ruff and diff hygiene passed. `kgraph impact` returned
+only the four changed files but explicitly reported a stale index, so it is retained
+as best-effort rather than claimed as a fresh impact pass. Independent review found
+the need for post-wave-3 and final budget enforcement, an explicit first-attempt
+guard, and fail-closed untimed-job handling; all were added. Preflight had not been
+dispatched at this boundary.
+
 ## 2026-10-06: Bounded Lifecycle Verification Stopped Non-Pass
 
 Candidate `cdbb9176b89757b7e0ca75aca053b3eb94f93409`, tree

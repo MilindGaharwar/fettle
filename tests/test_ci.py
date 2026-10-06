@@ -350,6 +350,41 @@ def test_mutation_workflow_has_bounded_non_qualifying_diagnostic_canary():
     assert "merge-multiple: true" not in workflow
 
 
+def test_staged_preflight_is_single_run_frozen_and_fail_closed():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    staged = workflow.split("\n  staged-prepare:", 1)[1].split("\n  full-shard:", 1)[0]
+
+    assert "- staged-preflight" in workflow
+    assert 'run: test "$RUN_ATTEMPT" = "1"' in staged
+    assert staged.count("ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36") >= 3
+    assert "max-parallel: 2" in staged
+    assert "max-parallel: 4" in staged
+    assert "max-parallel: 8" in staged
+    assert staged.count("fail-fast: true") == 3
+    assert "needs: [staged-prepare, staged-wave-1-gate]" in staged
+    assert "needs: [staged-prepare, staged-wave-2-gate]" in staged
+    assert "needs: [staged-prepare, staged-wave-3-gate]" in staged
+    assert staged.count("validate-wave") == 3
+    assert staged.count("retention-days: 90") == 7
+    assert "--aggregate-preflight staged-reports --shard-count 256" in staged
+    assert "run-id:" not in staged
+    assert "github-token:" not in staged
+    assert "merge-multiple: true" not in staged
+
+
+def test_staged_preflight_keeps_authoritative_check_non_qualifying():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    staged = workflow.split("\n  staged-preflight-evidence:", 1)[1].split("\n  full-shard:", 1)[0]
+    aggregate = workflow.split("\n  aggregate:", 1)[1]
+
+    assert "name: mutation staged preflight evidence" in staged
+    assert "needs: [staged-preflight-aggregate]" in staged
+    assert "0fc41fdfee13e09f4bda3dc5eee177030882aa36" in staged
+    assert 'report.get("passed") is True' in staged
+    assert "github.event.inputs.mode != 'staged-preflight'" in aggregate
+    assert 'candidate == os.environ["GITHUB_SHA"]' in aggregate
+
+
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
@@ -391,7 +426,8 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert (
         "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
         " && github.event.inputs.mode != 'preflight'"
-        " && github.event.inputs.mode != 'diagnostic-canary'\n    needs: prepare"
+        " && github.event.inputs.mode != 'diagnostic-canary'"
+        " && github.event.inputs.mode != 'staged-preflight'\n    needs: prepare"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow
