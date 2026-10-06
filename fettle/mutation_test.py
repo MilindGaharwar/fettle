@@ -277,6 +277,7 @@ def _restore_mutation_source_state(
     root: str,
     before_sources: dict[str, tuple[bytes, int]],
     before_residue: set[str],
+    mutation_scope: set[str],
 ) -> tuple[str, list[str]]:
     root_path = Path(root)
     try:
@@ -291,6 +292,10 @@ def _restore_mutation_source_state(
         target = root_path / relative
         backup = target.with_name(target.name + ".bak")
         try:
+            observed = after_sources.get(relative)
+            if observed is not None and observed[0] == content and relative in mutation_scope:
+                os.chmod(target, mode)
+                continue
             backup_relative = backup.relative_to(root_path).as_posix()
             if (
                 backup_relative in before_residue
@@ -327,12 +332,27 @@ def _restore_mutation_source_state(
     return "; ".join(errors), restored
 
 
+def _mutmut_source_scope(argv: list[str]) -> set[str]:
+    prefix = "--paths-to-mutate="
+    values = [argument.removeprefix(prefix) for argument in argv if argument.startswith(prefix)]
+    if len(values) != 1:
+        return set()
+    scope = set()
+    for value in values[0].split(","):
+        path = Path(value)
+        if not value or path.is_absolute() or ".." in path.parts:
+            return set()
+        scope.add(path.as_posix())
+    return scope
+
+
 def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
     """Run mutmut with whole-source restoration and residue verification."""
     try:
         before_sources, before_residue = _mutation_source_state(root)
     except OSError as exc:
         raise OSError(f"cannot capture pre-run mutation source manifest: {exc}") from exc
+    mutation_scope = _mutmut_source_scope(argv)
     popen_kwargs = {"start_new_session": True} if os.name == "posix" else {
         "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _WINDOWS_CREATE_SUSPENDED,
     }
@@ -379,7 +399,7 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
         except (OSError, KeyboardInterrupt) as exc:
             if getattr(exc, "tree_stopped", True):
                 integrity_error, _ = _restore_mutation_source_state(
-                    root, before_sources, before_residue,
+                    root, before_sources, before_residue, mutation_scope,
                 )
                 if integrity_error:
                     raise OSError("mutation source integrity failure: " + integrity_error) from exc
@@ -405,7 +425,7 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
             tree_stopped = termination_error is None or termination_error.tree_stopped
             if tree_stopped:
                 integrity_error, _ = _restore_mutation_source_state(
-                    root, before_sources, before_residue,
+                    root, before_sources, before_residue, mutation_scope,
                 )
                 if integrity_error:
                     raise OSError("mutation source integrity failure: " + integrity_error) from (
@@ -420,7 +440,9 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
     finally:
         for signum, handler in prior_handlers.items():
             signal.signal(signum, handler)
-    integrity_error, restored = _restore_mutation_source_state(root, before_sources, before_residue)
+    integrity_error, restored = _restore_mutation_source_state(
+        root, before_sources, before_residue, mutation_scope,
+    )
     if integrity_error:
         raise OSError("mutation source integrity failure: " + integrity_error)
     if restored:

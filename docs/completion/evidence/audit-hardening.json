@@ -10,7 +10,7 @@
     "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
     "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
     "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
-    "ah07": "blocked: full-package independent review at cdbb9176 confirmed AH00-AH06 but rejected AH07. Exact-head substantive CI passed while strict completion and required mutation evidence remained non-pass. A candidate-written narrow preflight completed with 19 canonical fingerprints, but the sole replay stopped on the first fingerprint with fatal mutmut exit 1, zero outcomes, and 19 pending; it was not retried. Windows normal-leader-exit descendant containment is defective in cdbb9176. Its uncommitted suspended-process Job Object repair has current-diff independent automated approval and local evidence, but still requires real Windows CI. Authorized available-host execution is absent, and the private run-05 archive lacks a durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 on candidate 8c865a18 was cancelled after estimated usage exceeded its practical budget; only 13 of 256 shard reports completed, 29 were tool errors, 5 were malformed, and 209 were missing. The demonstrated source-integrity defect is mutmut 2.5.1 replacing executable quality_scan.py mode 0755 with a consumed backup's 0644 mode after restoring exact bytes. A scope-bound mode-only lifecycle repair passed exact-shard local diagnostics, 4368 tests, Ruff, actionlint, Fettle all-source scan, and independent code-and-evidence review; one exact-SHA remote diagnostic canary remains pending and cannot qualify. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
   },
   "dispatcher_baseline": {
     "role": "diagnostic baseline, not final qualification",
@@ -163,6 +163,21 @@
       "authorization_needed": "Authorize a remote CI run without authorizing commit, push, publication, or release implicitly"
     }
   ],
+  "mutation_preflight_incident": {
+    "run_id": 37438948512,
+    "candidate": "8c865a18a4a187ad782dc4db856e2cff23199253",
+    "status": "cancelled; diagnostic-only; permanently non-pass",
+    "archive_sha256": "8de38e2b26f7b861ecce29ce4847a9450301070d6ad1d750c8f81432f0fe55a7",
+    "job_counts": {"success": 9, "failure": 22, "cancelled": 228, "skipped": 1},
+    "shard_reports": {"completed": 13, "tool_error": 29, "malformed": 5, "missing": 209},
+    "job_shard_ledger_sha256": "6afdd188272f34c78834ace1cb90b10fcea2155c28c47b4f1a10085c48180f3b",
+    "earliest_failure_shards": [8, 27],
+    "root_cause": "mutmut 2.5.1 restores exact source bytes from a newly created backup but loses executable mode; the backup is consumed before Fettle verifies the whole source tree",
+    "repair_review_session": "ses_eef5d5ca9ffe0UE3pkRaG8dzTC",
+    "local_repair_evidence": "4368 passed, 20 skipped; exact shard 27 generated and canonicalized 61 details with zero collisions and restored exact bytes/mode",
+    "remote_canary": "authorized but pending; diagnostic only; cannot qualify",
+    "decision_packet": "docs/completion/evidence/preflight-37438948512-incident.md"
+  },
   "ah03_durable_attempts": {
     "attempt_01": {
       "root": "external://local/audit-hardening/run-01",

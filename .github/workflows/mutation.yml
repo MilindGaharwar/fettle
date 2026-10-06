@@ -12,6 +12,7 @@ on:
         type: choice
         options:
           - binding-probe
+          - diagnostic-canary
           - preflight
           - replay
           - calibration
@@ -30,6 +31,10 @@ on:
       candidate_sha:
         description: "Exact 40-character candidate commit to qualify"
         required: true
+        type: string
+      diagnostic_shard:
+        description: "Single shard index for diagnostic-canary mode"
+        required: false
         type: string
 
 concurrency:
@@ -68,7 +73,7 @@ jobs:
           python -c 'import os,re,sys; candidate=os.environ["CANDIDATE_SHA"];
           sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", candidate) and candidate == os.environ["GITHUB_SHA"] else 1)'
       - name: Require retained preflight run
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         env:
           PREFLIGHT_RUN_ID: ${{ github.event.inputs.preflight_run_id }}
         run: test -n "$PREFLIGHT_RUN_ID" && test "$PREFLIGHT_RUN_ID" -eq "$PREFLIGHT_RUN_ID"
@@ -85,7 +90,7 @@ jobs:
           python -c 'import os,re,sys; value=os.environ["CALIBRATION_ID"];
           sys.exit(0 if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value) else 1)'
       - name: Download retained partition manifests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-manifests-${{ github.event.inputs.preflight_run_id }}
@@ -93,7 +98,7 @@ jobs:
           run-id: ${{ github.event.inputs.preflight_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download retained preflight aggregate
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-preflight-${{ github.event.inputs.preflight_run_id }}
@@ -101,7 +106,7 @@ jobs:
           run-id: ${{ github.event.inputs.preflight_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare digest-bound partitions
-        if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight'
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight' || github.event.inputs.mode == 'diagnostic-canary'
         id: prepare
         run: |
           uv run --no-sync python -m fettle.mutation_test --root . --prepare-manifests mutation-manifests --json > prepare.json
@@ -110,8 +115,16 @@ jobs:
             echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'preflight' }}' uv run --no-sync python -c 'import glob,json,os; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); print(json.dumps({"shard": replay if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare.json"))["shard_count"])')"
           } >> "$GITHUB_OUTPUT"
+      - name: Validate diagnostic canary scope
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'diagnostic-canary'
+        env:
+          DIAGNOSTIC_SHARD: ${{ github.event.inputs.diagnostic_shard }}
+        run: >-
+          python -c 'import json,os,re,sys; value=os.environ["DIAGNOSTIC_SHARD"];
+          count=json.load(open("prepare.json"))["shard_count"];
+          sys.exit(0 if re.fullmatch(r"0|[1-9][0-9]*", value) and int(value) < count else 1)'
       - name: Verify retained SHA-bound preflight
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         id: reuse
         env:
           MODE: ${{ github.event.inputs.mode }}
@@ -165,6 +178,42 @@ jobs:
           path: mutation-preflight.json
           if-no-files-found: error
 
+  diagnostic-canary:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'diagnostic-canary'
+    needs: prepare
+    name: mutation (diagnostic preflight shard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-manifests-${{ github.run_id }}
+          path: mutation-manifests
+      - name: Run diagnostic preflight canary
+        env:
+          DIAGNOSTIC_SHARD: ${{ github.event.inputs.diagnostic_shard }}
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --preflight-manifest "mutation-manifests/partition-${DIAGNOSTIC_SHARD}.json"
+          --json > mutation-preflight-diagnostic.json
+      - name: Retain diagnostic preflight canary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-diagnostic-${{ github.run_id }}
+          path: mutation-preflight-diagnostic.json
+          if-no-files-found: error
+
   preflight-aggregate:
     if: (github.event_name == 'schedule' || github.event.inputs.mode == 'preflight') && always()
     needs: [prepare, preflight]
@@ -199,7 +248,7 @@ jobs:
           if-no-files-found: error
 
   full-shard:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
     needs: prepare
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest

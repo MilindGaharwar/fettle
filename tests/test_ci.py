@@ -312,6 +312,36 @@ def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     assert workflow.index("Prepare digest-bound partitions") < workflow.index("Bounded mutation-detail preflight")
     assert "type: choice" in workflow
     assert "- preflight" in workflow and "- replay" in workflow and "- calibration" in workflow
+
+
+def test_mutation_workflow_has_bounded_non_qualifying_diagnostic_canary():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    prepare_job = workflow.split("\n  prepare:", 1)[1].split("\n  preflight:", 1)[0]
+    preflight_job = workflow.split("\n  preflight:", 1)[1].split("\n  diagnostic-canary:", 1)[0]
+    canary_job = workflow.split("\n  diagnostic-canary:", 1)[1].split(
+        "\n  preflight-aggregate:", 1,
+    )[0]
+    preflight_aggregate_job = workflow.split("\n  preflight-aggregate:", 1)[1].split(
+        "\n  full-shard:", 1,
+    )[0]
+    full_shard_job = workflow.split("\n  full-shard:", 1)[1].split("\n  aggregate:", 1)[0]
+    aggregate_job = workflow.split("\n  aggregate:", 1)[1]
+
+    assert "- diagnostic-canary" in workflow
+    assert "diagnostic_shard:" in workflow
+    assert "Bind dispatch to exact candidate" in prepare_job
+    assert "Validate diagnostic canary scope" in prepare_job
+    assert "name: mutation (diagnostic preflight shard)" in canary_job
+    assert "matrix:" not in canary_job
+    assert '--preflight-manifest "mutation-manifests/partition-${DIAGNOSTIC_SHARD}.json"' in canary_job
+    assert "if: always()" in canary_job
+    assert "name: mutation-preflight-diagnostic-${{ github.run_id }}" in canary_job
+    assert "github.event.inputs.mode == 'preflight'" in preflight_job
+    assert "github.event.inputs.mode == 'preflight'" in preflight_aggregate_job
+    assert "github.event.inputs.mode != 'diagnostic-canary'" in full_shard_job
+    assert "github.event.inputs.mode != 'calibration'" in aggregate_job
+    assert '"qualification_executed":False' in aggregate_job
+    assert "report.get('passed') is True" in aggregate_job
     assert "[46,62,63,239]" not in workflow
     assert 'archived=(("fettle/mutation_test.py",121,180)' in workflow
     assert 'item["start"] <= end and item["end"] >= start' in workflow
@@ -358,7 +388,11 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert "github.event.inputs.mode == 'preflight'" in workflow
     assert "github.event_name == 'schedule' || github.event.inputs.mode != 'preflight'" not in workflow
     assert "needs: [prepare, preflight-aggregate]" not in workflow
-    assert "full-shard:\n    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight'\n    needs: prepare" in workflow
+    assert (
+        "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
+        " && github.event.inputs.mode != 'preflight'"
+        " && github.event.inputs.mode != 'diagnostic-canary'\n    needs: prepare"
+    ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow
     assert "github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow

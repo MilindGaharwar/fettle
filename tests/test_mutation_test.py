@@ -500,6 +500,152 @@ def test_mutmut_process_rejects_unexplained_mode_drift(tmp_path):
     assert source.stat().st_mode & 0o777 == 0o644
 
 
+def test_mutmut_process_restores_in_scope_mode_only_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+
+    result = _run_mutmut_process(
+        [
+            sys.executable, "-c", script,
+            "--paths-to-mutate=src/command.py",
+        ],
+        str(tmp_path),
+        10,
+    )
+
+    assert result.returncode == 0
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+
+
+def test_mutmut_process_rejects_out_of_scope_mode_only_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(
+            [
+                sys.executable, "-c", script,
+                "--paths-to-mutate=src/other.py",
+            ],
+            str(tmp_path),
+            10,
+        )
+
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.parametrize(
+    "scope_argument",
+    [
+        None,
+        "--paths-to-mutate=",
+        "--paths-to-mutate=/src/command.py",
+        "--paths-to-mutate=../src/command.py",
+    ],
+)
+def test_mutmut_process_malformed_scope_fails_closed(scope_argument, tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+    argv = [sys.executable, "-c", script]
+    if scope_argument is not None:
+        argv.append(scope_argument)
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(argv, str(tmp_path), 10)
+
+    assert source.stat().st_mode & 0o777 == 0o644
+    assert not source.with_name(source.name + ".bak").exists()
+
+
+def test_mutmut_process_does_not_hide_in_scope_content_and_mode_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = (
+        "from pathlib import Path; p=Path('src/command.py'); "
+        "p.write_text(\"VALUE = 'changed'\\n\"); p.chmod(0o644)"
+    )
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(
+            [sys.executable, "-c", script, "--paths-to-mutate=src/command.py"],
+            str(tmp_path),
+            10,
+        )
+
+    assert source.read_text() == "VALUE = 'changed'\n"
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+def test_mutmut_process_timeout_restores_in_scope_mode_only_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = (
+        "import time; from pathlib import Path; "
+        "Path('src/command.py').chmod(0o644); time.sleep(30)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_mutmut_process(
+            [
+                sys.executable, "-c", script,
+                "--paths-to-mutate=src/command.py",
+            ],
+            str(tmp_path),
+            1,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+
+
+def test_mutmut_process_keyboard_interrupt_restores_in_scope_mode_only_drift(
+    monkeypatch, tmp_path,
+):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+
+    class InterruptedProcess:
+        pid = 123
+        returncode = -2
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                source.chmod(0o644)
+                raise KeyboardInterrupt
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    process = InterruptedProcess()
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("fettle.mutation_test._terminate_process_tree", lambda child: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process(
+            ["mutmut", "run", "--paths-to-mutate=src/command.py"], str(tmp_path), 10,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+
+
 def test_mutmut_process_does_not_start_without_complete_source_manifest(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "fettle.mutation_test._mutation_source_state",
