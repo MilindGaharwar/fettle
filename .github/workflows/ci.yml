@@ -192,6 +192,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "package installation failed" }
           & $python -m pytest tests/test_evidence_ledger.py -q -k "concurrent_append or independent_processes or lock_timeout or interrupted_writer"
           if ($LASTEXITCODE -ne 0) { throw "ledger concurrency and interruption tests failed" }
+          & $python -m pytest tests/test_mutation_test.py -q -k "mutmut_process_timeout_restores or mutmut_process_stops_descendants_after_leader_exits or windows_ or unconfirmed_tree_termination"
+          if ($LASTEXITCODE -ne 0) { throw "mutation worker lifecycle tests failed" }
           & $python -m fettle demo
           if ($LASTEXITCODE -ne 0) { throw "offline demo failed" }
           $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"

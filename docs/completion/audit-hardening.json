@@ -13,7 +13,7 @@
       "observed": "isolated Python 3.12.13 environment passes AH00 local acceptance checks for the current candidate",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Re-run AH00 only if candidate, interpreter, dependencies, platform, or qualification identity changes"
@@ -26,7 +26,7 @@
       "observed": "165 focused tests pass; clean live scan exits 0 and a fresh analyzer-free environment returns structured tool_error with exit 2",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Re-run if scanner code, dependencies, or candidate identity changes"
@@ -39,7 +39,7 @@
       "observed": "21 focused tests pass; empty scope exits 2 and clean enforced live execution exits 0 with output metadata and SARIF",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Re-run if action entrypoint, workflows, scanner contract, or candidate identity changes"
@@ -52,7 +52,7 @@
       "observed": "focused and live criteria pass; durable run-05 executed seven partitions once each and separate read-only verification confirmed all 299 fingerprints, 269 killed, 30 reviewed equivalents, zero indeterminate outcomes, source restoration, and no mutation-cache residue",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Re-run only if the qualified source, tests, runtime, dependencies, mappings, exclusions, policy, or equivalence applicability changes; approve a portable immutable channel before relying on the external package from another checkout"
@@ -65,7 +65,7 @@
       "observed": "59 focused race/interruption tests pass on Darwin-arm64; live 24-process workload yields unique contiguous sequences and a verified chain",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Retain additional supported-platform evidence for AH07; re-run if ledger behavior or candidate identity changes"
@@ -78,7 +78,7 @@
       "observed": "fresh wheel and sdist include providers, install outside checkout, resolve from isolated site-packages, and pass demo/help/graph probes",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Rebuild and replay if package metadata, package sources, dependencies, or candidate identity changes"
@@ -91,7 +91,7 @@
       "observed": "339 tests pass with 20 declared skips; live profile preserves numeric zero, valid email/phone, Unicode, whitespace, and punctuation classes",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
       "recovery": "Re-run if UAT profile generation, consumers, or candidate identity changes"
@@ -101,13 +101,13 @@
       "kind": "success",
       "required": true,
       "verdict": "blocked",
-      "observed": "Owner authorized independent automated acceptance in place of the unavailable human reviewer. Independent review found a fail-closed process-termination defect and accepted the scoped repair; exact-repair-head CI, live-host execution, and a durable resolvable run-05 evidence location remain pending. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; real-participant parity is a later WP-AH13/P77 gate, and public-PyPI verification is a later WP-AH15/release gate.",
+      "observed": "Owner authorized independent automated acceptance in place of the unavailable human reviewer. Full-package independent review confirmed AH00-AH06 but rejected AH07: exact-head substantive CI passed while strict completion and required mutation evidence remained non-pass. A candidate-written narrow preflight completed with 19 canonical fingerprints, but the sole replay stopped on the first fingerprint with fatal mutmut exit 1, zero outcomes, and 19 pending; no retry occurred. Windows normal-leader-exit descendant containment is defective in cdbb9176. Its uncommitted suspended-process Job Object repair has current-diff independent automated approval and local evidence, but still requires real Windows CI. Live-host execution and a durable resolvable run-05 evidence location remain pending. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; real-participant parity is a later WP-AH13/P77 gate, and public-PyPI verification is a later WP-AH15/release gate.",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "6f91971eabc24f4171a0a7dba18d3491385729f10cb318290fb84b1174566ac4",
+        "sha256": "d54927763fcb381765c8fa74d9df0b9b408730f9212f0c78e182030afc67ead2",
         "revision": "integration-candidate-2026-10-05"
       },
-      "recovery": "Refresh exact-repair-head CI, complete authorized available-host checks, and provide a durable digest-bound location for the private run-05 archive; then run strict completion validation"
+      "recovery": "Review and authorize repair of fatal mutmut output retention before any new lifecycle execution; review, commit, and run the prepared Windows Job Object repair; separately authorize the exact full workflow qualification needed for the required mutation check; complete authorized available-host checks and provide a durable digest-bound location for the private run-05 archive; then run strict completion validation"
     }
   ]
 }

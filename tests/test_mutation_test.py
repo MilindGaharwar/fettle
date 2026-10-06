@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sqlite3
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -42,6 +42,8 @@ from fettle.mutation_test import (
     _rerun_mutant,
     _run_mutmut,
     _run_mutmut_process,
+    _terminate_process_tree,
+    _MutationProcessTerminationError,
     _preflight_mutmut,
     aggregate_preflight_shards,
     _run_shard_modules,
@@ -84,6 +86,7 @@ def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(t
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
     source.chmod(0o744)
+    initial_mode = source.stat().st_mode & 0o777
     script = (
         "from pathlib import Path; import time; "
         "p=Path('src/nested.py'); "
@@ -95,17 +98,17 @@ def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(t
         _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 0.2)
 
     assert source.read_text() == "VALUE = 'original'\n"
-    assert source.stat().st_mode & 0o777 == 0o744
+    assert source.stat().st_mode & 0o777 == initial_mode
     assert not (tmp_path / "src/nested.py.bak").exists()
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")
 @pytest.mark.parametrize("filename", ["quality_scan.py", "import_graph.py"])
 def test_mutmut_process_stops_descendants_after_leader_exits(tmp_path, filename):
     source = tmp_path / "fettle" / filename
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
     source.chmod(0o744)
+    initial_mode = source.stat().st_mode & 0o777
     child = (
         "import time; from pathlib import Path; "
         f"time.sleep(0.15); Path('fettle/{filename}').write_text(\"VALUE = 'late-mutant'\\n\")"
@@ -121,7 +124,218 @@ def test_mutmut_process_stops_descendants_after_leader_exits(tmp_path, filename)
 
     assert result.returncode == 0
     assert source.read_text() == "VALUE = 'original'\n"
-    assert source.stat().st_mode & 0o777 == 0o744
+    assert source.stat().st_mode & 0o777 == initial_mode
+
+
+def test_windows_cleanup_targets_descendants_after_leader_exit(monkeypatch):
+    process = Mock(pid=123)
+    process.poll.return_value = 0
+    close_job = Mock()
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test._close_windows_kill_job", close_job)
+
+    _terminate_process_tree(process)
+
+    close_job.assert_called_once_with(process)
+
+
+def test_windows_cleanup_failure_is_not_hidden(monkeypatch):
+    process = Mock(pid=123)
+    process.poll.return_value = 0
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job",
+        Mock(side_effect=PermissionError("denied")),
+    )
+
+    with pytest.raises(OSError, match="process tree termination failed: denied"):
+        _terminate_process_tree(process)
+
+
+def test_windows_job_attachment_failure_stops_worker_before_restoration(monkeypatch, tmp_path):
+    process = Mock()
+    process._fettle_job_handle = None
+    process.communicate.return_value = ("", "")
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    monkeypatch.setattr(
+        "fettle.mutation_test._attach_windows_kill_job",
+        Mock(side_effect=PermissionError("denied")),
+    )
+
+    with pytest.raises(PermissionError, match="denied"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=10)
+
+
+@pytest.mark.parametrize("failure", [OSError("kill failed"), KeyboardInterrupt()])
+def test_windows_attachment_cleanup_failure_blocks_restoration(monkeypatch, tmp_path, failure):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+    process = Mock()
+    process._fettle_job_handle = None
+    process.kill.side_effect = failure
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+
+    def fail_attachment(_process):
+        source.write_text("VALUE = 'mutated'\n")
+        raise OSError("attach failed")
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", fail_attachment)
+
+    with pytest.raises(OSError, match="cannot confirm unattached Windows mutation process stopped"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+
+
+def test_windows_worker_is_attached_before_it_is_resumed(monkeypatch, tmp_path):
+    events = []
+    process = Mock(returncode=0)
+    process._fettle_job_handle = None
+    process.communicate.return_value = ("", "")
+    process.poll.return_value = 0
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    popen = Mock(return_value=process)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", popen)
+    monkeypatch.setattr(
+        "fettle.mutation_test._attach_windows_kill_job", lambda child: events.append(("attach", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process", lambda child: events.append(("resume", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._terminate_process_tree", lambda child: events.append(("terminate", child)),
+    )
+
+    _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert popen.call_args.kwargs["creationflags"] == 516
+    assert events == [("attach", process), ("resume", process), ("terminate", process)]
+
+
+def test_windows_resume_failure_closes_attached_job(monkeypatch, tmp_path):
+    events = []
+    process = Mock()
+    process._fettle_job_handle = None
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    def attach(child):
+        child._fettle_job_handle = 1
+        events.append(("attach", child))
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process",
+        Mock(side_effect=OSError("resume failed")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job", lambda child: events.append(("close", child)),
+    )
+
+    with pytest.raises(OSError, match="resume failed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert events == [("attach", process), ("close", process)]
+    process.kill.assert_not_called()
+
+
+def test_windows_resume_cleanup_failure_does_not_restore_source(monkeypatch, tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+    process = Mock()
+    process._fettle_job_handle = None
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+
+    def attach(_process):
+        _process._fettle_job_handle = 1
+        source.write_text("VALUE = 'mutated'\n")
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process", Mock(side_effect=OSError("resume failed")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job",
+        Mock(side_effect=_MutationProcessTerminationError("unconfirmed", tree_stopped=False)),
+    )
+
+    with pytest.raises(OSError, match="unconfirmed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+
+
+def test_windows_interrupt_after_resume_stops_job_before_restoration(monkeypatch, tmp_path):
+    events = []
+    process = Mock()
+    process._fettle_job_handle = None
+    monkeypatch.setattr("fettle.mutation_test.os.name", "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    def attach(child):
+        child._fettle_job_handle = 1
+        events.append(("attach", child))
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+
+    def interrupt_after_resume(child):
+        events.append(("resume", child))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("fettle.mutation_test._resume_windows_process", interrupt_after_resume)
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job", lambda child: events.append(("close", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._restore_mutation_source_state",
+        lambda *_args: (events.append(("restore", process)) or ("", [])),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert events == [
+        ("attach", process), ("resume", process), ("close", process), ("restore", process),
+    ]
+
+
+def test_unconfirmed_tree_termination_does_not_restore_source(monkeypatch, tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+
+    class FailedProcess:
+        pid = 123
+        returncode = 1
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                source.write_text("VALUE = 'mutated'\n")
+                raise subprocess.TimeoutExpired([], timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: FailedProcess())
+    monkeypatch.setattr(
+        "fettle.mutation_test._terminate_process_tree",
+        Mock(side_effect=_MutationProcessTerminationError("unconfirmed", tree_stopped=False)),
+    )
+
+    with pytest.raises(OSError, match="unconfirmed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")

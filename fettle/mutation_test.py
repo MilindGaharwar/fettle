@@ -83,10 +83,139 @@ _SOURCE_IGNORES = {
     "__pycache__", "build", "dist", "node_modules", "venv",
 }
 _MUTATION_RESIDUE_SUFFIXES = {".bak", ".orig", ".rej"}
+_WINDOWS_CREATE_SUSPENDED = 0x00000004
 
 
 class _MutationProcessTerminationError(OSError):
     """The mutation worker tree could not be confirmed stopped."""
+
+    def __init__(self, message: str, *, tree_stopped: bool = False) -> None:
+        super().__init__(message)
+        self.tree_stopped = tree_stopped
+
+
+def _attach_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    """Bind a Windows worker tree to a kill-on-close job object."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimitInformation),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(process._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException:
+        kernel32.CloseHandle(job)
+        raise
+    process._fettle_job_handle = job  # type: ignore[attr-defined]
+
+
+def _resume_windows_process(process: subprocess.Popen[str]) -> None:
+    """Resume a worker only after Job Object containment is established."""
+    import ctypes
+    from ctypes import wintypes
+
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = wintypes.LONG
+    status = ntdll.NtResumeProcess(wintypes.HANDLE(process._handle))
+    if status != 0:
+        raise OSError(f"NtResumeProcess failed with NTSTATUS 0x{status & 0xffffffff:08x}")
+
+
+def _stop_unattached_windows_process(process: subprocess.Popen[str]) -> None:
+    """Stop and confirm a suspended worker that could not join its Job Object."""
+    try:
+        process.kill()
+        process.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+        raise _MutationProcessTerminationError(
+            f"cannot confirm unattached Windows mutation process stopped: {exc}",
+            tree_stopped=False,
+        ) from exc
+
+
+def _close_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    job = getattr(process, "_fettle_job_handle", None)
+    if job is None:
+        raise OSError("mutation process has no Windows job object")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    termination_error = None
+    try:
+        if not kernel32.TerminateJobObject(job, 1):
+            termination_error = ctypes.WinError(ctypes.get_last_error())
+        wait_result = kernel32.WaitForSingleObject(job, 10_000)
+        if wait_result != 0:  # WAIT_OBJECT_0
+            if wait_result == 0x00000102:  # WAIT_TIMEOUT
+                raise _MutationProcessTerminationError(
+                    "timed out terminating Windows mutation job", tree_stopped=False,
+                )
+            raise _MutationProcessTerminationError(
+                f"cannot confirm Windows mutation job termination: {ctypes.WinError(ctypes.get_last_error())}",
+                tree_stopped=False,
+            )
+        if termination_error is not None:
+            raise _MutationProcessTerminationError(
+                f"Windows mutation job termination failed: {termination_error}", tree_stopped=True,
+            )
+    finally:
+        kernel32.CloseHandle(job)
+        process._fettle_job_handle = None  # type: ignore[attr-defined]
 
 
 def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set[str]]:
@@ -108,21 +237,21 @@ def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
     termination_error = None
+    tree_stopped = False
     try:
         if os.name == "posix":
             # The session leader can exit before its workers. Kill the process
             # group even after the leader has returned so no descendant can
             # mutate source after the integrity check.
             os.killpg(process.pid, signal.SIGKILL)
-        elif process.poll() is None:  # pragma: no cover - exercised by the Windows workflow
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                capture_output=True, timeout=10,
-            )
+        else:  # pragma: no cover - exercised by the Windows workflow
+            _close_windows_kill_job(process)
+        tree_stopped = True
     except ProcessLookupError:
-        pass
+        tree_stopped = True
     except (OSError, subprocess.SubprocessError) as exc:
         termination_error = exc
+        tree_stopped = getattr(exc, "tree_stopped", False)
         try:
             process.kill()
         except ProcessLookupError:
@@ -138,7 +267,8 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         process.wait()
     if termination_error is not None:
         raise _MutationProcessTerminationError(
-            f"mutation process tree termination failed: {termination_error}"
+            f"mutation process tree termination failed: {termination_error}",
+            tree_stopped=tree_stopped,
         ) from termination_error
 
 
@@ -203,7 +333,7 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
     except OSError as exc:
         raise OSError(f"cannot capture pre-run mutation source manifest: {exc}") from exc
     popen_kwargs = {"start_new_session": True} if os.name == "posix" else {
-        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _WINDOWS_CREATE_SUSPENDED,
     }
     stdout = stderr = ""
     prior_handlers = {}
@@ -227,12 +357,31 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
                 argv, cwd=root, env=_ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, **popen_kwargs,
             )
+            if os.name == "nt":  # pragma: no cover - exercised by the Windows workflow
+                try:
+                    _attach_windows_kill_job(process)
+                    _resume_windows_process(process)
+                except (OSError, KeyboardInterrupt) as exc:
+                    try:
+                        if getattr(process, "_fettle_job_handle", None) is not None:
+                            _close_windows_kill_job(process)
+                        else:
+                            _stop_unattached_windows_process(process)
+                    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as cleanup_exc:
+                        if isinstance(cleanup_exc, _MutationProcessTerminationError):
+                            raise cleanup_exc from exc
+                        raise _MutationProcessTerminationError(
+                            f"Windows mutation startup cleanup failed: {cleanup_exc}",
+                            tree_stopped=False,
+                        ) from exc
+                    raise
         except (OSError, KeyboardInterrupt) as exc:
-            integrity_error, _ = _restore_mutation_source_state(
-                root, before_sources, before_residue,
-            )
-            if integrity_error:
-                raise OSError("mutation source integrity failure: " + integrity_error) from exc
+            if getattr(exc, "tree_stopped", True):
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue,
+                )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from exc
             raise
         if interrupted_by is not None:
             _terminate_process_tree(process)
@@ -252,13 +401,15 @@ def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.
                     termination_error = cleanup_exc
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
-            integrity_error, _ = _restore_mutation_source_state(
-                root, before_sources, before_residue,
-            )
-            if integrity_error:
-                raise OSError("mutation source integrity failure: " + integrity_error) from (
-                    termination_error or exc
+            tree_stopped = termination_error is None or termination_error.tree_stopped
+            if tree_stopped:
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue,
                 )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from (
+                        termination_error or exc
+                    )
             if termination_error is not None:
                 raise termination_error from exc
             if isinstance(exc, subprocess.TimeoutExpired):

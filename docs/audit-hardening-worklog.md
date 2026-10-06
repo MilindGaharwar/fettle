@@ -1,5 +1,127 @@
 # Audit Hardening Worklog
 
+## 2026-10-06: Bounded Lifecycle Verification Stopped Non-Pass
+
+Candidate `cdbb9176b89757b7e0ca75aca053b3eb94f93409`, tree
+`b6bcf7057f86aa2425dee4d9189a9ec7c5b054dc`, was frozen in detached durable
+worktrees for the authorized pinned-mutmut 2.5.1 lifecycle verification. The
+predeclared scope was one partition containing the configured five-line chunks
+`86-95`, `106-110`, `121-125`, `136-145`, and `246-265` in
+`fettle/mutation_test.py`. Its mapped tests were `tests/test_mutation_test.py`,
+`tests/test_assurance_integrity.py`, and `tests/test_ci.py`. Preflight and replay
+budgets were 1,800 and 1,740 seconds. Each stage was limited to one attempt, with
+stopping required for timeout, termination failure, source/mode drift, residue,
+malformed evidence, or any identity mismatch.
+
+The first setup package stopped before preflight because its fresh virtual
+environment resolved Python 3.14.6 instead of the validated Python 3.12.13
+runtime. It ran no partition attempt, produced no mutation cache, and remains
+preserved at `external://local/fettle-lifecycle-verification-20261006`.
+
+A separate corrected setup used the exact validated Python 3.12.13 interpreter,
+Darwin-arm64, and mutmut 2.5.1. All 234 mapped tests passed. Its one authorized
+preflight invocation then exited 1 before mutmut generation because the
+predeclared manifest encoded numeric `schema_version: 1`, while the candidate
+requires string `schema_version: "1"`. The empty stdout, traceback, command,
+exit, runtime, plan, manifest, and before/after source state are preserved at
+`external://local/fettle-lifecycle-evidence-20261006-02`. Source bytes, modes,
+revision, and tree matched before/after; Git remained clean and neither native
+nor Fettle mutation cache existed. Replay was not started and no retry occurred.
+This is an evidence-harness construction error, not a candidate behavior result.
+It is non-pass and supplies no mutation outcome.
+
+The current workflow's PR path remains intentionally unknown/non-pass. A later
+successful local narrow replay would validate only the changed lifecycle ranges;
+it would not by itself satisfy the required PR mutation check. That check needs
+accepted exact-SHA evidence through the workflow's retained preflight/execution
+contract. The current workflow replay selector does not include all newly changed
+lifecycle chunks, while calibration executes the full manifest set. Therefore the
+existing workflow requires a full preflight plus full calibration for a green
+required check unless a separately reviewed workflow change adds an exact
+changed-lifecycle replay acceptance path. Neither option is authorized here.
+
+An independent automated reviewer then assessed the full exact-candidate Milestone
+A package, not only the lifecycle repair. It confirmed AH00-AH06 within their
+documented scopes and returned `REJECT / FIX FIRST` for AH07. Exact-head CI run
+`37307731437` passed substantive Linux, macOS, Windows bridge, test, coverage,
+lint, self-scan, and installed-wheel jobs; strict completion and its aggregate
+failed as designed because AH07 is incomplete. Mutation run `37307731522`
+correctly retained unknown/non-pass evidence without executing qualification.
+No human acceptance or human-usability validation occurred.
+
+### Authorized follow-up
+
+A third fresh package used candidate writers and validators rather than a
+hand-encoded manifest. Candidate `write_partition_manifests` serialized the
+schema, revision, ranges, and digest; `load_partition_manifest` accepted it; an
+independent assertion matched the exact ten predeclared ranges. Python 3.12.13,
+Darwin-arm64, mutmut 2.5.1, the dependency freeze, commit/tree, external evidence
+path, and 234 passing mapped tests were confirmed before execution.
+
+The only preflight attempt completed with 19 generated and canonicalized
+fingerprints and zero collisions. The normal preflight aggregate then rejected
+the narrow ranges because that API intentionally requires full line coverage of
+all configured source paths. This was corrected as a pre-execution staging issue
+without rerunning preflight: a narrow retained envelope was built using the
+candidate canonical-digest function, and a no-execution stub proved that every
+replay identity check reached the execution boundary with all 19 fingerprints.
+
+The only real replay attempt then stopped on its first fingerprint with
+`mutmut exited with 1`; its checkpoint is `incomplete`, has zero outcomes, one
+execution-error attempt, and 19 pending fingerprints. Replay was not retried or
+resumed. The candidate source bytes, modes, revision, tree, and Git state remained
+unchanged. The native SQLite preflight cache remains preserved with the package at
+`external://local/fettle-lifecycle-evidence-20261006-03`. The harness discarded
+the fatal mutmut subprocess output and retained only the numeric exit, which is a
+separate diagnostic-evidence defect. Narrow mutation verification remains non-pass.
+
+Windows code inspection separately proved that candidate `cdbb9176` calls
+`taskkill /T` only while the process leader is alive, so normal-leader-exit
+descendants are not contained on Windows. An uncommitted minimal Job Object repair
+and focused tests are prepared. Local focused tests, Ruff, and Fettle pass; actual
+Windows execution and current-diff independent approval remain pending. This
+repair is not part of the frozen narrow candidate and is not committed or pushed.
+
+The first Job Object draft was then independently rejected. It started the worker
+before assigning the job, leaving a child-spawn race; its attach-failure path could
+therefore miss descendants; it could restore while failed termination remained
+unconfirmed; and one newly enabled Windows test hard-coded a POSIX mode. No commit
+or Windows dispatch followed that rejection. The revised uncommitted draft uses
+`CREATE_SUSPENDED`, assigns the Job Object before `NtResumeProcess`, cleans up
+attach/resume failures, propagates whether the tree is positively stopped, skips
+restoration when it is not, captures the platform's initial mode, and adds Windows
+timeout/restoration coverage. It passes 241 focused local tests and Ruff. Fresh
+independent review and actual Windows execution remain pending.
+
+A subsequent exact-diff review rejected that revision because `KeyboardInterrupt`
+during job attachment/resume could bypass cleanup, failed unattached-process cleanup
+was implicitly treated as stopped, and the Windows selector omitted three lifecycle
+failure contracts. The next uncommitted revision catches both operational errors
+and interrupts across the whole attachment transaction, uses the process's retained
+job handle as attachment authority, bounds and verifies unattached cleanup, records
+unconfirmed cleanup with `tree_stopped=false`, and restores only after confirmed
+termination. The Windows selector now includes every `windows_` lifecycle test,
+unconfirmed-tree restoration, timeout restoration, and normal-leader-exit behavior.
+It passes 244 focused tests, Ruff, and the 419-file Fettle scan. A final independent
+review of this exact revision and actual Windows execution remain pending.
+
+The final independent automated review of that exact current diff returned
+**APPROVE** with no severity-ranked findings. It verified suspended creation,
+assignment before resume, retained handle ownership, bounded unattached cleanup,
+interrupt cleanup, `tree_stopped=false` propagation, restoration suppression when
+termination is unconfirmed, normal-leader-exit cleanup, Win32 declarations, CI
+selection, and unchanged POSIX process-group behavior. Its limitation is explicit:
+native Win32 calls, nested runner-job behavior, real timing, and descendant
+termination still require execution on `windows-latest`. No commit or push has yet
+occurred.
+
+During no-provider-call host command validation, the operator ran `claude auth
+status` and `opencode auth list` in addition to version/help commands. These
+returned login/provider metadata only; no credential value was displayed, no
+provider was invoked, and no charge occurred. Because the authorization prohibited
+authentication access, this metadata inspection exceeded the intended boundary.
+No further authentication inspection was performed.
+
 ## 2026-10-05: Durable AH03 Qualification And Independent Verification
 
 Standing authorization covered one exact run-05 execution, separate read-only
