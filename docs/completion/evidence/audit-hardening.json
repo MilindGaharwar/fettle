@@ -10,7 +10,7 @@
     "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
     "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
     "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
-    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 on candidate 8c865a18 was cancelled after estimated usage exceeded its practical budget; only 13 of 256 shard reports completed, 29 were tool errors, 5 were malformed, and 209 were missing. The demonstrated source-integrity defect is mutmut 2.5.1 replacing executable quality_scan.py mode 0755 with a consumed backup's 0644 mode after restoring exact bytes. A scope-bound mode-only lifecycle repair passed exact-shard local diagnostics, 4368 tests, Ruff, actionlint, Fettle all-source scan, independent code-and-evidence review, and exact-SHA remote diagnostic canary 37448719286 on repair SHA bdae922. The canary's authoritative check correctly remained unknown/non-pass and cannot qualify. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 was cancelled and incomplete. Its repaired exact-SHA canary 37448719286 passed but remained non-qualifying. One-attempt staged preflight 37464324954 on frozen candidate 0fc41fd and orchestration 891562b passed all eight wave-1 shards and manifest-bound validation (629 canonical details, zero collisions), then failed closed because GitHub returned reversed timestamps for skipped jobs. Waves 2 and 3 did not execute; the run is permanently non-pass and cannot be retried or substituted. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
   },
   "dispatcher_baseline": {
     "role": "diagnostic baseline, not final qualification",
@@ -187,6 +187,30 @@
       "retained_root": "external://local/audit-hardening/candidate-bdae922/canary-37448719286",
       "remote_expiry": "2027-01-04",
       "qualification_effect": "none; diagnostic only"
+    },
+    "staged_preflight": {
+      "run_id": 37464324954,
+      "run_attempt": 1,
+      "candidate": "0fc41fdfee13e09f4bda3dc5eee177030882aa36",
+      "orchestration": "891562ba4909b16e6252a0eb7e8674393f43eba0",
+      "status": "failed closed after accepted wave 1; permanently non-pass",
+      "wave_1": {
+        "shards": [8, 27, 28, 37, 48, 50, 51, 53],
+        "reports": 8,
+        "generated": 629,
+        "canonicalized": 629,
+        "collisions": 0,
+        "validation_sha256": "42d41dc932b33506b7b8e4d2d2d597b40192285aac2e76fc9aa9891d4bccaec4"
+      },
+      "stop_reason": "GitHub job metadata contained skipped jobs whose completed_at preceded started_at by one second; budget evidence was contradictory and therefore non-pass",
+      "diagnostic_non_skipped_runner_minutes": 11.97,
+      "wave_2_executed": false,
+      "wave_3_executed": false,
+      "qualification_effect": "none; incomplete preflight",
+      "plan_sha256": "1e712595d7c6adccbd17aa284eaf4821afda82c9b61798022eeb6ea861190294",
+      "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-37464324954",
+      "retained_corpus_sha256": "d0740e31f2a51fe37d829cf39db7923ada054f450e4edc77e47939ddd9e82a4e",
+      "checksum_index_sha256": "2254c5f0492427712a97a0bc55d1fdba3ebb16cfa7b69182394e71297af5c9f5"
     },
     "decision_packet": "docs/completion/evidence/preflight-37438948512-incident.md"
   },

@@ -60,6 +60,25 @@ the need for post-wave-3 and final budget enforcement, an explicit first-attempt
 guard, and fail-closed untimed-job handling; all were added. Preflight had not been
 dispatched at this boundary.
 
+### Terminal staged-preflight result
+
+Orchestration commit `891562ba4909b16e6252a0eb7e8674393f43eba0` was pushed and
+run `37464324954`, attempt 1, was dispatched against frozen executable candidate
+`0fc41fdfee13e09f4bda3dc5eee177030882aa36`. All eight wave-1 shard jobs passed, as
+did durable manifest-bound read-back: exact shards `8, 27, 28, 37, 48, 50, 51, 53`,
+629 canonical details, and zero collisions.
+
+The wave-1 budget gate then failed closed because GitHub returned reversed timestamps
+for skipped jobs. Two already-skipped jobs in the gate response had `completed_at`
+one second before `started_at`; a later skipped wave-2 placeholder showed the same
+provider behavior. Diagnostic accounting that excludes skipped jobs was 11.97
+runner-minutes, below the 20-minute launch ceiling, but contradictory evidence remains
+non-pass. Waves 2 and 3 never executed. The run will not be retried, resumed, or
+substituted, and no calibration is authorized. The 268 downloaded evidence files and
+metadata are preserved under
+`external://local/audit-hardening/candidate-0fc41fd/staged-preflight-37464324954` with
+corpus digest `d0740e31f2a51fe37d829cf39db7923ada054f450e4edc77e47939ddd9e82a4e`.
+
 ## 2026-10-06: Bounded Lifecycle Verification Stopped Non-Pass
 
 Candidate `cdbb9176b89757b7e0ca75aca053b3eb94f93409`, tree

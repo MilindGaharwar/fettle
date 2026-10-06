@@ -114,3 +114,38 @@ The one-shard remote diagnostic canary is complete and supports readiness for a 
 Additional authorization now needed: approval of the staged preflight plan, explicit per-wave runner-minute budget/headroom, and exact repair candidate SHA. Calibration remains disabled until a complete accepted preflight and separate calibration authorization. Portable evidence and authenticated host work retain their independent approval requirements.
 
 Milestone A and AH07 remain incomplete.
+
+## Staged preflight 37464324954 stopped after wave 1
+
+The authorized one-attempt staged preflight ran on 2026-10-06 with frozen executable
+candidate `0fc41fdfee13e09f4bda3dc5eee177030882aa36` and separate orchestration commit
+`891562ba4909b16e6252a0eb7e8674393f43eba0`. Run `37464324954`, attempt 1, froze a
+complete 256-manifest topology and executed only wave 1: shards `8, 27, 28, 37, 48,
+50, 51, 53` at maximum parallelism 2.
+
+All eight shard jobs and the manifest-bound wave validator passed. Independent local
+read-back reproduced exact membership, 629 generated/canonicalized details, zero
+collisions, and the validator's eight report digests. The plan SHA-256 is
+`1e712595d7c6adccbd17aa284eaf4821afda82c9b61798022eeb6ea861190294`; the accepted
+wave-1 validation SHA-256 is
+`42d41dc932b33506b7b8e4d2d2d597b40192285aac2e76fc9aa9891d4bccaec4`.
+
+The budget gate then rejected GitHub's job-timing response as contradictory. Three
+skipped jobs reported `completed_at` one second before `started_at`: job
+`112271421433` (`mutation (complete detail corpus)`), job `112271422153` (`mutation
+evidence`), and the subsequently skipped wave-2 placeholder job `112274836403`.
+The first two contradictory records were present in the budget gate's response. The
+gate therefore returned `staged preflight rejected: job timing is reversed` and exit
+2. Excluding skipped jobs only for diagnosis, non-skipped observed usage was 11.97
+runner-minutes, below the 20-minute wave-2 launch ceiling. That diagnostic does not
+override the fail-closed decision.
+
+Waves 2 and 3, full-corpus aggregation, and final staged evidence did not execute.
+The run is permanently non-pass and will not be retried, resumed, or substituted.
+Calibration remains blocked. The downloaded plan, 256 manifests, eight reports,
+wave validation, API metadata, and gate log are retained at
+`external://local/audit-hardening/candidate-0fc41fd/staged-preflight-37464324954`.
+The downloaded 268-file corpus digest is
+`d0740e31f2a51fe37d829cf39db7923ada054f450e4edc77e47939ddd9e82a4e`; the complete
+preserved-tree checksum index has SHA-256
+`2254c5f0492427712a97a0bc55d1fdba3ebb16cfa7b69182394e71297af5c9f5`.
