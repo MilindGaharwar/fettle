@@ -37,6 +37,22 @@ API_FAILURE_JOB_INVENTORY = {
     112723867329: ("Read back durable consolidated evidence", "skipped"),
     112723868751: ("Reconcile terminal cumulative budget", "skipped"),
 }
+API_RETRY_FAILURE_RUN_ID = "37602471821"
+API_RETRY_FAILURE_ORCHESTRATION_SHA = "ca03ead001d32e021617bd5484d8eb9c41febdd2"
+API_RETRY_FAILURE_JOB_ID = 112729922474
+API_RETRY_FAILURE_JOB_INVENTORY = {
+    112729922474: ("Validate immutable preflight sources", "failure"),
+    112730607196: ("Reconcile cumulative launch budget", "skipped"),
+    112730608209: ("mutation (continuation shard ${{ needs.prepare.outputs.canary_shard }} canary)", "skipped"),
+    112730608442: ("Validate canary artifact handoff", "skipped"),
+    112730609923: ("Reconcile post-canary completion budget", "skipped"),
+    112730610775: ("mutation (continuation shard ${{ matrix.shard }})", "skipped"),
+    112730611220: ("Monitor failures and operational ceiling", "skipped"),
+    112730612003: ("Validate complete continuation wave", "skipped"),
+    112730612484: ("Read back durable consolidated evidence", "skipped"),
+    112730612783: ("Aggregate exact 256-report corpus", "skipped"),
+    112730613280: ("Reconcile terminal cumulative budget", "skipped"),
+}
 LAYOUT_FAILURE_ORCHESTRATION_SHA = "dba75c1684ab7557721d93eac0eb58683dd9517b"
 LAYOUT_FAILURE_SHARD_JOBS = {
     112688644249: 35,
@@ -151,6 +167,8 @@ def validate_source_exception(
     layout_logs_dir: Path,
     api_run_path: Path, api_jobs_path: Path, api_artifacts_path: Path,
     api_failure_log_path: Path,
+    api_retry_run_path: Path, api_retry_jobs_path: Path,
+    api_retry_artifacts_path: Path, api_retry_failure_log_path: Path,
     prior_runs_path: Path, plan_path: Path, manifests_dir: Path,
     wave_1_reports: Path, wave_2_reports: Path, wave_1_validation: Path,
     wave_2_validation: Path,
@@ -318,7 +336,16 @@ def validate_source_exception(
     api_inventory = {
         job.get("id"): (job.get("name"), job.get("conclusion")) for job in api_jobs
     }
-    api_started = [job for job in api_jobs if job.get("runner_id")]
+    api_started = [
+        job for job in api_jobs
+        if isinstance(job.get("runner_id"), int)
+        and not isinstance(job.get("runner_id"), bool)
+        and job["runner_id"] > 0
+    ]
+    api_prepare = next(
+        (job for job in api_jobs if job.get("id") == API_FAILURE_JOB_ID), {},
+    )
+    api_skipped = [job for job in api_jobs if job.get("id") != API_FAILURE_JOB_ID]
     if (
         len(api_inventory) != len(api_jobs)
         or api_inventory != API_FAILURE_JOB_INVENTORY
@@ -326,9 +353,12 @@ def validate_source_exception(
         or api_started[0].get("id") != API_FAILURE_JOB_ID
         or api_started[0].get("name") != "Validate immutable preflight sources"
         or api_started[0].get("conclusion") != "failure"
+        or not isinstance(api_prepare.get("steps"), list)
+        or not api_prepare["steps"]
         or any(str(job.get("run_id")) != API_FAILURE_RUN_ID
                or str(job.get("run_attempt")) != "1" for job in api_jobs)
-        or any(job.get("steps") for job in api_jobs if job.get("id") != API_FAILURE_JOB_ID)
+        or any(job.get("runner_id") is not None or job.get("steps") != []
+               for job in api_skipped)
     ):
         raise ValueError("prior API failure execution inventory is incomplete or conflicting")
     api_failed_steps = [
@@ -345,9 +375,81 @@ def validate_source_exception(
     if _load(api_artifacts_path) != [{"total_count": 0, "artifacts": []}]:
         raise ValueError("prior API failure unexpectedly retained artifacts")
 
+    api_retry_run = _load(api_retry_run_path)
+    if not isinstance(api_retry_run, dict) or (
+        str(api_retry_run.get("id")) != API_RETRY_FAILURE_RUN_ID
+        or str(api_retry_run.get("run_attempt")) != "1"
+        or api_retry_run.get("head_sha") != API_RETRY_FAILURE_ORCHESTRATION_SHA
+        or api_retry_run.get("head_branch") != RECOVERY_BRANCH
+        or api_retry_run.get("event") != "workflow_dispatch"
+        or api_retry_run.get("status") != "completed"
+        or api_retry_run.get("conclusion") != "failure"
+    ):
+        raise ValueError("prior API retry run is not the authorized pre-execution failure")
+    api_retry_jobs = _jobs(api_retry_jobs_path)
+    api_retry_inventory = {
+        job.get("id"): (job.get("name"), job.get("conclusion"))
+        for job in api_retry_jobs
+    }
+    api_retry_started = [
+        job for job in api_retry_jobs
+        if isinstance(job.get("runner_id"), int)
+        and not isinstance(job.get("runner_id"), bool)
+        and job["runner_id"] > 0
+    ]
+    api_retry_prepare = next(
+        (job for job in api_retry_jobs if job.get("id") == API_RETRY_FAILURE_JOB_ID),
+        {},
+    )
+    api_retry_skipped = [
+        job for job in api_retry_jobs if job.get("id") != API_RETRY_FAILURE_JOB_ID
+    ]
+    if (
+        len(api_retry_inventory) != len(api_retry_jobs)
+        or api_retry_inventory != API_RETRY_FAILURE_JOB_INVENTORY
+        or len(api_retry_started) != 1
+        or api_retry_started[0].get("id") != API_RETRY_FAILURE_JOB_ID
+        or not isinstance(api_retry_prepare.get("steps"), list)
+        or not api_retry_prepare["steps"]
+        or any(str(job.get("run_id")) != API_RETRY_FAILURE_RUN_ID
+               or str(job.get("run_attempt")) != "1" for job in api_retry_jobs)
+        or any(job.get("runner_id") is not None or job.get("steps") != []
+               for job in api_retry_skipped)
+        or any(str(job.get("name", "")).startswith("mutation (continuation shard ")
+               and job.get("conclusion") != "skipped" for job in api_retry_jobs)
+    ):
+        raise ValueError("prior API retry inventory is incomplete or conflicting")
+    api_retry_failed_steps = [
+        step for step in api_retry_started[0].get("steps", [])
+        if step.get("conclusion") == "failure"
+    ]
+    api_retry_log = api_retry_failure_log_path.read_text(encoding="utf-8")
+    if (
+        [step.get("name") for step in api_retry_failed_steps]
+        != ["Capture pinned failed source and prove no prior recovery"]
+        or api_retry_log.count("Server Error (HTTP 502)") != 3
+    ):
+        raise ValueError("prior API retry is not the bounded evidence-fetch failure")
+    if _load(api_retry_artifacts_path) != [{"total_count": 0, "artifacts": []}]:
+        raise ValueError("prior API retry unexpectedly retained artifacts")
+
     prior_runs = _load(prior_runs_path)
     if not isinstance(prior_runs, list) or any(not isinstance(item, dict) for item in prior_runs):
         raise ValueError("prior continuation run inventory is malformed")
+    expected_api_history = {
+        API_FAILURE_RUN_ID: API_FAILURE_ORCHESTRATION_SHA,
+        API_RETRY_FAILURE_RUN_ID: API_RETRY_FAILURE_ORCHESTRATION_SHA,
+    }
+    for run_id, head_sha in expected_api_history.items():
+        matches = [item for item in prior_runs if str(item.get("databaseId")) == run_id]
+        if len(matches) != 1 or (
+            matches[0].get("headBranch") != RECOVERY_BRANCH
+            or matches[0].get("headSha") != head_sha
+            or matches[0].get("event") != "workflow_dispatch"
+            or matches[0].get("status") != "completed"
+            or matches[0].get("conclusion") != "failure"
+        ):
+            raise ValueError("prior API failure run history is missing or conflicting")
     competing = [
         item for item in prior_runs
         if str(item.get("databaseId")) != current_run_id
@@ -358,6 +460,7 @@ def validate_source_exception(
         )
         and str(item.get("databaseId")) not in {
             SETUP_RUN_ID, LAYOUT_FAILURE_RUN_ID, API_FAILURE_RUN_ID,
+            API_RETRY_FAILURE_RUN_ID,
         }
     ]
     if competing:
@@ -467,6 +570,12 @@ def validate_source_exception(
             "mutation_jobs_executed": 0,
             "verdict": "permanently failed; evidence-fetch HTTP 502",
         },
+        "prior_api_retry_failure": {
+            "run_id": API_RETRY_FAILURE_RUN_ID,
+            "run_attempt": "1",
+            "mutation_jobs_executed": 0,
+            "verdict": "permanently failed; bounded evidence-fetch HTTP 502",
+        },
         "plan_sha256": SOURCE_PLAN_SHA256,
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "retained_reports": len(found), "validations": validations,
@@ -492,6 +601,10 @@ def main() -> int:
     parser.add_argument("--api-jobs", type=Path, required=True)
     parser.add_argument("--api-artifacts", type=Path, required=True)
     parser.add_argument("--api-failure-log", type=Path, required=True)
+    parser.add_argument("--api-retry-run", type=Path, required=True)
+    parser.add_argument("--api-retry-jobs", type=Path, required=True)
+    parser.add_argument("--api-retry-artifacts", type=Path, required=True)
+    parser.add_argument("--api-retry-failure-log", type=Path, required=True)
     parser.add_argument("--prior-runs", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--manifests", type=Path, required=True)
@@ -515,6 +628,10 @@ def main() -> int:
             api_run_path=args.api_run, api_jobs_path=args.api_jobs,
             api_artifacts_path=args.api_artifacts,
             api_failure_log_path=args.api_failure_log,
+            api_retry_run_path=args.api_retry_run,
+            api_retry_jobs_path=args.api_retry_jobs,
+            api_retry_artifacts_path=args.api_retry_artifacts,
+            api_retry_failure_log_path=args.api_retry_failure_log,
             plan_path=args.plan, manifests_dir=args.manifests,
             wave_1_reports=args.wave_1_reports, wave_2_reports=args.wave_2_reports,
             wave_1_validation=args.wave_1_validation,

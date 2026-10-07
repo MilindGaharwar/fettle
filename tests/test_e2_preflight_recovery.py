@@ -123,6 +123,17 @@ def _fixture(monkeypatch, tmp_path):
             "conclusion": "failure",
         }] if job_id == recovery.API_FAILURE_JOB_ID else [],
     } for job_id, (name, conclusion) in recovery.API_FAILURE_JOB_INVENTORY.items()]
+    api_retry_jobs = [{
+        "id": job_id, "run_id": int(recovery.API_RETRY_FAILURE_RUN_ID),
+        "run_attempt": 1, "name": name,
+        "runner_id": 1 if job_id == recovery.API_RETRY_FAILURE_JOB_ID else None,
+        "status": "completed",
+        "conclusion": conclusion,
+        "steps": [{
+            "name": "Capture pinned failed source and prove no prior recovery",
+            "conclusion": "failure",
+        }] if job_id == recovery.API_RETRY_FAILURE_JOB_ID else [],
+    } for job_id, (name, conclusion) in recovery.API_RETRY_FAILURE_JOB_INVENTORY.items()]
     artifacts = []
     for wave in ("wave-1", "wave-2"):
         for index in recovery.WAVES[wave]:
@@ -186,7 +197,37 @@ def _fixture(monkeypatch, tmp_path):
             tmp_path / "api-artifacts.json", [{"total_count": 0, "artifacts": []}],
         ),
         "api_failure_log_path": tmp_path / "api-failure.log",
-        "prior_runs_path": _write(tmp_path / "prior-runs.json", []),
+        "api_retry_run_path": _write(tmp_path / "api-retry-run.json", {
+            "id": int(recovery.API_RETRY_FAILURE_RUN_ID), "run_attempt": 1,
+            "head_sha": recovery.API_RETRY_FAILURE_ORCHESTRATION_SHA,
+            "head_branch": recovery.RECOVERY_BRANCH, "event": "workflow_dispatch",
+            "status": "completed", "conclusion": "failure",
+        }),
+        "api_retry_jobs_path": _write(
+            tmp_path / "api-retry-jobs.json",
+            [{"total_count": len(api_retry_jobs), "jobs": api_retry_jobs}],
+        ),
+        "api_retry_artifacts_path": _write(
+            tmp_path / "api-retry-artifacts.json",
+            [{"total_count": 0, "artifacts": []}],
+        ),
+        "api_retry_failure_log_path": tmp_path / "api-retry-failure.log",
+        "prior_runs_path": _write(tmp_path / "prior-runs.json", [
+            {
+                "databaseId": int(recovery.API_FAILURE_RUN_ID),
+                "headBranch": recovery.RECOVERY_BRANCH,
+                "headSha": recovery.API_FAILURE_ORCHESTRATION_SHA,
+                "event": "workflow_dispatch", "status": "completed",
+                "conclusion": "failure",
+            },
+            {
+                "databaseId": int(recovery.API_RETRY_FAILURE_RUN_ID),
+                "headBranch": recovery.RECOVERY_BRANCH,
+                "headSha": recovery.API_RETRY_FAILURE_ORCHESTRATION_SHA,
+                "event": "workflow_dispatch", "status": "completed",
+                "conclusion": "failure",
+            },
+        ]),
         "plan_path": plan_path, "manifests_dir": manifests,
         "wave_1_reports": reports["wave-1"], "wave_2_reports": reports["wave-2"],
         "wave_1_validation": validation_paths["wave-1"],
@@ -197,6 +238,9 @@ def _fixture(monkeypatch, tmp_path):
         "failed to run git: fatal: not a git repository (or any of the parent directories): .git\n",
     )
     paths["api_failure_log_path"].write_text("gh: Server Error (HTTP 502)\n")
+    paths["api_retry_failure_log_path"].write_text(
+        "gh: Server Error (HTTP 502)\n" * 3,
+    )
     return paths
 
 
@@ -216,7 +260,10 @@ def test_authorized_handoff_recovery_accepts_only_pinned_complete_source(monkeyp
      "manifest", "prior-wave-3", "wave-3-artifact", "other-failure", "failure-log",
      "setup-run", "setup-origin", "setup-step", "setup-execution", "setup-artifact",
      "setup-missing", "setup-extra", "malformed-setup", "malformed-prior-run",
-     "layout-started", "layout-log", "layout-artifact", "api-job"],
+     "layout-started", "layout-log", "layout-artifact", "api-job",
+     "api-retry-job", "api-retry-canary", "api-retry-count",
+     "api-retry-history", "api-retry-history-conflict", "api-retry-history-duplicate",
+     "api-retry-runner", "api-retry-steps", "api-runner", "api-steps"],
 )
 def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, tmp_path, fault):
     paths = _fixture(monkeypatch, tmp_path)
@@ -306,6 +353,49 @@ def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, 
     elif fault == "api-job":
         pages = json.loads(paths["api_jobs_path"].read_text())
         pages[0]["jobs"][1]["name"] = "renamed skipped job"
+        paths["api_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-retry-job":
+        pages = json.loads(paths["api_retry_jobs_path"].read_text())
+        pages[0]["jobs"][1]["conclusion"] = "success"
+        paths["api_retry_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-retry-canary":
+        pages = json.loads(paths["api_retry_jobs_path"].read_text())
+        canary = next(
+            job for job in pages[0]["jobs"]
+            if job["name"].endswith("canary)")
+        )
+        canary["conclusion"] = "success"
+        paths["api_retry_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-retry-count":
+        paths["api_retry_failure_log_path"].write_text(
+            "gh: Server Error (HTTP 502)\n" * 2,
+        )
+    elif fault == "api-retry-history":
+        runs = json.loads(paths["prior_runs_path"].read_text())
+        paths["prior_runs_path"].write_text(json.dumps(runs[:-1]))
+    elif fault == "api-retry-history-conflict":
+        runs = json.loads(paths["prior_runs_path"].read_text())
+        runs[-1]["headSha"] = "0" * 40
+        paths["prior_runs_path"].write_text(json.dumps(runs))
+    elif fault == "api-retry-history-duplicate":
+        runs = json.loads(paths["prior_runs_path"].read_text())
+        runs.append(runs[-1])
+        paths["prior_runs_path"].write_text(json.dumps(runs))
+    elif fault == "api-retry-runner":
+        pages = json.loads(paths["api_retry_jobs_path"].read_text())
+        pages[0]["jobs"][1]["runner_id"] = 0
+        paths["api_retry_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-retry-steps":
+        pages = json.loads(paths["api_retry_jobs_path"].read_text())
+        pages[0]["jobs"][1]["steps"] = None
+        paths["api_retry_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-runner":
+        pages = json.loads(paths["api_jobs_path"].read_text())
+        pages[0]["jobs"][1]["runner_id"] = 0
+        paths["api_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "api-steps":
+        pages = json.loads(paths["api_jobs_path"].read_text())
+        pages[0]["jobs"][1]["steps"] = None
         paths["api_jobs_path"].write_text(json.dumps(pages))
     else:
         paths["source_failure_log_path"].write_text("different error\n")

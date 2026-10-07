@@ -477,6 +477,7 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "--source source-jobs.json 37573662156 1" in workflow
     assert "--source setup-jobs.json 37580393007 1" in workflow
     assert "--source layout-jobs.json 37589782905 1" in workflow
+    assert "--source api-retry-jobs.json 37602471821 1" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
     assert 'operator_authorized_dispatch_recovery' not in workflow
@@ -494,6 +495,7 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "--remaining-shards 215" in workflow
     assert '--canary-minutes "$(cat canary-minutes.txt)"' in workflow
     assert "cp staged-plan/layout-jobs.json layout-jobs.json" in workflow
+    assert "cp staged-plan/api-retry-jobs.json api-retry-jobs.json" in workflow
     assert "for delay in 0 5 15" in workflow
     assert 'mv "$output.tmp" "$output"' in workflow
     assert jobs["remaining-shards"]["needs"] == [
@@ -583,6 +585,7 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--source source-jobs.json 37573662156 1" in continuation
     assert "--source setup-jobs.json 37580393007 1" in continuation
     assert "--source layout-jobs.json 37589782905 1" in continuation
+    assert continuation.count("--source api-retry-jobs.json 37602471821 1") == 5
     assert "--next-wave wave-3 --output launch-budget.json" in continuation
     budget_source = (Path(PLUGIN_DIR) / "fettle/staged_preflight.py").read_text()
     assert '"execution_cutoff": 700' in budget_source
