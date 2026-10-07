@@ -241,12 +241,16 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
+          cp staged-plan/layout-jobs.json layout-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
+          python control/scripts/staged_preflight.py recovery-budget-projection \
+            --accounting launch-budget.json --remaining-shards 216 \
+            --output launch-projection.json
       - name: Validate downloaded manifest handoff before execution
         run: |
           python control/scripts/staged_preflight.py validate-manifest-handoff \
@@ -282,6 +286,7 @@ jobs:
             current-jobs.json
             current-runs.json
             launch-budget.json
+            launch-projection.json
             manifest-handoff.json
           retention-days: 90
           if-no-files-found: error
@@ -409,10 +414,75 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  remaining-launch-gate:
+    name: Reconcile post-canary completion budget
+    if: github.run_attempt == 1
+    needs: [prepare, canary-readback]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: control
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-continuation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-plan
+      - name: Recalculate completion reserve from observed canary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
+          cp staged-plan/layout-jobs.json layout-jobs.json
+          python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
+            --source source-jobs.json 37573662156 1 \
+            --source setup-jobs.json 37580393007 1 \
+            --source layout-jobs.json 37589782905 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
+            --next-wave complete --output post-canary-accounting.json
+          python - <<'PY'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+
+          pages = json.loads(Path("current-jobs.json").read_text())
+          jobs = [job for page in pages for job in page["jobs"]]
+          canaries = [job for job in jobs if job.get("name") == "mutation (continuation shard 35 canary)"]
+          if len(canaries) != 1 or canaries[0].get("conclusion") != "success":
+              raise SystemExit("successful canary timing is missing or ambiguous")
+          canary = canaries[0]
+          start = datetime.fromisoformat(canary["started_at"].replace("Z", "+00:00"))
+          end = datetime.fromisoformat(canary["completed_at"].replace("Z", "+00:00"))
+          minutes = (end - start).total_seconds() / 60
+          if minutes <= 0:
+              raise SystemExit("successful canary timing is malformed")
+          Path("canary-minutes.txt").write_text(f"{minutes:.6f}\n")
+          PY
+          python control/scripts/staged_preflight.py recovery-budget-projection \
+            --accounting post-canary-accounting.json --remaining-shards 215 \
+            --canary-minutes "$(cat canary-minutes.txt)" \
+            --output remaining-launch-projection.json
+      - name: Retain post-canary budget decision
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-continuation-remaining-launch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source-jobs.json
+            setup-jobs.json
+            layout-jobs.json
+            current-jobs.json
+            post-canary-accounting.json
+            canary-minutes.txt
+            remaining-launch-projection.json
+          retention-days: 90
+          if-no-files-found: error
+
   remaining-shards:
     name: mutation (continuation shard ${{ matrix.shard }})
     if: github.run_attempt == 1
-    needs: [prepare, canary-readback]
+    needs: [prepare, canary-readback, remaining-launch-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -454,7 +524,7 @@ jobs:
   monitor:
     name: Monitor failures and operational ceiling
     if: github.run_attempt == 1
-    needs: canary-readback
+    needs: [canary-readback, remaining-launch-gate]
     runs-on: ubuntu-latest
     permissions:
       actions: write

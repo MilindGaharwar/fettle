@@ -460,10 +460,10 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     workflow = workflow_path.read_text()
     jobs = yaml.safe_load(workflow)["jobs"]
 
-    assert set(jobs) == {"prepare", "launch-gate", "canary", "canary-readback", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
+    assert set(jobs) == {"prepare", "launch-gate", "canary", "canary-readback", "remaining-launch-gate", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
     assert all(job.get("if") == "github.run_attempt == 1" for job in jobs.values())
     assert sum("strategy" in job for job in jobs.values()) == 1
-    assert len(jobs) - 2 == 8
+    assert len(jobs) - 2 == 9
     assert workflow.count("strategy:") == 1
     assert workflow.count("matrix:") == 3  # strategy plus two prepare output keys
     assert "max-parallel: 8" in workflow
@@ -489,6 +489,14 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "Validate producer manifest layout before matrix expansion" in workflow
     assert "Validate downloaded manifest handoff before execution" in workflow
     assert "Validate downloaded canary through final consumer contract" in workflow
+    assert "Recalculate completion reserve from observed canary" in workflow
+    assert "--remaining-shards 216" in workflow
+    assert "--remaining-shards 215" in workflow
+    assert '--canary-minutes "$(cat canary-minutes.txt)"' in workflow
+    assert "cp staged-plan/layout-jobs.json layout-jobs.json" in workflow
+    assert jobs["remaining-shards"]["needs"] == [
+        "prepare", "canary-readback", "remaining-launch-gate",
+    ]
     assert "max-parallel: 8" in workflow
     assert "matrix:" not in workflow.split("\n  canary:", 1)[1].split("\n  canary-readback:", 1)[0]
     assert "staged-wave-1" not in workflow
@@ -505,7 +513,7 @@ def test_recovery_workflow_embedded_python_compiles_from_actual_yaml():
             if isinstance(script, str):
                 blocks.extend(_embedded_python_blocks(script))
 
-    assert len(blocks) == 8
+    assert len(blocks) == 9
     for index, source in enumerate(blocks):
         compile(source, f"workflow-python-{index}", "exec")
 
@@ -574,10 +582,12 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--source setup-jobs.json 37580393007 1" in continuation
     assert "--source layout-jobs.json 37589782905 1" in continuation
     assert "--next-wave wave-3 --output launch-budget.json" in continuation
-    assert '"launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700}' in (
-        Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
-    ).read_text()
-    assert continuation.count("--next-wave complete") == 2
+    budget_source = (Path(PLUGIN_DIR) / "fettle/staged_preflight.py").read_text()
+    assert '"execution_cutoff": 700' in budget_source
+    assert '"wave-3": 281.2' in budget_source
+    assert '"retained_successful_shard_p95_minutes": 1.8' in budget_source
+    assert '"support_completion_reserve_minutes": 30' in budget_source
+    assert continuation.count("--next-wave complete") == 3
     assert "billing_authority" not in first
     assert "Operational ceiling, not a guaranteed provider billing cap." not in first
 

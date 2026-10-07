@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import platform
 import re
 import sys
@@ -94,10 +95,21 @@ BUDGET = {
     "wave_allowances": {"wave-1": 20, "wave-2": 75, "wave-3": 500},
     "orchestration_and_aggregation": 105,
     "cancellation_headroom": 100,
-    "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700},
+    "execution_cutoff": 700,
+    "recovery_projection": {
+        "retained_successful_shard_p95_minutes": 1.8,
+        "support_completion_reserve_minutes": 30,
+        "canary_and_remaining_shards": 216,
+    },
+    "launch_ceiling": {
+        "wave-2": 20,
+        "wave-3": 281.2,
+        "aggregate": 595,
+        "complete": 700,
+    },
 }
 MATRIX_JOB_LIMIT = 256
-CONTINUATION_SUPPORT_JOBS = 8
+CONTINUATION_SUPPORT_JOBS = 9
 
 
 def _digest(value: object) -> str:
@@ -1089,6 +1101,52 @@ def combine_accounting_sources(sources: list[tuple[Path, str, str]], now: dateti
     }
 
 
+def project_recovery_completion(
+    accounting: dict,
+    *,
+    remaining_shards: int,
+    observed_canary_minutes: float | None = None,
+) -> dict:
+    """Require enough measured budget to finish while retaining cancellation headroom."""
+    observed = accounting.get("estimated_runner_minutes")
+    if (
+        not isinstance(observed, (int, float))
+        or isinstance(observed, bool)
+        or not math.isfinite(observed)
+        or observed < 0
+    ):
+        raise ValueError("observed runner-minute accounting is missing or malformed")
+    if not isinstance(remaining_shards, int) or isinstance(remaining_shards, bool) or not 0 <= remaining_shards <= 216:
+        raise ValueError("remaining shard count is outside the recovery topology")
+    projection = BUDGET["recovery_projection"]
+    retained_p95 = projection["retained_successful_shard_p95_minutes"]
+    if observed_canary_minutes is not None and (
+        not isinstance(observed_canary_minutes, (int, float))
+        or isinstance(observed_canary_minutes, bool)
+        or not math.isfinite(observed_canary_minutes)
+        or observed_canary_minutes <= 0
+    ):
+        raise ValueError("observed canary timing is missing or malformed")
+    per_shard = max(retained_p95, observed_canary_minutes or retained_p95)
+    shard_reserve = round(per_shard * remaining_shards, 2)
+    support_reserve = projection["support_completion_reserve_minutes"]
+    projected_completion = round(observed + shard_reserve + support_reserve, 2)
+    cutoff = BUDGET["execution_cutoff"]
+    return {
+        **accounting,
+        "remaining_shards": remaining_shards,
+        "retained_successful_shard_p95_minutes": retained_p95,
+        "observed_canary_minutes": observed_canary_minutes,
+        "projected_per_shard_minutes": per_shard,
+        "projected_shard_minutes": shard_reserve,
+        "support_completion_reserve_minutes": support_reserve,
+        "projected_completion_runner_minutes": projected_completion,
+        "execution_cutoff": cutoff,
+        "completion_headroom_minutes": round(cutoff - projected_completion, 2),
+        "passed": projected_completion <= cutoff,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1103,6 +1161,7 @@ def main() -> int:
     handoff = sub.add_parser("validate-manifest-handoff")
     report_handoff = sub.add_parser("validate-report-handoff")
     budget = sub.add_parser("budget-gate")
+    projection = sub.add_parser("recovery-budget-projection")
     for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
@@ -1188,6 +1247,10 @@ def main() -> int:
         choices=("wave-2", "wave-3", "aggregate", "complete"),
         required=True,
     )
+    projection.add_argument("--accounting", type=Path, required=True)
+    projection.add_argument("--remaining-shards", type=int, required=True)
+    projection.add_argument("--canary-minutes", type=float)
+    projection.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "budget-gate":
@@ -1237,6 +1300,14 @@ def main() -> int:
                 "next_wave": args.next_wave,
                 "passed": observed <= ceiling,
             }
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0 if result["passed"] else 2
+        if args.command == "recovery-budget-projection":
+            result = project_recovery_completion(
+                _load_json(args.accounting),
+                remaining_shards=args.remaining_shards,
+                observed_canary_minutes=args.canary_minutes,
+            )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0 if result["passed"] else 2
         if args.command == "recovery-record":

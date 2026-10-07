@@ -27,6 +27,7 @@ from scripts.staged_preflight import (
     build_recovery_record,
     combine_accounting_sources,
     observed_runner_minutes,
+    project_recovery_completion,
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
@@ -45,13 +46,19 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 800
     assert BUDGET["launch_ceiling"] == {
         "wave-2": 20,
-        "wave-3": 95,
+        "wave-3": 281.2,
         "aggregate": 595,
         "complete": 700,
     }
+    assert BUDGET["execution_cutoff"] + BUDGET["cancellation_headroom"] == 800
+    assert BUDGET["recovery_projection"] == {
+        "retained_successful_shard_p95_minutes": 1.8,
+        "support_completion_reserve_minutes": 30,
+        "canary_and_remaining_shards": 216,
+    }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
-        "matrix_jobs": 216, "support_jobs": 8, "expanded_jobs": 224, "platform_limit": 256,
+        "matrix_jobs": 216, "support_jobs": 9, "expanded_jobs": 225, "platform_limit": 256,
     }
 
 
@@ -517,11 +524,56 @@ def test_accounting_rejects_boolean_integer_fields(tmp_path, field):
 
 @pytest.mark.parametrize(
     ("used", "next_wave", "passed"),
-    [(20, "wave-2", True), (20.01, "wave-2", False), (95, "wave-3", True),
+    [(20, "wave-2", True), (20.01, "wave-2", False),
+     (281.2, "wave-3", True), (281.21, "wave-3", False),
      (595, "aggregate", True), (700, "complete", True), (700.01, "complete", False)],
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
+
+
+@pytest.mark.parametrize(
+    ("observed", "remaining", "canary", "passed", "projected"),
+    [
+        (146.93, 216, None, True, 565.73),
+        (281.2, 216, None, True, 700.0),
+        (281.21, 216, None, False, 700.01),
+        (150, 215, 2.0, True, 610.0),
+        (250, 215, 2.0, False, 710.0),
+    ],
+)
+def test_recovery_projection_requires_completion_headroom(
+    observed, remaining, canary, passed, projected,
+):
+    result = project_recovery_completion(
+        {"estimated_runner_minutes": observed},
+        remaining_shards=remaining,
+        observed_canary_minutes=canary,
+    )
+
+    assert result["passed"] is passed
+    assert result["projected_completion_runner_minutes"] == projected
+    assert result["completion_headroom_minutes"] == round(700 - projected, 2)
+
+
+@pytest.mark.parametrize(
+    ("accounting", "remaining", "canary"),
+    [
+        ({}, 216, None),
+        ({"estimated_runner_minutes": None}, 216, None),
+        ({"estimated_runner_minutes": float("nan")}, 216, None),
+        ({"estimated_runner_minutes": float("inf")}, 216, None),
+        ({"estimated_runner_minutes": 146.93}, 217, None),
+        ({"estimated_runner_minutes": 146.93}, 215, 0),
+        ({"estimated_runner_minutes": 146.93}, 215, float("nan")),
+        ({"estimated_runner_minutes": 146.93}, 215, float("inf")),
+    ],
+)
+def test_recovery_projection_rejects_unknown_accounting(accounting, remaining, canary):
+    with pytest.raises(ValueError):
+        project_recovery_completion(
+            accounting, remaining_shards=remaining, observed_canary_minutes=canary,
+        )
 
 
 def test_combined_accounting_charges_original_and_recovery_attempts(tmp_path):
@@ -732,7 +784,7 @@ def test_continuation_plan_revalidates_both_runs_and_schedules_only_wave_three(
     )
 
     assert result["execution_wave"]["shards"] == WAVES["wave-3"]
-    assert result["topology"]["expanded_jobs"] == 224
+    assert result["topology"]["expanded_jobs"] == 225
     assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
     assert result["origin_assignment"]["0"]["run_id"] == RECOVERY_RUN_ID
     assert result["origin_assignment"]["35"]["run_id"] == "39"
