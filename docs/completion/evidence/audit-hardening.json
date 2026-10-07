@@ -10,7 +10,7 @@
     "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
     "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
     "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
-    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 was cancelled and incomplete. Its repaired exact-SHA canary 37448719286 passed but remained non-qualifying. Staged runs 37464324954 and 37476889333 accepted 8 and 32 reports respectively but remain permanently non-pass. The separately authorized continuation 37550308775 ran all 216 remaining shards exactly once and every shard succeeded, but its validation support job failed before reading reports because uv was not installed; workflow aggregation, durable readback, and terminal accounting were skipped. A read-only offline reconstruction accepted exactly 256 reports with 45,432 canonical details and zero collisions, but is diagnostic-only and does not convert the failed workflow run into accepted qualification evidence. No retry is authorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, and aggregation-only recovery 37560100974 accepted an exact 256-report preflight for candidate 0fc41fd with 45,432 canonical details and zero collisions. Source runs 37464324954, 37476889333, and 37550308775 retain their failed verdicts. Preflight acceptance does not satisfy mutation qualification: exact-candidate calibration remains unexecuted and unauthorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
   },
   "dispatcher_baseline": {
     "role": "diagnostic baseline, not final qualification",
@@ -258,7 +258,30 @@
           },
           "qualification_effect": "none; workflow validation and durable aggregate readback did not complete",
           "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-continuation-37550308775",
-          "checksum_index_sha256": "6873b92230399c8d99c0e118ea9fef3f426f1dbab820db0035160e8fb841cc79"
+          "checksum_index_sha256": "6873b92230399c8d99c0e118ea9fef3f426f1dbab820db0035160e8fb841cc79",
+          "aggregation_recovery": {
+            "run_id": 37560100974,
+            "run_attempt": 1,
+            "orchestration": "2a0bae35cf56a54b4d7ed1dc9747b2a145fabad1",
+            "status": "completed; passed; accepted linked preflight aggregate",
+            "mutation_jobs": 0,
+            "support_jobs": 3,
+            "reports": 256,
+            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216},
+            "generated": 45432,
+            "canonicalized": 45432,
+            "collisions": 0,
+            "corpus_digest": "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2",
+            "aggregate_sha256": "dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173",
+            "terminal_cumulative_operational_minutes": 351.11,
+            "recovery_operational_minutes": 0.84,
+            "completion_ceiling_minutes": 640,
+            "billing_authority": false,
+            "readback_checksum_index_sha256": "c9d3e125fa785aad1be32f7ff710e8ebeaca2ad10f07d858865393a5917beeb7",
+            "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-aggregation-recovery-37560100974",
+            "checksum_index_sha256": "c0695508dca55ec288548da1f76959ff796d1d38415349a622eef186aa798e60",
+            "qualification_effect": "preflight accepted; authoritative calibration remains required"
+          }
         }
       }
     },

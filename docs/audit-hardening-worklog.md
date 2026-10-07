@@ -1,5 +1,37 @@
 # Audit Hardening Worklog
 
+## 2026-10-07: Aggregation-Only Recovery Accepted
+
+Run `37560100974`, attempt 1, orchestration `2a0bae3`, completed successfully with
+three support jobs and no mutation or shard job. It imported exact attempt-1 artifacts
+from runs `37464324954` (8 reports), `37476889333` (32 reports), and `37550308775`
+(216 reports). Exact workflow verdicts, orchestration SHAs, artifact inventories,
+candidate, Python 3.12.14 runtime, dependency and policy hashes, manifests, report
+membership, and report contents passed validation.
+
+The unchanged authoritative aggregator accepted exactly 256 unique reports for
+candidate `0fc41fdfee13e09f4bda3dc5eee177030882aa36`: 45,432 generated and
+canonicalized details, zero collisions, corpus digest
+`155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2`,
+and aggregate SHA-256
+`dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173`.
+The result exactly matched the earlier diagnostic reconstruction without relaxing or
+overriding any rule.
+
+GitHub retained the aggregate package, independent readback, and terminal accounting.
+An additional local readback verified the package checksum index independently; both
+readbacks produced checksum-index SHA-256
+`c9d3e125fa785aad1be32f7ff710e8ebeaca2ad10f07d858865393a5917beeb7`.
+Cumulative operational usage is 351.11 minutes: 11.97 + 45.13 + 293.17 + 0.84,
+within the original 740-minute allocation. The external evidence index SHA-256 is
+`c0695508dca55ec288548da1f76959ff796d1d38415349a622eef186aa798e60`.
+
+Runs `37464324954`, `37476889333`, and `37550308775` remain permanently non-pass.
+The accepted aggregation-recovery record links them and does not rewrite their
+verdicts. Preflight is complete; calibration, authoritative qualification, merge,
+release, and milestone completion remain unexecuted and unauthorized. The calibration
+proposal is retained in `docs/exact-candidate-calibration-proposal.md`.
+
 ## 2026-10-07: Continuation Run 37550308775 Failed Closed After Shard Completion
 
 The one authorized continuation ran once at orchestration commit `9a66e4f`, attempt
