@@ -433,6 +433,40 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "staged-wave-2" not in workflow
 
 
+def test_aggregation_recovery_cannot_execute_mutations_and_retains_failure_evidence():
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-aggregation-recovery.yml"
+    workflow = workflow_path.read_text()
+    jobs = yaml.safe_load(workflow)["jobs"]
+
+    assert set(jobs) == {"aggregate", "readback", "terminal-accounting"}
+    assert all("strategy" not in job for job in jobs.values())
+    assert "matrix:" not in workflow
+    assert "--preflight-manifest" not in workflow
+    assert "--prepare-manifests" not in workflow
+    assert "mutation run" not in workflow
+    assert "--aggregate-preflight corpus --shard-count 256" in workflow
+    assert "github.event.head_commit.message == 'Execute preflight aggregation recovery'" in workflow
+    assert workflow.count("run-id: 37464324954") == 1
+    assert workflow.count("run-id: 37476889333") == 1
+    assert workflow.count("run-id: 37550308775") == 2
+    assert "if: always()\n    needs: aggregate" in workflow
+    assert "if: always()\n    needs: [aggregate, readback]" in workflow
+    assert "--source jobs-37550308775.json 37550308775 1" in workflow
+    assert "generated\"] == aggregate[\"canonicalized\"] == 45432" in workflow
+    assert "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2" in workflow
+
+
+def test_continuation_support_jobs_install_every_invoked_tool():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    validation = workflow.split("\n  validate:", 1)[1].split("\n  aggregate:", 1)[0]
+    aggregate = workflow.split("\n  aggregate:", 1)[1].split("\n  readback:", 1)[0]
+
+    assert "astral-sh/setup-uv@" in validation
+    assert "uv venv --python 3.12.14" in validation
+    assert "astral-sh/setup-uv@" in aggregate
+    assert "uv venv --python 3.12.14" in aggregate
+
+
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 

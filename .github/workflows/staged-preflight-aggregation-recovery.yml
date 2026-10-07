@@ -1,0 +1,305 @@
+name: Staged preflight aggregation recovery
+
+on:
+  push:
+    branches:
+      - audit/hardening-integration-20261005
+    paths:
+      - .github/workflows/staged-preflight-aggregation-recovery.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    if: github.event.head_commit.message == 'Execute preflight aggregation recovery'
+    name: Validate and aggregate retained preflight reports
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject rerun attempts
+        run: test "$GITHUB_RUN_ATTEMPT" = "1"
+      - name: Check out orchestration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: control
+      - name: Check out frozen executable candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          path: candidate
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: Install pinned aggregation dependencies
+        working-directory: candidate
+        run: |
+          uv venv --python 3.12.14
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - name: Record command and execution identities
+        run: |
+          mkdir -p recovery-evidence reports/source reports/recovery reports/continuation
+          git -C candidate rev-parse HEAD > recovery-evidence/candidate-sha.txt
+          git -C control rev-parse HEAD > recovery-evidence/orchestration-sha.txt
+          python --version > recovery-evidence/python-version.txt 2>&1
+          cat > recovery-evidence/commands.txt <<'EOF'
+          validate-wave wave-1, wave-2, and wave-3
+          aggregate-preflight reports --shard-count 256
+          aggregation-recovery-record
+          budget-gate with runs 37464324954, 37476889333, 37550308775, and this run
+          EOF
+          test "$(cat recovery-evidence/candidate-sha.txt)" = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
+          test "$(cat recovery-evidence/orchestration-sha.txt)" = "$GITHUB_SHA"
+          test "$(cat recovery-evidence/python-version.txt)" = "Python 3.12.14"
+      - name: Verify immutable historical workflow verdicts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for run in 37464324954 37476889333 37550308775; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" > "recovery-evidence/run-$run.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected = {
+              37464324954: "891562ba4909b16e6252a0eb7e8674393f43eba0",
+              37476889333: "7da9f5d07884a5913bdbc38f28b34344c839a9f9",
+              37550308775: "9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807",
+          }
+          for run_id, head_sha in expected.items():
+              run = json.loads(Path(f"recovery-evidence/run-{run_id}.json").read_text())
+              assert run["id"] == run_id and run["run_attempt"] == 1
+              assert run["status"] == "completed" and run["conclusion"] == "failure"
+              assert run["head_sha"] == head_sha and run["head_branch"] == "audit/hardening-integration-20261005"
+          assert json.loads(Path("recovery-evidence/run-37464324954.json").read_text())["path"] == ".github/workflows/mutation.yml"
+          assert json.loads(Path("recovery-evidence/run-37476889333.json").read_text())["path"] == ".github/workflows/mutation.yml"
+          assert json.loads(Path("recovery-evidence/run-37550308775.json").read_text())["path"] == ".github/workflows/staged-preflight-continuation.yml"
+          PY
+      - name: Download immutable continuation plan and manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-continuation-plan-37550308775-1
+          path: retained-plan
+          run-id: 37550308775
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download eight immutable source reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-preflight-wave-1-37464324954-1-*
+          path: reports/source
+          run-id: 37464324954
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download 32 immutable recovery reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-preflight-wave-2-37476889333-1-*
+          path: reports/recovery
+          run-id: 37476889333
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download 216 immutable continuation reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-preflight-wave-3-37550308775-1-*
+          path: reports/continuation
+          run-id: 37550308775
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pin continuation artifact inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/artifacts?per_page=100" > recovery-evidence/source-artifacts.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37476889333/artifacts?per_page=100" > recovery-evidence/recovery-artifacts.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37550308775/artifacts?per_page=100" > recovery-evidence/continuation-artifacts.json
+          candidate/.venv/bin/python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "control")
+          from fettle.staged_preflight import (
+              RECOVERY_ARTIFACT_INVENTORY_SHA256, SOURCE_ARTIFACT_INVENTORY_SHA256,
+              WAVES, validate_continuation_artifacts, validate_report_artifacts,
+          )
+          source = validate_report_artifacts(
+              Path("recovery-evidence/source-artifacts.json"), "37464324954", "1",
+              WAVES["wave-1"], SOURCE_ARTIFACT_INVENTORY_SHA256,
+          )
+          recovery = validate_report_artifacts(
+              Path("recovery-evidence/recovery-artifacts.json"), "37476889333", "2",
+              WAVES["wave-2"], RECOVERY_ARTIFACT_INVENTORY_SHA256,
+          )
+          continuation = validate_continuation_artifacts(
+              Path("recovery-evidence/continuation-artifacts.json")
+          )
+          assert [source["reports"], recovery["reports"], continuation["reports"]] == [8, 32, 216]
+          PY
+      - name: Validate all three immutable report waves
+        run: |
+          set -o pipefail
+          candidate/.venv/bin/python control/scripts/staged_preflight.py validate-wave --root candidate \
+            --manifests retained-plan/mutation-manifests --plan retained-plan/source-plan/staged-preflight-plan.json \
+            --reports reports/source --wave wave-1 --repository "$GITHUB_REPOSITORY" \
+            --workflow "Mutation evidence" --workflow-ref "MilindGaharwar/fettle/.github/workflows/mutation.yml@refs/heads/audit/hardening-integration-20261005" \
+            --orchestration-sha 891562ba4909b16e6252a0eb7e8674393f43eba0 --run-id 37464324954 --run-attempt 1 \
+            --output recovery-evidence/wave-1-validation.json 2>&1 | tee recovery-evidence/wave-1-validation.log
+          candidate/.venv/bin/python control/scripts/staged_preflight.py validate-wave --root candidate \
+            --manifests retained-plan/mutation-manifests --plan retained-plan/recovery-plan/staged-preflight-plan.json \
+            --reports reports/recovery --wave wave-2 --repository "$GITHUB_REPOSITORY" \
+            --workflow "Mutation evidence" --workflow-ref "MilindGaharwar/fettle/.github/workflows/mutation.yml@refs/heads/audit/hardening-integration-20261005" \
+            --orchestration-sha 7da9f5d07884a5913bdbc38f28b34344c839a9f9 --run-id 37476889333 --run-attempt 1 \
+            --output recovery-evidence/wave-2-validation.json 2>&1 | tee recovery-evidence/wave-2-validation.log
+          candidate/.venv/bin/python control/scripts/staged_preflight.py validate-wave --root candidate \
+            --manifests retained-plan/mutation-manifests --plan retained-plan/continuation-plan.json \
+            --reports reports/continuation --wave wave-3 --repository "$GITHUB_REPOSITORY" \
+            --workflow "Staged preflight continuation" --workflow-ref "MilindGaharwar/fettle/.github/workflows/staged-preflight-continuation.yml@refs/heads/audit/hardening-integration-20261005" \
+            --orchestration-sha 9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807 --run-id 37550308775 --run-attempt 1 \
+            --output recovery-evidence/wave-3-validation.json 2>&1 | tee recovery-evidence/wave-3-validation.log
+      - name: Assemble collision-free report corpus
+        run: |
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          expected = {
+              "source": {8, 27, 28, 37, 48, 50, 51, 53},
+              "recovery": set(range(35)) - {8, 27, 28},
+              "continuation": set(range(35, 256)) - {37, 48, 50, 51, 53},
+          }
+          output = Path("corpus")
+          output.mkdir()
+          seen = set()
+          for directory, required in expected.items():
+              paths = sorted(Path("reports", directory).rglob("mutation-preflight.json"))
+              indexes = [json.loads(path.read_text())["shard_index"] for path in paths]
+              assert len(indexes) == len(set(indexes)) and set(indexes) == required
+              assert seen.isdisjoint(indexes)
+              for index, path in zip(indexes, paths):
+                  target = output / str(index)
+                  target.mkdir()
+                  shutil.copy2(path, target / "mutation-preflight.json")
+              seen.update(indexes)
+          assert seen == set(range(256))
+          PY
+      - name: Run unchanged authoritative aggregator and linked validator
+        run: |
+          set -o pipefail
+          candidate/.venv/bin/python -m fettle.mutation_test --root candidate \
+            --aggregate-preflight corpus --shard-count 256 --json \
+            > recovery-evidence/mutation-preflight.json 2> >(tee recovery-evidence/aggregate.log >&2)
+          candidate/.venv/bin/python control/scripts/staged_preflight.py aggregation-recovery-record \
+            --plan retained-plan/continuation-plan.json --reports corpus \
+            --aggregate recovery-evidence/mutation-preflight.json \
+            --source-artifact-inventory recovery-evidence/source-artifacts.json \
+            --recovery-artifact-inventory recovery-evidence/recovery-artifacts.json \
+            --continuation-artifact-inventory recovery-evidence/continuation-artifacts.json \
+            --repository "$GITHUB_REPOSITORY" --workflow "$GITHUB_WORKFLOW" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output recovery-evidence/aggregation-recovery-record.json \
+            2>&1 | tee recovery-evidence/linked-validation.log
+      - name: Build retained package and checksum index
+        if: always()
+        run: |
+          cp -R retained-plan/mutation-manifests recovery-evidence/manifests
+          mkdir -p recovery-evidence/plans/source recovery-evidence/plans/recovery
+          cp retained-plan/continuation-plan.json recovery-evidence/plans/
+          cp retained-plan/source-plan/staged-preflight-plan.json recovery-evidence/plans/source/
+          cp retained-plan/recovery-plan/staged-preflight-plan.json recovery-evidence/plans/recovery/
+          cp retained-plan/recovery-validation/wave-2-validation.json recovery-evidence/plans/recovery/
+          cp -R reports recovery-evidence/reports
+          (cd recovery-evidence && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS)
+          mv SHA256SUMS recovery-evidence/SHA256SUMS
+      - name: Retain aggregation recovery package
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-aggregation-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: recovery-evidence
+          retention-days: 90
+          if-no-files-found: error
+
+  readback:
+    if: always()
+    needs: aggregate
+    name: Independently read back retained aggregate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download retained recovery package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-preflight-aggregation-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retained
+      - name: Verify package hashes and accepted aggregate
+        run: |
+          set -o pipefail
+          (cd retained && sha256sum --check SHA256SUMS) | tee readback.log
+          python - <<'PY'
+          import hashlib, json
+          from collections import Counter
+          from pathlib import Path
+          aggregate = json.loads(Path("retained/mutation-preflight.json").read_text())
+          record = json.loads(Path("retained/aggregation-recovery-record.json").read_text())
+          assert aggregate["status"] == "completed" and aggregate["passed"] is True
+          assert aggregate["revision"] == "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
+          assert aggregate["shard_count"] == 256
+          assert aggregate["generated"] == aggregate["canonicalized"] == 45432
+          assert aggregate["collisions"] == 0
+          assert aggregate["corpus_digest"] == "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2"
+          assert hashlib.sha256(Path("retained/mutation-preflight.json").read_bytes()).hexdigest() == record["aggregate_sha256"]
+          assert Counter(item["run_id"] for item in record["origins"].values()) == {
+              "37464324954": 8, "37476889333": 32, "37550308775": 216,
+          }
+          assert record["historical_verdicts"] == {
+              "37464324954": "permanently non-pass",
+              "37476889333": "permanently non-pass",
+              "37550308775": "permanently non-pass",
+          }
+          Path("readback-sha256.txt").write_text(hashlib.sha256(Path("retained/SHA256SUMS").read_bytes()).hexdigest() + "\n")
+          PY
+      - name: Retain independent readback
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-aggregation-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            readback.log
+            readback-sha256.txt
+          retention-days: 90
+          if-no-files-found: warn
+
+  terminal-accounting:
+    if: always()
+    needs: [aggregate, readback]
+    name: Retain terminal four-run accounting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out orchestration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: control
+      - name: Reconcile all operational usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for run in 37464324954 37476889333 37550308775; do
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$run/attempts/1/jobs?per_page=100" > "jobs-$run.json"
+          done
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
+          python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
+            --source jobs-37464324954.json 37464324954 1 \
+            --source jobs-37476889333.json 37476889333 1 \
+            --source jobs-37550308775.json 37550308775 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt 1 --next-wave complete \
+            --output terminal-accounting.json
+      - name: Retain terminal accounting
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-aggregation-accounting-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            jobs-37464324954.json
+            jobs-37476889333.json
+            jobs-37550308775.json
+            current-jobs.json
+            terminal-accounting.json
+          retention-days: 90
+          if-no-files-found: warn

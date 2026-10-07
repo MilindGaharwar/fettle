@@ -272,6 +272,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.14"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install frozen candidate
         working-directory: candidate
         run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .

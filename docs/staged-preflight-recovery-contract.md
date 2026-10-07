@@ -97,3 +97,29 @@ report hashes, and retained validations. Budget gates sum all three attempts aga
 the original 740-minute operational allocation; aggregation launches at 595 minutes
 or less and completion must remain at 640 minutes or less, preserving 100 minutes of
 cancellation headroom. Both historical runs remain permanently non-pass.
+
+## Aggregation-only recovery
+
+Run `37550308775`, attempt 1 completed all 216 remaining shard jobs successfully but
+failed before validation because the validation support job invoked `uv` without the
+repository's pinned `astral-sh/setup-uv` action. The aggregation-only recovery contains
+no matrix, manifest preparation, preflight execution, or mutation generation command.
+It uses the established pinned Python 3.12.14, setup-uv, and hash-locked mutation
+requirements path only for validation and aggregation.
+
+The recovery imports exactly 8, 32, and 216 reports from runs `37464324954`,
+`37476889333`, and `37550308775`, all attempt 1. It requires each historical workflow
+to remain completed/failure at its fixed orchestration SHA, validates exact artifact
+inventories and report content against the retained manifests, then invokes the
+unchanged complete-corpus aggregator. The aggregate must independently reproduce
+45,432 generated and canonicalized details, zero collisions, and corpus digest
+`155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2`;
+a discrepancy is a failure, not an override.
+
+The aggregate job retains inputs, manifests, commands, logs, results, and a checksum
+index even when validation fails. Separate always-run readback and terminal-accounting
+jobs preserve failure evidence and charge the three historical attempts plus recovery
+overhead against the original 740-minute operational budget. A successful record links
+all failed historical runs without changing their verdicts. It is preflight evidence
+only and cannot satisfy the authoritative mutation qualification check before a
+separately authorized exact-candidate calibration.

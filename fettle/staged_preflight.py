@@ -34,6 +34,14 @@ RECOVERY_RUN_ID = "37476889333"
 RECOVERY_ORCHESTRATION_SHA = "7da9f5d07884a5913bdbc38f28b34344c839a9f9"
 RECOVERY_PLAN_SHA256 = "6882bd0f2cc46e73e86b44053257f9029e951c41c2d3d5767eb9fc29b0272b99"
 RECOVERY_VALIDATION_SHA256 = "be9720e53a65cd794ceb4d446925359e78d92f18af1afd356ef1334de368d4ee"
+CONTINUATION_RUN_ID = "37550308775"
+CONTINUATION_ORCHESTRATION_SHA = "9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807"
+CONTINUATION_PLAN_SHA256 = "86c92b109a152e9dd456c93b4c453ae0d0381930103f8f94547f53bda341035d"
+CONTINUATION_ARTIFACT_INVENTORY_SHA256 = "ffa3c03d9fc051fb2410c9efdb6b4ca2e7dc08488fb629d74f2ac811e102ac07"
+SOURCE_ARTIFACT_INVENTORY_SHA256 = "17ea66dd5e34d56046e3fcd0e86cf73f919bfe417fa0e57e28fb3195f622948a"
+RECOVERY_ARTIFACT_INVENTORY_SHA256 = "3d0158c0b72fcf622fcd1c7c5239d48229d098a06c1c6f39cbae0ba9fc8cbd6d"
+DIAGNOSTIC_GENERATED = 45432
+DIAGNOSTIC_CORPUS_DIGEST = "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2"
 RECOVERY_REPORT_SHA256 = {
     0: "410373c3a18369b9c1708deaf1d26eb84bc4bc3c6822ad34a1772c6fb2b8c0a5",
     1: "b0892cce8c7503d7870919d1f05ee3f776173619931423d0c22877783a29f752",
@@ -415,6 +423,125 @@ def build_recovery_record(plan_path: Path, reports_dir: Path, aggregate_path: Pa
     }
 
 
+def validate_report_artifacts(
+    artifacts_path: Path,
+    run_id: str,
+    wave: str,
+    expected_shards: list[int],
+    expected_inventory_sha256: str,
+) -> dict:
+    pages = json.loads(artifacts_path.read_text(encoding="utf-8"))
+    if not isinstance(pages, list):
+        pages = [pages]
+    if not pages or any(not isinstance(page, dict) or not isinstance(page.get("artifacts"), list)
+                        for page in pages):
+        raise ValueError("continuation artifact inventory is missing or malformed")
+    artifacts = [artifact for page in pages for artifact in page["artifacts"]]
+    reports = sorted(
+        ({key: artifact.get(key) for key in ("id", "name", "size_in_bytes", "digest", "expired")}
+         for artifact in artifacts
+         if str(artifact.get("name", "")).startswith(
+             f"mutation-preflight-wave-{wave}-{run_id}-1-"
+         )),
+        key=lambda artifact: artifact["name"],
+    )
+    indexes = []
+    for artifact in reports:
+        match = re.fullmatch(
+            rf"mutation-preflight-wave-{wave}-{run_id}-1-(\d+)",
+            str(artifact["name"]),
+        )
+        if (
+            match is None
+            or not isinstance(artifact["id"], int)
+            or isinstance(artifact["id"], bool)
+            or not isinstance(artifact["size_in_bytes"], int)
+            or artifact["size_in_bytes"] <= 0
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact["digest"]))
+            or artifact["expired"] is not False
+        ):
+            raise ValueError("continuation artifact inventory contains malformed evidence")
+        indexes.append(int(match.group(1)))
+    if len(indexes) != len(set(indexes)) or sorted(indexes) != sorted(expected_shards):
+        raise ValueError("report artifact inventory is incomplete or substituted")
+    digest = hashlib.sha256(
+        json.dumps(reports, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if digest != expected_inventory_sha256:
+        raise ValueError("report artifact inventory differs from the authorized input")
+    return {"run_id": run_id, "run_attempt": "1", "reports": len(reports),
+            "inventory_sha256": digest, "artifacts": reports}
+
+
+def validate_continuation_artifacts(artifacts_path: Path) -> dict:
+    return validate_report_artifacts(
+        artifacts_path, CONTINUATION_RUN_ID, "3", WAVES["wave-3"],
+        CONTINUATION_ARTIFACT_INVENTORY_SHA256,
+    )
+
+
+def build_aggregation_recovery_record(
+    plan_path: Path,
+    reports_dir: Path,
+    aggregate_path: Path,
+    source_artifact_inventory_path: Path,
+    recovery_artifact_inventory_path: Path,
+    continuation_artifact_inventory_path: Path,
+    identity: dict,
+) -> dict:
+    if _file_digest(plan_path) != CONTINUATION_PLAN_SHA256:
+        raise ValueError("continuation plan digest differs from the authorized aggregation input")
+    plan = _load_json(plan_path)
+    if (
+        plan.get("mode") != "staged-preflight-continuation"
+        or plan.get("candidate_sha") != FROZEN_CANDIDATE
+        or plan.get("orchestration_sha") != CONTINUATION_ORCHESTRATION_SHA
+        or plan.get("workflow", {}).get("run_id") != CONTINUATION_RUN_ID
+        or plan.get("workflow", {}).get("run_attempt") != "1"
+    ):
+        raise ValueError("continuation plan identity differs from the authorized aggregation input")
+    inventories = {
+        SOURCE_RUN_ID: validate_report_artifacts(
+            source_artifact_inventory_path, SOURCE_RUN_ID, "1", WAVES["wave-1"],
+            SOURCE_ARTIFACT_INVENTORY_SHA256,
+        ),
+        RECOVERY_RUN_ID: validate_report_artifacts(
+            recovery_artifact_inventory_path, RECOVERY_RUN_ID, "2", WAVES["wave-2"],
+            RECOVERY_ARTIFACT_INVENTORY_SHA256,
+        ),
+        CONTINUATION_RUN_ID: validate_continuation_artifacts(
+            continuation_artifact_inventory_path,
+        ),
+    }
+    record = build_recovery_record(plan_path, reports_dir, aggregate_path)
+    aggregate = _load_json(aggregate_path)
+    if (
+        aggregate.get("generated") != DIAGNOSTIC_GENERATED
+        or aggregate.get("canonicalized") != DIAGNOSTIC_GENERATED
+        or aggregate.get("collisions") != 0
+        or aggregate.get("corpus_digest") != DIAGNOSTIC_CORPUS_DIGEST
+    ):
+        raise ValueError("authoritative aggregate differs from the diagnostic reconstruction")
+    record.update({
+        "kind": "staged_preflight_aggregation_recovery",
+        "historical_verdicts": {
+            SOURCE_RUN_ID: "permanently non-pass",
+            RECOVERY_RUN_ID: "permanently non-pass",
+            CONTINUATION_RUN_ID: "permanently non-pass",
+        },
+        "aggregation_recovery_workflow": identity,
+        "artifact_inventories": inventories,
+        "diagnostic_comparison": {
+            "generated": DIAGNOSTIC_GENERATED,
+            "canonicalized": DIAGNOSTIC_GENERATED,
+            "collisions": 0,
+            "corpus_digest": DIAGNOSTIC_CORPUS_DIGEST,
+            "matched": True,
+        },
+    })
+    return record
+
+
 def validate_continuation_topology() -> dict:
     matrix_jobs = len(WAVES["wave-3"])
     expanded_jobs = matrix_jobs + CONTINUATION_SUPPORT_JOBS
@@ -721,6 +848,7 @@ def main() -> int:
     recovery = sub.add_parser("recovery-plan")
     continuation = sub.add_parser("continuation-plan")
     recovery_record = sub.add_parser("recovery-record")
+    aggregation_record = sub.add_parser("aggregation-recovery-record")
     wave = sub.add_parser("validate-wave")
     budget = sub.add_parser("budget-gate")
     for command in (plan, recovery, continuation, wave):
@@ -748,6 +876,18 @@ def main() -> int:
     recovery_record.add_argument("--reports", type=Path, required=True)
     recovery_record.add_argument("--aggregate", type=Path, required=True)
     recovery_record.add_argument("--output", type=Path, required=True)
+    aggregation_record.add_argument("--plan", type=Path, required=True)
+    aggregation_record.add_argument("--reports", type=Path, required=True)
+    aggregation_record.add_argument("--aggregate", type=Path, required=True)
+    aggregation_record.add_argument("--source-artifact-inventory", type=Path, required=True)
+    aggregation_record.add_argument("--recovery-artifact-inventory", type=Path, required=True)
+    aggregation_record.add_argument("--continuation-artifact-inventory", type=Path, required=True)
+    aggregation_record.add_argument("--repository", required=True)
+    aggregation_record.add_argument("--workflow", required=True)
+    aggregation_record.add_argument("--workflow-ref", required=True)
+    aggregation_record.add_argument("--run-id", required=True)
+    aggregation_record.add_argument("--run-attempt", required=True)
+    aggregation_record.add_argument("--output", type=Path, required=True)
     wave.add_argument("--plan", type=Path, required=True)
     wave.add_argument("--reports", type=Path, required=True)
     wave.add_argument("--wave", choices=tuple(WAVES), required=True)
@@ -760,6 +900,7 @@ def main() -> int:
     budget.add_argument("--additional-prior-jobs", type=Path)
     budget.add_argument("--additional-prior-run-id")
     budget.add_argument("--additional-prior-run-attempt")
+    budget.add_argument("--source", nargs=3, action="append", metavar=("JOBS", "RUN_ID", "ATTEMPT"))
     budget.add_argument("--run-id", required=True)
     budget.add_argument("--run-attempt", required=True)
     budget.add_argument("--output", type=Path, required=True)
@@ -771,6 +912,12 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "budget-gate":
+            if args.source and any(value is not None for value in (
+                args.prior_jobs, args.prior_run_id, args.prior_run_attempt,
+                args.additional_prior_jobs, args.additional_prior_run_id,
+                args.additional_prior_run_attempt,
+            )):
+                raise ValueError("repeatable sources cannot be combined with legacy prior sources")
             prior_values = (args.prior_jobs, args.prior_run_id, args.prior_run_attempt)
             additional_values = (args.additional_prior_jobs, args.additional_prior_run_id,
                                  args.additional_prior_run_attempt)
@@ -778,7 +925,11 @@ def main() -> int:
                     or any(value is not None for value in additional_values) and not all(value is not None for value in additional_values)
                     or args.additional_prior_jobs is not None and args.prior_jobs is None):
                 raise ValueError("each prior jobs source, run ID, and run attempt must be supplied together")
-            if args.prior_jobs is None:
+            if args.source:
+                accounting = combine_accounting_sources([
+                    (Path(path), run_id, attempt) for path, run_id, attempt in args.source
+                ] + [(args.jobs, args.run_id, args.run_attempt)])
+            elif args.prior_jobs is None:
                 accounting = account_runner_minutes(
                     args.jobs,
                     expected_run_id=args.run_id,
@@ -811,6 +962,19 @@ def main() -> int:
             return 0 if result["passed"] else 2
         if args.command == "recovery-record":
             result = build_recovery_record(args.plan, args.reports, args.aggregate)
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "aggregation-recovery-record":
+            identity = {
+                "repository": args.repository, "workflow": args.workflow,
+                "workflow_ref": args.workflow_ref, "run_id": args.run_id,
+                "run_attempt": args.run_attempt,
+            }
+            result = build_aggregation_recovery_record(
+                args.plan, args.reports, args.aggregate, args.source_artifact_inventory,
+                args.recovery_artifact_inventory, args.continuation_artifact_inventory,
+                identity,
+            )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0
         identity = {

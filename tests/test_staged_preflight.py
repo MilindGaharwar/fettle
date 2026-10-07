@@ -27,6 +27,7 @@ from scripts.staged_preflight import (
     observed_runner_minutes,
     validate_wave,
     validate_continuation_topology,
+    validate_continuation_artifacts,
 )
 
 
@@ -471,6 +472,19 @@ def test_three_run_accounting_preserves_every_explicit_origin(tmp_path):
     assert [item["expected_run_id"] for item in result["sources"]] == ["37", "38", "39"]
 
 
+def test_four_run_accounting_adds_aggregation_overhead_once(tmp_path):
+    sources = [
+        (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(index, run_id=run_id)]}],
+                    f"{run_id}.json"), str(run_id), "1")
+        for index, run_id in enumerate((37, 38, 39, 40), 1)
+    ]
+
+    result = combine_accounting_sources(sources)
+
+    assert result["estimated_runner_minutes"] == 8
+    assert [item["expected_run_id"] for item in result["sources"]] == ["37", "38", "39", "40"]
+
+
 def test_three_run_accounting_rejects_wrong_middle_origin(tmp_path):
     sources = [
         (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}], "37.json"), "37", "1"),
@@ -480,6 +494,49 @@ def test_three_run_accounting_rejects_wrong_middle_origin(tmp_path):
 
     with pytest.raises(ValueError, match="origin"):
         combine_accounting_sources(sources)
+
+
+def test_continuation_artifact_inventory_is_exact_and_digest_bound(monkeypatch, tmp_path):
+    artifacts = [
+        {"id": index + 1, "name": f"mutation-preflight-wave-3-37550308775-1-{index}",
+         "size_in_bytes": 1, "digest": f"sha256:{index:064x}", "expired": False}
+        for index in WAVES["wave-3"]
+    ]
+    path = tmp_path / "artifacts.json"
+    path.write_text(json.dumps([{"artifacts": artifacts}]))
+    artifacts = sorted(artifacts, key=lambda artifact: artifact["name"])
+    digest = __import__("hashlib").sha256(
+        json.dumps(artifacts, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    monkeypatch.setattr("scripts.staged_preflight.CONTINUATION_ARTIFACT_INVENTORY_SHA256", digest)
+
+    result = validate_continuation_artifacts(path)
+
+    assert result["reports"] == 216
+    assert result["inventory_sha256"] == digest
+
+
+@pytest.mark.parametrize("fault", ["missing", "expired", "digest", "inventory"])
+def test_continuation_artifact_inventory_rejects_conflicts(monkeypatch, tmp_path, fault):
+    artifacts = [
+        {"id": index + 1, "name": f"mutation-preflight-wave-3-37550308775-1-{index}",
+         "size_in_bytes": 1, "digest": f"sha256:{index:064x}", "expired": False}
+        for index in WAVES["wave-3"]
+    ]
+    if fault == "missing":
+        artifacts.pop()
+    elif fault == "expired":
+        artifacts[0]["expired"] = True
+    elif fault == "digest":
+        artifacts[0]["digest"] = "unknown"
+    path = tmp_path / "artifacts.json"
+    path.write_text(json.dumps([{"artifacts": artifacts}]))
+    monkeypatch.setattr(
+        "scripts.staged_preflight.CONTINUATION_ARTIFACT_INVENTORY_SHA256", "0" * 64,
+    )
+
+    with pytest.raises(ValueError):
+        validate_continuation_artifacts(path)
 
 
 def test_combined_accounting_rejects_recovery_attempt_two(tmp_path):
