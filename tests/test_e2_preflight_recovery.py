@@ -65,6 +65,23 @@ def _fixture(monkeypatch, tmp_path):
            "event": "workflow_dispatch",
            "head_branch": "audit/hardening-integration-20261005",
            "status": "completed", "conclusion": "failure"}
+    setup_run = {
+        "id": int(recovery.SETUP_RUN_ID), "run_attempt": 1,
+        "head_sha": "91c72a71fae004c8a23b846cb887d48d467f2e61",
+        "head_branch": recovery.RECOVERY_BRANCH, "event": "workflow_dispatch",
+        "status": "completed", "conclusion": "failure",
+    }
+    setup_jobs = [
+        {
+            "id": job_id, "run_id": int(recovery.SETUP_RUN_ID), "run_attempt": 1,
+            "name": name, "conclusion": conclusion,
+            "steps": [{
+                "name": "Bind candidate and recovery orchestration identities",
+                "conclusion": "failure",
+            }] if job_id == recovery.SETUP_FAILURE_JOB_ID else [],
+        }
+        for job_id, (name, conclusion) in recovery.SETUP_JOB_INVENTORY.items()
+    ]
     artifacts = []
     for wave in ("wave-1", "wave-2"):
         for index in recovery.WAVES[wave]:
@@ -90,6 +107,14 @@ def _fixture(monkeypatch, tmp_path):
         "source_artifacts_path": _write(
             tmp_path / "artifacts.json",
             [{"total_count": len(artifacts), "artifacts": artifacts}],
+        ),
+        "setup_run_path": _write(tmp_path / "setup-run.json", setup_run),
+        "setup_jobs_path": _write(
+            tmp_path / "setup-jobs.json",
+            [{"total_count": len(setup_jobs), "jobs": setup_jobs}],
+        ),
+        "setup_artifacts_path": _write(
+            tmp_path / "setup-artifacts.json", [{"total_count": 0, "artifacts": []}],
         ),
         "prior_runs_path": _write(tmp_path / "prior-runs.json", []),
         "plan_path": plan_path, "manifests_dir": manifests,
@@ -117,7 +142,9 @@ def test_authorized_handoff_recovery_accepts_only_pinned_complete_source(monkeyp
 @pytest.mark.parametrize(
     "fault",
     ["wrong-attempt", "candidate", "missing-report", "altered-report", "duplicate",
-     "manifest", "prior-wave-3", "wave-3-artifact", "other-failure", "failure-log"],
+     "manifest", "prior-wave-3", "wave-3-artifact", "other-failure", "failure-log",
+     "setup-run", "setup-origin", "setup-step", "setup-execution", "setup-artifact",
+     "setup-missing", "setup-extra", "malformed-setup", "malformed-prior-run"],
 )
 def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, tmp_path, fault):
     paths = _fixture(monkeypatch, tmp_path)
@@ -151,6 +178,47 @@ def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, 
                                   "run_attempt": 1, "name": "other", "conclusion": "failure"})
         pages[0]["total_count"] += 1
         paths["source_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "setup-run":
+        setup = json.loads(paths["setup_run_path"].read_text())
+        setup["head_sha"] = "f" * 40
+        paths["setup_run_path"].write_text(json.dumps(setup))
+    elif fault == "setup-origin":
+        pages = json.loads(paths["setup_jobs_path"].read_text())
+        pages[0]["jobs"][0]["run_id"] = 1
+        paths["setup_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "setup-step":
+        pages = json.loads(paths["setup_jobs_path"].read_text())
+        pages[0]["jobs"][0]["steps"][0]["name"] = "different failure"
+        paths["setup_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "setup-execution":
+        pages = json.loads(paths["setup_jobs_path"].read_text())
+        shard = next(
+            job for job in pages[0]["jobs"]
+            if job["name"].startswith("mutation (continuation shard ")
+        )
+        shard["conclusion"] = "success"
+        paths["setup_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "setup-artifact":
+        paths["setup_artifacts_path"].write_text(json.dumps([{
+            "total_count": 1, "artifacts": [{"name": "unexpected"}],
+        }]))
+    elif fault == "malformed-setup":
+        paths["setup_jobs_path"].write_text("{}")
+    elif fault == "setup-missing":
+        pages = json.loads(paths["setup_jobs_path"].read_text())
+        pages[0]["jobs"].pop()
+        pages[0]["total_count"] -= 1
+        paths["setup_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "setup-extra":
+        pages = json.loads(paths["setup_jobs_path"].read_text())
+        pages[0]["jobs"].append({
+            "id": 3, "run_id": int(recovery.SETUP_RUN_ID), "run_attempt": 1,
+            "name": "unexpected", "conclusion": "success", "steps": [],
+        })
+        pages[0]["total_count"] += 1
+        paths["setup_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "malformed-prior-run":
+        paths["prior_runs_path"].write_text("[null]")
     else:
         paths["source_failure_log_path"].write_text("different error\n")
 

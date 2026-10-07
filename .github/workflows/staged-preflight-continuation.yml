@@ -19,6 +19,7 @@ permissions:
 jobs:
   prepare:
     name: Validate immutable preflight sources
+    if: github.run_attempt == 1
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -42,13 +43,28 @@ jobs:
         working-directory: candidate
         run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
       - name: Bind candidate and recovery orchestration identities
-        run: >-
-          python -c 'import os,re,subprocess,sys;
-          candidate=subprocess.check_output(["git","-C","candidate","rev-parse","HEAD"],text=True).strip();
-          control=subprocess.check_output(["git","-C","control","rev-parse","HEAD"],text=True).strip();
-          sys.exit(0 if candidate=="f5560685d1f9eaea05107947fb0ecab791ad9478"
-          and re.fullmatch(r"[0-9a-f]{40}",control) and control==os.environ["GITHUB_SHA"]
-          and control!=candidate and os.environ.get("RECOVERY_ID")=="E2-37573662156-1-handoff") else 2)'
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          candidate = subprocess.check_output(
+              ["git", "-C", "candidate", "rev-parse", "HEAD"], text=True,
+          ).strip()
+          control = subprocess.check_output(
+              ["git", "-C", "control", "rev-parse", "HEAD"], text=True,
+          ).strip()
+          expected_candidate = "f5560685d1f9eaea05107947fb0ecab791ad9478"
+          valid = (
+              candidate == expected_candidate
+              and re.fullmatch(r"[0-9a-f]{40}", control) is not None
+              and control == os.environ["GITHUB_SHA"]
+              and control != candidate
+              and os.environ.get("RECOVERY_ID") == "E2-37573662156-1-handoff"
+          )
+          raise SystemExit(0 if valid else 2)
+          PY
         env:
           RECOVERY_ID: ${{ github.event.inputs.recovery_id }}
       - name: Capture pinned failed source and prove no prior recovery
@@ -59,6 +75,9 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh run view 37573662156 --repo "$GITHUB_REPOSITORY" --job 112642844198 --log > source-failure.log
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/artifacts?per_page=100" > source-artifacts.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37580393007" > setup-run.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/artifacts?per_page=100" > setup-artifacts.json
           gh run list --repo "$GITHUB_REPOSITORY" --workflow staged-preflight-continuation.yml \
             --limit 100 --json databaseId,headBranch,headSha,event,status,conclusion,createdAt,url \
             > prior-runs.json
@@ -104,6 +123,8 @@ jobs:
             --source-run source-run.json --source-jobs source-jobs.json \
             --source-failure-log source-failure.log \
             --source-artifacts source-artifacts.json --prior-runs prior-runs.json \
+            --setup-run setup-run.json --setup-jobs setup-jobs.json \
+            --setup-artifacts setup-artifacts.json \
             --plan source-plan/staged-preflight-plan.json \
             --manifests source-plan/mutation-manifests --wave-1-reports wave-1-reports \
             --wave-2-reports wave-2-reports \
@@ -160,6 +181,9 @@ jobs:
             source-jobs.json
             source-failure.log
             source-artifacts.json
+            setup-run.json
+            setup-jobs.json
+            setup-artifacts.json
             prior-runs.json
             recovery-authorization.json
           retention-days: 90
@@ -167,6 +191,7 @@ jobs:
 
   launch-gate:
     name: Reconcile cumulative launch budget
+    if: github.run_attempt == 1
     needs: prepare
     runs-on: ubuntu-latest
     steps:
@@ -186,9 +211,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
+            --source source-jobs.json 37573662156 1 \
+            --source setup-jobs.json 37580393007 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
       - name: Recheck exclusive recovery identity before matrix expansion
@@ -203,7 +230,9 @@ jobs:
           runs = json.load(open("current-runs.json"))
           competing = [run for run in runs if run["event"] == "workflow_dispatch"
                        and run.get("headBranch") == os.environ["GITHUB_REF_NAME"]
-                       and str(run["databaseId"]) != os.environ["GITHUB_RUN_ID"]]
+                       and str(run["databaseId"]) not in {
+                           "37580393007", os.environ["GITHUB_RUN_ID"],
+                       }]
           if competing:
               raise SystemExit("another recovery execution exists")
           PY
@@ -214,6 +243,7 @@ jobs:
           name: mutation-continuation-launch-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             source-jobs.json
+            setup-jobs.json
             current-jobs.json
             current-runs.json
             launch-budget.json
@@ -222,6 +252,7 @@ jobs:
 
   remaining-shards:
     name: mutation (continuation shard ${{ matrix.shard }})
+    if: github.run_attempt == 1
     needs: [prepare, launch-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -263,6 +294,7 @@ jobs:
 
   monitor:
     name: Monitor failures and operational ceiling
+    if: github.run_attempt == 1
     needs: launch-gate
     runs-on: ubuntu-latest
     permissions:
@@ -277,6 +309,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (continuation shard ")) | select(.status == "completed" and .conclusion != "success")] | length' current-jobs.json)
@@ -287,7 +320,8 @@ jobs:
               exit 2
             fi
             if ! python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-              --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
+              --source source-jobs.json 37573662156 1 \
+              --source setup-jobs.json 37580393007 1 \
               --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
               --next-wave complete --output monitor-budget.json; then
               echo "Operational execution ceiling reached or accounting became indeterminate; cancelling run"
@@ -305,6 +339,7 @@ jobs:
           name: mutation-continuation-monitor-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             source-jobs.json
+            setup-jobs.json
             current-jobs.json
             monitor-budget.json
           retention-days: 90
@@ -312,6 +347,7 @@ jobs:
 
   validate:
     name: Validate complete continuation wave
+    if: github.run_attempt == 1
     needs: [prepare, remaining-shards, monitor]
     runs-on: ubuntu-latest
     steps:
@@ -350,9 +386,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
+            --source source-jobs.json 37573662156 1 \
+            --source setup-jobs.json 37580393007 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave aggregate --output aggregate-budget.json
       - name: Retain continuation validation
@@ -364,12 +402,14 @@ jobs:
             continuation-validation.json
             aggregate-budget.json
             source-jobs.json
+            setup-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error
 
   aggregate:
     name: Aggregate exact 256-report corpus
+    if: github.run_attempt == 1
     needs: [prepare, validate]
     runs-on: ubuntu-latest
     steps:
@@ -441,6 +481,7 @@ jobs:
 
   readback:
     name: Read back durable consolidated evidence
+    if: github.run_attempt == 1
     needs: aggregate
     runs-on: ubuntu-latest
     steps:
@@ -506,6 +547,7 @@ jobs:
 
   terminal-accounting:
     name: Reconcile terminal cumulative budget
+    if: github.run_attempt == 1
     needs: readback
     runs-on: ubuntu-latest
     steps:
@@ -518,9 +560,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
+            --source source-jobs.json 37573662156 1 \
+            --source setup-jobs.json 37580393007 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output complete-budget.json
       - name: Retain terminal accounting
@@ -530,6 +574,7 @@ jobs:
           path: |
             complete-budget.json
             source-jobs.json
+            setup-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error

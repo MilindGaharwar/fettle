@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,19 @@ from fettle.quality_scan import ToolScanResult  # noqa: E402
 from fettle.result import ResultStatus  # noqa: E402
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
+
+
+def _workflow_step(workflow: dict, job_name: str, step_name: str) -> dict:
+    return next(
+        step for step in workflow["jobs"][job_name]["steps"]
+        if step.get("name") == step_name
+    )
+
+
+def _embedded_python_blocks(script: str) -> list[str]:
+    heredocs = re.findall(r"(?:^|\n)\s*(?:\S+/)?python - <<'PY'\n(.*?)\n\s*PY(?:\n|$)", script, re.DOTALL)
+    one_liners = re.findall(r"python -c '([^']*)'", script)
+    return [*heredocs, *one_liners]
 
 
 def _git_repo(files: dict) -> str:
@@ -447,6 +461,7 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     jobs = yaml.safe_load(workflow)["jobs"]
 
     assert set(jobs) == {"prepare", "launch-gate", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
+    assert all(job.get("if") == "github.run_attempt == 1" for job in jobs.values())
     assert sum("strategy" in job for job in jobs.values()) == 1
     assert len(jobs) - 1 == 7
     assert workflow.count("strategy:") == 1
@@ -459,7 +474,8 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "fresh-continuation-plan" in workflow
     assert "--prepare-manifests" not in workflow
     assert "--manifests source-plan/mutation-manifests" in workflow
-    assert "--prior-run-id 37573662156" in workflow
+    assert "--source source-jobs.json 37573662156 1" in workflow
+    assert "--source setup-jobs.json 37580393007 1" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
     assert 'operator_authorized_dispatch_recovery' not in workflow
@@ -472,6 +488,72 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "staged-wave-2" not in workflow
 
 
+def test_recovery_workflow_embedded_python_compiles_from_actual_yaml():
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    blocks = []
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            script = step.get("run")
+            if isinstance(script, str):
+                blocks.extend(_embedded_python_blocks(script))
+
+    assert len(blocks) == 6
+    for index, source in enumerate(blocks):
+        compile(source, f"workflow-python-{index}", "exec")
+
+
+def test_recovery_identity_entry_point_executes_actual_workflow_script(tmp_path):
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    script = _workflow_step(
+        workflow, "prepare", "Bind candidate and recovery orchestration identities",
+    )["run"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").symlink_to(sys.executable)
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        "case \"$2\" in\n"
+        "candidate) echo f5560685d1f9eaea05107947fb0ecab791ad9478 ;;\n"
+        "control) echo \"$GITHUB_SHA\" ;;\n"
+        "*) exit 3 ;;\n"
+        "esac\n",
+    )
+    git.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GITHUB_SHA": "a" * 40,
+        "RECOVERY_ID": "E2-37573662156-1-handoff",
+    }
+
+    accepted = subprocess.run(["bash", "-eu", "-c", script], cwd=tmp_path, env=env)
+    rejected = subprocess.run(
+        ["bash", "-eu", "-c", script], cwd=tmp_path,
+        env={**env, "RECOVERY_ID": "wrong"},
+    )
+
+    assert accepted.returncode == 0
+    assert rejected.returncode == 2
+
+
+def test_recovery_workflow_shell_handoffs_parse_after_expression_rendering():
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    scripts = []
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            script = step.get("run")
+            if isinstance(script, str):
+                scripts.append(re.sub(r"\$\{\{[^}]+\}\}", "rendered", script))
+
+    for script in scripts:
+        result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+        assert result.returncode == 0, result.stderr
+
+
 def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     first = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
     continuation = (
@@ -481,8 +563,8 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--next-wave wave-2 --output wave-1-budget.json" in first
     assert "--next-wave wave-3 --output wave-2-budget.json" in first
     assert "--next-wave complete --output monitor-budget.json" in first
-    assert "--prior-jobs source-jobs.json" in continuation
-    assert "--prior-run-id 37573662156" in continuation
+    assert "--source source-jobs.json 37573662156 1" in continuation
+    assert "--source setup-jobs.json 37580393007 1" in continuation
     assert "--next-wave wave-3 --output launch-budget.json" in continuation
     assert '"launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700}' in (
         Path(PLUGIN_DIR) / "fettle/staged_preflight.py"

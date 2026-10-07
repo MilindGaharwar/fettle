@@ -18,6 +18,18 @@ CANDIDATE_SHA = "f5560685d1f9eaea05107947fb0ecab791ad9478"
 SOURCE_RUN_ID = "37573662156"
 SOURCE_RUN_ATTEMPT = "1"
 SOURCE_FAILURE_JOB_ID = 112642844198
+SETUP_RUN_ID = "37580393007"
+SETUP_FAILURE_JOB_ID = 112658485409
+SETUP_JOB_INVENTORY = {
+    112658485409: ("Validate immutable preflight sources", "failure"),
+    112658597904: ("Reconcile cumulative launch budget", "skipped"),
+    112658598471: ("mutation (continuation shard ${{ matrix.shard }})", "skipped"),
+    112658598881: ("Monitor failures and operational ceiling", "skipped"),
+    112658599168: ("Validate complete continuation wave", "skipped"),
+    112658599886: ("Aggregate exact 256-report corpus", "skipped"),
+    112658600056: ("Read back durable consolidated evidence", "skipped"),
+    112658601354: ("Reconcile terminal cumulative budget", "skipped"),
+}
 SOURCE_WORKFLOW_REF = (
     "MilindGaharwar/fettle/.github/workflows/mutation.yml@"
     "refs/heads/audit/hardening-integration-20261005"
@@ -96,6 +108,7 @@ def _jobs(path: Path) -> list[dict]:
 def validate_source_exception(
     *, root: Path, source_run_path: Path, source_jobs_path: Path, source_failure_log_path: Path,
     source_artifacts_path: Path,
+    setup_run_path: Path, setup_jobs_path: Path, setup_artifacts_path: Path,
     prior_runs_path: Path, plan_path: Path, manifests_dir: Path,
     wave_1_reports: Path, wave_2_reports: Path, wave_1_validation: Path,
     wave_2_validation: Path,
@@ -137,17 +150,60 @@ def validate_source_exception(
     if any(str(job.get("name", "")).startswith("mutation (continuation shard ") for job in jobs):
         raise ValueError("source run contains unexpected wave-3 execution")
 
+    setup_run = _load(setup_run_path)
+    if not isinstance(setup_run, dict) or (
+        str(setup_run.get("id")) != SETUP_RUN_ID
+        or str(setup_run.get("run_attempt")) != "1"
+        or setup_run.get("head_sha") != "91c72a71fae004c8a23b846cb887d48d467f2e61"
+        or setup_run.get("head_branch") != RECOVERY_BRANCH
+        or setup_run.get("event") != "workflow_dispatch"
+        or setup_run.get("status") != "completed"
+        or setup_run.get("conclusion") != "failure"
+    ):
+        raise ValueError("prior setup run is not the authorized zero-shard failure")
+    setup_jobs = _jobs(setup_jobs_path)
+    if any(str(job.get("run_id")) != SETUP_RUN_ID or str(job.get("run_attempt")) != "1"
+           for job in setup_jobs):
+        raise ValueError("prior setup jobs contain a different run attempt")
+    setup_inventory = {
+        job.get("id"): (job.get("name"), job.get("conclusion")) for job in setup_jobs
+    }
+    if len(setup_inventory) != len(setup_jobs) or setup_inventory != SETUP_JOB_INVENTORY:
+        raise ValueError("prior setup job inventory is incomplete or conflicting")
+    setup_failures = [job for job in setup_jobs if job.get("conclusion") not in {"success", "skipped"}]
+    setup_failed_steps = [
+        step for step in setup_failures[0].get("steps", [])
+        if step.get("conclusion") == "failure"
+    ] if len(setup_failures) == 1 else []
+    if (
+        len(setup_failures) != 1
+        or setup_failures[0].get("id") != SETUP_FAILURE_JOB_ID
+        or setup_failures[0].get("name") != "Validate immutable preflight sources"
+        or [step.get("name") for step in setup_failed_steps]
+        != ["Bind candidate and recovery orchestration identities"]
+        or any(str(job.get("name", "")).startswith("mutation (continuation shard ")
+               and job.get("conclusion") != "skipped" for job in setup_jobs)
+    ):
+        raise ValueError("prior setup run contains execution beyond the authorized failure")
+    setup_artifact_pages = _load(setup_artifacts_path)
+    if (
+        not isinstance(setup_artifact_pages, list)
+        or setup_artifact_pages != [{"total_count": 0, "artifacts": []}]
+    ):
+        raise ValueError("prior setup run unexpectedly retained artifacts")
+
     prior_runs = _load(prior_runs_path)
-    if not isinstance(prior_runs, list):
+    if not isinstance(prior_runs, list) or any(not isinstance(item, dict) for item in prior_runs):
         raise ValueError("prior continuation run inventory is malformed")
     competing = [
-        item for item in prior_runs if isinstance(item, dict)
-        and str(item.get("databaseId")) != current_run_id
+        item for item in prior_runs
+        if str(item.get("databaseId")) != current_run_id
         and item.get("event") == "workflow_dispatch"
         and (
             item.get("headSha") == CANDIDATE_SHA
             or item.get("headBranch") == RECOVERY_BRANCH
         )
+        and str(item.get("databaseId")) != SETUP_RUN_ID
     ]
     if competing:
         raise ValueError("an E2 continuation or recovery execution already exists")
@@ -241,6 +297,8 @@ def validate_source_exception(
         "recovery_run_id": current_run_id,
         "source_run": {"run_id": SOURCE_RUN_ID, "run_attempt": "1",
                        "verdict": "permanently failed; dispatch handoff only"},
+        "prior_setup_failure": {"run_id": SETUP_RUN_ID, "run_attempt": "1",
+                                "wave_3_jobs_executed": 0},
         "plan_sha256": SOURCE_PLAN_SHA256,
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "retained_reports": len(found), "validations": validations,
@@ -255,6 +313,9 @@ def main() -> int:
     parser.add_argument("--source-jobs", type=Path, required=True)
     parser.add_argument("--source-failure-log", type=Path, required=True)
     parser.add_argument("--source-artifacts", type=Path, required=True)
+    parser.add_argument("--setup-run", type=Path, required=True)
+    parser.add_argument("--setup-jobs", type=Path, required=True)
+    parser.add_argument("--setup-artifacts", type=Path, required=True)
     parser.add_argument("--prior-runs", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--manifests", type=Path, required=True)
@@ -271,6 +332,8 @@ def main() -> int:
             root=args.root, source_run_path=args.source_run, source_jobs_path=args.source_jobs,
             source_failure_log_path=args.source_failure_log,
             source_artifacts_path=args.source_artifacts, prior_runs_path=args.prior_runs,
+            setup_run_path=args.setup_run, setup_jobs_path=args.setup_jobs,
+            setup_artifacts_path=args.setup_artifacts,
             plan_path=args.plan, manifests_dir=args.manifests,
             wave_1_reports=args.wave_1_reports, wave_2_reports=args.wave_2_reports,
             wave_1_validation=args.wave_1_validation,
