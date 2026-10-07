@@ -10,7 +10,7 @@
     "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
     "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
     "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
-    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 was cancelled and incomplete. Its repaired exact-SHA canary 37448719286 passed but remained non-qualifying. One-attempt staged preflight 37464324954 passed its eight wave-1 shards and remains permanently non-pass. Separately identified recovery 37476889333 reused those eight reports, passed all 32 wave-2 shards and validation, then failed closed when GitHub's 256-job workflow-run limit prevented the 216-shard wave-3 matrix from expanding. No complete 256-report corpus exists; both runs are permanently non-pass and no retry or continuation is authorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, but strict completion and mutation qualification remain non-pass. Authorized preflight 37438948512 was cancelled and incomplete. Its repaired exact-SHA canary 37448719286 passed but remained non-qualifying. Staged runs 37464324954 and 37476889333 accepted 8 and 32 reports respectively but remain permanently non-pass. The separately authorized continuation 37550308775 ran all 216 remaining shards exactly once and every shard succeeded, but its validation support job failed before reading reports because uv was not installed; workflow aggregation, durable readback, and terminal accounting were skipped. A read-only offline reconstruction accepted exactly 256 reports with 45,432 canonical details and zero collisions, but is diagnostic-only and does not convert the failed workflow run into accepted qualification evidence. No retry is authorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
   },
   "dispatcher_baseline": {
     "role": "diagnostic baseline, not final qualification",
@@ -234,7 +234,32 @@
         "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-recovery-37476889333",
         "incident_summary_sha256": "5f8fb9a0982a6f4cc8f10af501a428f62ffb6d865c74ca94457e5b2eb5a91786",
         "terminal_accounting_sha256": "4a9a7185d80a0c5009df9ba174f20b2f06962bd5df4122c96fa42869c4c011cf",
-        "checksum_index_sha256": "05422c408164073ddcd2bba3816bcc222467fb0a7d99f8701278581f22f48714"
+        "checksum_index_sha256": "05422c408164073ddcd2bba3816bcc222467fb0a7d99f8701278581f22f48714",
+        "continuation": {
+          "run_id": 37550308775,
+          "run_attempt": 1,
+          "orchestration": "9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807",
+          "status": "failed closed after all 216 continuation shards succeeded; permanently non-pass",
+          "topology": {"matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223},
+          "wave_3": {"jobs": 216, "successful_jobs": 216, "artifacts": 216, "generated": 42398},
+          "stop_reason": "validation support job install step failed with uv: command not found; workflow aggregate, readback, and terminal accounting were skipped",
+          "terminal_continuation_operational_minutes": 293.17,
+          "terminal_cumulative_operational_minutes": 350.27,
+          "billing_authority": false,
+          "offline_reconstruction": {
+            "status": "diagnostic-only; not workflow acceptance evidence",
+            "reports": 256,
+            "generated": 45432,
+            "canonicalized": 45432,
+            "collisions": 0,
+            "corpus_digest": "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2",
+            "aggregate_sha256": "dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173",
+            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216}
+          },
+          "qualification_effect": "none; workflow validation and durable aggregate readback did not complete",
+          "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-continuation-37550308775",
+          "checksum_index_sha256": "6873b92230399c8d99c0e118ea9fef3f426f1dbab820db0035160e8fb841cc79"
+        }
       }
     },
     "decision_packet": "docs/completion/evidence/preflight-37438948512-incident.md"

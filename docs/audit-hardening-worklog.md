@@ -1,5 +1,30 @@
 # Audit Hardening Worklog
 
+## 2026-10-07: Continuation Run 37550308775 Failed Closed After Shard Completion
+
+The one authorized continuation ran once at orchestration commit `9a66e4f`, attempt
+1. GitHub materialized the proven 223-job topology. All 216 distinct wave-3 shard jobs
+succeeded and produced 216 artifacts; no shard failed or was retried. The validation
+support job then failed before reading reports because its install step invoked `uv`
+without first installing `uv` (`uv: command not found`, exit 127). The aggregate,
+durable readback, and terminal-accounting jobs were consequently skipped. Run
+`37550308775` is therefore permanently non-pass, alongside runs `37464324954` and
+`37476889333`. The failure is orchestration-only and does not negate successful shard
+execution, but no retry is authorized.
+
+All run metadata, logs, artifacts, and hashes were preserved under
+`external://local/audit-hardening/candidate-0fc41fd/staged-preflight-continuation-37550308775`.
+Read-only reconstruction against the exact candidate validated all 216 new reports
+(`generated=42398`) and the unchanged authoritative aggregator accepted exactly 256
+reports (`generated=canonicalized=45432`, `collisions=0`, corpus digest
+`155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2`).
+The linked origin split is exactly 8 reports from run `37464324954`, 32 from run
+`37476889333`, and 216 from run `37550308775`. This offline aggregate is diagnostic
+only because the workflow's own aggregate and durable readback gates did not run.
+Operational accounting is 11.97 + 45.13 + 293.17 = 350.27 runner-minutes, well below
+the original 740-minute allocation. The checksum index digest is
+`6873b92230399c8d99c0e118ea9fef3f426f1dbab820db0035160e8fb841cc79`.
+
 ## 2026-10-07: Standalone Preflight Continuation Prepared
 
 The owner authorized one independently reviewed continuation for the 216 shards that
