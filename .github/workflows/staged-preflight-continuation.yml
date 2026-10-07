@@ -3,29 +3,17 @@ name: Staged preflight continuation
 on:
   workflow_dispatch:
     inputs:
-      candidate_sha:
-        description: "Exact frozen candidate commit"
-        required: true
-        type: string
-      source_run_id:
-        description: "Successful wave 1+2 run"
-        required: true
-        type: string
-      source_orchestration_sha:
-        description: "Immutable first-run orchestration commit"
-        required: true
-        type: string
-      source_plan_sha256:
-        description: "SHA-256 of first-run staged plan"
-        required: true
-        type: string
-      source_workflow_ref:
-        description: "Immutable first-run workflow ref"
+      recovery_id:
+        description: "Pinned operator-authorized E2 handoff recovery"
         required: true
         type: string
 
+concurrency:
+  group: e2-preflight-recovery-37573662156-1
+  cancel-in-progress: false
+
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 jobs:
@@ -44,7 +32,7 @@ jobs:
       - name: Check out frozen executable candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.candidate_sha }}
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -53,83 +41,109 @@ jobs:
       - name: Install frozen candidate
         working-directory: candidate
         run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
-      - name: Bind candidate and orchestration identities
-        env:
-          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+      - name: Bind candidate and recovery orchestration identities
         run: >-
-          python -c 'import os,re,subprocess,sys; expected=os.environ["GITHUB_SHA"];
-          actual=subprocess.check_output(["git","-C","candidate","rev-parse","HEAD"],text=True).strip();
+          python -c 'import os,re,subprocess,sys;
+          candidate=subprocess.check_output(["git","-C","candidate","rev-parse","HEAD"],text=True).strip();
           control=subprocess.check_output(["git","-C","control","rev-parse","HEAD"],text=True).strip();
-          sys.exit(0 if os.environ["CANDIDATE_SHA"]==actual==expected
-          and re.fullmatch(r"[0-9a-f]{40}",control) and control==os.environ["GITHUB_SHA"] else 1)'
-      - name: Recreate frozen manifests
-        working-directory: candidate
-        run: >-
-          uv run --no-sync python -m fettle.mutation_test --root .
-          --prepare-manifests ../mutation-manifests --json > ../prepare.json
-      - name: Confirm immutable successful source run
+          sys.exit(0 if candidate=="f5560685d1f9eaea05107947fb0ecab791ad9478"
+          and re.fullmatch(r"[0-9a-f]{40}",control) and control==os.environ["GITHUB_SHA"]
+          and control!=candidate and os.environ.get("RECOVERY_ID")=="E2-37573662156-1-handoff") else 2)'
+        env:
+          RECOVERY_ID: ${{ github.event.inputs.recovery_id }}
+      - name: Capture pinned failed source and prove no prior recovery
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for _ in $(seq 1 10); do
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}" > source-run.json
-            [ "$(jq -r .status source-run.json)" = "completed" ] && break
-            sleep 30
-          done
-          jq -e '.id == ${{ github.event.inputs.source_run_id }} and .run_attempt == 1 and .status == "completed" and .conclusion == "success" and .head_sha == "${{ github.event.inputs.source_orchestration_sha }}"' source-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37573662156" > source-run.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh run view 37573662156 --repo "$GITHUB_REPOSITORY" --job 112642844198 --log > source-failure.log
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/artifacts?per_page=100" > source-artifacts.json
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow staged-preflight-continuation.yml \
+            --limit 100 --json databaseId,headBranch,headSha,event,status,conclusion,createdAt,url \
+            > prior-runs.json
       - name: Download immutable source plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-staged-plan-${{ github.event.inputs.source_run_id }}-1
+          name: mutation-staged-plan-37573662156-1
           path: source-plan
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: 37573662156
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download immutable wave 1 reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: mutation-preflight-wave-1-${{ github.event.inputs.source_run_id }}-1-*
+          pattern: mutation-preflight-wave-1-37573662156-1-*
           path: wave-1-reports
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: 37573662156
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download immutable wave 2 reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: mutation-preflight-wave-2-${{ github.event.inputs.source_run_id }}-1-*
+          pattern: mutation-preflight-wave-2-37573662156-1-*
           path: wave-2-reports
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: 37573662156
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download immutable wave 1 validation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-preflight-wave-1-validation-${{ github.event.inputs.source_run_id }}-1
+          name: mutation-preflight-wave-1-validation-37573662156-1
           path: wave-1-validation
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: 37573662156
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download immutable wave 2 validation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-preflight-wave-2-validation-${{ github.event.inputs.source_run_id }}-1
+          name: mutation-preflight-wave-2-validation-37573662156-1
           path: wave-2-validation
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: 37573662156
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate operator-authorized failed-source exception
+        run: |
+          candidate/.venv/bin/python control/scripts/e2_preflight_recovery.py \
+            --root candidate \
+            --source-run source-run.json --source-jobs source-jobs.json \
+            --source-failure-log source-failure.log \
+            --source-artifacts source-artifacts.json --prior-runs prior-runs.json \
+            --plan source-plan/staged-preflight-plan.json \
+            --manifests source-plan/mutation-manifests --wave-1-reports wave-1-reports \
+            --wave-2-reports wave-2-reports \
+            --wave-1-validation wave-1-validation/wave-1-validation.json \
+            --wave-2-validation wave-2-validation/wave-2-validation.json \
+            --orchestration-sha "$GITHUB_SHA" --current-run-id "$GITHUB_RUN_ID" \
+            --output recovery-authorization.json
       - name: Build exact continuation plan
         id: plan
+        env:
+          RECOVERY_ORCHESTRATION_SHA: ${{ github.sha }}
         run: |
           candidate/.venv/bin/python control/scripts/staged_preflight.py fresh-continuation-plan --root candidate \
-            --manifests mutation-manifests \
+            --manifests source-plan/mutation-manifests \
             --source-plan source-plan/staged-preflight-plan.json \
             --wave-1-reports wave-1-reports --wave-2-reports wave-2-reports \
             --wave-1-validation wave-1-validation/wave-1-validation.json \
             --wave-2-validation wave-2-validation/wave-2-validation.json \
-            --source-plan-sha256 "${{ github.event.inputs.source_plan_sha256 }}" \
-            --source-run-id "${{ github.event.inputs.source_run_id }}" \
-            --source-orchestration-sha "${{ github.event.inputs.source_orchestration_sha }}" \
-            --source-workflow-ref "${{ github.event.inputs.source_workflow_ref }}" \
-            --candidate-sha "${{ github.event.inputs.candidate_sha }}" \
+            --source-plan-sha256 "a6fbc9607212d36215d917284859d336ee6db2a370b7ea379a3ad574a4402efa" \
+            --source-run-id "37573662156" \
+            --source-orchestration-sha "f5560685d1f9eaea05107947fb0ecab791ad9478" \
+            --source-workflow-ref "MilindGaharwar/fettle/.github/workflows/mutation.yml@refs/heads/audit/hardening-integration-20261005" \
+            --candidate-sha "f5560685d1f9eaea05107947fb0ecab791ad9478" \
             --orchestration-sha "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output continuation-plan.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("continuation-plan.json")
+          plan = json.loads(path.read_text())
+          plan["source"]["verdict"] = "permanently failed; dispatch handoff only"
+          plan["recovery"] = {
+              "id": "E2-37573662156-1-handoff",
+              "authorization": "operator-authorized dispatch recovery",
+              "orchestration_sha": os.environ["RECOVERY_ORCHESTRATION_SHA"],
+          }
+          path.write_text(json.dumps(plan, indent=2) + "\n")
+          PY
           echo "matrix=$(python -c 'import json; print(json.dumps({"shard":json.load(open("continuation-plan.json"))["execution_wave"]["shards"]},separators=(",",":")))')" >> "$GITHUB_OUTPUT"
       - name: Retain validated continuation inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -137,13 +151,17 @@ jobs:
           name: mutation-continuation-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             continuation-plan.json
-            mutation-manifests
             source-plan
             wave-1-reports
             wave-2-reports
             wave-1-validation
             wave-2-validation
             source-run.json
+            source-jobs.json
+            source-failure.log
+            source-artifacts.json
+            prior-runs.json
+            recovery-authorization.json
           retention-days: 90
           if-no-files-found: error
 
@@ -167,12 +185,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
+      - name: Recheck exclusive recovery identity before matrix expansion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow staged-preflight-continuation.yml \
+            --limit 100 --json databaseId,headBranch,headSha,event,status,conclusion,createdAt,url \
+            > current-runs.json
+          python - <<'PY'
+          import json, os
+          runs = json.load(open("current-runs.json"))
+          competing = [run for run in runs if run["event"] == "workflow_dispatch"
+                       and run.get("headBranch") == os.environ["GITHUB_REF_NAME"]
+                       and str(run["databaseId"]) != os.environ["GITHUB_RUN_ID"]]
+          if competing:
+              raise SystemExit("another recovery execution exists")
+          PY
       - name: Retain launch accounting
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -181,6 +215,7 @@ jobs:
           path: |
             source-jobs.json
             current-jobs.json
+            current-runs.json
             launch-budget.json
           retention-days: 90
           if-no-files-found: error
@@ -197,7 +232,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.candidate_sha }}
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
@@ -230,6 +265,9 @@ jobs:
     name: Monitor failures and operational ceiling
     needs: launch-gate
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -238,7 +276,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (continuation shard ")) | select(.status == "completed" and .conclusion != "success")] | length' current-jobs.json)
@@ -249,7 +287,7 @@ jobs:
               exit 2
             fi
             if ! python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-              --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+              --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
               --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
               --next-wave complete --output monitor-budget.json; then
               echo "Operational execution ceiling reached or accounting became indeterminate; cancelling run"
@@ -282,7 +320,7 @@ jobs:
           path: control
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.candidate_sha }}
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -311,10 +349,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave aggregate --output aggregate-budget.json
       - name: Retain continuation validation
@@ -341,7 +379,7 @@ jobs:
           path: control
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.candidate_sha }}
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -364,7 +402,7 @@ jobs:
       - name: Assemble and aggregate all immutable reports
         run: |
           candidate/.venv/bin/python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           expected = {
               "wave-1-reports": {8, 27, 28, 37, 48, 50, 51, 53},
@@ -389,6 +427,7 @@ jobs:
           candidate/.venv/bin/python control/scripts/staged_preflight.py fresh-completion-record \
             --plan staged-plan/continuation-plan.json --reports staged-reports \
             --aggregate mutation-preflight.json --output staged-preflight-continuation.json
+          cp staged-plan/recovery-authorization.json recovery-authorization.json
       - name: Retain consolidated preflight
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -396,6 +435,7 @@ jobs:
           path: |
             mutation-preflight.json
             staged-preflight-continuation.json
+            recovery-authorization.json
           retention-days: 90
           if-no-files-found: error
 
@@ -414,20 +454,41 @@ jobs:
           name: mutation-preflight-continuation-${{ github.run_id }}-${{ github.run_attempt }}
           path: retained
       - name: Verify downloaded aggregate and origin record
+        env:
+          EXPECTED_ORCHESTRATION_SHA: ${{ github.sha }}
+          EXPECTED_RECOVERY_RUN_ID: ${{ github.run_id }}
         run: |
           python - <<'PY'
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
           aggregate = json.loads(Path("retained/mutation-preflight.json").read_text())
           record = json.loads(Path("retained/staged-preflight-continuation.json").read_text())
-          expected = "${{ github.event.inputs.candidate_sha }}"
+          expected = "f5560685d1f9eaea05107947fb0ecab791ad9478"
           assert aggregate["status"] == "completed" and aggregate["passed"] is True
           assert aggregate["revision"] == expected and aggregate["shard_count"] == 256
           assert aggregate["generated"] == aggregate["canonicalized"] and aggregate["collisions"] == 0
           assert record["status"] == "completed" and record["passed"] is True
           assert record["candidate_sha"] == expected and len(record["origins"]) == 256
           assert record["kind"] == "fresh_staged_preflight"
-          assert record["source"]["run_id"] == "${{ github.event.inputs.source_run_id }}"
+          assert record["source"]["run_id"] == "37573662156"
+          assert record["source"]["run_attempt"] == "1"
+          assert record["source"]["verdict"] == "permanently failed; dispatch handoff only"
+          assert set(record["origins"]) == {str(index) for index in range(256)}
+          retained = {8, 27, 28, 37, 48, 50, 51, 53} | (set(range(35)) - {8, 27, 28})
+          for index in range(256):
+              origin = record["origins"][str(index)]
+              assert origin["run_attempt"] == "1"
+              assert origin["run_id"] == ("37573662156" if index in retained else os.environ["EXPECTED_RECOVERY_RUN_ID"])
+              assert origin["wave"] == ("wave-1" if index in {8, 27, 28, 37, 48, 50, 51, 53}
+                                         else "wave-2" if index in retained else "wave-3")
+              assert len(origin["artifact_sha256"]) == 64
+          assert sum(origin["generated"] for origin in record["origins"].values()) == aggregate["generated"]
+          assert record["aggregate_sha256"] == hashlib.sha256(
+              Path("retained/mutation-preflight.json").read_bytes(),
+          ).hexdigest()
+          authorization = json.loads(Path("retained/recovery-authorization.json").read_text())
+          assert authorization["recovery_orchestration_sha"] == os.environ["EXPECTED_ORCHESTRATION_SHA"]
+          assert authorization["recovery_run_id"] == os.environ["EXPECTED_RECOVERY_RUN_ID"]
           checksums = {
               path.name: hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(Path("retained").iterdir())
@@ -456,10 +517,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id 37573662156 --prior-run-attempt 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output complete-budget.json
       - name: Retain terminal accounting

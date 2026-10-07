@@ -453,13 +453,20 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert workflow.count("matrix:") == 2  # strategy plus the prepare output key
     assert "max-parallel: 8" in workflow
     assert "workflow_dispatch:" in workflow
-    assert "candidate_sha:" in workflow
-    assert "source_plan_sha256:" in workflow
+    assert "recovery_id:" in workflow
+    assert "candidate_sha:" not in workflow
+    assert "source_plan_sha256:" not in workflow
     assert "fresh-continuation-plan" in workflow
-    assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in workflow
+    assert "--prepare-manifests" not in workflow
+    assert "--manifests source-plan/mutation-manifests" in workflow
+    assert "--prior-run-id 37573662156" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
-    assert '.status == "completed" and .conclusion == "success"' in workflow
+    assert 'operator_authorized_dispatch_recovery' not in workflow
+    assert "e2_preflight_recovery.py" in workflow
+    assert '"permanently failed; dispatch handoff only"' in workflow
+    assert 'set(record["origins"]) == {str(index) for index in range(256)}' in workflow
+    assert 'recovery-authorization.json' in workflow
     assert "--aggregate-preflight staged-reports --shard-count 256" in workflow
     assert "staged-wave-1" not in workflow
     assert "staged-wave-2" not in workflow
@@ -475,7 +482,11 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--next-wave wave-3 --output wave-2-budget.json" in first
     assert "--next-wave complete --output monitor-budget.json" in first
     assert "--prior-jobs source-jobs.json" in continuation
-    assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
+    assert "--prior-run-id 37573662156" in continuation
+    assert "--next-wave wave-3 --output launch-budget.json" in continuation
+    assert '"launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700}' in (
+        Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
+    ).read_text()
     assert continuation.count("--next-wave complete") == 2
     assert "billing_authority" not in first
     assert "Operational ceiling, not a guaranteed provider billing cap." not in first

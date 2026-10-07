@@ -51,6 +51,10 @@ polyglot adapters do not imply polyglot mutation support.
   exact-once shard origins, and cumulative original-budget accounting all validate.
   Never rewrite the source run as successful or describe recovery as one uninterrupted
   run.
+- The current general continuation receiver requires a successful source run. A source
+  that fails only during its dispatch handoff therefore needs a separately reviewed,
+  source-pinned recovery orchestration. Repair this receiver limitation before relying
+  on automatic failed-handoff recovery.
 - Keep retained JSON bounded and secret-free. Do not add absolute paths,
   credentials, environment values, or raw unbounded process output.
 
