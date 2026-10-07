@@ -131,36 +131,34 @@
       "The frozen candidate contains broader Milestone A changes and two pre-existing executable-mode changes that require acceptance review."
     ]
   },
-  "ah07_blocker_matrix": [
+  "ah07_finite_checklist": [
     {
       "item": "Portable immutable evidence channel",
+      "status": "blocked",
       "required_evidence": "Repository-relative digest-bound index resolving the durable run-05 raw package, verifier output, and independent review without embedding workstation paths or copying bulky caches into Git",
       "responsible_reviewer_or_environment": "Repository maintainer and approved immutable artifact store",
-      "authorization_needed": "Approve the evidence channel and retention policy; do not publish or relocate artifacts implicitly"
+      "remaining": "Approve a durable immutable store and replace the unresolved private-local run-05 archive URL, SHA-256, and byte count in docs/completion/evidence/external/audit-hardening/run-05-locator.json; retain its existing digest-bound content index, verifier output, and independent-review attestation. No upload or relocation is authorized yet."
     },
     {
       "item": "Independent acceptance review",
+      "status": "confirmed",
       "required_evidence": "Independent automated acceptance in a separate isolated session, with direct artifact inspection, executed checks, criterion verdicts, evidence references, findings, and limitations",
       "responsible_reviewer_or_environment": "Independent automated reviewer that did not implement the integration changes",
-      "authorization_needed": "Authorized 2026-10-05; remediation-head review found a defect and the post-repair automated addendum accepted the scoped fix"
-    },
-    {
-      "item": "Additional supported-platform verification",
-      "required_evidence": "AH04 locking/interruption and AH05 installed-artifact smoke evidence on each required supported platform not represented by the current Darwin-arm64 run",
-      "responsible_reviewer_or_environment": "Authorized CI or operators on the required Linux and Windows environments",
-      "authorization_needed": "Authorize remote or operator-run supported-platform jobs and identify the required platform matrix"
+      "remaining": "None. The owner-authorized remediation-head review and post-repair automated addendum satisfy the replacement for the unavailable human reviewer. Do not infer human acceptance or usability validation."
     },
     {
       "item": "Live host verification",
-      "required_evidence": "Installed-candidate registration and safe transport probes in each required agent host, with unavailable capabilities recorded as blocked",
-      "responsible_reviewer_or_environment": "Operators with access to the required Claude Code, Codex CLI, Gemini CLI, and OpenCode host installations",
-      "authorization_needed": "Authorize host access or provide operator-run evidence; no credentials should be shared in the repository"
+      "status": "blocked",
+      "required_evidence": "Installed-candidate registration and safe real-session transport probes on every available and authenticated agent host; unavailable hosts remain explicit blocked inventory rows with exact recovery actions",
+      "responsible_reviewer_or_environment": "Operators with access to the available Claude Code and OpenCode installations; Codex CLI and Gemini CLI remain blocked unless they become available and authenticated before the evidence boundary",
+      "remaining": "Authorize and retain the defined harmless corrupt-policy deny and repaired-policy allow probes on available authenticated hosts for the final candidate. Current read-only inventory finds Claude Code 2.1.234 and OpenCode 2.0.20; Codex and Gemini are absent from PATH. Do not infer unavailable-host success or place credentials in repository evidence."
     },
     {
-      "item": "Remote CI binding",
-      "required_evidence": "Remote workflow results bound to the exact candidate and artifact digests, including failure-path behavior and retained logs",
+      "item": "Final-candidate CI and mutation qualification",
+      "status": "blocked",
+      "required_evidence": "Fresh preflight and authoritative calibration bound to the future frozen final executable SHA, exact CPython 3.12.13, fresh manifests and corpus, hash-locked dependencies, unchanged policy, failure-path behavior, retained logs, terminal accounting, source restoration, and independent readback; exact-head required CI must also pass",
       "responsible_reviewer_or_environment": "Repository CI environment and authorized maintainer",
-      "authorization_needed": "Authorize a remote CI run without authorizing commit, push, publication, or release implicitly"
+      "remaining": "Approve and implement the bounded final-candidate repair described in docs/exact-candidate-calibration-proposal.md, including the Node-24-native setup-uv pin and Windows portability correction; freeze the resulting SHA; obtain separate fresh-preflight and recalculated calibration authorization; then satisfy CI required and mutation evidence on the exact PR head. Recovery run 37560100974 remains historical evidence for 0fc41fd only."
     }
   ],
   "mutation_preflight_incident": {

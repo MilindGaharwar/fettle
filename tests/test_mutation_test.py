@@ -593,6 +593,7 @@ def test_mutmut_process_timeout_restores_in_scope_mode_only_drift(tmp_path):
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
     source.chmod(0o755)
+    original_mode = source.stat().st_mode & 0o777
     script = (
         "import time; from pathlib import Path; "
         "Path('src/command.py').chmod(0o644); time.sleep(30)"
@@ -609,7 +610,7 @@ def test_mutmut_process_timeout_restores_in_scope_mode_only_drift(tmp_path):
         )
 
     assert source.read_text() == "VALUE = 'original'\n"
-    assert source.stat().st_mode & 0o777 == 0o755
+    assert source.stat().st_mode & 0o777 == original_mode
 
 
 def test_mutmut_process_keyboard_interrupt_restores_in_scope_mode_only_drift(

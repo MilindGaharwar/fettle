@@ -302,6 +302,66 @@ def test_mutation_workflows_have_one_authoritative_check_producer():
     ) == 1
 
 
+def test_mutation_workflows_pin_supported_node24_setup_uv():
+    workflows = [
+        Path(PLUGIN_DIR) / ".github/workflows/mutation.yml",
+        Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml",
+        Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml",
+        Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-aggregation-recovery.yml",
+    ]
+    pin = "astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0"
+
+    assert all(pin in path.read_text() for path in workflows)
+    assert all("setup-uv@d0cc045d" not in path.read_text() for path in workflows)
+
+
+def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert 'python-version: "3.12"' not in workflow
+    assert 'python-version: "3.12.13"' in workflow
+    assert 'platform.python_version()=="3.12.13"' in workflow
+    assert 'report.get("shard_count")==256' in workflow
+    assert "- finalize" in workflow
+    assert 'WAVES["wave-"+stage]' in workflow
+    assert '"1":8,"2":16,"3":32' in workflow
+    assert "pattern: mutation-shard-${{ github.event.inputs.stage_1_run_id }}-*" in workflow
+    assert "pattern: mutation-shard-${{ github.event.inputs.stage_2_run_id }}-*" in workflow
+    assert "Validate prior calibration stages before fan-out" in workflow
+    assert "len(identities) != 1" in workflow
+    assert 'report.get("calibration_id") != os.environ["CALIBRATION_ID"]' in workflow
+    assert "Download prior calibration accounting" in workflow
+    assert 'accounting.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])' in workflow
+    assert "name: mutation (assemble evidence)" in workflow
+    assert "name: mutation evidence" in workflow
+    assert "Independently read back authoritative evidence" in workflow
+    assert "name: mutation (read back detail corpus)" in workflow
+    assert "name: mutation (calibration accounting)" in workflow
+    assert "runner_minute_ceiling:" in workflow
+    assert "int(value)<=12000" in workflow
+    assert "fail-fast: ${{ github.event.inputs.mode == 'calibration' }}" in workflow
+    readback = workflow.split("\n  evidence-readback:", 1)[1]
+    assert "github.event.inputs.calibration_stage != '3'" in readback
+
+
+def test_finalization_rejects_non_allowlisted_or_mode_changes():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    finalization = workflow.split("Prove evidence-only finalization head", 1)[1].split(
+        "Download stage 1 mutation evidence", 1,
+    )[0]
+
+    assert '"docs/completion/audit-hardening.json"' in finalization
+    assert '"docs/final-candidate-readiness.md"' in finalization
+    assert '["git", "diff", "--raw", "--no-abbrev", executable, head]' in finalization
+    assert 'fields[0] != ":100644" or fields[1] != "100644"' in finalization
+    assert "set(changed) - allowed" in finalization
+    aggregate = workflow.split("\n  aggregate:", 1)[1].split("\n  evidence-readback:", 1)[0]
+    assert "fetch-depth: 0" in aggregate
+    assert 'report.get("calibration_id")==os.environ["CALIBRATION_ID"]' in workflow
+    assert 'hashlib.sha256(path.read_bytes()).hexdigest()==checksum' in workflow
+    assert 'accounting.get("stage")=="3" and accounting.get("passed") is True' in workflow
+
+
 def test_full_mutation_workflow_gates_fanout_on_retained_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
@@ -472,7 +532,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 7
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 14
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow
@@ -510,7 +570,8 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
         " && github.event.inputs.mode != 'preflight'"
         " && github.event.inputs.mode != 'diagnostic-canary'"
         " && github.event.inputs.mode != 'staged-preflight'"
-        " && github.event.inputs.mode != 'staged-preflight-recovery'\n    needs: prepare"
+        " && github.event.inputs.mode != 'staged-preflight-recovery'"
+        " && github.event.inputs.mode != 'finalize'\n    needs: prepare"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow

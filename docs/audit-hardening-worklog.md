@@ -1,5 +1,73 @@
 # Audit Hardening Worklog
 
+## 2026-10-07: Bounded Final-Candidate Repair Implemented
+
+Owner authorization superseded the implementation prohibition in the proposal. The
+existing mutation workflow now pins final-candidate paths to CPython 3.12.13, exposes
+sequential 8/32/216 calibration stages at maximum concurrency 8/16/32, validates
+prior-stage identity and accounting before later fan-out, retains terminal artifacts
+for 90 days, and places the protected check behind aggregate checksum readback. A
+preimplemented finalization mode permits only four named evidence files and rejects
+path, type, or executable-mode changes outside that exact allowlist. All affected
+mutation workflows now pin Node-24-native `setup-uv` v7.0.0 at `eb1897b8…`.
+
+The Windows lifecycle test now compares restoration to the mode the native filesystem
+actually reported before execution. This preserves exact POSIX assertions while not
+inventing unsupported mode bits on Windows. Local validation passed: 4,446 tests with
+20 declared skips, the 112-test focused workflow/mutation suite, Ruff, Fettle, and
+actionlint on all touched workflows. Independent automated review produced no
+unresolved blocking finding after its applicable accounting, checksum, runtime, and
+identity recommendations were incorporated. No mutation or authenticated host call
+was executed.
+
+## 2026-10-07: Final Acceptance Contract Stabilization
+
+No calibration is authorized. Read-only review rejected the earlier proposal to
+qualify `0fc41fdfee13e09f4bda3dc5eee177030882aa36` and later assess applicability.
+Current PR head `2752f01c426fc9a02f22b56ea37ce10f9b3dda25` adds the shipped
+1,022-line `fettle/staged_preflight.py` module plus executable workflow behavior,
+tests, and documentation. The retained 45,432-mutant preflight does not cover that
+module. Qualifying the old candidate would therefore not satisfy the exact PR-head
+`mutation evidence` requirement.
+
+The final target is one future SHA, still unset, containing the complete intended
+tree: a bounded extension of the existing mutation workflow, a pinned Node-24-native
+`setup-uv` action, and resolution of the current Windows lifecycle failure. That SHA
+must be frozen before a fresh preflight. A later PR head may contain only allowlisted
+evidence documentation and must prove executable-tree equality before retained
+qualification can be published on the exact head. No executable edit may be hidden in
+that finalization step.
+
+Runtime identity was also reconciled. CPython patch version is included in the
+checkpoint environment digest, so 3.12.13 and 3.12.14 checkpoints are not
+interchangeable. The old recovery plan truthfully remains CPython 3.12.14 evidence for
+`0fc41fd…`; the final candidate will use the established hardening identity CPython
+3.12.13 and start from a fresh preflight and clean checkpoints. Policy and
+hash-locked mutation dependencies remain byte-identical.
+
+The host requirement follows the governing AH07 and installed-host UAT contracts:
+exercise every available and authenticated host; record unavailable hosts as blocked
+with recovery actions. Codex and Gemini are required inventory rows, not unconditional
+live-execution blockers. Current inventory finds Claude Code 2.1.234 and OpenCode
+2.0.20; Codex and Gemini are absent from `PATH`. A stricter all-four-live-host gate
+would require a new owner decision before freezing the candidate.
+
+Latest mutation PR logs identify `astral-sh/setup-uv` v6.8.0 at pinned commit
+`d0cc045d04ccac9d8b7881df0226f9e82c39688e` as the source of the Node 20 forced-
+runtime and `punycode` warnings. GitHub's Node 20 removal deadline was 2026-09-23.
+The smallest supported upgrade is v7.0.0 pinned at
+`eb1897b8dc4b5d5bfe39a428a8f2304605e0983c`; it declares Node 24. This changes
+the action runtime, not project CPython. The warning was not the CI failure: run
+`37560916857` failed a Windows mode assertion and intentionally strict incomplete
+completion, while run `37560916928` deliberately kept mutation qualification non-pass.
+
+Historical resource evidence still supports roughly 7,950 runner-minutes for the old
+corpus. The provisional final-candidate estimate is about 8,100 runner-minutes with
+±25% uncertainty, plus 360–450 runner-minutes for a fresh preflight. Recompute from
+the new corpus before requesting calibration authorization; the prior 12,000-minute
+ceiling is not approved. The executable closure plan and bounded stage gates are in
+`docs/exact-candidate-calibration-proposal.md`. No workflow was changed or executed.
+
 ## 2026-10-07: Aggregation-Only Recovery Accepted
 
 Run `37560100974`, attempt 1, orchestration `2a0bae3`, completed successfully with
@@ -123,11 +191,13 @@ integration commit whose executable tree is proven equivalent to the frozen cand
 or a separately reviewed branch-protection/integration decision; neither is inferred
 from a passing frozen-candidate preflight.
 
-Acceptance scope was reconciled against the governing plan rather than the latest
-summary alone. Milestone A still requires the platform, artifact, remote-CI, strict
-completion, and live-host evidence retained in AH07. The recorded AH07 matrix names
-Claude Code, Codex CLI, Gemini CLI, and OpenCode, so all four remain required for that
-criterion unless the owner formally changes it; unavailable hosts remain blocked.
+At this historical checkpoint, acceptance scope was read as requiring live execution
+on all four named hosts. The 2026-10-07 contract-stabilization review above supersedes
+that interpretation after reconciling the governing AH07 criterion with the installed-
+host UAT success criteria: all four remain inventory rows, every available and
+authenticated host must execute, and unavailable hosts remain explicit blockers rather
+than inferred passes. Milestone A still requires the platform, artifact, remote-CI,
+strict-completion, and available-host evidence retained in AH07.
 Real-participant parity and ten human sessions belong to later WP-AH13/P77. A public
 PyPI canary and broader release platform/host validation belong to WP-AH15 and the
 release contract. Optional host improvements do not silently alter Milestone A.

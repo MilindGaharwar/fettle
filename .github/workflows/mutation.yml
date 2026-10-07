@@ -18,12 +18,37 @@ on:
           - preflight
           - replay
           - calibration
+          - finalize
       preflight_run_id:
         description: "Successful preflight run on this commit (required for replay/calibration)"
         required: false
         type: string
       calibration_id:
         description: "Unique logical calibration ID (required for calibration)"
+        required: false
+        type: string
+      calibration_stage:
+        description: "Calibration stage to execute (1, 2, or 3)"
+        required: false
+        type: string
+      stage_1_run_id:
+        description: "Terminal stage 1 run (required for stages 2 and 3)"
+        required: false
+        type: string
+      stage_2_run_id:
+        description: "Terminal stage 2 run (required for stage 3)"
+        required: false
+        type: string
+      executable_candidate_sha:
+        description: "Frozen executable SHA E (required for finalize)"
+        required: false
+        type: string
+      calibration_run_id:
+        description: "Successful stage 3 calibration run for E (required for finalize)"
+        required: false
+        type: string
+      runner_minute_ceiling:
+        description: "Separately approved cumulative calibration ceiling"
         required: false
         type: string
       resume_run_id:
@@ -49,22 +74,23 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery')
+    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery' && github.event.inputs.mode != 'finalize')
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.prepare.outputs.matrix || steps.reuse.outputs.matrix }}
       execution_matrix: ${{ steps.prepare.outputs.execution_matrix || steps.reuse.outputs.execution_matrix }}
       shard_count: ${{ steps.prepare.outputs.shard_count || steps.reuse.outputs.shard_count }}
+      max_parallel: ${{ steps.prepare.outputs.max_parallel || steps.reuse.outputs.max_parallel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet -e .
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet -e .
       - name: Validate effective configuration
         run: uv run --no-sync fettle config --validate
       - name: Bind dispatch to exact candidate
@@ -85,12 +111,32 @@ jobs:
           RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}
         run: test "$RESUME_RUN_ID" -eq "$RESUME_RUN_ID"
       - name: Require calibration identity
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
+        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'calibration' || github.event.inputs.mode == 'finalize')
         env:
           CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
         run: >-
           python -c 'import os,re,sys; value=os.environ["CALIBRATION_ID"];
           sys.exit(0 if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value) else 1)'
+      - name: Bind sequential calibration stage
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
+        env:
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+          STAGE_1_RUN_ID: ${{ github.event.inputs.stage_1_run_id }}
+          STAGE_2_RUN_ID: ${{ github.event.inputs.stage_2_run_id }}
+        run: >-
+          python -c 'import os,re,sys; stage=os.environ["CALIBRATION_STAGE"];
+          one=os.environ["STAGE_1_RUN_ID"]; two=os.environ["STAGE_2_RUN_ID"];
+          numeric=lambda value: bool(re.fullmatch(r"[1-9][0-9]*",value));
+          valid=(stage=="1" and not one and not two) or (stage=="2" and numeric(one) and not two)
+          or (stage=="3" and numeric(one) and numeric(two) and one!=two);
+          sys.exit(0 if valid else 1)'
+      - name: Require separately approved calibration ceiling
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
+        env:
+          RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
+        run: >-
+          python -c 'import os,re,sys; value=os.environ["RUNNER_MINUTE_CEILING"];
+          sys.exit(0 if re.fullmatch(r"[1-9][0-9]{0,4}",value) and int(value)<=12000 else 2)'
       - name: Download retained partition manifests
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -107,15 +153,80 @@ jobs:
           path: retained-preflight
           run-id: ${{ github.event.inputs.preflight_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download prior calibration stage 1
+        if: github.event.inputs.mode == 'calibration' && (github.event.inputs.calibration_stage == '2' || github.event.inputs.calibration_stage == '3')
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-shard-${{ github.event.inputs.stage_1_run_id }}-*
+          path: prior-calibration/stage-1
+          run-id: ${{ github.event.inputs.stage_1_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download prior calibration stage 2
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-shard-${{ github.event.inputs.stage_2_run_id }}-*
+          path: prior-calibration/stage-2
+          run-id: ${{ github.event.inputs.stage_2_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download prior calibration accounting
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '1'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-accounting-${{ github.event.inputs.calibration_stage == '2' && github.event.inputs.stage_1_run_id || github.event.inputs.stage_2_run_id }}
+          path: prior-accounting
+          run-id: ${{ github.event.inputs.calibration_stage == '2' && github.event.inputs.stage_1_run_id || github.event.inputs.stage_2_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate prior calibration stages before fan-out
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '1'
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+          RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
+        run: |
+          uv run --no-sync python - <<'PY'
+          import json, os, pathlib, sys
+          from fettle.staged_preflight import WAVES
+          expected = {"stage-1": WAVES["wave-1"]}
+          if os.environ["CALIBRATION_STAGE"] == "3":
+              expected["stage-2"] = WAVES["wave-2"]
+          for directory, indexes in expected.items():
+              paths = sorted(pathlib.Path("prior-calibration", directory).rglob("mutation-report.json"))
+              if len(paths) != len(indexes):
+                  sys.exit(2)
+              reports = [json.loads(path.read_text()) for path in paths]
+              identity_fields = (
+                  "revision", "calibration_id", "preflight_digest",
+                  "preflight_corpus_digest", "environment_digest",
+              )
+              identities = {
+                  tuple(report.get(field) for field in identity_fields)
+                  for report in reports
+              }
+              if (sorted(report.get("shard_index") for report in reports) != sorted(indexes)
+                      or len(identities) != 1
+                      or any(report.get("status") != "completed"
+                             or report.get("calibration_id") != os.environ["CALIBRATION_ID"]
+                             or report.get("revision") != os.environ["GITHUB_SHA"]
+                             for report in reports)):
+                  sys.exit(2)
+          accounting = json.load(open("prior-accounting/calibration-accounting.json"))
+          expected_stage = str(int(os.environ["CALIBRATION_STAGE"]) - 1)
+          if (accounting.get("stage") != expected_stage or accounting.get("passed") is not True
+                  or accounting.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])):
+              sys.exit(2)
+          PY
       - name: Prepare digest-bound partitions
         if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight' || github.event.inputs.mode == 'diagnostic-canary'
         id: prepare
         run: |
           uv run --no-sync python -m fettle.mutation_test --root . --prepare-manifests mutation-manifests --json > prepare.json
+          python -c 'import json,sys; report=json.load(open("prepare.json")); sys.exit(0 if report.get("shard_count")==256 else 2)'
           {
             echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("prepare.json"))["matrix"], separators=(",", ":")))')"
-            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'preflight' }}' uv run --no-sync python -c 'import glob,json,os; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); print(json.dumps({"shard": replay if os.environ["MODE"] == "replay" else list(range(json.load(open("prepare.json"))["shard_count"]))}, separators=(",", ":")))')"
+            echo "execution_matrix=$(MODE='${{ github.event.inputs.mode || 'preflight' }}' STAGE='${{ github.event.inputs.calibration_stage }}' uv run --no-sync python -c 'import glob,json,os; from fettle.staged_preflight import WAVES; manifests=[json.load(open(path)) for path in glob.glob("mutation-manifests/partition-*.json")]; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"] == file and item["start"] <= end and item["end"] >= start for file,start,end in archived)}); mode=os.environ["MODE"]; selected=WAVES["wave-"+os.environ["STAGE"]] if mode=="calibration" else (replay if mode=="replay" else list(range(json.load(open("prepare.json"))["shard_count"]))); print(json.dumps({"shard":selected},separators=(",",":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare.json"))["shard_count"])')"
+            echo "max_parallel=$(python -c 'print({"1":8,"2":16,"3":32}.get("${{ github.event.inputs.calibration_stage }}",32))')"
           } >> "$GITHUB_OUTPUT"
       - name: Validate diagnostic canary scope
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'diagnostic-canary'
@@ -130,18 +241,21 @@ jobs:
         id: reuse
         env:
           MODE: ${{ github.event.inputs.mode }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
         run: |
-          uv run --no-sync python -c 'import glob,json,os; from fettle.mutation_test import load_partition_manifest; paths=glob.glob("mutation-manifests/partition-*.json"); manifests=[load_partition_manifest(__import__("pathlib").Path(path)) for path in paths]; aggregate=json.load(open("retained-preflight/mutation-preflight.json")); shard_count=len(manifests); assert shard_count and sorted(item["shard_index"] for item in manifests)==list(range(shard_count)), "retained manifests are incomplete"; assert all(item["revision"]==os.environ["GITHUB_SHA"] and item["shard_count"]==shard_count for item in manifests), "retained manifests do not match this commit and topology"; assert aggregate.get("status")=="completed" and aggregate.get("passed") is True, "retained preflight is not successful"; assert aggregate["revision"]==os.environ["GITHUB_SHA"], "retained preflight does not match this commit"; assert aggregate["shard_count"]==shard_count, "retained preflight shard count differs"; assert aggregate["generated"]==aggregate["canonicalized"], "retained preflight details do not reconcile"; assert aggregate["collisions"]==0, "retained preflight contains collisions"; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"]==file and item["start"]<=end and item["end"]>=start for file,start,end in archived)}); outputs={"matrix":{"shard":list(range(shard_count))},"execution_matrix":{"shard":replay if os.environ["MODE"]=="replay" else list(range(shard_count))},"shard_count":shard_count}; open("reuse-outputs.json","w").write(json.dumps(outputs))'
+          uv run --no-sync python -c 'import glob,json,os; from fettle.mutation_test import load_partition_manifest; from fettle.staged_preflight import WAVES; paths=glob.glob("mutation-manifests/partition-*.json"); manifests=[load_partition_manifest(__import__("pathlib").Path(path)) for path in paths]; aggregate=json.load(open("retained-preflight/mutation-preflight.json")); shard_count=len(manifests); assert shard_count==256 and sorted(item["shard_index"] for item in manifests)==list(range(shard_count)), "retained manifests are incomplete"; assert all(item["revision"]==os.environ["GITHUB_SHA"] and item["shard_count"]==shard_count for item in manifests), "retained manifests do not match this commit and topology"; assert aggregate.get("status")=="completed" and aggregate.get("passed") is True, "retained preflight is not successful"; assert aggregate["revision"]==os.environ["GITHUB_SHA"], "retained preflight does not match this commit"; assert aggregate["shard_count"]==shard_count, "retained preflight shard count differs"; assert aggregate["generated"]==aggregate["canonicalized"], "retained preflight details do not reconcile"; assert aggregate["collisions"]==0, "retained preflight contains collisions"; archived=(("fettle/mutation_test.py",121,180),("fettle/mutation_test.py",1081,1140),("fettle/mutation_test.py",1141,1200),("fettle/environment.py",121,141),("fettle/policy_layers.py",1,60),("fettle/policy_layers.py",61,120),("fettle/security_review.py",1,60),("fettle/suppressions_v3.py",121,180)); replay=sorted({manifest["shard_index"] for manifest in manifests for item in manifest["ranges"] if any(item["file"]==file and item["start"]<=end and item["end"]>=start for file,start,end in archived)}); stage=os.environ.get("CALIBRATION_STAGE",""); selected=WAVES["wave-"+stage] if os.environ["MODE"]=="calibration" else replay; outputs={"matrix":{"shard":list(range(shard_count))},"execution_matrix":{"shard":selected},"shard_count":shard_count,"max_parallel":{"1":8,"2":16,"3":32}.get(stage,32)}; open("reuse-outputs.json","w").write(json.dumps(outputs))'
           {
             echo "matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("reuse-outputs.json"))["matrix"], separators=(",", ":")))')"
             echo "execution_matrix=$(uv run --no-sync python -c 'import json; print(json.dumps(json.load(open("reuse-outputs.json"))["execution_matrix"], separators=(",", ":")))')"
             echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("reuse-outputs.json"))["shard_count"])')"
+            echo "max_parallel=$(uv run --no-sync python -c 'import json; print(json.load(open("reuse-outputs.json"))["max_parallel"])')"
           } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-manifests-${{ github.run_id }}
           path: mutation-manifests
           if-no-files-found: error
+          retention-days: 90
 
   preflight:
     if: github.event_name == 'schedule' || github.event.inputs.mode == 'preflight'
@@ -156,13 +270,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-manifests-${{ github.run_id }}
@@ -179,6 +294,7 @@ jobs:
           name: mutation-preflight-${{ github.run_id }}-${{ matrix.shard }}
           path: mutation-preflight.json
           if-no-files-found: error
+          retention-days: 90
 
   diagnostic-canary:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'diagnostic-canary'
@@ -190,13 +306,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-manifests-${{ github.run_id }}
@@ -225,13 +342,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: mutation-preflight-${{ github.run_id }}-*
@@ -248,6 +366,24 @@ jobs:
           name: mutation-preflight-${{ github.run_id }}
           path: mutation-preflight.json
           if-no-files-found: error
+          retention-days: 90
+
+  preflight-readback:
+    if: (github.event_name == 'schedule' || github.event.inputs.mode == 'preflight') && always()
+    needs: preflight-aggregate
+    name: mutation (read back detail corpus)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-preflight-${{ github.run_id }}
+          path: retained-preflight
+      - name: Read back complete preflight
+        run: >-
+          python -c 'import json,sys; report=json.load(open("retained-preflight/mutation-preflight.json"));
+          sys.exit(0 if report.get("status")=="completed" and report.get("passed") is True
+          and report.get("shard_count")==256 and report.get("generated")==report.get("canonicalized")
+          and report.get("collisions")==0 else 2)'
 
   staged-prepare:
     if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'staged-preflight' || github.event.inputs.mode == 'staged-preflight-recovery')
@@ -275,7 +411,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.14"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install frozen candidate
         working-directory: candidate
         run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
@@ -372,7 +508,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.14"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
           uv venv --python 3.12.14
@@ -418,7 +554,7 @@ jobs:
         with:
           python-version: "3.12.14"
       - &setup_staged_uv
-        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - &install_staged_candidate
         name: Install frozen candidate for validation
         working-directory: candidate
@@ -639,7 +775,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.14"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
           uv venv --python 3.12.14
@@ -701,7 +837,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.14"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install frozen candidate for evidence validation
         working-directory: candidate
         run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
@@ -757,25 +893,27 @@ jobs:
           if-no-files-found: error
 
   full-shard:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery' && github.event.inputs.mode != 'finalize'
     needs: prepare
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event.inputs.mode == 'calibration' }}
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.prepare.outputs.execution_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-manifests-${{ github.run_id }}
@@ -833,6 +971,7 @@ jobs:
           name: mutation-checkpoint-${{ github.event.inputs.mode == 'replay' && format('replay-{0}', github.event.inputs.resume_run_id || github.run_id) || github.event.inputs.calibration_id }}-${{ matrix.shard }}
           path: mutation-checkpoint.json
           if-no-files-found: error
+          retention-days: 90
       - name: Retain mutation shard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -840,34 +979,146 @@ jobs:
           name: mutation-shard-${{ github.run_id }}-${{ matrix.shard }}
           path: mutation-report.json
           if-no-files-found: error
+          retention-days: 90
 
-  aggregate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery' && always()
-    name: mutation evidence
+  calibration-accounting:
+    if: always() && github.event.inputs.mode == 'calibration'
     needs: [prepare, full-shard]
+    name: mutation (calibration accounting)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+          python-version: "3.12.13"
+      - name: Collect cumulative job accounting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE_1_RUN_ID: ${{ github.event.inputs.stage_1_run_id }}
+          STAGE_2_RUN_ID: ${{ github.event.inputs.stage_2_run_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+          RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-current.json
+          if [[ "$CALIBRATION_STAGE" == "2" || "$CALIBRATION_STAGE" == "3" ]]; then
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_1_RUN_ID/attempts/1/jobs?per_page=100" > jobs-stage-1.json
+          fi
+          if [[ "$CALIBRATION_STAGE" == "3" ]]; then
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_2_RUN_ID/attempts/1/jobs?per_page=100" > jobs-stage-2.json
+          fi
+          python - <<'PY'
+          import json, os, pathlib, sys
+          from fettle.staged_preflight import account_runner_minutes
+          sources = [(pathlib.Path("jobs-current.json"), os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])]
+          if os.environ["CALIBRATION_STAGE"] in {"2", "3"}:
+              sources.append((pathlib.Path("jobs-stage-1.json"), os.environ["STAGE_1_RUN_ID"], "1"))
+          if os.environ["CALIBRATION_STAGE"] == "3":
+              sources.append((pathlib.Path("jobs-stage-2.json"), os.environ["STAGE_2_RUN_ID"], "1"))
+          records = [account_runner_minutes(path, expected_run_id=run, expected_run_attempt=attempt)
+                     for path, run, attempt in sources]
+          total = round(sum(record["estimated_runner_minutes"] for record in records), 2)
+          result = {"schema_version": "1", "stage": os.environ["CALIBRATION_STAGE"],
+                    "ceiling": int(os.environ["RUNNER_MINUTE_CEILING"]),
+                    "estimated_runner_minutes": total, "sources": records,
+                    "passed": total <= int(os.environ["RUNNER_MINUTE_CEILING"])}
+          pathlib.Path("calibration-accounting.json").write_text(json.dumps(result, indent=2)+"\n")
+          sys.exit(0 if result["passed"] else 2)
+          PY
+      - name: Retain calibration accounting
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-accounting-${{ github.run_id }}
+          path: |
+            calibration-accounting.json
+            jobs-*.json
+          retention-days: 90
+          if-no-files-found: error
+
+  aggregate:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'staged-preflight-recovery' && always()
+    name: mutation (assemble evidence)
+    needs: [prepare, full-shard, calibration-accounting]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
       - name: Bind authoritative check to exact candidate
+        if: github.event.inputs.mode != 'finalize'
         env:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
         run: >-
           python -c 'import os,re,sys; candidate=os.environ["CANDIDATE_SHA"];
           sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", candidate) and candidate == os.environ["GITHUB_SHA"] else 1)'
+      - name: Prove evidence-only finalization head
+        if: github.event.inputs.mode == 'finalize'
+        env:
+          EXECUTABLE_CANDIDATE_SHA: ${{ github.event.inputs.executable_candidate_sha }}
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          CALIBRATION_RUN_ID: ${{ github.event.inputs.calibration_run_id }}
+        run: |
+          python - <<'PY'
+          import os, re, subprocess, sys
+          executable = os.environ["EXECUTABLE_CANDIDATE_SHA"]
+          head = os.environ["CANDIDATE_SHA"]
+          run_id = os.environ["CALIBRATION_RUN_ID"]
+          allowed = {
+              "docs/audit-hardening-worklog.md",
+              "docs/completion/audit-hardening.json",
+              "docs/completion/evidence/audit-hardening.json",
+              "docs/final-candidate-readiness.md",
+          }
+          if not (re.fullmatch(r"[0-9a-f]{40}", executable)
+                  and head == os.environ["GITHUB_SHA"]
+                  and re.fullmatch(r"[1-9][0-9]*", run_id)):
+              sys.exit(2)
+          subprocess.run(["git", "merge-base", "--is-ancestor", executable, head], check=True)
+          raw = subprocess.check_output(
+              ["git", "diff", "--raw", "--no-abbrev", executable, head], text=True,
+          ).splitlines()
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--no-renames", executable, head], text=True,
+          ).splitlines()
+          if not changed or set(changed) - allowed or len(changed) != len(set(changed)):
+              sys.exit(2)
+          for line in raw:
+              metadata, path = line.split("\t", 1)
+              fields = metadata.split()
+              if path not in allowed or fields[0] != ":100644" or fields[1] != "100644" or fields[-1] != "M":
+                  sys.exit(2)
+          PY
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: github.event.inputs.mode == 'calibration'
         with:
           pattern: mutation-shard-${{ github.run_id }}-*
-          path: mutation-shards
+          path: calibration-shards/current
+      - name: Download stage 1 mutation evidence
+        if: github.event.inputs.mode == 'calibration' && (github.event.inputs.calibration_stage == '2' || github.event.inputs.calibration_stage == '3')
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-shard-${{ github.event.inputs.stage_1_run_id }}-*
+          path: calibration-shards/stage-1
+          run-id: ${{ github.event.inputs.stage_1_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download stage 2 mutation evidence
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-shard-${{ github.event.inputs.stage_2_run_id }}-*
+          path: calibration-shards/stage-2
+          run-id: ${{ github.event.inputs.stage_2_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download current-run partition manifests
         if: github.event.inputs.mode == 'calibration'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -883,39 +1134,114 @@ jobs:
           run-id: ${{ github.event.inputs.preflight_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Validate and aggregate full mutation evidence
-        if: github.event.inputs.mode == 'calibration'
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
         env:
           CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
         run: >-
-          uv run --no-sync python -m fettle.mutation_test --root . --aggregate mutation-shards
+          uv run --no-sync python -m fettle.mutation_test --root . --aggregate calibration-shards
           --aggregate-scope mutation-manifests
           --aggregate-preflight-evidence retained-preflight/mutation-preflight.json
           --calibration-id "$CALIBRATION_ID"
           --shard-count ${{ needs.prepare.outputs.shard_count }} --json > mutation-report.json
       - name: Record non-qualifying authoritative probe
-        if: github.event.inputs.mode != 'calibration'
+        if: github.event.inputs.mode != 'calibration' && github.event.inputs.mode != 'finalize'
         env:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
           MODE: ${{ github.event.inputs.mode }}
         run: >-
           python -c 'import json,os; mode=os.environ["MODE"];
           json.dump({"status":"unknown","message":mode+" does not constitute mutation qualification","revision":os.environ["CANDIDATE_SHA"],"score":None,"passed":False,"qualification_executed":False},open("mutation-report.json","w"),separators=(",",":"))'
+      - name: Record incomplete calibration stage
+        if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '3'
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+        run: >-
+          python -c 'import json,os;
+          json.dump({"status":"unknown","message":"calibration stage "+os.environ["CALIBRATION_STAGE"]+" retained; all three stages are required","revision":os.environ["CANDIDATE_SHA"],"score":None,"passed":False,"qualification_executed":False},open("mutation-report.json","w"),separators=(",",":"))'
+      - name: Download frozen-candidate calibration
+        if: github.event.inputs.mode == 'finalize'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-evidence-${{ github.event.inputs.calibration_run_id }}
+          path: frozen-calibration
+          run-id: ${{ github.event.inputs.calibration_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download frozen-candidate accounting
+        if: github.event.inputs.mode == 'finalize'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-accounting-${{ github.event.inputs.calibration_run_id }}
+          path: frozen-accounting
+          run-id: ${{ github.event.inputs.calibration_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate frozen-candidate calibration
+        if: github.event.inputs.mode == 'finalize'
+        env:
+          EXECUTABLE_CANDIDATE_SHA: ${{ github.event.inputs.executable_candidate_sha }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+        run: >-
+          python -c 'import hashlib,json,os,pathlib,shutil,sys; path=pathlib.Path("frozen-calibration/mutation-report.json");
+          checksum=pathlib.Path("frozen-calibration/mutation-report.sha256").read_text().split()[0];
+          report=json.loads(path.read_text()); accounting=json.load(open("frozen-accounting/calibration-accounting.json"));
+          valid=report.get("status")=="completed" and report.get("passed") is True
+          and report.get("revision")==os.environ["EXECUTABLE_CANDIDATE_SHA"]
+          and report.get("calibration_id")==os.environ["CALIBRATION_ID"]
+          and accounting.get("stage")=="3" and accounting.get("passed") is True
+          and hashlib.sha256(path.read_bytes()).hexdigest()==checksum;
+          shutil.copyfile(path,"mutation-report.json"); sys.exit(0 if valid else 2)'
       - name: Mutation summary
         if: always() && hashFiles('mutation-report.json') != ''
         run: >-
           uv run --no-sync python -c "import json,os,pathlib; r=json.load(open('mutation-report.json'));
           pathlib.Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Full mutation evidence\n\nStatus: **%s**  \nScore: **%s**  \nKilled: **%s**  \nSurvived: **%s**\n'
           % (r.get('status'), r.get('score'), r.get('killed', 0), r.get('survived', 0)))"
+      - name: Record evidence checksum
+        if: always() && hashFiles('mutation-report.json') != ''
+        run: shasum -a 256 mutation-report.json > mutation-report.sha256
       - name: Retain full mutation evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-evidence-${{ github.run_id }}
-          path: mutation-report.json
+          path: |
+            mutation-report.json
+            mutation-report.sha256
           if-no-files-found: error
+          retention-days: 90
       - name: Enforce mutation evidence result
-        if: always()
+        if: always() && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '3')
         run: >-
           uv run --no-sync python -c "import json,sys;
           report=json.load(open('mutation-report.json'));
           sys.exit(0 if report.get('passed') is True else 2)"
+
+  evidence-readback:
+    if: >-
+      always() && github.event_name == 'workflow_dispatch'
+      && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '3')
+      && github.event.inputs.mode != 'staged-preflight'
+      && github.event.inputs.mode != 'staged-preflight-recovery'
+    needs: aggregate
+    name: mutation evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-evidence-${{ github.run_id }}
+          path: retained-evidence
+      - name: Independently read back authoritative evidence
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, sys
+          report_path = pathlib.Path("retained-evidence/mutation-report.json")
+          checksum_path = pathlib.Path("retained-evidence/mutation-report.sha256")
+          try:
+              report = json.loads(report_path.read_text())
+              expected = checksum_path.read_text().split()[0]
+              actual = hashlib.sha256(report_path.read_bytes()).hexdigest()
+          except (OSError, UnicodeError, ValueError, json.JSONDecodeError, IndexError):
+              sys.exit(2)
+          sys.exit(0 if expected == actual and report.get("status") == "completed"
+                   and report.get("passed") is True else 2)
+          PY

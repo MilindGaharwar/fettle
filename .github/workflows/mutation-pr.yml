@@ -23,9 +23,9 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
       - name: Prepare bounded changed-scope partitions
         id: prepare
         env:
@@ -49,9 +49,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv venv --python 3.12 && uv pip install --quiet --no-deps -e .
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
       - name: Reject incomplete changed-scope preparation
         if: needs.changed-prepare.result != 'success' || needs.changed-prepare.outputs.shard_count == ''
         run: exit 1
