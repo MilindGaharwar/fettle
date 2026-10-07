@@ -409,6 +409,30 @@ def test_staged_recovery_reuses_only_immutable_wave_one_and_charges_both_runs():
     assert 'len(recovery.get("origins",{}))==256' in staged
 
 
+def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml"
+    workflow = workflow_path.read_text()
+    jobs = yaml.safe_load(workflow)["jobs"]
+
+    assert set(jobs) == {"prepare", "launch-gate", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
+    assert sum("strategy" in job for job in jobs.values()) == 1
+    assert len(jobs) - 1 == 7
+    assert workflow.count("strategy:") == 1
+    assert workflow.count("matrix:") == 2  # strategy plus the prepare output key
+    assert "max-parallel: 8" in workflow
+    assert "github.event.head_commit.message == 'Execute staged preflight continuation'" in workflow
+    assert "37464324954" in workflow
+    assert "37476889333" in workflow
+    assert "continuation-plan" in workflow
+    assert "--additional-prior-run-id 37476889333" in workflow
+    assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
+    assert '"status == \\"completed\\"' not in workflow
+    assert '.status == "completed" and .conclusion == "failure"' in workflow
+    assert "--aggregate-preflight staged-reports --shard-count 256" in workflow
+    assert "staged-wave-1" not in workflow
+    assert "staged-wave-2" not in workflow
+
+
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 

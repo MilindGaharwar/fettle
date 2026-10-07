@@ -73,3 +73,27 @@ then consumes exactly 256 compatible reports. No single-run claim is made.
   validation is structurally valid while honestly retaining unrelated blocked criteria;
   and independent review finds no dispatch blocker before dispatch.
 - Remote execution stops on the first failed shard, evidence gate, or budget gate.
+
+## Separately authorized continuation
+
+Run `37476889333` proved that conditional earlier matrices and supporting jobs still
+consume the workflow run's matrix expansion capacity. The retained provider record
+contains one unexpanded wave-3 placeholder with the literal matrix expression,
+`completed/skipped`, null runner identity, and no steps. GitHub exposed no textual
+rejection annotation; the documented applicable limit is 256 matrix jobs per workflow
+run: <https://docs.github.com/en/actions/reference/limits>.
+
+The continuation is therefore a separate workflow with only the 216 unattempted
+shards at maximum parallelism 8 and seven support jobs (223 fully expanded jobs). Its
+one-shot push trigger is restricted to the integration branch, the workflow file,
+and the exact authorized commit message because GitHub does not expose a newly added
+`workflow_dispatch` workflow until it exists on the default branch. Ordinary later
+pushes cannot launch it.
+Its
+prepare gate imports explicit run `37464324954`, attempt 1 and run `37476889333`,
+attempt 1, then revalidates exact candidate, orchestration and workflow provenance,
+runtime, dependency and policy hashes, all manifest digests, source plan hashes,
+report hashes, and retained validations. Budget gates sum all three attempts against
+the original 740-minute operational allocation; aggregation launches at 595 minutes
+or less and completion must remain at 640 minutes or less, preserving 100 minutes of
+cancellation headroom. Both historical runs remain permanently non-pass.

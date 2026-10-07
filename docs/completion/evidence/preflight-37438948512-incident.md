@@ -166,9 +166,12 @@ budget artifact SHA-256 is
 `19b92208658b7c17d32f80fe7d2ab600e5529792a9a866d17e248ce21111b908`.
 
 GitHub then created one skipped placeholder for the 216-shard wave-3 matrix instead
-of expanding it. The documented GitHub Actions job-matrix limit is 256 jobs per
-workflow run. The run had already materialized its earlier matrix and control jobs;
-expanding all 216 remaining jobs would have exceeded that fixed limit. The always-run
+of expanding it. The placeholder retained the literal matrix expression, had null
+runner identity and no steps, and carried no textual rejection annotation. The
+documented GitHub Actions job-matrix limit is 256 jobs per workflow run. The run had
+already materialized its earlier matrix and control jobs; expanding all 216 remaining
+jobs would have exceeded that fixed limit. Earlier readiness checks proved each fixed
+wave's membership but did not count the complete expanded workflow topology. The always-run
 wave-3 validator correctly failed because no wave-3 reports existed. Aggregation and
 the linked recovery record did not execute, and final evidence failed closed.
 

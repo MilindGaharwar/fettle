@@ -10,6 +10,8 @@ from scripts.staged_preflight import (
     ARTIFACT_RETENTION_DAYS,
     BUDGET,
     FROZEN_CANDIDATE,
+    RECOVERY_ORCHESTRATION_SHA,
+    RECOVERY_RUN_ID,
     SOURCE_ORCHESTRATION_SHA,
     SOURCE_REPORT_SHA256,
     SOURCE_RUN_ID,
@@ -18,10 +20,13 @@ from scripts.staged_preflight import (
     account_runner_minutes,
     combine_accounting,
     build_plan,
+    build_continuation_plan,
     build_recovery_plan,
     build_recovery_record,
+    combine_accounting_sources,
     observed_runner_minutes,
     validate_wave,
+    validate_continuation_topology,
 )
 
 
@@ -40,6 +45,9 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
         "complete": 640,
     }
     assert ARTIFACT_RETENTION_DAYS == 90
+    assert validate_continuation_topology() == {
+        "matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223, "platform_limit": 256,
+    }
 
 
 def _fixture(monkeypatch, tmp_path):
@@ -450,6 +458,30 @@ def test_combined_accounting_charges_original_and_recovery_attempts(tmp_path):
     assert [item["expected_run_id"] for item in result["sources"]] == ["37", "38"]
 
 
+def test_three_run_accounting_preserves_every_explicit_origin(tmp_path):
+    sources = [
+        (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(index, run_id=run_id)]}],
+                    f"{run_id}.json"), str(run_id), "1")
+        for index, run_id in enumerate((37, 38, 39), 1)
+    ]
+
+    result = combine_accounting_sources(sources)
+
+    assert result["estimated_runner_minutes"] == 6
+    assert [item["expected_run_id"] for item in result["sources"]] == ["37", "38", "39"]
+
+
+def test_three_run_accounting_rejects_wrong_middle_origin(tmp_path):
+    sources = [
+        (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}], "37.json"), "37", "1"),
+        (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(2, run_id=99)]}], "38.json"), "38", "1"),
+        (_jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(3, run_id=39)]}], "39.json"), "39", "1"),
+    ]
+
+    with pytest.raises(ValueError, match="origin"):
+        combine_accounting_sources(sources)
+
+
 def test_combined_accounting_rejects_recovery_attempt_two(tmp_path):
     prior = _jobs_file(
         tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}], "prior.json",
@@ -500,6 +532,71 @@ def test_recovery_plan_reuses_only_exact_compatible_wave_one(monkeypatch, tmp_pa
     assert set(result["execution_waves"]) == {"wave-2", "wave-3"}
     assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
     assert result["origin_assignment"]["0"]["run_id"] == "38"
+
+
+def test_continuation_plan_revalidates_both_runs_and_schedules_only_wave_three(
+    monkeypatch, tmp_path,
+):
+    root, manifests_dir, source_reports, manifests, _, _ = _fixture(monkeypatch, tmp_path)
+    source_identity = {
+        "repository": "owner/repo", "workflow": "Mutation evidence",
+        "workflow_ref": SOURCE_WORKFLOW_REF, "run_id": SOURCE_RUN_ID, "run_attempt": "1",
+    }
+    source_plan = build_plan(root, manifests_dir, SOURCE_ORCHESTRATION_SHA, source_identity)
+    source_plan_path = tmp_path / "source-plan.json"
+    source_plan_path.write_text(json.dumps(source_plan))
+    _write_wave(source_reports, manifests, "wave-1")
+    monkeypatch.setattr("scripts.staged_preflight.SOURCE_PLAN_SHA256", _file_sha(source_plan_path))
+    monkeypatch.setattr(
+        "scripts.staged_preflight.SOURCE_REPORT_SHA256",
+        {index: _file_sha(source_reports / str(index) / "mutation-preflight.json")
+         for index in WAVES["wave-1"]},
+    )
+    recovery_identity = {
+        "repository": "owner/repo", "workflow": "Mutation evidence",
+        "workflow_ref": SOURCE_WORKFLOW_REF, "run_id": RECOVERY_RUN_ID, "run_attempt": "1",
+    }
+    recovery_plan = build_recovery_plan(
+        root, source_plan_path, manifests_dir, source_reports,
+        RECOVERY_ORCHESTRATION_SHA, recovery_identity,
+    )
+    recovery_plan_path = tmp_path / "recovery-plan.json"
+    recovery_plan_path.write_text(json.dumps(recovery_plan))
+    recovery_reports = tmp_path / "recovery-reports"
+    recovery_reports.mkdir()
+    _write_wave(recovery_reports, manifests, "wave-2")
+    recovery_validation = validate_wave(
+        root, recovery_plan_path, manifests_dir, recovery_reports, "wave-2",
+        RECOVERY_ORCHESTRATION_SHA, recovery_identity,
+    )
+    recovery_validation_path = tmp_path / "recovery-validation.json"
+    recovery_validation_path.write_text(json.dumps(recovery_validation))
+    monkeypatch.setattr("scripts.staged_preflight.RECOVERY_PLAN_SHA256", _file_sha(recovery_plan_path))
+    monkeypatch.setattr(
+        "scripts.staged_preflight.RECOVERY_VALIDATION_SHA256",
+        _file_sha(recovery_validation_path),
+    )
+    monkeypatch.setattr(
+        "scripts.staged_preflight.RECOVERY_REPORT_SHA256",
+        {index: _file_sha(recovery_reports / str(index) / "mutation-preflight.json")
+         for index in WAVES["wave-2"]},
+    )
+    continuation_identity = {
+        "repository": "owner/repo", "workflow": "Staged preflight continuation",
+        "workflow_ref": "owner/repo/.github/workflows/staged-preflight-continuation.yml@refs/heads/test",
+        "run_id": "39", "run_attempt": "1",
+    }
+
+    result = build_continuation_plan(
+        root, source_plan_path, source_reports, recovery_plan_path, recovery_reports,
+        recovery_validation_path, manifests_dir, "c" * 40, continuation_identity,
+    )
+
+    assert result["execution_wave"]["shards"] == WAVES["wave-3"]
+    assert result["topology"]["expanded_jobs"] == 223
+    assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
+    assert result["origin_assignment"]["0"]["run_id"] == RECOVERY_RUN_ID
+    assert result["origin_assignment"]["35"]["run_id"] == "39"
 
 
 def _file_sha(path):

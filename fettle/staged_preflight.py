@@ -30,6 +30,44 @@ SOURCE_REPORT_SHA256 = {
     51: "b3221fe3776b4324e1df83ee2284e13a3cc66a5544ceaedc150d28fe62fd4f65",
     53: "932730a91b27186c2a15de0fd76ff461d2b2f41c8be2b1712739b27470511dcb",
 }
+RECOVERY_RUN_ID = "37476889333"
+RECOVERY_ORCHESTRATION_SHA = "7da9f5d07884a5913bdbc38f28b34344c839a9f9"
+RECOVERY_PLAN_SHA256 = "6882bd0f2cc46e73e86b44053257f9029e951c41c2d3d5767eb9fc29b0272b99"
+RECOVERY_VALIDATION_SHA256 = "be9720e53a65cd794ceb4d446925359e78d92f18af1afd356ef1334de368d4ee"
+RECOVERY_REPORT_SHA256 = {
+    0: "410373c3a18369b9c1708deaf1d26eb84bc4bc3c6822ad34a1772c6fb2b8c0a5",
+    1: "b0892cce8c7503d7870919d1f05ee3f776173619931423d0c22877783a29f752",
+    2: "823d836c4338acafa031efcf2f85df05570007dc1b86cd7f92b33c3c4d8188b3",
+    3: "3234fb4b3104eaa1dad97d04aae682757b524153ef7e4f695b1d253c4541b097",
+    4: "047c82d09636c47e799557b1141d683600995f18dcf289b112207b7b456e2799",
+    5: "8dbb02de21a312d6ac01071500d396eb3c545a71eb97aa42ddec614639f2a552",
+    6: "ac863e12708bba2c95d9b269e5f71890b0a4f63b800bbae1d5f0d2000e1a7c79",
+    7: "a1aadee19be52acc2f500c000b9494ed0b887b9c65443023dd2444f345ffd5e5",
+    9: "96f3de59d67ba3821bdf5d3ad2b65e1df7f5c0b80306ff9c602f90a5d626acd8",
+    10: "8951441c09d40d13b8533fbaf8fbf5f2267da1e10e2203b341b38361eac0ca54",
+    11: "3750b25dca78623abd9d06600d439b996c436d5ea2dd8093cb57424463cb9b4e",
+    12: "750992ed42d68442352dfef74e460adad76c3c4aa9cb7d86d3d93dd79c8db845",
+    13: "7cc5a02ebac49f3e8e18ce316cf64bed3828a7dc3946b4bc2230f83609685574",
+    14: "4a6dc0f6a7c2ae815ce1c617318c7fbc506d11a95b276438efa1ffcda759a6e3",
+    15: "bbdc243203aa6fb0d418a794a492e0db2115ef95a50dfa6b6f2ef79c85255f65",
+    16: "880f6d00dff4eac05ea9c0cc8fac607658274b8b24b5e1df6d3361c28a021cf3",
+    17: "09349cba8db51ce6dd41fbca36f662435f94edc82be4882c7cec41fe488e2fb4",
+    18: "e271b9d1bb9a59386afd98fbd8a6c28681b2fb28e347da30402ec6d4322eedca",
+    19: "0c760cd9c9f8bfd338792a2eed2d74cb9e981dfc1f5aa5a1c4ce2b0234f303af",
+    20: "3f9817c3ea53e65963f4c64ff06b24783923285ab438862653a46f31b48760cf",
+    21: "11b0d963d7ada57fbb2bb4bebe774238067abeb1c62493bf21a0e0c1978da243",
+    22: "b0d8e12b6a21e000587fb63a533a61bc236a54b0ef0ed1afa1f5c622e68b3cd3",
+    23: "09b800a456920ff407aa9dbb00beb75cf71d5896442bdbd2d3bf3e640e4aac41",
+    24: "c1124f72f9f57f6a2e6c6afd5dc6c00538c70181074e13301767fe859eb7db05",
+    25: "4e0be0a7923ac1339954f6bf2e437b08a1819a4258b2edb8dbba419a0b90e881",
+    26: "b4f29f1a24239055130e1670e5f08004dcc0828a8f8320cd43cb3d843a17320c",
+    29: "43ad72514df8cf6c5891bbb27230b6a249aae5026d0624e9283c87f565ce745f",
+    30: "fbe56fc83a6b87068caec4af442aed3da8dca34facb4a89aad8a8af7948e1376",
+    31: "52b78549e801f21d51e127922578e1d7394d1e97e35e9343af4e91ef7f278f10",
+    32: "b2258b8603049be0218ffe3f29ffe6c1647d1104ecfd8185902dce4b3ea7963e",
+    33: "4e8838e92a2d39ac307499da22f2521d496cb2492ff695b0ada09c7c44cea220",
+    34: "2dff36180d5518b8006a6930160fdf94f2595138595753810e1b73d4e4328935",
+}
 SHARD_COUNT = 256
 ARTIFACT_RETENTION_DAYS = 90
 WAVES = {
@@ -49,6 +87,8 @@ BUDGET = {
     "cancellation_headroom": 100,
     "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 640},
 }
+MATRIX_JOB_LIMIT = 256
+CONTINUATION_SUPPORT_JOBS = 7
 
 
 def _digest(value: object) -> str:
@@ -274,9 +314,10 @@ def build_recovery_plan(
 
 def build_recovery_record(plan_path: Path, reports_dir: Path, aggregate_path: Path) -> dict:
     plan = _load_json(plan_path)
-    if plan.get("mode") != "staged-preflight-recovery":
-        raise ValueError("recovery record requires a recovery plan")
-    source = plan.get("source")
+    mode = plan.get("mode")
+    if mode not in {"staged-preflight-recovery", "staged-preflight-continuation"}:
+        raise ValueError("linked record requires a recovery or continuation plan")
+    source = plan.get("source") if mode == "staged-preflight-recovery" else plan.get("sources", [None])[0]
     origins = plan.get("origin_assignment")
     manifest_digests = plan.get("manifest_digests")
     if (
@@ -319,11 +360,20 @@ def build_recovery_record(plan_path: Path, reports_dir: Path, aggregate_path: Pa
                 or file_digest != SOURCE_REPORT_SHA256[index]
             ):
                 raise ValueError(f"reused report {index} differs from its immutable origin")
-        elif (
-            origin.get("run_id") != plan.get("workflow", {}).get("run_id")
-            or origin.get("run_attempt") != plan.get("workflow", {}).get("run_attempt")
-        ):
-            raise ValueError(f"new report {index} differs from its recovery origin")
+        else:
+            expected_run = (
+                RECOVERY_RUN_ID
+                if mode == "staged-preflight-continuation" and index in WAVES["wave-2"]
+                else plan.get("workflow", {}).get("run_id")
+            )
+            if origin.get("run_id") != expected_run or origin.get("run_attempt") != "1":
+                raise ValueError(f"new report {index} differs from its recovery origin")
+            if (
+                mode == "staged-preflight-continuation"
+                and index in WAVES["wave-2"]
+                and file_digest != RECOVERY_REPORT_SHA256[index]
+            ):
+                raise ValueError(f"reused report {index} differs from its immutable origin")
         generated_value = report.get("generated")
         if not isinstance(generated_value, int) or isinstance(generated_value, bool):
             raise ValueError(f"recovery report {index} has malformed generated count")
@@ -350,15 +400,127 @@ def build_recovery_record(plan_path: Path, reports_dir: Path, aggregate_path: Pa
         "schema_version": "1",
         "status": "completed",
         "passed": True,
-        "kind": "linked_staged_preflight_recovery",
+        "kind": ("linked_staged_preflight_recovery" if mode == "staged-preflight-recovery"
+                 else "linked_staged_preflight_continuation"),
         "candidate_sha": FROZEN_CANDIDATE,
         "source_run_verdict": "permanently non-pass",
         "source": source,
+        "sources": plan.get("sources"),
+        "historical_verdicts": plan.get("historical_verdicts"),
         "recovery_workflow": plan["workflow"],
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "aggregate_sha256": _file_digest(aggregate_path),
         "generated": generated,
         "origins": {str(index): records[index] for index in range(SHARD_COUNT)},
+    }
+
+
+def validate_continuation_topology() -> dict:
+    matrix_jobs = len(WAVES["wave-3"])
+    expanded_jobs = matrix_jobs + CONTINUATION_SUPPORT_JOBS
+    if matrix_jobs != 216 or expanded_jobs > MATRIX_JOB_LIMIT:
+        raise ValueError("continuation workflow exceeds the fixed matrix-job topology")
+    return {
+        "matrix_jobs": matrix_jobs,
+        "support_jobs": CONTINUATION_SUPPORT_JOBS,
+        "expanded_jobs": expanded_jobs,
+        "platform_limit": MATRIX_JOB_LIMIT,
+    }
+
+
+def build_continuation_plan(
+    root: Path,
+    source_plan_path: Path,
+    source_reports_dir: Path,
+    recovery_plan_path: Path,
+    recovery_reports_dir: Path,
+    recovery_validation_path: Path,
+    manifests_dir: Path,
+    orchestration_sha: str,
+    identity: dict,
+) -> dict:
+    if _file_digest(source_plan_path) != SOURCE_PLAN_SHA256:
+        raise ValueError("source plan digest differs from the authorized continuation input")
+    if _file_digest(recovery_plan_path) != RECOVERY_PLAN_SHA256:
+        raise ValueError("recovery plan digest differs from the authorized continuation input")
+    if _file_digest(recovery_validation_path) != RECOVERY_VALIDATION_SHA256:
+        raise ValueError("recovery validation digest differs from the authorized continuation input")
+    recovery_plan = _load_json(recovery_plan_path)
+    recovery_identity = {
+        "repository": identity["repository"], "workflow": "Mutation evidence",
+        "workflow_ref": SOURCE_WORKFLOW_REF, "run_id": RECOVERY_RUN_ID, "run_attempt": "1",
+    }
+    if (
+        recovery_plan.get("candidate_sha") != FROZEN_CANDIDATE
+        or recovery_plan.get("orchestration_sha") != RECOVERY_ORCHESTRATION_SHA
+        or recovery_plan.get("workflow") != recovery_identity
+        or recovery_plan.get("source", {}).get("run_id") != SOURCE_RUN_ID
+        or recovery_plan.get("source", {}).get("run_attempt") != "1"
+    ):
+        raise ValueError("recovery plan identity differs from the authorized continuation input")
+    current = build_plan(root, manifests_dir, orchestration_sha, identity)
+    compatibility_keys = (
+        "candidate_sha", "runtime", "dependencies", "policy", "shard_count",
+        "manifest_digests", "manifest_topology_digest", "waves", "budget",
+    )
+    if any(current[key] != recovery_plan.get(key) for key in compatibility_keys):
+        raise ValueError("recovery and continuation execution identities are incompatible")
+    source_identity = {
+        "repository": identity["repository"], "workflow": "Mutation evidence",
+        "workflow_ref": SOURCE_WORKFLOW_REF, "run_id": SOURCE_RUN_ID, "run_attempt": "1",
+    }
+    source_validation = validate_wave(
+        root, source_plan_path, manifests_dir, source_reports_dir, "wave-1",
+        SOURCE_ORCHESTRATION_SHA, source_identity,
+    )
+    source_paths = {
+        _load_json(path).get("shard_index"): path
+        for path in source_reports_dir.rglob("mutation-preflight.json")
+    }
+    if sorted(source_paths) != sorted(WAVES["wave-1"]):
+        raise ValueError("source reports are incomplete or duplicated")
+    for index, expected_digest in SOURCE_REPORT_SHA256.items():
+        if _file_digest(source_paths[index]) != expected_digest:
+            raise ValueError(f"source report {index} digest differs from the authorized input")
+    recovery_validation = validate_wave(
+        root, recovery_plan_path, manifests_dir, recovery_reports_dir, "wave-2",
+        RECOVERY_ORCHESTRATION_SHA, recovery_identity,
+    )
+    if recovery_validation != _load_json(recovery_validation_path):
+        raise ValueError("recovery validation does not reproduce from imported reports")
+    recovery_paths = {
+        _load_json(path).get("shard_index"): path
+        for path in recovery_reports_dir.rglob("mutation-preflight.json")
+    }
+    if sorted(recovery_paths) != sorted(WAVES["wave-2"]):
+        raise ValueError("recovery reports are incomplete or duplicated")
+    for index, expected_digest in RECOVERY_REPORT_SHA256.items():
+        if _file_digest(recovery_paths[index]) != expected_digest:
+            raise ValueError(f"recovery report {index} digest differs from the authorized input")
+    return {
+        **current,
+        "mode": "staged-preflight-continuation",
+        "topology": validate_continuation_topology(),
+        "historical_verdicts": {
+            SOURCE_RUN_ID: "permanently non-pass",
+            RECOVERY_RUN_ID: "permanently non-pass",
+        },
+        "sources": [
+            {"run_id": SOURCE_RUN_ID, "run_attempt": "1", "orchestration_sha": SOURCE_ORCHESTRATION_SHA,
+             "plan_sha256": SOURCE_PLAN_SHA256, "validation": source_validation},
+            {"run_id": RECOVERY_RUN_ID, "run_attempt": "1", "orchestration_sha": RECOVERY_ORCHESTRATION_SHA,
+             "plan_sha256": RECOVERY_PLAN_SHA256, "validation": recovery_validation},
+        ],
+        "execution_wave": current["waves"]["wave-3"],
+        "origin_assignment": {
+            str(index): {
+                "run_id": (SOURCE_RUN_ID if index in WAVES["wave-1"] else
+                           RECOVERY_RUN_ID if index in WAVES["wave-2"] else identity["run_id"]),
+                "run_attempt": "1",
+                "wave": next(name for name, shards in WAVES.items() if index in shards),
+            }
+            for index in range(SHARD_COUNT)
+        },
     }
 
 
@@ -536,15 +698,32 @@ def combine_accounting(
     }
 
 
+def combine_accounting_sources(sources: list[tuple[Path, str, str]], now: datetime | None = None) -> dict:
+    if not sources:
+        raise ValueError("at least one accounting source is required")
+    reports = [
+        account_runner_minutes(path, now, expected_run_id=run_id, expected_run_attempt=attempt)
+        for path, run_id, attempt in sources
+    ]
+    return {
+        "schema_version": "1",
+        "kind": "combined_operational_runner_time_estimate",
+        "billing_authority": False,
+        "estimated_runner_minutes": round(sum(item["estimated_runner_minutes"] for item in reports), 2),
+        "sources": reports,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan")
     recovery = sub.add_parser("recovery-plan")
+    continuation = sub.add_parser("continuation-plan")
     recovery_record = sub.add_parser("recovery-record")
     wave = sub.add_parser("validate-wave")
     budget = sub.add_parser("budget-gate")
-    for command in (plan, recovery, wave):
+    for command in (plan, recovery, continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
         command.add_argument("--repository", required=True)
@@ -558,6 +737,13 @@ def main() -> int:
     recovery.add_argument("--source-reports", type=Path, required=True)
     recovery.add_argument("--orchestration-sha", required=True)
     recovery.add_argument("--output", type=Path, required=True)
+    continuation.add_argument("--source-plan", type=Path, required=True)
+    continuation.add_argument("--source-reports", type=Path, required=True)
+    continuation.add_argument("--recovery-plan", type=Path, required=True)
+    continuation.add_argument("--recovery-reports", type=Path, required=True)
+    continuation.add_argument("--recovery-validation", type=Path, required=True)
+    continuation.add_argument("--orchestration-sha", required=True)
+    continuation.add_argument("--output", type=Path, required=True)
     recovery_record.add_argument("--plan", type=Path, required=True)
     recovery_record.add_argument("--reports", type=Path, required=True)
     recovery_record.add_argument("--aggregate", type=Path, required=True)
@@ -571,6 +757,9 @@ def main() -> int:
     budget.add_argument("--prior-jobs", type=Path)
     budget.add_argument("--prior-run-id")
     budget.add_argument("--prior-run-attempt")
+    budget.add_argument("--additional-prior-jobs", type=Path)
+    budget.add_argument("--additional-prior-run-id")
+    budget.add_argument("--additional-prior-run-attempt")
     budget.add_argument("--run-id", required=True)
     budget.add_argument("--run-attempt", required=True)
     budget.add_argument("--output", type=Path, required=True)
@@ -583,17 +772,19 @@ def main() -> int:
     try:
         if args.command == "budget-gate":
             prior_values = (args.prior_jobs, args.prior_run_id, args.prior_run_attempt)
-            if any(value is not None for value in prior_values) and not all(
-                value is not None for value in prior_values
-            ):
-                raise ValueError("prior jobs, run ID, and run attempt must be supplied together")
+            additional_values = (args.additional_prior_jobs, args.additional_prior_run_id,
+                                 args.additional_prior_run_attempt)
+            if (any(value is not None for value in prior_values) and not all(value is not None for value in prior_values)
+                    or any(value is not None for value in additional_values) and not all(value is not None for value in additional_values)
+                    or args.additional_prior_jobs is not None and args.prior_jobs is None):
+                raise ValueError("each prior jobs source, run ID, and run attempt must be supplied together")
             if args.prior_jobs is None:
                 accounting = account_runner_minutes(
                     args.jobs,
                     expected_run_id=args.run_id,
                     expected_run_attempt=args.run_attempt,
                 )
-            else:
+            elif args.additional_prior_jobs is None:
                 accounting = combine_accounting(
                     args.prior_jobs,
                     args.jobs,
@@ -602,6 +793,13 @@ def main() -> int:
                     expected_current_run_id=args.run_id,
                     expected_current_run_attempt=args.run_attempt,
                 )
+            else:
+                accounting = combine_accounting_sources([
+                    (args.prior_jobs, args.prior_run_id, args.prior_run_attempt),
+                    (args.additional_prior_jobs, args.additional_prior_run_id,
+                     args.additional_prior_run_attempt),
+                    (args.jobs, args.run_id, args.run_attempt),
+                ])
             observed = accounting["estimated_runner_minutes"]
             ceiling = BUDGET["launch_ceiling"][args.next_wave]
             result = {**accounting,
@@ -632,6 +830,12 @@ def main() -> int:
                 args.source_reports,
                 args.orchestration_sha,
                 identity,
+            )
+        elif args.command == "continuation-plan":
+            result = build_continuation_plan(
+                args.root, args.source_plan, args.source_reports, args.recovery_plan,
+                args.recovery_reports, args.recovery_validation, args.manifests,
+                args.orchestration_sha, identity,
             )
         else:
             result = validate_wave(

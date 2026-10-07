@@ -49,3 +49,22 @@ or compatibility cannot be proven before fan-out.
 **Evidence required:** Independent read-back of the eight reports; source/current plan
 comparison; fixtures proving duplicate, missing, substituted, stale, and conflicting
 origins fail; an outcome-equivalence fixture through the existing aggregate.
+
+## H4 — Standalone 216-shard continuation (selected, pending execution)
+
+**Hypothesis:** A separate workflow containing only the 216 never-started wave-3
+shards and seven support jobs can complete the frozen corpus without crossing GitHub's
+256-job matrix ceiling or replaying accepted work.
+
+**Falsifiers:** The expanded topology exceeds 256 jobs; either prior run cannot be
+revalidated by exact run/attempt, manifest, identity, and artifact hash; cumulative
+operational usage exceeds a launch or completion ceiling; any shard fails; or the
+authoritative aggregate cannot reconcile exactly 256 unique reports.
+
+**Evidence before dispatch:** GitHub documented a maximum of 256 matrix-generated
+jobs per workflow run. Recovery run `37476889333` exposed wave 3 only as one literal
+`${{ matrix.shard }}` placeholder marked completed/skipped, with no runner and no
+steps; GitHub exposed no more specific annotation. The old readiness tests checked
+each wave's membership and parallelism but never counted the fully expanded workflow
+topology. The proposed topology is 216 matrix jobs plus seven support jobs, 223 total.
+Earlier-wave matrices are absent rather than conditionally instantiated.

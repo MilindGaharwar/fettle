@@ -1,5 +1,32 @@
 # Audit Hardening Worklog
 
+## 2026-10-07: Standalone Preflight Continuation Prepared
+
+The owner authorized one independently reviewed continuation for the 216 shards that
+never started. GitHub's retained record for run `37476889333` contains one wave-3
+placeholder with the literal matrix expression, `completed/skipped`, null runner
+identity, and no steps; no textual rejection annotation was exposed. GitHub documents
+a 256-job matrix limit per workflow run. The prior readiness tests validated each
+wave but did not count complete expansion across conditional matrices and support
+jobs.
+
+The continuation workflow contains no earlier-wave matrices. Its sole matrix is the
+216-shard wave 3 at maximum parallelism 8, plus seven support jobs, for 223 expanded
+jobs. Before fan-out it revalidates source run `37464324954`, recovery run
+`37476889333`, both attempt 1, both failed verdicts and orchestration SHAs, the exact
+candidate, runtime, dependencies, policy, all manifests, source plan hashes, report
+hashes, and retained wave validations. It charges all three runs against the original
+operational budget, keeps the 100-minute cancellation reserve, and fails closed on a
+shard failure, unknown accounting, evidence mismatch, duplicate, collision, or
+incomplete corpus. Imported report sets remain in separate directories before the
+unchanged authoritative aggregator consumes exactly 256 reports.
+
+Pre-dispatch evidence: exact-runtime simulation reproduced the 8-report and 32-report
+validations and the 223-job topology; focused tests passed (`100 passed`); the full
+suite passed (`4,435 passed, 20 skipped`); actionlint, Ruff, diff hygiene, and Fettle
+passed. Independent review identified topology-test, collision-isolation, historical
+verdict, and three-source error-path gaps; each was addressed before dispatch.
+
 ## 2026-10-06: Frozen-Candidate Staged Preflight Orchestration
 
 The owner authorized one orchestration-only implementation and push followed by the
