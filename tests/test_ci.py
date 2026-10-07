@@ -329,6 +329,7 @@ def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
     assert "pattern: mutation-shard-${{ github.event.inputs.stage_2_run_id }}-*" in workflow
     assert "Validate prior calibration stages before fan-out" in workflow
     assert "len(identities) != 1" in workflow
+    assert "identity != prior_identity" in workflow
     assert 'report.get("calibration_id") != os.environ["CALIBRATION_ID"]' in workflow
     assert "Download prior calibration accounting" in workflow
     assert 'accounting.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])' in workflow

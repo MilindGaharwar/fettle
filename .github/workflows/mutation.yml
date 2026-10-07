@@ -190,6 +190,7 @@ jobs:
           expected = {"stage-1": WAVES["wave-1"]}
           if os.environ["CALIBRATION_STAGE"] == "3":
               expected["stage-2"] = WAVES["wave-2"]
+          prior_identity = None
           for directory, indexes in expected.items():
               paths = sorted(pathlib.Path("prior-calibration", directory).rglob("mutation-report.json"))
               if len(paths) != len(indexes):
@@ -210,6 +211,10 @@ jobs:
                              or report.get("revision") != os.environ["GITHUB_SHA"]
                              for report in reports)):
                   sys.exit(2)
+              identity = next(iter(identities))
+              if prior_identity is not None and identity != prior_identity:
+                  sys.exit(2)
+              prior_identity = identity
           accounting = json.load(open("prior-accounting/calibration-accounting.json"))
           expected_stage = str(int(os.environ["CALIBRATION_STAGE"]) - 1)
           if (accounting.get("stage") != expected_stage or accounting.get("passed") is not True
