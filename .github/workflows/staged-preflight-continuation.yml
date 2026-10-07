@@ -1,11 +1,28 @@
 name: Staged preflight continuation
 
 on:
-  push:
-    branches:
-      - audit/hardening-integration-20261005
-    paths:
-      - .github/workflows/staged-preflight-continuation.yml
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Exact frozen candidate commit"
+        required: true
+        type: string
+      source_run_id:
+        description: "Successful wave 1+2 run"
+        required: true
+        type: string
+      source_orchestration_sha:
+        description: "Immutable first-run orchestration commit"
+        required: true
+        type: string
+      source_plan_sha256:
+        description: "SHA-256 of first-run staged plan"
+        required: true
+        type: string
+      source_workflow_ref:
+        description: "Immutable first-run workflow ref"
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -13,7 +30,6 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event.head_commit.message == 'Execute staged preflight continuation'
     name: Validate immutable preflight sources
     runs-on: ubuntu-latest
     outputs:
@@ -28,20 +44,20 @@ jobs:
       - name: Check out frozen executable candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          ref: ${{ github.event.inputs.candidate_sha }}
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.14"
+          python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install frozen candidate
         working-directory: candidate
-        run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
+        run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
       - name: Bind candidate and orchestration identities
         env:
-          CANDIDATE_SHA: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
         run: >-
-          python -c 'import os,re,subprocess,sys; expected="0fc41fdfee13e09f4bda3dc5eee177030882aa36";
+          python -c 'import os,re,subprocess,sys; expected=os.environ["GITHUB_SHA"];
           actual=subprocess.check_output(["git","-C","candidate","rev-parse","HEAD"],text=True).strip();
           control=subprocess.check_output(["git","-C","control","rev-parse","HEAD"],text=True).strip();
           sys.exit(0 if os.environ["CANDIDATE_SHA"]==actual==expected
@@ -51,59 +67,65 @@ jobs:
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --prepare-manifests ../mutation-manifests --json > ../prepare.json
-      - name: Confirm immutable historical run verdicts
+      - name: Confirm immutable successful source run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37464324954" > source-run.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37476889333" > recovery-run.json
-          jq -e '.id == 37464324954 and .run_attempt == 1 and .status == "completed" and .conclusion == "failure" and .head_sha == "891562ba4909b16e6252a0eb7e8674393f43eba0"' source-run.json
-          jq -e '.id == 37476889333 and .run_attempt == 1 and .status == "completed" and .conclusion == "failure" and .head_sha == "7da9f5d07884a5913bdbc38f28b34344c839a9f9"' recovery-run.json
+          for _ in $(seq 1 10); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}" > source-run.json
+            [ "$(jq -r .status source-run.json)" = "completed" ] && break
+            sleep 30
+          done
+          jq -e '.id == ${{ github.event.inputs.source_run_id }} and .run_attempt == 1 and .status == "completed" and .conclusion == "success" and .head_sha == "${{ github.event.inputs.source_orchestration_sha }}"' source-run.json
       - name: Download immutable source plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-staged-plan-37464324954-1
+          name: mutation-staged-plan-${{ github.event.inputs.source_run_id }}-1
           path: source-plan
-          run-id: 37464324954
+          run-id: ${{ github.event.inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download immutable source reports
+      - name: Download immutable wave 1 reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: mutation-preflight-wave-1-37464324954-1-*
-          path: source-reports
-          run-id: 37464324954
+          pattern: mutation-preflight-wave-1-${{ github.event.inputs.source_run_id }}-1-*
+          path: wave-1-reports
+          run-id: ${{ github.event.inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download immutable recovery plan
+      - name: Download immutable wave 2 reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-staged-plan-37476889333-1
-          path: recovery-plan
-          run-id: 37476889333
+          pattern: mutation-preflight-wave-2-${{ github.event.inputs.source_run_id }}-1-*
+          path: wave-2-reports
+          run-id: ${{ github.event.inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download immutable recovery reports
+      - name: Download immutable wave 1 validation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: mutation-preflight-wave-2-37476889333-1-*
-          path: recovery-reports
-          run-id: 37476889333
+          name: mutation-preflight-wave-1-validation-${{ github.event.inputs.source_run_id }}-1
+          path: wave-1-validation
+          run-id: ${{ github.event.inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download immutable recovery validation
+      - name: Download immutable wave 2 validation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mutation-preflight-wave-2-validation-37476889333-1
-          path: recovery-validation
-          run-id: 37476889333
+          name: mutation-preflight-wave-2-validation-${{ github.event.inputs.source_run_id }}-1
+          path: wave-2-validation
+          run-id: ${{ github.event.inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Build exact continuation plan
         id: plan
         run: |
-          candidate/.venv/bin/python control/scripts/staged_preflight.py continuation-plan --root candidate \
+          candidate/.venv/bin/python control/scripts/staged_preflight.py fresh-continuation-plan --root candidate \
             --manifests mutation-manifests \
             --source-plan source-plan/staged-preflight-plan.json \
-            --source-reports source-reports \
-            --recovery-plan recovery-plan/staged-preflight-plan.json \
-            --recovery-reports recovery-reports \
-            --recovery-validation recovery-validation/wave-2-validation.json \
+            --wave-1-reports wave-1-reports --wave-2-reports wave-2-reports \
+            --wave-1-validation wave-1-validation/wave-1-validation.json \
+            --wave-2-validation wave-2-validation/wave-2-validation.json \
+            --source-plan-sha256 "${{ github.event.inputs.source_plan_sha256 }}" \
+            --source-run-id "${{ github.event.inputs.source_run_id }}" \
+            --source-orchestration-sha "${{ github.event.inputs.source_orchestration_sha }}" \
+            --source-workflow-ref "${{ github.event.inputs.source_workflow_ref }}" \
+            --candidate-sha "${{ github.event.inputs.candidate_sha }}" \
             --orchestration-sha "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
@@ -117,12 +139,11 @@ jobs:
             continuation-plan.json
             mutation-manifests
             source-plan
-            source-reports
-            recovery-plan
-            recovery-reports
-            recovery-validation
+            wave-1-reports
+            wave-2-reports
+            wave-1-validation
+            wave-2-validation
             source-run.json
-            recovery-run.json
           retention-days: 90
           if-no-files-found: error
 
@@ -136,7 +157,7 @@ jobs:
           path: control
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.14"
+          python-version: "3.12.13"
       - name: Download continuation inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -146,13 +167,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/attempts/1/jobs?per_page=100" > source-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37476889333/attempts/1/jobs?per_page=100" > recovery-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1 \
-            --additional-prior-jobs recovery-jobs.json --additional-prior-run-id 37476889333 \
-            --additional-prior-run-attempt 1 --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
       - name: Retain launch accounting
         if: always()
@@ -161,7 +180,6 @@ jobs:
           name: mutation-continuation-launch-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             source-jobs.json
-            recovery-jobs.json
             current-jobs.json
             launch-budget.json
           retention-days: 90
@@ -179,14 +197,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          ref: ${{ github.event.inputs.candidate_sha }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.14"
+          python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
-          uv venv --python 3.12.14
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
       - name: Download continuation plan
@@ -220,8 +238,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/attempts/1/jobs?per_page=100" > source-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37476889333/attempts/1/jobs?per_page=100" > recovery-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (continuation shard ")) | select(.status == "completed" and .conclusion != "success")] | length' current-jobs.json)
@@ -232,9 +249,8 @@ jobs:
               exit 2
             fi
             if ! python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-              --prior-jobs source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1 \
-              --additional-prior-jobs recovery-jobs.json --additional-prior-run-id 37476889333 \
-              --additional-prior-run-attempt 1 --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
+              --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+              --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
               --next-wave complete --output monitor-budget.json; then
               echo "Operational execution ceiling reached or accounting became indeterminate; cancelling run"
               gh run cancel "$GITHUB_RUN_ID"
@@ -251,7 +267,6 @@ jobs:
           name: mutation-continuation-monitor-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             source-jobs.json
-            recovery-jobs.json
             current-jobs.json
             monitor-budget.json
           retention-days: 90
@@ -267,15 +282,15 @@ jobs:
           path: control
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          ref: ${{ github.event.inputs.candidate_sha }}
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.14"
+          python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install frozen candidate
         working-directory: candidate
-        run: uv venv --python 3.12.14 && uv pip install --quiet --no-deps -e .
+        run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-continuation-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -296,13 +311,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/attempts/1/jobs?per_page=100" > source-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37476889333/attempts/1/jobs?per_page=100" > recovery-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1 \
-            --additional-prior-jobs recovery-jobs.json --additional-prior-run-id 37476889333 \
-            --additional-prior-run-attempt 1 --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave aggregate --output aggregate-budget.json
       - name: Retain continuation validation
         if: always()
@@ -313,7 +326,6 @@ jobs:
             continuation-validation.json
             aggregate-budget.json
             source-jobs.json
-            recovery-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error
@@ -329,16 +341,16 @@ jobs:
           path: control
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36
+          ref: ${{ github.event.inputs.candidate_sha }}
           path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.14"
+          python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         working-directory: candidate
         run: |
-          uv venv --python 3.12.14
+          uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -355,8 +367,8 @@ jobs:
           import json
           from pathlib import Path
           expected = {
-              "source-reports": {8, 27, 28, 37, 48, 50, 51, 53},
-              "recovery-reports": set(range(35)) - {8, 27, 28},
+              "wave-1-reports": {8, 27, 28, 37, 48, 50, 51, 53},
+              "wave-2-reports": set(range(35)) - {8, 27, 28},
               "staged-reports": set(range(35, 256)) - {37, 48, 50, 51, 53},
           }
           seen = set()
@@ -369,12 +381,12 @@ jobs:
               seen.update(indexes)
           assert seen == set(range(256))
           PY
-          mkdir -p staged-reports/imported-source staged-reports/imported-recovery
-          cp -R staged-plan/source-reports/. staged-reports/imported-source/
-          cp -R staged-plan/recovery-reports/. staged-reports/imported-recovery/
+          mkdir -p staged-reports/imported-wave-1 staged-reports/imported-wave-2
+          cp -R staged-plan/wave-1-reports/. staged-reports/imported-wave-1/
+          cp -R staged-plan/wave-2-reports/. staged-reports/imported-wave-2/
           candidate/.venv/bin/python -m fettle.mutation_test --root candidate \
             --aggregate-preflight staged-reports --shard-count 256 --json > mutation-preflight.json
-          candidate/.venv/bin/python control/scripts/staged_preflight.py recovery-record \
+          candidate/.venv/bin/python control/scripts/staged_preflight.py fresh-completion-record \
             --plan staged-plan/continuation-plan.json --reports staged-reports \
             --aggregate mutation-preflight.json --output staged-preflight-continuation.json
       - name: Retain consolidated preflight
@@ -408,15 +420,14 @@ jobs:
           from pathlib import Path
           aggregate = json.loads(Path("retained/mutation-preflight.json").read_text())
           record = json.loads(Path("retained/staged-preflight-continuation.json").read_text())
-          expected = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
+          expected = "${{ github.event.inputs.candidate_sha }}"
           assert aggregate["status"] == "completed" and aggregate["passed"] is True
           assert aggregate["revision"] == expected and aggregate["shard_count"] == 256
           assert aggregate["generated"] == aggregate["canonicalized"] and aggregate["collisions"] == 0
           assert record["status"] == "completed" and record["passed"] is True
           assert record["candidate_sha"] == expected and len(record["origins"]) == 256
-          assert record["historical_verdicts"] == {
-              "37464324954": "permanently non-pass", "37476889333": "permanently non-pass",
-          }
+          assert record["kind"] == "fresh_staged_preflight"
+          assert record["source"]["run_id"] == "${{ github.event.inputs.source_run_id }}"
           checksums = {
               path.name: hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(Path("retained").iterdir())
@@ -445,13 +456,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37464324954/attempts/1/jobs?per_page=100" > source-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37476889333/attempts/1/jobs?per_page=100" > recovery-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.source_run_id }}/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
-            --prior-jobs source-jobs.json --prior-run-id 37464324954 --prior-run-attempt 1 \
-            --additional-prior-jobs recovery-jobs.json --additional-prior-run-id 37476889333 \
-            --additional-prior-run-attempt 1 --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
+            --prior-jobs source-jobs.json --prior-run-id ${{ github.event.inputs.source_run_id }} --prior-run-attempt 1 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output complete-budget.json
       - name: Retain terminal accounting
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -460,7 +469,6 @@ jobs:
           path: |
             complete-budget.json
             source-jobs.json
-            recovery-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error

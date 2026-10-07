@@ -21,6 +21,8 @@ from scripts.staged_preflight import (
     combine_accounting,
     build_plan,
     build_continuation_plan,
+    build_fresh_continuation_plan,
+    build_fresh_completion_record,
     build_recovery_plan,
     build_recovery_record,
     combine_accounting_sources,
@@ -38,12 +40,12 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     assert 27 in WAVES["wave-1"]
     assert len(members) == len(set(members)) == 256
     assert sorted(members) == list(range(256))
-    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 740
+    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 800
     assert BUDGET["launch_ceiling"] == {
         "wave-2": 20,
         "wave-3": 95,
         "aggregate": 595,
-        "complete": 640,
+        "complete": 700,
     }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
@@ -436,7 +438,7 @@ def test_accounting_rejects_boolean_integer_fields(tmp_path, field):
 @pytest.mark.parametrize(
     ("used", "next_wave", "passed"),
     [(20, "wave-2", True), (20.01, "wave-2", False), (95, "wave-3", True),
-     (595, "aggregate", True), (640, "complete", True), (640.01, "complete", False)],
+     (595, "aggregate", True), (700, "complete", True), (700.01, "complete", False)],
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
@@ -654,6 +656,94 @@ def test_continuation_plan_revalidates_both_runs_and_schedules_only_wave_three(
     assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
     assert result["origin_assignment"]["0"]["run_id"] == RECOVERY_RUN_ID
     assert result["origin_assignment"]["35"]["run_id"] == "39"
+
+
+def test_fresh_continuation_uses_validated_immutable_candidate_inputs(monkeypatch, tmp_path):
+    root, manifests_dir, wave_1_reports, manifests, _, source_plan_path = _fixture(
+        monkeypatch, tmp_path,
+    )
+    source_plan = json.loads(source_plan_path.read_text())
+    source_plan["workflow"]["run_id"] = "37"
+    source_plan["workflow"]["workflow_ref"] = SOURCE_WORKFLOW_REF
+    source_plan_path.write_text(json.dumps(source_plan))
+    _write_wave(wave_1_reports, manifests, "wave-1")
+    wave_2_reports = tmp_path / "wave-2-reports"
+    wave_2_reports.mkdir()
+    _write_wave(wave_2_reports, manifests, "wave-2")
+    source_identity = source_plan["workflow"]
+    validations = []
+    for wave, reports in (("wave-1", wave_1_reports), ("wave-2", wave_2_reports)):
+        validation = validate_wave(
+            root, source_plan_path, manifests_dir, reports, wave, "a" * 40, source_identity,
+        )
+        path = tmp_path / f"{wave}-validation.json"
+        path.write_text(json.dumps(validation))
+        validations.append(path)
+    continuation_identity = {
+        "repository": "owner/repo", "workflow": "Staged preflight continuation",
+        "workflow_ref": "owner/repo/.github/workflows/staged-preflight-continuation.yml@refs/heads/test",
+        "run_id": "38", "run_attempt": "1",
+    }
+
+    result = build_fresh_continuation_plan(
+        root, source_plan_path, wave_1_reports, wave_2_reports,
+        validations[0], validations[1], manifests_dir, _file_sha(source_plan_path),
+        "37", "a" * 40, SOURCE_WORKFLOW_REF, "b" * 40,
+        continuation_identity, FROZEN_CANDIDATE,
+    )
+
+    assert result["candidate_sha"] == FROZEN_CANDIDATE
+    assert result["execution_wave"]["shards"] == WAVES["wave-3"]
+    assert result["source"]["validations"]["wave-2"]["passed"] is True
+    assert result["origin_assignment"]["0"]["run_id"] == "37"
+    assert result["origin_assignment"]["35"]["run_id"] == "38"
+
+
+def test_fresh_continuation_rejects_changed_candidate_or_plan_digest(monkeypatch, tmp_path):
+    root, manifests_dir, reports, _manifests, _, source_plan_path = _fixture(monkeypatch, tmp_path)
+    validation = tmp_path / "validation.json"
+    validation.write_text("{}")
+    identity = {
+        "repository": "owner/repo", "workflow": "Staged preflight continuation",
+        "workflow_ref": "ref", "run_id": "38", "run_attempt": "1",
+    }
+
+    with pytest.raises(ValueError):
+        build_fresh_continuation_plan(
+            root, source_plan_path, reports, reports, validation, validation,
+            manifests_dir, "0" * 64, "37", "a" * 40, SOURCE_WORKFLOW_REF,
+            "b" * 40, identity, "f" * 40,
+        )
+
+
+def test_fresh_completion_record_reconciles_exact_once_corpus(monkeypatch, tmp_path):
+    root, manifests_dir, reports, manifests, identity, _ = _fixture(monkeypatch, tmp_path)
+    identity["run_id"] = "38"
+    plan = build_plan(root, manifests_dir, "b" * 40, identity)
+    plan.update({
+        "mode": "fresh-staged-preflight-continuation",
+        "source": {"run_id": "37", "run_attempt": "1"},
+        "origin_assignment": {
+            str(index): {"run_id": "37" if index not in WAVES["wave-3"] else "38",
+                         "run_attempt": "1", "wave": next(name for name, shards in WAVES.items() if index in shards)}
+            for index in range(256)
+        },
+    })
+    for wave in WAVES:
+        _write_wave(reports, manifests, wave)
+    plan_path = tmp_path / "fresh-plan.json"
+    plan_path.write_text(json.dumps(plan))
+    aggregate_path = tmp_path / "aggregate.json"
+    aggregate_path.write_text(json.dumps({
+        "status": "completed", "passed": True, "revision": FROZEN_CANDIDATE,
+        "shard_count": 256, "manifest_digests": plan["manifest_digests"],
+        "generated": 256, "canonicalized": 256, "collisions": 0,
+    }))
+
+    result = build_fresh_completion_record(plan_path, reports, aggregate_path)
+
+    assert result["kind"] == "fresh_staged_preflight"
+    assert len(result["origins"]) == 256
 
 
 def _file_sha(path):

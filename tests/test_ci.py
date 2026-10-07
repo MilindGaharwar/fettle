@@ -411,63 +411,34 @@ def test_mutation_workflow_has_bounded_non_qualifying_diagnostic_canary():
     assert "merge-multiple: true" not in workflow
 
 
-def test_staged_preflight_is_single_run_frozen_and_fail_closed():
+def test_staged_preflight_first_run_is_frozen_bounded_and_fail_closed():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
     staged = workflow.split("\n  staged-prepare:", 1)[1].split("\n  full-shard:", 1)[0]
 
     assert "- staged-preflight" in workflow
     assert 'run: test "$RUN_ATTEMPT" = "1"' in staged
-    assert staged.count("ref: 0fc41fdfee13e09f4bda3dc5eee177030882aa36") >= 3
+    assert staged.count("ref: ${{ github.event.inputs.candidate_sha }}") >= 3
     assert "max-parallel: 2" in staged
     assert "max-parallel: 4" in staged
-    assert "max-parallel: 8" in staged
-    assert staged.count("fail-fast: true") == 3
-    assert "needs: [staged-prepare, staged-wave-1-gate, staged-recovery-gate]" in staged
-    assert "needs: [staged-prepare, staged-wave-2-gate]" in staged
-    assert "needs: [staged-prepare, staged-wave-3-gate]" in staged
-    assert staged.count("validate-wave") == 3
-    assert staged.count("retention-days: 90") == 9
-    assert "--aggregate-preflight staged-reports --shard-count 256" in staged
-    assert staged.count("run-id: 37464324954") == 2
-    assert staged.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 2
+    assert "max-parallel: 8" not in staged
+    assert staged.count("fail-fast: true") == 2
+    assert "needs: [staged-prepare, staged-wave-1-gate]" in staged
+    assert staged.count("validate-wave") == 2
+    assert "mutation (monitor staged preflight budget)" in staged
+    assert "gh run cancel \"$GITHUB_RUN_ID\"" in staged
+    assert "gh workflow run staged-preflight-continuation.yml --ref \"$GITHUB_REF_NAME\"" in staged
+    assert "source_plan_sha256" in staged
     assert "merge-multiple: true" not in staged
 
 
 def test_staged_preflight_keeps_authoritative_check_non_qualifying():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
-    staged = workflow.split("\n  staged-preflight-evidence:", 1)[1].split("\n  full-shard:", 1)[0]
     aggregate = workflow.split("\n  aggregate:", 1)[1]
 
-    assert "name: mutation staged preflight evidence" in staged
-    assert "needs: [staged-preflight-aggregate]" in staged
-    assert "0fc41fdfee13e09f4bda3dc5eee177030882aa36" in staged
-    assert 'report.get("passed") is True' in staged
+    assert "name: mutation staged preflight evidence" not in workflow
+    assert "name: mutation (dispatch staged preflight continuation)" in workflow
     assert "github.event.inputs.mode != 'staged-preflight'" in aggregate
-    assert "github.event.inputs.mode != 'staged-preflight-recovery'" in aggregate
     assert 'candidate == os.environ["GITHUB_SHA"]' in aggregate
-
-
-def test_staged_recovery_reuses_only_immutable_wave_one_and_charges_both_runs():
-    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
-    staged = workflow.split("\n  staged-prepare:", 1)[1].split("\n  full-shard:", 1)[0]
-
-    assert "- staged-preflight-recovery" in workflow
-    assert "mutation-staged-plan-37464324954-1" in staged
-    assert "mutation-preflight-wave-1-37464324954-1-*" in staged
-    assert staged.count('python-version: "3.12.14"') >= 3
-    assert "uv venv --python 3.12.14" in staged
-    assert "run-id: 37464324954" in staged
-    assert "--prior-jobs staged-plan/recovery-source-jobs.json" in staged
-    assert "--prior-run-id 37464324954" in staged
-    assert "--prior-run-attempt 1" in staged
-    assert staged.count("actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") == 5
-    assert "name: mutation (validate staged preflight recovery)" in staged
-    assert "staged-wave-1:\n    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'staged-preflight'" in staged
-    assert "cp -R staged-plan/recovery-source-reports/. staged-reports/" in staged
-    assert "--aggregate-preflight staged-reports --shard-count 256" in staged
-    assert "mutation-preflight-recovery-${{ github.run_id }}-${{ github.run_attempt }}" in staged
-    assert 'recovery.get("source_run_verdict")=="permanently non-pass"' in staged
-    assert 'len(recovery.get("origins",{}))==256' in staged
 
 
 def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
@@ -481,17 +452,33 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert workflow.count("strategy:") == 1
     assert workflow.count("matrix:") == 2  # strategy plus the prepare output key
     assert "max-parallel: 8" in workflow
-    assert "github.event.head_commit.message == 'Execute staged preflight continuation'" in workflow
-    assert "37464324954" in workflow
-    assert "37476889333" in workflow
-    assert "continuation-plan" in workflow
-    assert "--additional-prior-run-id 37476889333" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "candidate_sha:" in workflow
+    assert "source_plan_sha256:" in workflow
+    assert "fresh-continuation-plan" in workflow
+    assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
-    assert '.status == "completed" and .conclusion == "failure"' in workflow
+    assert '.status == "completed" and .conclusion == "success"' in workflow
     assert "--aggregate-preflight staged-reports --shard-count 256" in workflow
     assert "staged-wave-1" not in workflow
     assert "staged-wave-2" not in workflow
+
+
+def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
+    first = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    continuation = (
+        Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml"
+    ).read_text()
+
+    assert "--next-wave wave-2 --output wave-1-budget.json" in first
+    assert "--next-wave wave-3 --output wave-2-budget.json" in first
+    assert "--next-wave complete --output monitor-budget.json" in first
+    assert "--prior-jobs source-jobs.json" in continuation
+    assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
+    assert continuation.count("--next-wave complete") == 2
+    assert "billing_authority" not in first
+    assert "Operational ceiling, not a guaranteed provider billing cap." not in first
 
 
 def test_aggregation_recovery_cannot_execute_mutations_and_retains_failure_evidence():
@@ -523,9 +510,9 @@ def test_continuation_support_jobs_install_every_invoked_tool():
     aggregate = workflow.split("\n  aggregate:", 1)[1].split("\n  readback:", 1)[0]
 
     assert "astral-sh/setup-uv@" in validation
-    assert "uv venv --python 3.12.14" in validation
+    assert "uv venv --python 3.12.13" in validation
     assert "astral-sh/setup-uv@" in aggregate
-    assert "uv venv --python 3.12.14" in aggregate
+    assert "uv venv --python 3.12.13" in aggregate
 
 
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():
@@ -533,7 +520,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 14
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 12
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow
@@ -569,10 +556,9 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert (
         "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
         " && github.event.inputs.mode != 'preflight'"
-        " && github.event.inputs.mode != 'diagnostic-canary'"
-        " && github.event.inputs.mode != 'staged-preflight'"
-        " && github.event.inputs.mode != 'staged-preflight-recovery'"
-        " && github.event.inputs.mode != 'finalize'\n    needs: prepare"
+            " && github.event.inputs.mode != 'diagnostic-canary'"
+            " && github.event.inputs.mode != 'staged-preflight'"
+            " && github.event.inputs.mode != 'finalize'\n    needs: prepare"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow

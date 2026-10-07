@@ -89,11 +89,11 @@ WAVES["wave-3"] = [
 ]
 MAX_PARALLEL = {"wave-1": 2, "wave-2": 4, "wave-3": 8}
 BUDGET = {
-    "operational_ceiling_runner_minutes": 740,
+    "operational_ceiling_runner_minutes": 800,
     "wave_allowances": {"wave-1": 20, "wave-2": 75, "wave-3": 500},
-    "orchestration_and_aggregation": 45,
+    "orchestration_and_aggregation": 105,
     "cancellation_headroom": 100,
-    "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 640},
+    "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700},
 }
 MATRIX_JOB_LIMIT = 256
 CONTINUATION_SUPPORT_JOBS = 7
@@ -115,7 +115,11 @@ def _load_json(path: Path) -> dict:
     return value
 
 
-def _load_manifests(root: Path, directory: Path) -> list[dict]:
+def _load_manifests(
+    root: Path,
+    directory: Path,
+    candidate_sha: str = FROZEN_CANDIDATE,
+) -> list[dict]:
     sys.path.insert(0, str(root))
     from fettle.mutation_test import load_partition_manifest
 
@@ -127,17 +131,25 @@ def _load_manifests(root: Path, directory: Path) -> list[dict]:
     if [item["shard_index"] for item in manifests] != list(range(SHARD_COUNT)):
         raise ValueError("manifest indexes are incomplete or duplicated")
     if any(
-        item["revision"] != FROZEN_CANDIDATE or item["shard_count"] != SHARD_COUNT
+        item["revision"] != candidate_sha or item["shard_count"] != SHARD_COUNT
         for item in manifests
     ):
         raise ValueError("manifest candidate or topology differs from the frozen identity")
     return manifests
 
 
-def build_plan(root: Path, manifests_dir: Path, orchestration_sha: str, identity: dict) -> dict:
+def build_plan(
+    root: Path,
+    manifests_dir: Path,
+    orchestration_sha: str,
+    identity: dict,
+    candidate_sha: str = FROZEN_CANDIDATE,
+) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", orchestration_sha):
         raise ValueError("orchestration SHA must be a full lowercase commit")
-    manifests = _load_manifests(root, manifests_dir)
+    if not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+        raise ValueError("candidate SHA must be a full lowercase commit")
+    manifests = _load_manifests(root, manifests_dir, candidate_sha)
     members = [index for wave in WAVES.values() for index in wave]
     if len(members) != SHARD_COUNT or sorted(members) != list(range(SHARD_COUNT)):
         raise ValueError("fixed waves do not cover each shard exactly once")
@@ -150,7 +162,7 @@ def build_plan(root: Path, manifests_dir: Path, orchestration_sha: str, identity
         raise ValueError("predeclared budget does not reconcile")
     return {
         "schema_version": "1",
-        "candidate_sha": FROZEN_CANDIDATE,
+        "candidate_sha": candidate_sha,
         "orchestration_sha": orchestration_sha,
         "runtime": {
             "python": platform.python_version(),
@@ -184,13 +196,15 @@ def validate_wave(
     identity: dict,
 ) -> dict:
     plan = _load_json(plan_path)
+    candidate_sha = plan.get("candidate_sha")
     if (
-        plan.get("candidate_sha") != FROZEN_CANDIDATE
+        not isinstance(candidate_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
         or plan.get("orchestration_sha") != orchestration_sha
         or plan.get("workflow") != identity
     ):
         raise ValueError("wave identity differs from the frozen plan")
-    manifests = _load_manifests(root, manifests_dir)
+    manifests = _load_manifests(root, manifests_dir, candidate_sha)
     if plan.get("manifest_digests") != [item["digest"] for item in manifests]:
         raise ValueError("wave manifest digests differ from the frozen topology")
     expected = plan.get("waves", {}).get(wave, {}).get("shards")
@@ -236,7 +250,7 @@ def validate_wave(
         "status": "completed",
         "passed": True,
         "wave": wave,
-        "candidate_sha": FROZEN_CANDIDATE,
+        "candidate_sha": candidate_sha,
         "orchestration_sha": plan["orchestration_sha"],
         "shards": expected,
         "generated": sum(item["generated"] for item in reports),
@@ -555,6 +569,155 @@ def validate_continuation_topology() -> dict:
     }
 
 
+def build_fresh_continuation_plan(
+    root: Path,
+    source_plan_path: Path,
+    wave_1_reports_dir: Path,
+    wave_2_reports_dir: Path,
+    wave_1_validation_path: Path,
+    wave_2_validation_path: Path,
+    manifests_dir: Path,
+    source_plan_sha256: str,
+    source_run_id: str,
+    source_orchestration_sha: str,
+    source_workflow_ref: str,
+    orchestration_sha: str,
+    identity: dict,
+    candidate_sha: str,
+) -> dict:
+    if not re.fullmatch(r"[0-9a-f]{64}", source_plan_sha256):
+        raise ValueError("source plan digest must be a full lowercase SHA-256")
+    if _file_digest(source_plan_path) != source_plan_sha256:
+        raise ValueError("source plan digest differs from the immutable dispatch input")
+    if not re.fullmatch(r"[1-9][0-9]*", source_run_id):
+        raise ValueError("source run ID must be a positive integer")
+    source_plan = _load_json(source_plan_path)
+    source_identity = {
+        "repository": identity["repository"],
+        "workflow": "Mutation evidence",
+        "workflow_ref": source_workflow_ref,
+        "run_id": source_run_id,
+        "run_attempt": "1",
+    }
+    if (
+        source_plan.get("candidate_sha") != candidate_sha
+        or source_plan.get("orchestration_sha") != source_orchestration_sha
+        or source_plan.get("workflow") != source_identity
+    ):
+        raise ValueError("source plan identity differs from immutable dispatch inputs")
+    current = build_plan(
+        root, manifests_dir, orchestration_sha, identity, candidate_sha=candidate_sha,
+    )
+    compatibility_keys = (
+        "candidate_sha", "runtime", "dependencies", "policy", "shard_count",
+        "manifest_digests", "manifest_topology_digest", "waves", "budget",
+    )
+    if any(current[key] != source_plan.get(key) for key in compatibility_keys):
+        raise ValueError("source and continuation execution identities are incompatible")
+    validations = {}
+    for wave, reports_dir, validation_path in (
+        ("wave-1", wave_1_reports_dir, wave_1_validation_path),
+        ("wave-2", wave_2_reports_dir, wave_2_validation_path),
+    ):
+        validation = validate_wave(
+            root, source_plan_path, manifests_dir, reports_dir, wave,
+            source_orchestration_sha, source_identity,
+        )
+        if validation != _load_json(validation_path):
+            raise ValueError(f"{wave} validation does not reproduce from imported reports")
+        validations[wave] = validation
+    return {
+        **current,
+        "mode": "fresh-staged-preflight-continuation",
+        "topology": validate_continuation_topology(),
+        "source": {
+            "run_id": source_run_id,
+            "run_attempt": "1",
+            "orchestration_sha": source_orchestration_sha,
+            "workflow_ref": source_workflow_ref,
+            "plan_sha256": source_plan_sha256,
+            "validations": validations,
+        },
+        "execution_wave": current["waves"]["wave-3"],
+        "origin_assignment": {
+            str(index): {
+                "run_id": source_run_id if index not in WAVES["wave-3"] else identity["run_id"],
+                "run_attempt": "1",
+                "wave": next(name for name, shards in WAVES.items() if index in shards),
+            }
+            for index in range(SHARD_COUNT)
+        },
+    }
+
+
+def build_fresh_completion_record(
+    plan_path: Path,
+    reports_dir: Path,
+    aggregate_path: Path,
+) -> dict:
+    plan = _load_json(plan_path)
+    candidate_sha = plan.get("candidate_sha")
+    origins = plan.get("origin_assignment")
+    manifest_digests = plan.get("manifest_digests")
+    if (
+        plan.get("mode") != "fresh-staged-preflight-continuation"
+        or not isinstance(candidate_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
+        or not isinstance(origins, dict)
+        or not isinstance(manifest_digests, list)
+        or len(manifest_digests) != SHARD_COUNT
+    ):
+        raise ValueError("fresh continuation plan provenance is incomplete")
+    report_paths = sorted(reports_dir.rglob("mutation-preflight.json"))
+    if len(report_paths) != SHARD_COUNT:
+        raise ValueError(f"completion record requires exactly {SHARD_COUNT} reports")
+    records: dict[int, dict] = {}
+    generated = 0
+    for path in report_paths:
+        report = _load_json(path)
+        index = report.get("shard_index")
+        if (
+            not isinstance(index, int) or isinstance(index, bool)
+            or index not in range(SHARD_COUNT) or index in records
+            or report.get("status") != "completed" or report.get("passed") is not True
+            or report.get("shard_count") != SHARD_COUNT
+            or report.get("manifest_digest") != manifest_digests[index]
+        ):
+            raise ValueError("completion reports are failed, incomplete, or incompatible")
+        origin = origins.get(str(index))
+        if not isinstance(origin, dict) or origin.get("run_attempt") != "1":
+            raise ValueError(f"completion report {index} has no valid immutable origin")
+        generated_value = report.get("generated")
+        if not isinstance(generated_value, int) or isinstance(generated_value, bool):
+            raise ValueError(f"completion report {index} has malformed generated count")
+        generated += generated_value
+        records[index] = {
+            **origin,
+            "artifact_sha256": _file_digest(path),
+            "manifest_digest": manifest_digests[index],
+            "generated": generated_value,
+        }
+    aggregate = _load_json(aggregate_path)
+    if (
+        aggregate.get("status") != "completed" or aggregate.get("passed") is not True
+        or aggregate.get("revision") != candidate_sha
+        or aggregate.get("shard_count") != SHARD_COUNT
+        or aggregate.get("manifest_digests") != manifest_digests
+        or aggregate.get("generated") != generated
+        or aggregate.get("canonicalized") != generated
+        or aggregate.get("collisions") != 0
+    ):
+        raise ValueError("authoritative aggregate does not reconcile with completion reports")
+    return {
+        "schema_version": "1", "status": "completed", "passed": True,
+        "kind": "fresh_staged_preflight", "candidate_sha": candidate_sha,
+        "source": plan["source"], "continuation_workflow": plan["workflow"],
+        "manifest_topology_digest": plan["manifest_topology_digest"],
+        "aggregate_sha256": _file_digest(aggregate_path), "generated": generated,
+        "origins": {str(index): records[index] for index in range(SHARD_COUNT)},
+    }
+
+
 def build_continuation_plan(
     root: Path,
     source_plan_path: Path,
@@ -847,11 +1010,13 @@ def main() -> int:
     plan = sub.add_parser("plan")
     recovery = sub.add_parser("recovery-plan")
     continuation = sub.add_parser("continuation-plan")
+    fresh_continuation = sub.add_parser("fresh-continuation-plan")
     recovery_record = sub.add_parser("recovery-record")
+    fresh_record = sub.add_parser("fresh-completion-record")
     aggregation_record = sub.add_parser("aggregation-recovery-record")
     wave = sub.add_parser("validate-wave")
     budget = sub.add_parser("budget-gate")
-    for command in (plan, recovery, continuation, wave):
+    for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
         command.add_argument("--repository", required=True)
@@ -860,6 +1025,7 @@ def main() -> int:
         command.add_argument("--run-id", required=True)
         command.add_argument("--run-attempt", required=True)
     plan.add_argument("--orchestration-sha", required=True)
+    plan.add_argument("--candidate-sha", default=FROZEN_CANDIDATE)
     plan.add_argument("--output", type=Path, required=True)
     recovery.add_argument("--source-plan", type=Path, required=True)
     recovery.add_argument("--source-reports", type=Path, required=True)
@@ -872,10 +1038,26 @@ def main() -> int:
     continuation.add_argument("--recovery-validation", type=Path, required=True)
     continuation.add_argument("--orchestration-sha", required=True)
     continuation.add_argument("--output", type=Path, required=True)
+    fresh_continuation.add_argument("--source-plan", type=Path, required=True)
+    fresh_continuation.add_argument("--wave-1-reports", type=Path, required=True)
+    fresh_continuation.add_argument("--wave-2-reports", type=Path, required=True)
+    fresh_continuation.add_argument("--wave-1-validation", type=Path, required=True)
+    fresh_continuation.add_argument("--wave-2-validation", type=Path, required=True)
+    fresh_continuation.add_argument("--source-plan-sha256", required=True)
+    fresh_continuation.add_argument("--source-run-id", required=True)
+    fresh_continuation.add_argument("--source-orchestration-sha", required=True)
+    fresh_continuation.add_argument("--source-workflow-ref", required=True)
+    fresh_continuation.add_argument("--candidate-sha", required=True)
+    fresh_continuation.add_argument("--orchestration-sha", required=True)
+    fresh_continuation.add_argument("--output", type=Path, required=True)
     recovery_record.add_argument("--plan", type=Path, required=True)
     recovery_record.add_argument("--reports", type=Path, required=True)
     recovery_record.add_argument("--aggregate", type=Path, required=True)
     recovery_record.add_argument("--output", type=Path, required=True)
+    fresh_record.add_argument("--plan", type=Path, required=True)
+    fresh_record.add_argument("--reports", type=Path, required=True)
+    fresh_record.add_argument("--aggregate", type=Path, required=True)
+    fresh_record.add_argument("--output", type=Path, required=True)
     aggregation_record.add_argument("--plan", type=Path, required=True)
     aggregation_record.add_argument("--reports", type=Path, required=True)
     aggregation_record.add_argument("--aggregate", type=Path, required=True)
@@ -964,6 +1146,10 @@ def main() -> int:
             result = build_recovery_record(args.plan, args.reports, args.aggregate)
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0
+        if args.command == "fresh-completion-record":
+            result = build_fresh_completion_record(args.plan, args.reports, args.aggregate)
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
         if args.command == "aggregation-recovery-record":
             identity = {
                 "repository": args.repository, "workflow": args.workflow,
@@ -985,7 +1171,10 @@ def main() -> int:
             "run_attempt": args.run_attempt,
         }
         if args.command == "plan":
-            result = build_plan(args.root, args.manifests, args.orchestration_sha, identity)
+            result = build_plan(
+                args.root, args.manifests, args.orchestration_sha, identity,
+                candidate_sha=args.candidate_sha,
+            )
         elif args.command == "recovery-plan":
             result = build_recovery_plan(
                 args.root,
@@ -1000,6 +1189,14 @@ def main() -> int:
                 args.root, args.source_plan, args.source_reports, args.recovery_plan,
                 args.recovery_reports, args.recovery_validation, args.manifests,
                 args.orchestration_sha, identity,
+            )
+        elif args.command == "fresh-continuation-plan":
+            result = build_fresh_continuation_plan(
+                args.root, args.source_plan, args.wave_1_reports, args.wave_2_reports,
+                args.wave_1_validation, args.wave_2_validation, args.manifests,
+                args.source_plan_sha256, args.source_run_id,
+                args.source_orchestration_sha, args.source_workflow_ref,
+                args.orchestration_sha, identity, args.candidate_sha,
             )
         else:
             result = validate_wave(
