@@ -20,6 +20,28 @@ SOURCE_RUN_ATTEMPT = "1"
 SOURCE_FAILURE_JOB_ID = 112642844198
 SETUP_RUN_ID = "37580393007"
 SETUP_FAILURE_JOB_ID = 112658485409
+LAYOUT_FAILURE_RUN_ID = "37589782905"
+LAYOUT_FAILURE_ORCHESTRATION_SHA = "dba75c1684ab7557721d93eac0eb58683dd9517b"
+LAYOUT_FAILURE_SHARD_JOBS = {
+    112688644249: 35,
+    112688644256: 41,
+    112688644298: 42,
+    112688644321: 39,
+    112688644327: 38,
+    112688644359: 36,
+    112688644384: 40,
+    112688644514: 43,
+}
+LAYOUT_FAILURE_ARTIFACT_DIGESTS = {
+    35: "sha256:fc8632a51158096756affb5ef79ebb029fdccc2c2c6a261bdc0abb421e357dc8",
+    36: "sha256:3ca8739fca0589ce8b5d5c1746d251897ef1ee07d16ea5b2edfa6a38dfe9ac5d",
+    38: "sha256:3ca8739fca0589ce8b5d5c1746d251897ef1ee07d16ea5b2edfa6a38dfe9ac5d",
+    39: "sha256:fc8632a51158096756affb5ef79ebb029fdccc2c2c6a261bdc0abb421e357dc8",
+    40: "sha256:3d943151b22aa7243ef2596dec6c684b5ef6143af88cd8a36f4d9d730801910a",
+    41: "sha256:3d943151b22aa7243ef2596dec6c684b5ef6143af88cd8a36f4d9d730801910a",
+    42: "sha256:3d943151b22aa7243ef2596dec6c684b5ef6143af88cd8a36f4d9d730801910a",
+    43: "sha256:3ca8739fca0589ce8b5d5c1746d251897ef1ee07d16ea5b2edfa6a38dfe9ac5d",
+}
 SETUP_JOB_INVENTORY = {
     112658485409: ("Validate immutable preflight sources", "failure"),
     112658597904: ("Reconcile cumulative launch budget", "skipped"),
@@ -109,6 +131,8 @@ def validate_source_exception(
     *, root: Path, source_run_path: Path, source_jobs_path: Path, source_failure_log_path: Path,
     source_artifacts_path: Path,
     setup_run_path: Path, setup_jobs_path: Path, setup_artifacts_path: Path,
+    layout_run_path: Path, layout_jobs_path: Path, layout_artifacts_path: Path,
+    layout_logs_dir: Path,
     prior_runs_path: Path, plan_path: Path, manifests_dir: Path,
     wave_1_reports: Path, wave_2_reports: Path, wave_1_validation: Path,
     wave_2_validation: Path,
@@ -192,6 +216,75 @@ def validate_source_exception(
     ):
         raise ValueError("prior setup run unexpectedly retained artifacts")
 
+    layout_run = _load(layout_run_path)
+    if not isinstance(layout_run, dict) or (
+        str(layout_run.get("id")) != LAYOUT_FAILURE_RUN_ID
+        or str(layout_run.get("run_attempt")) != "1"
+        or layout_run.get("head_sha") != LAYOUT_FAILURE_ORCHESTRATION_SHA
+        or layout_run.get("head_branch") != RECOVERY_BRANCH
+        or layout_run.get("event") != "workflow_dispatch"
+        or layout_run.get("status") != "completed"
+        or layout_run.get("conclusion") != "failure"
+    ):
+        raise ValueError("prior layout run is not the authorized pre-mutation failure")
+    layout_jobs = _jobs(layout_jobs_path)
+    if (
+        len(layout_jobs) != 223
+        or any(str(job.get("run_id")) != LAYOUT_FAILURE_RUN_ID
+               or str(job.get("run_attempt")) != "1" for job in layout_jobs)
+    ):
+        raise ValueError("prior layout job inventory is incomplete or conflicting")
+    shard_jobs = [
+        job for job in layout_jobs
+        if str(job.get("name", "")).startswith("mutation (continuation shard ")
+    ]
+    started = {job.get("id"): job for job in shard_jobs if job.get("runner_id")}
+    if len(shard_jobs) != 216 or set(started) != set(LAYOUT_FAILURE_SHARD_JOBS):
+        raise ValueError("prior layout shard execution inventory differs from retained evidence")
+    for job_id, shard in LAYOUT_FAILURE_SHARD_JOBS.items():
+        job = started[job_id]
+        expected_name = f"mutation (continuation shard {shard})"
+        execution = [
+            step for step in job.get("steps", [])
+            if step.get("name") == "Execute previously unattempted shard"
+        ]
+        log = (layout_logs_dir / f"shard-{job_id}.log").read_text(encoding="utf-8")
+        expected_error = (
+            "cannot parse mutation partition manifest "
+            f"staged-plan/mutation-manifests/partition-{shard}.json"
+        )
+        if (
+            job.get("name") != expected_name
+            or len(execution) != 1
+            or execution[0].get("conclusion") != "failure"
+            or expected_error not in log
+            or "mutmut run" in log
+            or "Creating mutants" in log
+        ):
+            raise ValueError(f"prior layout shard {shard} is not proven pre-mutation")
+    if any(job.get("runner_id") for job in shard_jobs if job.get("id") not in started):
+        raise ValueError("a cancelled prior layout shard has ambiguous execution")
+    layout_artifact_pages = _load(layout_artifacts_path)
+    if not isinstance(layout_artifact_pages, list) or not layout_artifact_pages:
+        raise ValueError("prior layout artifact inventory is missing or malformed")
+    layout_artifacts = [
+        item for page in layout_artifact_pages for item in page.get("artifacts", [])
+    ]
+    if any(page.get("total_count") != len(layout_artifacts) for page in layout_artifact_pages):
+        raise ValueError("prior layout artifact pagination is incomplete")
+    empty_shards = {
+        int(match.group(1)): item.get("digest")
+        for item in layout_artifacts
+        if (match := re.fullmatch(
+            rf"mutation-preflight-wave-3-{LAYOUT_FAILURE_RUN_ID}-1-(\d+)",
+            str(item.get("name", "")),
+        ))
+        and item.get("size_in_bytes") == 162
+        and item.get("expired") is False
+    }
+    if empty_shards != LAYOUT_FAILURE_ARTIFACT_DIGESTS:
+        raise ValueError("prior layout empty shard artifacts are incomplete or conflicting")
+
     prior_runs = _load(prior_runs_path)
     if not isinstance(prior_runs, list) or any(not isinstance(item, dict) for item in prior_runs):
         raise ValueError("prior continuation run inventory is malformed")
@@ -203,7 +296,7 @@ def validate_source_exception(
             item.get("headSha") == CANDIDATE_SHA
             or item.get("headBranch") == RECOVERY_BRANCH
         )
-        and str(item.get("databaseId")) != SETUP_RUN_ID
+        and str(item.get("databaseId")) not in {SETUP_RUN_ID, LAYOUT_FAILURE_RUN_ID}
     ]
     if competing:
         raise ValueError("an E2 continuation or recovery execution already exists")
@@ -298,7 +391,14 @@ def validate_source_exception(
         "source_run": {"run_id": SOURCE_RUN_ID, "run_attempt": "1",
                        "verdict": "permanently failed; dispatch handoff only"},
         "prior_setup_failure": {"run_id": SETUP_RUN_ID, "run_attempt": "1",
-                                "wave_3_jobs_executed": 0},
+                                 "wave_3_jobs_executed": 0},
+        "prior_layout_failure": {
+            "run_id": LAYOUT_FAILURE_RUN_ID,
+            "run_attempt": "1",
+            "command_started_shards": sorted(LAYOUT_FAILURE_SHARD_JOBS.values()),
+            "mutation_generation_started_shards": [],
+            "verdict": "permanently failed; no reusable reports",
+        },
         "plan_sha256": SOURCE_PLAN_SHA256,
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "retained_reports": len(found), "validations": validations,
@@ -316,6 +416,10 @@ def main() -> int:
     parser.add_argument("--setup-run", type=Path, required=True)
     parser.add_argument("--setup-jobs", type=Path, required=True)
     parser.add_argument("--setup-artifacts", type=Path, required=True)
+    parser.add_argument("--layout-run", type=Path, required=True)
+    parser.add_argument("--layout-jobs", type=Path, required=True)
+    parser.add_argument("--layout-artifacts", type=Path, required=True)
+    parser.add_argument("--layout-logs", type=Path, required=True)
     parser.add_argument("--prior-runs", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--manifests", type=Path, required=True)
@@ -334,6 +438,8 @@ def main() -> int:
             source_artifacts_path=args.source_artifacts, prior_runs_path=args.prior_runs,
             setup_run_path=args.setup_run, setup_jobs_path=args.setup_jobs,
             setup_artifacts_path=args.setup_artifacts,
+            layout_run_path=args.layout_run, layout_jobs_path=args.layout_jobs,
+            layout_artifacts_path=args.layout_artifacts, layout_logs_dir=args.layout_logs,
             plan_path=args.plan, manifests_dir=args.manifests,
             wave_1_reports=args.wave_1_reports, wave_2_reports=args.wave_2_reports,
             wave_1_validation=args.wave_1_validation,

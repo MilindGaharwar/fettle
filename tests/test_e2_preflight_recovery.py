@@ -82,6 +82,38 @@ def _fixture(monkeypatch, tmp_path):
         }
         for job_id, (name, conclusion) in recovery.SETUP_JOB_INVENTORY.items()
     ]
+    layout_jobs = []
+    layout_logs = tmp_path / "layout-logs"
+    layout_logs.mkdir()
+    for job_id, shard in recovery.LAYOUT_FAILURE_SHARD_JOBS.items():
+        layout_jobs.append({
+            "id": job_id, "run_id": int(recovery.LAYOUT_FAILURE_RUN_ID),
+            "run_attempt": 1, "name": f"mutation (continuation shard {shard})",
+            "runner_id": job_id, "conclusion": "failure",
+            "steps": [{"name": "Execute previously unattempted shard", "conclusion": "failure"}],
+        })
+        (layout_logs / f"shard-{job_id}.log").write_text(
+            "cannot parse mutation partition manifest "
+            f"staged-plan/mutation-manifests/partition-{shard}.json\n"
+        )
+    for index in sorted(set(recovery.WAVES["wave-3"]) - set(recovery.LAYOUT_FAILURE_SHARD_JOBS.values())):
+        layout_jobs.append({
+            "id": 200000 + index, "run_id": int(recovery.LAYOUT_FAILURE_RUN_ID),
+            "run_attempt": 1, "name": f"mutation (continuation shard {index})",
+            "runner_id": 0, "conclusion": "cancelled", "steps": [],
+        })
+    layout_jobs.extend({
+        "id": 300000 + index, "run_id": int(recovery.LAYOUT_FAILURE_RUN_ID),
+        "run_attempt": 1, "name": f"support {index}", "runner_id": index + 1,
+        "conclusion": "success", "steps": [],
+    } for index in range(7))
+    layout_artifacts = [
+        {
+            "name": f"mutation-preflight-wave-3-{recovery.LAYOUT_FAILURE_RUN_ID}-1-{shard}",
+            "size_in_bytes": 162, "digest": digest, "expired": False,
+        }
+        for shard, digest in recovery.LAYOUT_FAILURE_ARTIFACT_DIGESTS.items()
+    ]
     artifacts = []
     for wave in ("wave-1", "wave-2"):
         for index in recovery.WAVES[wave]:
@@ -116,6 +148,21 @@ def _fixture(monkeypatch, tmp_path):
         "setup_artifacts_path": _write(
             tmp_path / "setup-artifacts.json", [{"total_count": 0, "artifacts": []}],
         ),
+        "layout_run_path": _write(tmp_path / "layout-run.json", {
+            "id": int(recovery.LAYOUT_FAILURE_RUN_ID), "run_attempt": 1,
+            "head_sha": recovery.LAYOUT_FAILURE_ORCHESTRATION_SHA,
+            "head_branch": recovery.RECOVERY_BRANCH, "event": "workflow_dispatch",
+            "status": "completed", "conclusion": "failure",
+        }),
+        "layout_jobs_path": _write(
+            tmp_path / "layout-jobs.json",
+            [{"total_count": len(layout_jobs), "jobs": layout_jobs}],
+        ),
+        "layout_artifacts_path": _write(
+            tmp_path / "layout-artifacts.json",
+            [{"total_count": len(layout_artifacts), "artifacts": layout_artifacts}],
+        ),
+        "layout_logs_dir": layout_logs,
         "prior_runs_path": _write(tmp_path / "prior-runs.json", []),
         "plan_path": plan_path, "manifests_dir": manifests,
         "wave_1_reports": reports["wave-1"], "wave_2_reports": reports["wave-2"],
@@ -144,7 +191,8 @@ def test_authorized_handoff_recovery_accepts_only_pinned_complete_source(monkeyp
     ["wrong-attempt", "candidate", "missing-report", "altered-report", "duplicate",
      "manifest", "prior-wave-3", "wave-3-artifact", "other-failure", "failure-log",
      "setup-run", "setup-origin", "setup-step", "setup-execution", "setup-artifact",
-     "setup-missing", "setup-extra", "malformed-setup", "malformed-prior-run"],
+     "setup-missing", "setup-extra", "malformed-setup", "malformed-prior-run",
+     "layout-started", "layout-log", "layout-artifact"],
 )
 def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, tmp_path, fault):
     paths = _fixture(monkeypatch, tmp_path)
@@ -219,6 +267,18 @@ def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, 
         paths["setup_jobs_path"].write_text(json.dumps(pages))
     elif fault == "malformed-prior-run":
         paths["prior_runs_path"].write_text("[null]")
+    elif fault == "layout-started":
+        pages = json.loads(paths["layout_jobs_path"].read_text())
+        cancelled = next(job for job in pages[0]["jobs"] if job.get("runner_id") == 0)
+        cancelled["runner_id"] = 1
+        paths["layout_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "layout-log":
+        job_id = next(iter(recovery.LAYOUT_FAILURE_SHARD_JOBS))
+        (paths["layout_logs_dir"] / f"shard-{job_id}.log").write_text("mutmut run\n")
+    elif fault == "layout-artifact":
+        pages = json.loads(paths["layout_artifacts_path"].read_text())
+        pages[0]["artifacts"][0]["digest"] = "sha256:" + "0" * 64
+        paths["layout_artifacts_path"].write_text(json.dumps(pages))
     else:
         paths["source_failure_log_path"].write_text("different error\n")
 

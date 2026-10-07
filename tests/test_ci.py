@@ -460,12 +460,12 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     workflow = workflow_path.read_text()
     jobs = yaml.safe_load(workflow)["jobs"]
 
-    assert set(jobs) == {"prepare", "launch-gate", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
+    assert set(jobs) == {"prepare", "launch-gate", "canary", "canary-readback", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
     assert all(job.get("if") == "github.run_attempt == 1" for job in jobs.values())
     assert sum("strategy" in job for job in jobs.values()) == 1
-    assert len(jobs) - 1 == 7
+    assert len(jobs) - 2 == 8
     assert workflow.count("strategy:") == 1
-    assert workflow.count("matrix:") == 2  # strategy plus the prepare output key
+    assert workflow.count("matrix:") == 3  # strategy plus two prepare output keys
     assert "max-parallel: 8" in workflow
     assert "workflow_dispatch:" in workflow
     assert "recovery_id:" in workflow
@@ -476,6 +476,7 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "--manifests source-plan/mutation-manifests" in workflow
     assert "--source source-jobs.json 37573662156 1" in workflow
     assert "--source setup-jobs.json 37580393007 1" in workflow
+    assert "--source layout-jobs.json 37589782905 1" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
     assert 'operator_authorized_dispatch_recovery' not in workflow
@@ -484,6 +485,12 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert 'set(record["origins"]) == {str(index) for index in range(256)}' in workflow
     assert 'recovery-authorization.json' in workflow
     assert "--aggregate-preflight staged-reports --shard-count 256" in workflow
+    assert "staged-plan/source-plan/mutation-manifests/partition-${{ matrix.shard }}.json" in workflow
+    assert "Validate producer manifest layout before matrix expansion" in workflow
+    assert "Validate downloaded manifest handoff before execution" in workflow
+    assert "Validate downloaded canary through final consumer contract" in workflow
+    assert "max-parallel: 8" in workflow
+    assert "matrix:" not in workflow.split("\n  canary:", 1)[1].split("\n  canary-readback:", 1)[0]
     assert "staged-wave-1" not in workflow
     assert "staged-wave-2" not in workflow
 
@@ -498,7 +505,7 @@ def test_recovery_workflow_embedded_python_compiles_from_actual_yaml():
             if isinstance(script, str):
                 blocks.extend(_embedded_python_blocks(script))
 
-    assert len(blocks) == 6
+    assert len(blocks) == 8
     for index, source in enumerate(blocks):
         compile(source, f"workflow-python-{index}", "exec")
 
@@ -565,6 +572,7 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--next-wave complete --output monitor-budget.json" in first
     assert "--source source-jobs.json 37573662156 1" in continuation
     assert "--source setup-jobs.json 37580393007 1" in continuation
+    assert "--source layout-jobs.json 37589782905 1" in continuation
     assert "--next-wave wave-3 --output launch-budget.json" in continuation
     assert '"launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700}' in (
         Path(PLUGIN_DIR) / "fettle/staged_preflight.py"

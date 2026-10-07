@@ -30,6 +30,8 @@ from scripts.staged_preflight import (
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
+    validate_manifest_handoff,
+    validate_preflight_report_handoff,
 )
 
 
@@ -49,7 +51,7 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
-        "matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223, "platform_limit": 256,
+        "matrix_jobs": 216, "support_jobs": 8, "expanded_jobs": 224, "platform_limit": 256,
     }
 
 
@@ -93,6 +95,84 @@ def _write_wave(reports: Path, manifests: list[dict], wave="wave-1"):
             "generated": 1, "canonicalized": 1, "collisions": 0,
             "fingerprints": [fingerprint], "corpus": [{"fingerprint": fingerprint}],
         }))
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "duplicate", "misplaced", "tampered"])
+def test_manifest_handoff_enforces_exact_artifact_layout(monkeypatch, tmp_path, fault):
+    root, manifests, _reports, items, _identity, plan_path = _fixture(monkeypatch, tmp_path)
+    def load_exact(_root, directory, candidate_sha=FROZEN_CANDIDATE):
+        loaded = [json.loads((directory / f"partition-{index}.json").read_text())
+                  for index in range(256)]
+        if loaded != items or candidate_sha != FROZEN_CANDIDATE:
+            raise ValueError("manifest content differs from expected topology")
+        return loaded
+
+    monkeypatch.setattr("scripts.staged_preflight._load_manifests", load_exact)
+    artifact_root = tmp_path / "artifact"
+    manifest_root = artifact_root / "source-plan/mutation-manifests"
+    manifest_root.mkdir(parents=True)
+    for index, item in enumerate(items):
+        (manifest_root / f"partition-{index}.json").write_text(json.dumps(item))
+    if fault == "missing":
+        (manifest_root / "partition-0.json").unlink()
+    elif fault == "duplicate":
+        duplicate = artifact_root / "duplicate"
+        duplicate.mkdir()
+        (duplicate / "partition-0.json").write_text(json.dumps(items[0]))
+    elif fault == "misplaced":
+        (artifact_root / "partition-0.json").write_text(
+            (manifest_root / "partition-0.json").read_text()
+        )
+        (manifest_root / "partition-0.json").unlink()
+    elif fault == "tampered":
+        changed = json.loads((manifest_root / "partition-0.json").read_text())
+        changed["ranges"][0]["end"] += 1
+        (manifest_root / "partition-0.json").write_text(json.dumps(changed))
+
+    if fault is None:
+        result = validate_manifest_handoff(root, artifact_root, plan_path)
+        assert result["manifest_root"] == "source-plan/mutation-manifests"
+        assert result["manifest_count"] == 256
+    else:
+        with pytest.raises(ValueError):
+            validate_manifest_handoff(root, artifact_root, plan_path)
+
+
+def test_report_handoff_reads_exact_manifest_and_report(monkeypatch, tmp_path):
+    root, _manifests, reports, items, _identity, plan_path = _fixture(monkeypatch, tmp_path)
+    plan = json.loads(plan_path.read_text())
+    plan["execution_wave"] = {"shards": WAVES["wave-3"], "max_parallel": 8}
+    plan_path.write_text(json.dumps(plan))
+    artifact_root = tmp_path / "artifact"
+    manifest_root = artifact_root / "source-plan/mutation-manifests"
+    manifest_root.mkdir(parents=True)
+    for index, item in enumerate(items):
+        (manifest_root / f"partition-{index}.json").write_text(json.dumps(item))
+    monkeypatch.setattr(
+        "scripts.staged_preflight._load_manifests", lambda *_args, **_kwargs: items,
+    )
+    index = WAVES["wave-3"][0]
+    fingerprint = f"{index + 1:064x}"
+    report_path = reports / "mutation-preflight.json"
+    report_path.write_text(json.dumps({
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "shard_index": index, "shard_count": 256,
+        "manifest_digest": items[index]["digest"], "line_ranges": items[index]["ranges"],
+        "files": items[index]["files"], "generated": 1, "canonicalized": 1,
+        "collisions": 0, "fingerprints": [fingerprint],
+        "corpus": [{"fingerprint": fingerprint}],
+    }))
+
+    result = validate_preflight_report_handoff(
+        root, artifact_root, plan_path, report_path, index,
+    )
+
+    assert result["passed"] is True
+    assert result["shard_index"] == index
+
+    report_path.write_text("")
+    with pytest.raises(json.JSONDecodeError):
+        validate_preflight_report_handoff(root, artifact_root, plan_path, report_path, index)
 
 
 def test_wave_validation_accepts_exact_complete_membership(monkeypatch, tmp_path):
@@ -652,7 +732,7 @@ def test_continuation_plan_revalidates_both_runs_and_schedules_only_wave_three(
     )
 
     assert result["execution_wave"]["shards"] == WAVES["wave-3"]
-    assert result["topology"]["expanded_jobs"] == 223
+    assert result["topology"]["expanded_jobs"] == 224
     assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
     assert result["origin_assignment"]["0"]["run_id"] == RECOVERY_RUN_ID
     assert result["origin_assignment"]["35"]["run_id"] == "39"

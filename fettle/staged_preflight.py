@@ -78,6 +78,7 @@ RECOVERY_REPORT_SHA256 = {
 }
 SHARD_COUNT = 256
 ARTIFACT_RETENTION_DAYS = 90
+MANIFEST_RELATIVE_ROOT = Path("source-plan/mutation-manifests")
 WAVES = {
     "wave-1": [8, 27, 28, 37, 48, 50, 51, 53],
     "wave-2": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16,
@@ -96,7 +97,7 @@ BUDGET = {
     "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700},
 }
 MATRIX_JOB_LIMIT = 256
-CONTINUATION_SUPPORT_JOBS = 7
+CONTINUATION_SUPPORT_JOBS = 8
 
 
 def _digest(value: object) -> str:
@@ -136,6 +137,90 @@ def _load_manifests(
     ):
         raise ValueError("manifest candidate or topology differs from the frozen identity")
     return manifests
+
+
+def validate_manifest_handoff(root: Path, artifact_root: Path, plan_path: Path) -> dict:
+    """Validate the one supported continuation-artifact manifest layout."""
+    plan = _load_json(plan_path)
+    candidate_sha = plan.get("candidate_sha")
+    if (
+        not isinstance(candidate_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
+        or plan.get("shard_count") != SHARD_COUNT
+    ):
+        raise ValueError("manifest handoff plan identity is malformed")
+    manifests_dir = artifact_root / MANIFEST_RELATIVE_ROOT
+    expected_paths = {
+        manifests_dir / f"partition-{index}.json" for index in range(SHARD_COUNT)
+    }
+    observed_paths = set(artifact_root.rglob("partition-*.json"))
+    if observed_paths != expected_paths:
+        raise ValueError(
+            "manifest handoff contains missing, duplicated, or misplaced partition files"
+        )
+    manifests = _load_manifests(root, manifests_dir, candidate_sha)
+    digests = [item["digest"] for item in manifests]
+    if (
+        plan.get("manifest_digests") != digests
+        or plan.get("manifest_topology_digest") != _digest(manifests)
+    ):
+        raise ValueError("manifest handoff differs from the plan topology")
+    return {
+        "schema_version": "1",
+        "status": "validated",
+        "passed": True,
+        "candidate_sha": candidate_sha,
+        "manifest_root": MANIFEST_RELATIVE_ROOT.as_posix(),
+        "manifest_count": SHARD_COUNT,
+        "manifest_topology_digest": plan["manifest_topology_digest"],
+    }
+
+
+def validate_preflight_report_handoff(
+    root: Path,
+    artifact_root: Path,
+    plan_path: Path,
+    report_path: Path,
+    expected_shard: int,
+) -> dict:
+    """Read back one downloaded shard through the final report contract."""
+    validate_manifest_handoff(root, artifact_root, plan_path)
+    plan = _load_json(plan_path)
+    if expected_shard not in plan.get("execution_wave", {}).get("shards", []):
+        raise ValueError("preflight report shard is outside the declared execution wave")
+    manifest = _load_manifests(
+        root, artifact_root / MANIFEST_RELATIVE_ROOT, plan["candidate_sha"],
+    )[expected_shard]
+    report = _load_json(report_path)
+    fingerprints = report.get("fingerprints")
+    corpus = report.get("corpus")
+    if (
+        report.get("status") != "completed"
+        or report.get("passed") is not True
+        or report.get("engine_version") != "2.5.1"
+        or report.get("shard_index") != expected_shard
+        or report.get("shard_count") != SHARD_COUNT
+        or report.get("manifest_digest") != manifest["digest"]
+        or report.get("line_ranges") != manifest["ranges"]
+        or report.get("files") != manifest["files"]
+        or report.get("generated") != report.get("canonicalized")
+        or report.get("collisions") != 0
+        or not isinstance(fingerprints, list)
+        or not isinstance(corpus, list)
+        or len(fingerprints) != report.get("generated")
+        or len(corpus) != len(fingerprints)
+        or len(fingerprints) != len(set(fingerprints))
+        or any(not isinstance(item, dict) for item in corpus)
+        or any(not isinstance(item, str) for item in fingerprints)
+        or sorted(item.get("fingerprint") for item in corpus) != sorted(fingerprints)
+    ):
+        raise ValueError(f"shard {expected_shard} has failed, malformed, or incompatible evidence")
+    return {
+        "schema_version": "1", "status": "validated", "passed": True,
+        "candidate_sha": plan["candidate_sha"], "shard_index": expected_shard,
+        "manifest_digest": manifest["digest"],
+        "report_sha256": _file_digest(report_path),
+    }
 
 
 def build_plan(
@@ -1015,6 +1100,8 @@ def main() -> int:
     fresh_record = sub.add_parser("fresh-completion-record")
     aggregation_record = sub.add_parser("aggregation-recovery-record")
     wave = sub.add_parser("validate-wave")
+    handoff = sub.add_parser("validate-manifest-handoff")
+    report_handoff = sub.add_parser("validate-report-handoff")
     budget = sub.add_parser("budget-gate")
     for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
@@ -1075,6 +1162,16 @@ def main() -> int:
     wave.add_argument("--wave", choices=tuple(WAVES), required=True)
     wave.add_argument("--orchestration-sha", required=True)
     wave.add_argument("--output", type=Path, required=True)
+    handoff.add_argument("--root", type=Path, required=True)
+    handoff.add_argument("--artifact-root", type=Path, required=True)
+    handoff.add_argument("--plan", type=Path, required=True)
+    handoff.add_argument("--output", type=Path, required=True)
+    report_handoff.add_argument("--root", type=Path, required=True)
+    report_handoff.add_argument("--artifact-root", type=Path, required=True)
+    report_handoff.add_argument("--plan", type=Path, required=True)
+    report_handoff.add_argument("--report", type=Path, required=True)
+    report_handoff.add_argument("--shard", type=int, required=True)
+    report_handoff.add_argument("--output", type=Path, required=True)
     budget.add_argument("--jobs", type=Path, required=True)
     budget.add_argument("--prior-jobs", type=Path)
     budget.add_argument("--prior-run-id")
@@ -1148,6 +1245,16 @@ def main() -> int:
             return 0
         if args.command == "fresh-completion-record":
             result = build_fresh_completion_record(args.plan, args.reports, args.aggregate)
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "validate-manifest-handoff":
+            result = validate_manifest_handoff(args.root, args.artifact_root, args.plan)
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "validate-report-handoff":
+            result = validate_preflight_report_handoff(
+                args.root, args.artifact_root, args.plan, args.report, args.shard,
+            )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0
         if args.command == "aggregation-recovery-record":
