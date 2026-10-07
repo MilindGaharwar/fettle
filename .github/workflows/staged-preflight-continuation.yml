@@ -73,23 +73,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37573662156" > source-run.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
-          gh run view 37573662156 --repo "$GITHUB_REPOSITORY" --job 112642844198 --log > source-failure.log
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/artifacts?per_page=100" > source-artifacts.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37580393007" > setup-run.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/artifacts?per_page=100" > setup-artifacts.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/37589782905" > layout-run.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/artifacts?per_page=100" > layout-artifacts.json
+          retry_api() {
+            local output=$1
+            shift
+            for delay in 0 5 15; do
+              if [ "$delay" -ne 0 ]; then sleep "$delay"; fi
+              if "$@" > "$output.tmp"; then
+                mv "$output.tmp" "$output"
+                return 0
+              fi
+            done
+            rm -f "$output.tmp"
+            return 1
+          }
+          retry_api source-run.json gh api "repos/$GITHUB_REPOSITORY/actions/runs/37573662156"
+          retry_api source-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100"
+          retry_api source-failure.log gh run view 37573662156 --repo "$GITHUB_REPOSITORY" --job 112642844198 --log
+          retry_api source-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/artifacts?per_page=100"
+          retry_api setup-run.json gh api "repos/$GITHUB_REPOSITORY/actions/runs/37580393007"
+          retry_api setup-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100"
+          retry_api setup-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/artifacts?per_page=100"
+          retry_api layout-run.json gh api "repos/$GITHUB_REPOSITORY/actions/runs/37589782905"
+          retry_api layout-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100"
+          retry_api layout-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/artifacts?per_page=100"
+          retry_api api-run.json gh api "repos/$GITHUB_REPOSITORY/actions/runs/37600554367"
+          retry_api api-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100"
+          retry_api api-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/artifacts?per_page=100"
+          retry_api api-failure.log gh run view 37600554367 --repo "$GITHUB_REPOSITORY" --job 112723599440 --log
           mkdir layout-logs
           for job in 112688644249 112688644256 112688644298 112688644321 112688644327 112688644359 112688644384 112688644514; do
-            gh run view 37589782905 --repo "$GITHUB_REPOSITORY" --job "$job" --log > "layout-logs/shard-$job.log"
+            retry_api "layout-logs/shard-$job.log" gh run view 37589782905 --repo "$GITHUB_REPOSITORY" --job "$job" --log
           done
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow staged-preflight-continuation.yml \
-            --limit 100 --json databaseId,headBranch,headSha,event,status,conclusion,createdAt,url \
-            > prior-runs.json
+          retry_api prior-runs.json gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow staged-preflight-continuation.yml --limit 100 \
+            --json databaseId,headBranch,headSha,event,status,conclusion,createdAt,url
       - name: Download immutable source plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -136,6 +153,8 @@ jobs:
             --setup-artifacts setup-artifacts.json \
             --layout-run layout-run.json --layout-jobs layout-jobs.json \
             --layout-artifacts layout-artifacts.json --layout-logs layout-logs \
+            --api-run api-run.json --api-jobs api-jobs.json \
+            --api-artifacts api-artifacts.json --api-failure-log api-failure.log \
             --plan source-plan/staged-preflight-plan.json \
             --manifests source-plan/mutation-manifests --wave-1-reports wave-1-reports \
             --wave-2-reports wave-2-reports \
@@ -211,6 +230,10 @@ jobs:
             layout-jobs.json
             layout-artifacts.json
             layout-logs
+            api-run.json
+            api-jobs.json
+            api-artifacts.json
+            api-failure.log
             prior-runs.json
             recovery-authorization.json
             manifest-handoff.json
@@ -242,10 +265,12 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           cp staged-plan/layout-jobs.json layout-jobs.json
+          cp staged-plan/api-jobs.json api-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
+            --source api-jobs.json 37600554367 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
           python control/scripts/staged_preflight.py recovery-budget-projection \
@@ -270,6 +295,7 @@ jobs:
                        and run.get("headBranch") == os.environ["GITHUB_REF_NAME"]
                        and str(run["databaseId"]) not in {
                             "37580393007", "37589782905", os.environ["GITHUB_RUN_ID"],
+                            "37600554367",
                        }]
           if competing:
               raise SystemExit("another recovery execution exists")
@@ -283,6 +309,7 @@ jobs:
             source-jobs.json
             setup-jobs.json
             layout-jobs.json
+            api-jobs.json
             current-jobs.json
             current-runs.json
             launch-budget.json
@@ -435,10 +462,12 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           cp staged-plan/layout-jobs.json layout-jobs.json
+          cp staged-plan/api-jobs.json api-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
+            --source api-jobs.json 37600554367 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output post-canary-accounting.json
           python - <<'PY'
@@ -472,6 +501,7 @@ jobs:
             source-jobs.json
             setup-jobs.json
             layout-jobs.json
+            api-jobs.json
             current-jobs.json
             post-canary-accounting.json
             canary-minutes.txt
@@ -540,6 +570,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (continuation shard ")) | select(.status == "completed" and .conclusion != "success")] | length' current-jobs.json)
@@ -553,6 +584,7 @@ jobs:
               --source source-jobs.json 37573662156 1 \
               --source setup-jobs.json 37580393007 1 \
               --source layout-jobs.json 37589782905 1 \
+              --source api-jobs.json 37600554367 1 \
               --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
               --next-wave complete --output monitor-budget.json; then
               echo "Operational execution ceiling reached or accounting became indeterminate; cancelling run"
@@ -572,6 +604,7 @@ jobs:
             source-jobs.json
             setup-jobs.json
             layout-jobs.json
+            api-jobs.json
             current-jobs.json
             monitor-budget.json
           retention-days: 90
@@ -620,11 +653,13 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
+            --source api-jobs.json 37600554367 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave aggregate --output aggregate-budget.json
       - name: Retain continuation validation
@@ -638,6 +673,7 @@ jobs:
             source-jobs.json
             setup-jobs.json
             layout-jobs.json
+            api-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error
@@ -797,11 +833,13 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37573662156/attempts/1/jobs?per_page=100" > source-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37580393007/attempts/1/jobs?per_page=100" > setup-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
+            --source api-jobs.json 37600554367 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output complete-budget.json
       - name: Retain terminal accounting
@@ -813,6 +851,7 @@ jobs:
             source-jobs.json
             setup-jobs.json
             layout-jobs.json
+            api-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error

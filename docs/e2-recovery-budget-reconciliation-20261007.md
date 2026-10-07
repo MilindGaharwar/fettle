@@ -52,3 +52,10 @@ After successful canary readback, the workflow recalculates cumulative usage and
 projects the remaining 215 shards at the greater of the observed canary duration or
 the retained 1.80-minute p95, plus the unchanged 30-minute support reserve. Missing,
 malformed, ambiguous, or insufficient evidence stops matrix expansion.
+
+Run `37600554367/1` stopped during preparation on a transient GitHub API HTTP 502.
+Its only executed job consumed 0.63 minutes; the canary and every downstream job
+had no runner and no steps. The attempt remains permanently failed and is charged
+by subsequent cumulative accounting. Immutable evidence collection uses three
+bounded attempts (immediate, 5 seconds, then 15 seconds) and publishes only a
+complete final file; this does not retry a shard or mutation command.

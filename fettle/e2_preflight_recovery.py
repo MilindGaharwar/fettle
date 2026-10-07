@@ -21,6 +21,22 @@ SOURCE_FAILURE_JOB_ID = 112642844198
 SETUP_RUN_ID = "37580393007"
 SETUP_FAILURE_JOB_ID = 112658485409
 LAYOUT_FAILURE_RUN_ID = "37589782905"
+API_FAILURE_RUN_ID = "37600554367"
+API_FAILURE_ORCHESTRATION_SHA = "f063ec4bf223bb686bd5705a316d84586cf752fc"
+API_FAILURE_JOB_ID = 112723599440
+API_FAILURE_JOB_INVENTORY = {
+    112723599440: ("Validate immutable preflight sources", "failure"),
+    112723860212: ("Reconcile cumulative launch budget", "skipped"),
+    112723861755: ("mutation (continuation shard ${{ needs.prepare.outputs.canary_shard }} canary)", "skipped"),
+    112723862477: ("Reconcile post-canary completion budget", "skipped"),
+    112723862645: ("Validate canary artifact handoff", "skipped"),
+    112723863997: ("mutation (continuation shard ${{ matrix.shard }})", "skipped"),
+    112723864942: ("Monitor failures and operational ceiling", "skipped"),
+    112723865406: ("Validate complete continuation wave", "skipped"),
+    112723866105: ("Aggregate exact 256-report corpus", "skipped"),
+    112723867329: ("Read back durable consolidated evidence", "skipped"),
+    112723868751: ("Reconcile terminal cumulative budget", "skipped"),
+}
 LAYOUT_FAILURE_ORCHESTRATION_SHA = "dba75c1684ab7557721d93eac0eb58683dd9517b"
 LAYOUT_FAILURE_SHARD_JOBS = {
     112688644249: 35,
@@ -133,6 +149,8 @@ def validate_source_exception(
     setup_run_path: Path, setup_jobs_path: Path, setup_artifacts_path: Path,
     layout_run_path: Path, layout_jobs_path: Path, layout_artifacts_path: Path,
     layout_logs_dir: Path,
+    api_run_path: Path, api_jobs_path: Path, api_artifacts_path: Path,
+    api_failure_log_path: Path,
     prior_runs_path: Path, plan_path: Path, manifests_dir: Path,
     wave_1_reports: Path, wave_2_reports: Path, wave_1_validation: Path,
     wave_2_validation: Path,
@@ -285,6 +303,48 @@ def validate_source_exception(
     if empty_shards != LAYOUT_FAILURE_ARTIFACT_DIGESTS:
         raise ValueError("prior layout empty shard artifacts are incomplete or conflicting")
 
+    api_run = _load(api_run_path)
+    if not isinstance(api_run, dict) or (
+        str(api_run.get("id")) != API_FAILURE_RUN_ID
+        or str(api_run.get("run_attempt")) != "1"
+        or api_run.get("head_sha") != API_FAILURE_ORCHESTRATION_SHA
+        or api_run.get("head_branch") != RECOVERY_BRANCH
+        or api_run.get("event") != "workflow_dispatch"
+        or api_run.get("status") != "completed"
+        or api_run.get("conclusion") != "failure"
+    ):
+        raise ValueError("prior API run is not the authorized pre-execution failure")
+    api_jobs = _jobs(api_jobs_path)
+    api_inventory = {
+        job.get("id"): (job.get("name"), job.get("conclusion")) for job in api_jobs
+    }
+    api_started = [job for job in api_jobs if job.get("runner_id")]
+    if (
+        len(api_inventory) != len(api_jobs)
+        or api_inventory != API_FAILURE_JOB_INVENTORY
+        or len(api_started) != 1
+        or api_started[0].get("id") != API_FAILURE_JOB_ID
+        or api_started[0].get("name") != "Validate immutable preflight sources"
+        or api_started[0].get("conclusion") != "failure"
+        or any(str(job.get("run_id")) != API_FAILURE_RUN_ID
+               or str(job.get("run_attempt")) != "1" for job in api_jobs)
+        or any(job.get("steps") for job in api_jobs if job.get("id") != API_FAILURE_JOB_ID)
+    ):
+        raise ValueError("prior API failure execution inventory is incomplete or conflicting")
+    api_failed_steps = [
+        step for step in api_started[0].get("steps", [])
+        if step.get("conclusion") == "failure"
+    ]
+    api_log = api_failure_log_path.read_text(encoding="utf-8")
+    if (
+        [step.get("name") for step in api_failed_steps]
+        != ["Capture pinned failed source and prove no prior recovery"]
+        or "Server Error (HTTP 502)" not in api_log
+    ):
+        raise ValueError("prior API failure is not the authorized evidence-fetch failure")
+    if _load(api_artifacts_path) != [{"total_count": 0, "artifacts": []}]:
+        raise ValueError("prior API failure unexpectedly retained artifacts")
+
     prior_runs = _load(prior_runs_path)
     if not isinstance(prior_runs, list) or any(not isinstance(item, dict) for item in prior_runs):
         raise ValueError("prior continuation run inventory is malformed")
@@ -296,7 +356,9 @@ def validate_source_exception(
             item.get("headSha") == CANDIDATE_SHA
             or item.get("headBranch") == RECOVERY_BRANCH
         )
-        and str(item.get("databaseId")) not in {SETUP_RUN_ID, LAYOUT_FAILURE_RUN_ID}
+        and str(item.get("databaseId")) not in {
+            SETUP_RUN_ID, LAYOUT_FAILURE_RUN_ID, API_FAILURE_RUN_ID,
+        }
     ]
     if competing:
         raise ValueError("an E2 continuation or recovery execution already exists")
@@ -399,6 +461,12 @@ def validate_source_exception(
             "mutation_generation_started_shards": [],
             "verdict": "permanently failed; no reusable reports",
         },
+        "prior_api_failure": {
+            "run_id": API_FAILURE_RUN_ID,
+            "run_attempt": "1",
+            "mutation_jobs_executed": 0,
+            "verdict": "permanently failed; evidence-fetch HTTP 502",
+        },
         "plan_sha256": SOURCE_PLAN_SHA256,
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "retained_reports": len(found), "validations": validations,
@@ -420,6 +488,10 @@ def main() -> int:
     parser.add_argument("--layout-jobs", type=Path, required=True)
     parser.add_argument("--layout-artifacts", type=Path, required=True)
     parser.add_argument("--layout-logs", type=Path, required=True)
+    parser.add_argument("--api-run", type=Path, required=True)
+    parser.add_argument("--api-jobs", type=Path, required=True)
+    parser.add_argument("--api-artifacts", type=Path, required=True)
+    parser.add_argument("--api-failure-log", type=Path, required=True)
     parser.add_argument("--prior-runs", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--manifests", type=Path, required=True)
@@ -440,6 +512,9 @@ def main() -> int:
             setup_artifacts_path=args.setup_artifacts,
             layout_run_path=args.layout_run, layout_jobs_path=args.layout_jobs,
             layout_artifacts_path=args.layout_artifacts, layout_logs_dir=args.layout_logs,
+            api_run_path=args.api_run, api_jobs_path=args.api_jobs,
+            api_artifacts_path=args.api_artifacts,
+            api_failure_log_path=args.api_failure_log,
             plan_path=args.plan, manifests_dir=args.manifests,
             wave_1_reports=args.wave_1_reports, wave_2_reports=args.wave_2_reports,
             wave_1_validation=args.wave_1_validation,

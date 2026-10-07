@@ -494,6 +494,8 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "--remaining-shards 215" in workflow
     assert '--canary-minutes "$(cat canary-minutes.txt)"' in workflow
     assert "cp staged-plan/layout-jobs.json layout-jobs.json" in workflow
+    assert "for delay in 0 5 15" in workflow
+    assert 'mv "$output.tmp" "$output"' in workflow
     assert jobs["remaining-shards"]["needs"] == [
         "prepare", "canary-readback", "remaining-launch-gate",
     ]

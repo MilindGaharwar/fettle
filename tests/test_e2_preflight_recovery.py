@@ -114,6 +114,15 @@ def _fixture(monkeypatch, tmp_path):
         }
         for shard, digest in recovery.LAYOUT_FAILURE_ARTIFACT_DIGESTS.items()
     ]
+    api_jobs = [{
+        "id": job_id, "run_id": int(recovery.API_FAILURE_RUN_ID), "run_attempt": 1,
+        "name": name, "runner_id": 1 if job_id == recovery.API_FAILURE_JOB_ID else None,
+        "conclusion": conclusion,
+        "steps": [{
+            "name": "Capture pinned failed source and prove no prior recovery",
+            "conclusion": "failure",
+        }] if job_id == recovery.API_FAILURE_JOB_ID else [],
+    } for job_id, (name, conclusion) in recovery.API_FAILURE_JOB_INVENTORY.items()]
     artifacts = []
     for wave in ("wave-1", "wave-2"):
         for index in recovery.WAVES[wave]:
@@ -163,6 +172,20 @@ def _fixture(monkeypatch, tmp_path):
             [{"total_count": len(layout_artifacts), "artifacts": layout_artifacts}],
         ),
         "layout_logs_dir": layout_logs,
+        "api_run_path": _write(tmp_path / "api-run.json", {
+            "id": int(recovery.API_FAILURE_RUN_ID), "run_attempt": 1,
+            "head_sha": recovery.API_FAILURE_ORCHESTRATION_SHA,
+            "head_branch": recovery.RECOVERY_BRANCH, "event": "workflow_dispatch",
+            "status": "completed", "conclusion": "failure",
+        }),
+        "api_jobs_path": _write(
+            tmp_path / "api-jobs.json",
+            [{"total_count": len(api_jobs), "jobs": api_jobs}],
+        ),
+        "api_artifacts_path": _write(
+            tmp_path / "api-artifacts.json", [{"total_count": 0, "artifacts": []}],
+        ),
+        "api_failure_log_path": tmp_path / "api-failure.log",
         "prior_runs_path": _write(tmp_path / "prior-runs.json", []),
         "plan_path": plan_path, "manifests_dir": manifests,
         "wave_1_reports": reports["wave-1"], "wave_2_reports": reports["wave-2"],
@@ -173,6 +196,7 @@ def _fixture(monkeypatch, tmp_path):
     paths["source_failure_log_path"].write_text(
         "failed to run git: fatal: not a git repository (or any of the parent directories): .git\n",
     )
+    paths["api_failure_log_path"].write_text("gh: Server Error (HTTP 502)\n")
     return paths
 
 
@@ -192,7 +216,7 @@ def test_authorized_handoff_recovery_accepts_only_pinned_complete_source(monkeyp
      "manifest", "prior-wave-3", "wave-3-artifact", "other-failure", "failure-log",
      "setup-run", "setup-origin", "setup-step", "setup-execution", "setup-artifact",
      "setup-missing", "setup-extra", "malformed-setup", "malformed-prior-run",
-     "layout-started", "layout-log", "layout-artifact"],
+     "layout-started", "layout-log", "layout-artifact", "api-job"],
 )
 def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, tmp_path, fault):
     paths = _fixture(monkeypatch, tmp_path)
@@ -279,6 +303,10 @@ def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, 
         pages = json.loads(paths["layout_artifacts_path"].read_text())
         pages[0]["artifacts"][0]["digest"] = "sha256:" + "0" * 64
         paths["layout_artifacts_path"].write_text(json.dumps(pages))
+    elif fault == "api-job":
+        pages = json.loads(paths["api_jobs_path"].read_text())
+        pages[0]["jobs"][1]["name"] = "renamed skipped job"
+        paths["api_jobs_path"].write_text(json.dumps(pages))
     else:
         paths["source_failure_log_path"].write_text("different error\n")
 
