@@ -97,6 +97,7 @@ BUDGET = {
 }
 MATRIX_JOB_LIMIT = 256
 CONTINUATION_SUPPORT_JOBS = 7
+SOURCE_WORKFLOW_PATH = ".github/workflows/mutation.yml"
 
 
 def _digest(value: object) -> str:
@@ -113,6 +114,173 @@ def _load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{path} is not a JSON object")
     return value
+
+
+def _load_api_pages(path: Path, collection: str) -> list[dict]:
+    pages = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(pages, list):
+        pages = [pages]
+    if not pages or any(
+        not isinstance(page, dict) or not isinstance(page.get(collection), list)
+        for page in pages
+    ):
+        raise ValueError(f"{collection} response is missing or malformed")
+    values = [value for page in pages for value in page[collection]]
+    if any(not isinstance(value, dict) for value in values):
+        raise ValueError(f"{collection} response contains a malformed item")
+    totals = {page.get("total_count") for page in pages}
+    if totals != {len(values)}:
+        raise ValueError(f"{collection} response pagination is incomplete")
+    return values
+
+
+def validate_continuation_dispatches(
+    runs_path: Path,
+    source_run_id: str,
+    current_run_id: str | None = None,
+) -> dict:
+    """Reject a second continuation for one immutable source run attempt."""
+    if not re.fullmatch(r"[1-9][0-9]*", source_run_id):
+        raise ValueError("source run ID must be a positive integer")
+    expected_title = f"Staged preflight continuation for source {source_run_id}/1"
+    runs = _load_api_pages(runs_path, "workflow_runs")
+    matches = [run for run in runs if run.get("display_title") == expected_title]
+    ids = [str(run.get("id", "")) for run in matches]
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in ids):
+        raise ValueError("matching continuation run identity is malformed")
+    expected = [] if current_run_id is None else [current_run_id]
+    if sorted(ids) != sorted(expected):
+        raise ValueError("source run already has a continuation dispatch")
+    return {
+        "schema_version": "1", "status": "validated", "passed": True,
+        "source_run_id": source_run_id, "continuation_run_ids": ids,
+    }
+
+
+def validate_source_handoff(
+    run_path: Path,
+    jobs_path: Path,
+    artifacts_path: Path,
+    *,
+    repository: str,
+    source_run_id: str,
+    candidate_sha: str,
+    source_orchestration_sha: str,
+    source_workflow_ref: str,
+) -> dict:
+    """Admit only a complete wave-1/2 source or a handoff-only source failure."""
+    run = _load_json(run_path)
+    expected_ref = f"{repository}/{SOURCE_WORKFLOW_PATH}@refs/heads/{run.get('head_branch', '')}"
+    if (
+        str(run.get("id", "")) != source_run_id
+        or run.get("run_attempt") != 1
+        or run.get("status") != "completed"
+        or run.get("conclusion") not in {"success", "failure"}
+        or run.get("event") != "workflow_dispatch"
+        or run.get("head_sha") != source_orchestration_sha
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
+        or source_workflow_ref != expected_ref
+        or run.get("path") != SOURCE_WORKFLOW_PATH
+        or not isinstance(run.get("head_repository"), dict)
+        or run["head_repository"].get("full_name") != repository
+    ):
+        raise ValueError("source run identity or terminal provenance differs")
+
+    jobs = _load_api_pages(jobs_path, "jobs")
+    if any(
+        str(job.get("run_id", "")) != source_run_id or job.get("run_attempt") != 1
+        for job in jobs
+    ):
+        raise ValueError("source job origin differs from the source run attempt")
+    by_name: dict[str, list[dict]] = {}
+    for job in jobs:
+        by_name.setdefault(str(job.get("name", "")), []).append(job)
+
+    required = {
+        "mutation (freeze staged preflight)",
+        "mutation (validate staged preflight wave 1)",
+        "mutation (validate staged preflight wave 2)",
+        "mutation (monitor staged preflight budget)",
+    }
+    required.update(f"mutation (staged preflight wave 1 shard {index})" for index in WAVES["wave-1"])
+    required.update(f"mutation (staged preflight wave 2 shard {index})" for index in WAVES["wave-2"])
+    dispatch_name = "mutation (dispatch staged preflight continuation)"
+    if any(len(by_name.get(name, [])) != 1 for name in required | {dispatch_name}):
+        raise ValueError("source prerequisite job topology is incomplete or duplicated")
+    if any(
+        by_name[name][0].get("status") != "completed"
+        or by_name[name][0].get("conclusion") != "success"
+        or not isinstance(by_name[name][0].get("steps"), list)
+        or any(
+            step.get("conclusion") not in {"success", "skipped"}
+            for step in by_name[name][0]["steps"]
+        )
+        for name in required
+    ):
+        raise ValueError("source prerequisite job failed or is incomplete")
+    unexpected_execution = [
+        job for name, entries in by_name.items() for job in entries
+        if name not in required | {dispatch_name}
+        and not (job.get("status") == "completed" and job.get("conclusion") == "skipped"
+                and not job.get("steps")
+                and not any(job.get(field) is not None for field in (
+                    "runner_id", "runner_name", "runner_group_id", "runner_group_name",
+                )))
+    ]
+    if unexpected_execution:
+        raise ValueError("source run contains execution outside the reviewed handoff topology")
+
+    dispatch = by_name[dispatch_name][0]
+    if dispatch.get("status") != "completed" or dispatch.get("conclusion") not in {"success", "failure"}:
+        raise ValueError("source dispatch job is not terminal")
+    failed_steps = [
+        step.get("name") for step in dispatch.get("steps", [])
+        if step.get("conclusion") not in {"success", "skipped"}
+    ]
+    handoff_only_failure = (
+        run["conclusion"] == "failure"
+        and dispatch["conclusion"] == "failure"
+        and failed_steps == ["Dispatch immutable continuation"]
+    )
+    if run["conclusion"] == "failure" and not handoff_only_failure:
+        raise ValueError("source failure is not confined to the continuation handoff")
+    if run["conclusion"] == "success" and dispatch["conclusion"] != "success":
+        raise ValueError("successful source has an inconsistent dispatch job")
+
+    artifacts = _load_api_pages(artifacts_path, "artifacts")
+    names = [artifact.get("name") for artifact in artifacts]
+    if len(names) != len(set(names)):
+        raise ValueError("source artifacts contain duplicate names")
+    required_artifacts = {
+        f"mutation-staged-plan-{source_run_id}-1",
+        f"mutation-preflight-wave-1-validation-{source_run_id}-1",
+        f"mutation-preflight-wave-2-validation-{source_run_id}-1",
+        f"mutation-preflight-monitor-{source_run_id}-1",
+    }
+    required_artifacts.update(
+        f"mutation-preflight-{wave}-{source_run_id}-1-{index}"
+        for wave in ("wave-1", "wave-2") for index in WAVES[wave]
+    )
+    if not required_artifacts.issubset(names):
+        raise ValueError("source prerequisite artifacts are incomplete")
+    for artifact in artifacts:
+        if artifact.get("name") not in required_artifacts:
+            continue
+        origin = artifact.get("workflow_run", {})
+        if (
+            artifact.get("expired") is not False
+            or str(origin.get("id", "")) != source_run_id
+            or origin.get("head_sha") != source_orchestration_sha
+        ):
+            raise ValueError("source prerequisite artifact provenance differs")
+    return {
+        "schema_version": "1", "status": "validated", "passed": True,
+        "source_run_id": source_run_id, "source_run_attempt": "1",
+        "source_conclusion": run["conclusion"],
+        "handoff_only_failure": handoff_only_failure,
+        "prerequisite_job_count": len(required),
+        "prerequisite_artifact_count": len(required_artifacts),
+    }
 
 
 def _load_manifests(
@@ -1250,6 +1418,8 @@ def main() -> int:
     budget = sub.add_parser("budget-gate")
     calibration_continuation = sub.add_parser("plan-calibration-continuation")
     calibration_budget = sub.add_parser("calibration-budget")
+    source_handoff = sub.add_parser("validate-source-handoff")
+    dispatches = sub.add_parser("validate-continuation-dispatches")
     for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
@@ -1340,8 +1510,36 @@ def main() -> int:
     calibration_budget.add_argument("--ceiling", type=int, required=True)
     calibration_budget.add_argument("--cancellation-reserve", type=int, required=True)
     calibration_budget.add_argument("--output", type=Path, required=True)
+    source_handoff.add_argument("--run", type=Path, required=True)
+    source_handoff.add_argument("--jobs", type=Path, required=True)
+    source_handoff.add_argument("--artifacts", type=Path, required=True)
+    source_handoff.add_argument("--repository", required=True)
+    source_handoff.add_argument("--source-run-id", required=True)
+    source_handoff.add_argument("--candidate-sha", required=True)
+    source_handoff.add_argument("--source-orchestration-sha", required=True)
+    source_handoff.add_argument("--source-workflow-ref", required=True)
+    source_handoff.add_argument("--output", type=Path, required=True)
+    dispatches.add_argument("--runs", type=Path, required=True)
+    dispatches.add_argument("--source-run-id", required=True)
+    dispatches.add_argument("--current-run-id")
+    dispatches.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "validate-source-handoff":
+            result = validate_source_handoff(
+                args.run, args.jobs, args.artifacts, repository=args.repository,
+                source_run_id=args.source_run_id, candidate_sha=args.candidate_sha,
+                source_orchestration_sha=args.source_orchestration_sha,
+                source_workflow_ref=args.source_workflow_ref,
+            )
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "validate-continuation-dispatches":
+            result = validate_continuation_dispatches(
+                args.runs, args.source_run_id, args.current_run_id,
+            )
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
         if args.command == "plan-calibration-continuation":
             manifests = [_load_json(path) for path in sorted(args.manifests.glob("partition-*.json"))]
             result = plan_calibration_continuation(

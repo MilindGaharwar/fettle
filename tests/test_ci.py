@@ -426,9 +426,101 @@ def test_staged_preflight_first_run_is_frozen_bounded_and_fail_closed():
     assert staged.count("validate-wave") == 2
     assert "mutation (monitor staged preflight budget)" in staged
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in staged
-    assert "gh workflow run staged-preflight-continuation.yml --ref \"$GITHUB_REF_NAME\"" in staged
+    assert "gh workflow run staged-preflight-continuation.yml" in staged
+    assert '--repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"' in staged
     assert "source_plan_sha256" in staged
     assert "merge-multiple: true" not in staged
+
+
+def test_staged_handoff_commands_bind_repo_ref_and_separate_candidate(tmp_path):
+    mutation = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    continuation = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    )
+    sender_steps = mutation["jobs"]["staged-dispatch-continuation"]["steps"]
+    dispatch = next(
+        step["run"] for step in sender_steps
+        if step.get("name") == "Dispatch immutable continuation"
+    )
+    receiver_steps = continuation["jobs"]["prepare"]["steps"]
+    bind = next(
+        step["run"] for step in receiver_steps
+        if step.get("name") == "Bind separate candidate and orchestration identities"
+    )
+
+    workspace = tmp_path / "workspace"
+    control = workspace / "control"
+    candidate = workspace / "candidate"
+    control.mkdir(parents=True)
+    candidate.mkdir()
+    for repo, content in ((control, "control"), (candidate, "candidate")):
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        (repo / "identity.txt").write_text(content)
+        subprocess.run(["git", "add", "identity.txt"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.com",
+             "commit", "-qm", content],
+            cwd=repo, check=True,
+        )
+    control_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=control, text=True,
+    ).strip()
+    candidate_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=candidate, text=True,
+    ).strip()
+    assert control_sha != candidate_sha
+
+    (workspace / "source-plan").mkdir()
+    (workspace / "source-plan/staged-preflight-plan.json").write_text("{}\n")
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    capture = workspace / "gh-args.txt"
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GH_CAPTURE\"\n")
+    gh.chmod(0o755)
+    (bin_dir / "python").symlink_to(sys.executable)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_CAPTURE": str(capture),
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_REF_NAME": "repair-branch",
+        "GITHUB_SHA": candidate_sha,
+        "GITHUB_RUN_ID": "37",
+        "GITHUB_WORKFLOW_REF": "owner/repo/.github/workflows/mutation.yml@refs/heads/repair-branch",
+    }
+
+    subprocess.run(dispatch, cwd=workspace, env=env, shell=True, check=True)
+
+    args = capture.read_text().splitlines()
+    assert args[:7] == [
+        "workflow", "run", "staged-preflight-continuation.yml",
+        "--repo", "owner/repo", "--ref", "repair-branch",
+    ]
+    fields = {
+        key: value
+        for flag, assignment in zip(args[7::2], args[8::2])
+        for key, value in [assignment.split("=", 1)]
+        if flag == "-f"
+    }
+    assert fields == {
+        "candidate_sha": candidate_sha,
+        "source_run_id": "37",
+        "source_orchestration_sha": candidate_sha,
+        "source_plan_sha256": __import__("hashlib").sha256(b"{}\n").hexdigest(),
+        "source_workflow_ref": env["GITHUB_WORKFLOW_REF"],
+    }
+
+    expanded_bind = bind.replace(
+        '${{ github.event.inputs.candidate_sha }}', candidate_sha
+    )
+    subprocess.run(
+        expanded_bind, cwd=workspace,
+        env={**env, "GITHUB_SHA": control_sha, "CANDIDATE_SHA": candidate_sha},
+        shell=True, check=True,
+    )
 
 
 def test_staged_preflight_keeps_authoritative_check_non_qualifying():

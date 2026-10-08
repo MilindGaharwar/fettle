@@ -34,6 +34,8 @@ from scripts.staged_preflight import (
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
+    validate_continuation_dispatches,
+    validate_source_handoff,
 )
 
 
@@ -313,6 +315,140 @@ def _jobs_file(tmp_path, pages, name="jobs.json"):
     path = tmp_path / name
     path.write_text(json.dumps(pages))
     return path
+
+
+def _source_handoff_fixture(tmp_path):
+    repository = "owner/repo"
+    source_run_id = "37"
+    candidate_sha = "f" * 40
+    orchestration_sha = "e" * 40
+    branch = "candidate"
+    workflow_ref = f"{repository}/.github/workflows/mutation.yml@refs/heads/{branch}"
+    run = {
+        "id": 37, "run_attempt": 1, "status": "completed", "conclusion": "failure",
+        "event": "workflow_dispatch", "head_sha": orchestration_sha, "head_branch": branch,
+        "path": ".github/workflows/mutation.yml",
+        "head_repository": {"full_name": repository},
+    }
+    jobs = []
+    names = {
+        "mutation (freeze staged preflight)",
+        "mutation (validate staged preflight wave 1)",
+        "mutation (validate staged preflight wave 2)",
+        "mutation (monitor staged preflight budget)",
+    }
+    names.update(f"mutation (staged preflight wave 1 shard {index})" for index in WAVES["wave-1"])
+    names.update(f"mutation (staged preflight wave 2 shard {index})" for index in WAVES["wave-2"])
+    for job_id, name in enumerate(sorted(names), 1):
+        jobs.append({
+            **_job(job_id, run_id=37, steps=[{"name": "work", "conclusion": "success"}]),
+            "name": name,
+        })
+    dispatch = {
+        **_job(len(jobs) + 1, run_id=37, conclusion="failure", steps=[
+            {"name": "Set up job", "conclusion": "success"},
+            {"name": "Dispatch immutable continuation", "conclusion": "failure"},
+            {"name": "Retain handoff evidence", "conclusion": "skipped"},
+        ]),
+        "name": "mutation (dispatch staged preflight continuation)",
+    }
+    jobs.append(dispatch)
+    artifact_names = {
+        f"mutation-staged-plan-{source_run_id}-1",
+        f"mutation-preflight-wave-1-validation-{source_run_id}-1",
+        f"mutation-preflight-wave-2-validation-{source_run_id}-1",
+        f"mutation-preflight-monitor-{source_run_id}-1",
+    }
+    artifact_names.update(
+        f"mutation-preflight-{wave}-{source_run_id}-1-{index}"
+        for wave in ("wave-1", "wave-2") for index in WAVES[wave]
+    )
+    artifacts = [{
+        "id": index, "name": name, "expired": False,
+        "workflow_run": {"id": 37, "head_sha": orchestration_sha},
+    } for index, name in enumerate(sorted(artifact_names), 1)]
+    run_path = tmp_path / "source-run.json"
+    jobs_path = tmp_path / "source-jobs.json"
+    artifacts_path = tmp_path / "source-artifacts.json"
+    run_path.write_text(json.dumps(run))
+    jobs_path.write_text(json.dumps([{"total_count": len(jobs), "jobs": jobs}]))
+    artifacts_path.write_text(json.dumps([{
+        "total_count": len(artifacts), "artifacts": artifacts,
+    }]))
+    return {
+        "run": run, "jobs": jobs, "artifacts": artifacts,
+        "run_path": run_path, "jobs_path": jobs_path, "artifacts_path": artifacts_path,
+        "repository": repository, "source_run_id": source_run_id,
+        "candidate_sha": candidate_sha, "source_orchestration_sha": orchestration_sha,
+        "source_workflow_ref": workflow_ref,
+    }
+
+
+def _validate_source_fixture(fixture):
+    return validate_source_handoff(
+        fixture["run_path"], fixture["jobs_path"], fixture["artifacts_path"],
+        repository=fixture["repository"], source_run_id=fixture["source_run_id"],
+        candidate_sha=fixture["candidate_sha"],
+        source_orchestration_sha=fixture["source_orchestration_sha"],
+        source_workflow_ref=fixture["source_workflow_ref"],
+    )
+
+
+def test_source_handoff_accepts_failure_confined_to_dispatch(tmp_path):
+    fixture = _source_handoff_fixture(tmp_path)
+
+    result = _validate_source_fixture(fixture)
+
+    assert result["handoff_only_failure"] is True
+    assert result["prerequisite_job_count"] == 44
+    assert result["prerequisite_artifact_count"] == 44
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["shard", "gate", "identity", "artifact", "expired", "artifact-origin", "ambiguous"],
+)
+def test_source_handoff_rejects_substantive_or_ambiguous_failures(tmp_path, fault):
+    fixture = _source_handoff_fixture(tmp_path)
+    if fault == "shard":
+        fixture["jobs"][0]["conclusion"] = "failure"
+    elif fault == "gate":
+        next(job for job in fixture["jobs"] if job["name"] == "mutation (validate staged preflight wave 2)")["conclusion"] = "failure"
+    elif fault == "identity":
+        fixture["run"]["head_sha"] = "d" * 40
+    elif fault == "artifact":
+        fixture["artifacts"].pop()
+    elif fault == "expired":
+        fixture["artifacts"][0]["expired"] = True
+    elif fault == "artifact-origin":
+        fixture["artifacts"][0]["workflow_run"]["head_sha"] = "d" * 40
+    else:
+        dispatch = fixture["jobs"][-1]
+        dispatch["steps"].insert(1, {"name": "Unknown failed step", "conclusion": "failure"})
+    fixture["run_path"].write_text(json.dumps(fixture["run"]))
+    fixture["jobs_path"].write_text(json.dumps([{
+        "total_count": len(fixture["jobs"]), "jobs": fixture["jobs"],
+    }]))
+    fixture["artifacts_path"].write_text(json.dumps([{
+        "total_count": len(fixture["artifacts"]), "artifacts": fixture["artifacts"],
+    }]))
+
+    with pytest.raises(ValueError):
+        _validate_source_fixture(fixture)
+
+
+def test_continuation_dispatch_validation_rejects_duplicates(tmp_path):
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps([{"total_count": 0, "workflow_runs": []}]))
+    current = tmp_path / "current.json"
+    current.write_text(json.dumps([{"total_count": 1, "workflow_runs": [{
+        "id": 41, "display_title": "Staged preflight continuation for source 37/1",
+    }]}]))
+
+    assert validate_continuation_dispatches(empty, "37")["passed"] is True
+    assert validate_continuation_dispatches(current, "37", "41")["passed"] is True
+    with pytest.raises(ValueError, match="already has"):
+        validate_continuation_dispatches(current, "37")
 
 
 def _calibration_run_file(tmp_path, name="run.json", **changes):

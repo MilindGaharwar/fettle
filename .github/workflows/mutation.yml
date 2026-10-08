@@ -805,12 +805,23 @@ jobs:
         with:
           name: mutation-staged-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: source-plan
+      - name: Reject duplicate continuation dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/staged-preflight-continuation.yml/runs?event=workflow_dispatch&per_page=100" \
+            > continuation-runs.json
+          python control/scripts/staged_preflight.py validate-continuation-dispatches \
+            --runs continuation-runs.json --source-run-id "$GITHUB_RUN_ID" \
+            --output continuation-dispatch-validation.json
       - name: Dispatch immutable continuation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           digest=$(shasum -a 256 source-plan/staged-preflight-plan.json | cut -d ' ' -f 1)
-          gh workflow run staged-preflight-continuation.yml --ref "$GITHUB_REF_NAME" \
+          gh workflow run staged-preflight-continuation.yml \
+            --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
             -f candidate_sha="$GITHUB_SHA" -f source_run_id="$GITHUB_RUN_ID" \
             -f source_orchestration_sha="$GITHUB_SHA" -f source_plan_sha256="$digest" \
             -f source_workflow_ref="$GITHUB_WORKFLOW_REF"
@@ -821,6 +832,8 @@ jobs:
           path: |
             jobs.json
             continuation-launch-budget.json
+            continuation-runs.json
+            continuation-dispatch-validation.json
             source-plan/staged-preflight-plan.json
           retention-days: 90
           if-no-files-found: error
