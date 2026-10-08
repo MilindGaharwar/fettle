@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +29,8 @@ from scripts.staged_preflight import (
     build_recovery_record,
     combine_accounting_sources,
     observed_runner_minutes,
+    plan_calibration_continuation,
+    evaluate_calibration_budget,
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
@@ -311,6 +315,19 @@ def _jobs_file(tmp_path, pages, name="jobs.json"):
     return path
 
 
+def _calibration_run_file(tmp_path, name="run.json", **changes):
+    run = {
+        "schema_version": "1", "kind": "calibration_source",
+        "run_id": "37", "run_attempt": "1", "revision": "f" * 40,
+        "mode": "calibration", "calibration_id": "calibration-a",
+        "calibration_stage": "1",
+        **changes,
+    }
+    path = tmp_path / name
+    path.write_text(json.dumps(run))
+    return path
+
+
 def test_accounting_excludes_proven_skipped_job_but_records_reversed_timestamp(tmp_path):
     skipped = _job(
         1, conclusion="skipped", start="2026-10-06T01:00:01Z",
@@ -442,6 +459,317 @@ def test_accounting_rejects_boolean_integer_fields(tmp_path, field):
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
+
+
+def test_calibration_budget_reserves_cancellation_lag_and_rejects_unknown_usage():
+    accounting = {"estimated_runner_minutes": 10799.5, "included_jobs": []}
+    accepted = evaluate_calibration_budget(accounting, ceiling=12000, cancellation_reserve=1200)
+    exhausted = evaluate_calibration_budget(
+        {**accounting, "estimated_runner_minutes": 10800.01},
+        ceiling=12000, cancellation_reserve=1200,
+    )
+
+    assert accepted["passed"] is True
+    assert accepted["launch_cutoff"] == 10800
+    assert accepted["cancellation_lag_charge"] == 0
+    assert accepted["billing_authority"] is False
+    assert exhausted["passed"] is False
+    with pytest.raises(ValueError, match="usage"):
+        evaluate_calibration_budget({}, ceiling=12000, cancellation_reserve=1200)
+    with pytest.raises(ValueError, match="included job"):
+        evaluate_calibration_budget(
+            {"estimated_runner_minutes": 1}, ceiling=12000, cancellation_reserve=1200,
+        )
+
+
+@pytest.mark.parametrize("status", [None, True, 2, "queued", "unknown"])
+def test_calibration_budget_rejects_malformed_included_job_status(status):
+    with pytest.raises(ValueError, match="included job"):
+        evaluate_calibration_budget(
+            {"estimated_runner_minutes": 1, "included_jobs": [{"status": status}]},
+            ceiling=12000, cancellation_reserve=1200,
+        )
+
+
+def test_calibration_budget_charges_active_jobs_for_cancellation_lag():
+    accounting = {
+        "estimated_runner_minutes": 10791,
+        "included_jobs": [
+            {"status": "in_progress"}, {"status": "in_progress"}, {"status": "completed"},
+        ],
+    }
+
+    result = evaluate_calibration_budget(accounting, ceiling=12000, cancellation_reserve=1200)
+
+    assert result["cancellation_lag_charge"] == 10
+    assert result["charged_runner_minutes"] == 10801
+    assert result["passed"] is False
+
+
+def test_sparse_continuation_requires_job_provenance_for_missing_checkpoints(tmp_path):
+    manifests = [
+        {"shard_index": 0, "digest": "a" * 64},
+        {"shard_index": 1, "digest": "b" * 64},
+        {"shard_index": 2, "digest": "c" * 64},
+    ]
+    jobs = [
+        _job(1, run_id=37),
+        _job(2, run_id=37, conclusion="cancelled"),
+        _job(3, run_id=37, conclusion="skipped", runner_id=None, steps=[]),
+    ]
+    for index, job in enumerate(jobs):
+        job["name"] = f"mutation (full shard {index}, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 3, "jobs": jobs}])
+    checkpoints = tmp_path / "checkpoints"
+    checkpoint_dir = checkpoints / "mutation-checkpoint-calibration-a-0"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        }, "outcomes": {"x": {}},
+        "attempts": [], "status": "completed", "pending": 0,
+    }))
+    reports = tmp_path / "reports" / "0"
+    reports.mkdir(parents=True)
+    reports.joinpath("mutation-report.json").write_text(json.dumps({
+        "status": "completed", "shard_index": 0, "calibration_id": "calibration-a",
+        "revision": "f" * 40, "preflight_digest": "e" * 64,
+        "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+        "environment_digest": "c" * 64,
+    }))
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, checkpoints, tmp_path / "reports",
+        manifests, [0, 1, 2], "calibration-a", "37", "1", "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [1, 2]}
+    assert result["shards"]["0"]["state"] == "completed"
+    assert result["shards"]["1"]["state"] == "started_interrupted"
+    assert result["shards"]["2"]["state"] == "never_started"
+
+
+def test_sparse_continuation_never_infers_missing_checkpoint(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [
+        {**_job(1, run_id=37), "name": "mutation (full shard 0, advisory)"},
+    ]}])
+
+    with pytest.raises(ValueError, match="successful shard 0 has no checkpoint"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_proves_skipped_shard_never_acquired_runner(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="skipped", runner_id=None, steps=[])
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    assert result["shards"]["0"]["state"] == "never_started"
+
+
+def test_sparse_continuation_retries_cancelled_no_runner_but_charges_interval(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="cancelled", runner_id=None, steps=[])
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    assert result["shards"]["0"]["state"] == "cancelled_before_execution"
+    assert result["accounting"]["estimated_runner_minutes"] == 2
+
+
+@pytest.mark.parametrize("fault", ["calibration", "manifest", "duplicate"])
+def test_sparse_continuation_rejects_incompatible_or_conflicting_checkpoints(tmp_path, fault):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [
+        {**_job(1, run_id=37), "name": "mutation (full shard 0, advisory)"},
+    ]}])
+    checkpoints = tmp_path / "checkpoints"
+    first = checkpoints / "one"
+    first.mkdir(parents=True)
+    payload = {
+        "schema_version": "1", "calibration_id": "other" if fault == "calibration" else "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "b" * 64 if fault == "manifest" else "a" * 64,
+            "corpus_digest": "d" * 64, "environment_digest": "c" * 64,
+        },
+        "outcomes": {}, "attempts": [], "status": "completed", "pending": 0,
+    }
+    first.joinpath("mutation-checkpoint.json").write_text(json.dumps(payload))
+    if fault == "duplicate":
+        second = checkpoints / "two"
+        second.mkdir()
+        second.joinpath("mutation-checkpoint.json").write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, checkpoints, tmp_path / "reports",
+            manifests, [0], "calibration-a", "37", "1", "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_rejects_conflicting_shared_checkpoint_identity(tmp_path):
+    manifests = [
+        {"shard_index": 0, "digest": "a" * 64},
+        {"shard_index": 1, "digest": "b" * 64},
+    ]
+    jobs = []
+    checkpoints = tmp_path / "checkpoints"
+    for index, manifest in enumerate(manifests):
+        job = _job(index + 1, run_id=37)
+        job["name"] = f"mutation (full shard {index}, advisory)"
+        jobs.append(job)
+        directory = checkpoints / str(index)
+        directory.mkdir(parents=True)
+        directory.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+            "schema_version": "1", "calibration_id": "calibration-a",
+            "identity": {
+                "revision": "f" * 40,
+                "preflight_digest": ("e" if index == 0 else "9") * 64,
+                "manifest_digest": manifest["digest"], "corpus_digest": "d" * 64,
+                "environment_digest": "c" * 64,
+            },
+            "outcomes": {}, "attempts": [], "status": "completed", "pending": 0,
+        }))
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 2, "jobs": jobs}])
+
+    with pytest.raises(ValueError, match="conflicting shared identity"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, checkpoints, tmp_path / "reports",
+            manifests, [0, 1], "calibration-a", "37", "1", "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_regenerates_report_from_complete_checkpoint(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37)
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoints = tmp_path / "checkpoints" / "0"
+    checkpoints.mkdir(parents=True)
+    checkpoints.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {}, "attempts": [], "status": "completed", "pending": 0,
+    }))
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    assert result["shards"]["0"]["state"] == "completed_checkpoint_missing_report"
+
+
+def test_sparse_continuation_rejects_wrong_source_run_inputs(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="skipped", runner_id=None, steps=[])
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    run_path = _calibration_run_file(tmp_path)
+    run = json.loads(run_path.read_text())
+    run["calibration_id"] = "other"
+    run_path.write_text(json.dumps(run))
+
+    with pytest.raises(ValueError, match="source run provenance"):
+        plan_calibration_continuation(
+            run_path, jobs_path, tmp_path / "checkpoints", tmp_path / "reports",
+            manifests, [0], "calibration-a", "37", "1", "f" * 40, "1",
+        )
+
+
+def test_calibration_continuation_and_budget_cli_delivery_path(tmp_path):
+    manifests = tmp_path / "manifests"
+    checkpoints = tmp_path / "checkpoints" / "completed"
+    reports = tmp_path / "reports" / "completed"
+    manifests.mkdir()
+    checkpoints.mkdir(parents=True)
+    reports.mkdir(parents=True)
+    for index in range(256):
+        (manifests / f"partition-{index}.json").write_text(json.dumps({
+            "shard_index": index, "digest": f"{index + 1:064x}",
+        }))
+    completed = WAVES["wave-1"][0]
+    identity = {
+        "revision": "f" * 40, "preflight_digest": "e" * 64,
+        "manifest_digest": f"{completed + 1:064x}", "corpus_digest": "d" * 64,
+        "environment_digest": "c" * 64,
+    }
+    checkpoints.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a", "identity": identity,
+        "outcomes": {"a" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [], "status": "completed", "pending": 0,
+    }))
+    reports.joinpath("mutation-report.json").write_text(json.dumps({
+        "status": "completed", "shard_index": completed,
+        "calibration_id": "calibration-a", **identity,
+    }))
+    jobs = []
+    for position, index in enumerate(WAVES["wave-1"]):
+        if index == completed:
+            job = _job(position + 1, run_id=37)
+        else:
+            job = _job(
+                position + 1, run_id=37, conclusion="skipped", runner_id=None, steps=[],
+            )
+        job["name"] = f"mutation (full shard {index}, advisory)"
+        jobs.append(job)
+    jobs_path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
+    run_path = _calibration_run_file(tmp_path)
+    continuation = tmp_path / "continuation.json"
+    script = Path(__file__).parents[1] / "scripts" / "staged_preflight.py"
+
+    subprocess.run([
+        sys.executable, str(script), "plan-calibration-continuation",
+        "--provenance", str(run_path), "--jobs", str(jobs_path),
+        "--checkpoints", str(tmp_path / "checkpoints"),
+        "--reports", str(tmp_path / "reports"), "--manifests", str(manifests),
+        "--stage", "1", "--calibration-id", "calibration-a",
+        "--run-id", "37", "--run-attempt", "1", "--revision", "f" * 40,
+        "--output", str(continuation),
+    ], check=True)
+    plan = json.loads(continuation.read_text())
+    assert plan["matrix"]["shard"] == WAVES["wave-1"][1:]
+    accounting = tmp_path / "accounting.json"
+    accounting.write_text(json.dumps(plan["accounting"]))
+    budget = tmp_path / "budget.json"
+    subprocess.run([
+        sys.executable, str(script), "calibration-budget",
+        "--accounting", str(accounting), "--ceiling", "12000",
+        "--cancellation-reserve", "1200", "--output", str(budget),
+    ], check=True)
+    retained = json.loads(budget.read_text())
+    assert retained["passed"] is True
+    assert retained["billing_authority"] is False
+    assert retained["cancellation_lag_charge"] == 0
 
 
 def test_combined_accounting_charges_original_and_recovery_attempts(tmp_path):

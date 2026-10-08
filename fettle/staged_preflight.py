@@ -1004,6 +1004,238 @@ def combine_accounting_sources(sources: list[tuple[Path, str, str]], now: dateti
     }
 
 
+def evaluate_calibration_budget(
+    accounting: dict,
+    *,
+    ceiling: int,
+    cancellation_reserve: int,
+) -> dict:
+    """Apply a conservative launch cutoff without claiming a provider billing cap."""
+    observed = accounting.get("estimated_runner_minutes")
+    if (
+        not isinstance(observed, (int, float)) or isinstance(observed, bool)
+        or observed < 0
+    ):
+        raise ValueError("calibration usage is missing or malformed")
+    if (
+        not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1
+        or not isinstance(cancellation_reserve, int) or isinstance(cancellation_reserve, bool)
+        or cancellation_reserve < 0 or cancellation_reserve >= ceiling
+    ):
+        raise ValueError("calibration ceiling or cancellation reserve is invalid")
+    cutoff = ceiling - cancellation_reserve
+    included = accounting.get("included_jobs")
+    if (
+        not isinstance(included, list)
+        or any(
+            not isinstance(job, dict)
+            or job.get("status") not in {"completed", "in_progress"}
+            for job in included
+        )
+    ):
+        raise ValueError("calibration included job accounting is malformed")
+    active_jobs = sum(job.get("status") == "in_progress" for job in included)
+    cancellation_lag_minutes = active_jobs * 5
+    charged = observed + cancellation_lag_minutes
+    return {
+        **accounting,
+        "ceiling": ceiling,
+        "cancellation_reserve": cancellation_reserve,
+        "launch_cutoff": cutoff,
+        "active_jobs": active_jobs,
+        "cancellation_lag_minutes_per_active_job": 5,
+        "cancellation_lag_charge": cancellation_lag_minutes,
+        "charged_runner_minutes": round(charged, 2),
+        "billing_authority": False,
+        "budget_notice": (
+            "Operational launch and cancellation control; provider cancellation latency "
+            "can exceed the estimate and this is not a guaranteed billing cap."
+        ),
+        "passed": charged <= cutoff,
+    }
+
+
+_CALIBRATION_JOB = re.compile(r"^mutation \(full shard (\d+), advisory\)$")
+
+
+def plan_calibration_continuation(
+    provenance_path: Path,
+    jobs_path: Path,
+    checkpoints_dir: Path,
+    reports_dir: Path,
+    manifests: list[dict],
+    selected_shards: list[int],
+    calibration_id: str,
+    expected_run_id: str,
+    expected_run_attempt: str,
+    expected_revision: str,
+    expected_stage: str,
+) -> dict:
+    """Select sparse continuation shards from checkpoints plus execution provenance."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id):
+        raise ValueError("calibration ID is invalid")
+    provenance = _load_json(provenance_path)
+    if (
+        provenance.get("schema_version") != "1"
+        or provenance.get("kind") != "calibration_source"
+        or provenance.get("run_id") != expected_run_id
+        or provenance.get("run_attempt") != expected_run_attempt
+        or provenance.get("revision") != expected_revision
+        or provenance.get("mode") != "calibration"
+        or provenance.get("calibration_id") != calibration_id
+        or provenance.get("calibration_stage") != expected_stage
+    ):
+        raise ValueError("calibration source run provenance differs")
+    manifest_by_shard = {
+        item.get("shard_index"): item for item in manifests if isinstance(item, dict)
+    }
+    if (
+        len(manifest_by_shard) != len(manifests)
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("digest", "")))
+            for index, item in manifest_by_shard.items()
+        )
+        or len(selected_shards) != len(set(selected_shards))
+        or any(index not in manifest_by_shard for index in selected_shards)
+    ):
+        raise ValueError("calibration manifest topology is malformed")
+    accounting = account_runner_minutes(
+        jobs_path, expected_run_id=expected_run_id,
+        expected_run_attempt=expected_run_attempt,
+    )
+    raw = json.loads(jobs_path.read_text(encoding="utf-8"))
+    pages = raw if isinstance(raw, list) else [raw]
+    jobs_by_shard: dict[int, dict] = {}
+    for job in (job for page in pages for job in page["jobs"]):
+        match = _CALIBRATION_JOB.fullmatch(str(job.get("name", "")))
+        if not match:
+            continue
+        index = int(match.group(1))
+        if index in jobs_by_shard:
+            raise ValueError(f"shard {index} has conflicting execution provenance")
+        jobs_by_shard[index] = job
+    if set(jobs_by_shard) != set(selected_shards):
+        raise ValueError("calibration job provenance is incomplete or contains extra shards")
+    checkpoint_by_shard: dict[int, tuple[Path, dict]] = {}
+    shared_identity: tuple[str, str, str] | None = None
+    for path in sorted(checkpoints_dir.rglob("mutation-checkpoint.json")) if checkpoints_dir.exists() else []:
+        checkpoint = _load_json(path)
+        identity = checkpoint.get("identity")
+        if (
+            not isinstance(identity, dict)
+            or set(identity) != {
+                "revision", "preflight_digest", "manifest_digest",
+                "corpus_digest", "environment_digest",
+            }
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("revision", "")))
+            or any(
+                not re.fullmatch(r"[0-9a-f]{64}", str(identity.get(field, "")))
+                for field in (
+                    "preflight_digest", "manifest_digest", "corpus_digest",
+                    "environment_digest",
+                )
+            )
+        ):
+            raise ValueError(f"checkpoint {path} identity is incomplete")
+        compatible_identity = (
+            identity["revision"], identity["preflight_digest"], identity["environment_digest"],
+        )
+        if shared_identity is not None and compatible_identity != shared_identity:
+            raise ValueError("calibration checkpoints have conflicting shared identity")
+        shared_identity = compatible_identity
+        matches = [index for index in selected_shards if isinstance(identity, dict)
+                   and identity.get("manifest_digest") == manifest_by_shard[index]["digest"]]
+        if len(matches) != 1:
+            raise ValueError(f"checkpoint {path} has incompatible manifest identity")
+        index = matches[0]
+        if index in checkpoint_by_shard:
+            raise ValueError(f"shard {index} has conflicting checkpoint evidence")
+        if checkpoint.get("calibration_id") != calibration_id:
+            raise ValueError(f"shard {index} checkpoint belongs to another calibration")
+        if (checkpoint.get("schema_version") != "1"
+                or checkpoint.get("status") not in {"completed", "incomplete"}
+                or not isinstance(checkpoint.get("pending"), int)
+                or isinstance(checkpoint.get("pending"), bool) or checkpoint["pending"] < 0
+                or not isinstance(checkpoint.get("outcomes"), dict)
+                or not isinstance(checkpoint.get("attempts"), list)):
+            raise ValueError(f"shard {index} checkpoint is malformed")
+        checkpoint_by_shard[index] = (path, checkpoint)
+    reports_by_shard: dict[int, list[dict]] = {index: [] for index in selected_shards}
+    for path in sorted(reports_dir.rglob("mutation-report.json")) if reports_dir.exists() else []:
+        report = _load_json(path)
+        index = report.get("shard_index")
+        if index not in reports_by_shard:
+            raise ValueError(f"report {path} is outside the selected calibration stage")
+        reports_by_shard[index].append(report)
+    retry = []
+    states: dict[str, dict] = {}
+    for index in selected_shards:
+        job = jobs_by_shard[index]
+        checkpoint_entry = checkpoint_by_shard.get(index)
+        has_runner = any(job.get(field) is not None for field in (
+            "runner_id", "runner_name", "runner_group_id", "runner_group_name",
+        ))
+        never_started = (not has_runner and not job.get("steps") and (
+            job.get("status") in {"queued", "requested", "pending", "waiting"}
+            or job.get("status") == "completed"
+            and job.get("conclusion") == "skipped"))
+        cancelled_before_execution = (
+            job.get("status") == "completed" and job.get("conclusion") == "cancelled"
+            and not has_runner and not job.get("steps")
+        )
+        if checkpoint_entry is not None:
+            path, checkpoint = checkpoint_entry
+            if checkpoint["status"] == "completed" and checkpoint["pending"] == 0:
+                completed_reports = [report for report in reports_by_shard[index]
+                                     if report.get("status") == "completed"]
+                if len(completed_reports) > 1:
+                    raise ValueError(
+                        f"completed shard {index} has conflicting retained reports"
+                    )
+                if not completed_reports:
+                    state = "completed_checkpoint_missing_report"
+                    retry.append(index)
+                    states[str(index)] = {
+                        "state": state, "job_id": job["id"],
+                        "checkpoint": path.as_posix(), "pending": 0,
+                    }
+                    continue
+                report = completed_reports[0]
+                if (report.get("calibration_id") != calibration_id
+                        or report.get("revision") != checkpoint["identity"]["revision"]
+                        or report.get("preflight_digest") != checkpoint["identity"]["preflight_digest"]
+                        or report.get("manifest_digest") != checkpoint["identity"]["manifest_digest"]
+                        or report.get("corpus_digest") != checkpoint["identity"]["corpus_digest"]
+                        or report.get("environment_digest") != checkpoint["identity"]["environment_digest"]):
+                    raise ValueError(f"completed shard {index} report identity differs")
+                state = "completed"
+            else:
+                state = "started_partial"
+                retry.append(index)
+            states[str(index)] = {"state": state, "job_id": job["id"],
+                                  "checkpoint": path.as_posix(), "pending": checkpoint["pending"]}
+            continue
+        if never_started:
+            state = "never_started"
+            retry.append(index)
+        elif cancelled_before_execution:
+            state = "cancelled_before_execution"
+            retry.append(index)
+        elif job.get("status") == "completed" and job.get("conclusion") == "success":
+            raise ValueError(f"successful shard {index} has no checkpoint")
+        elif has_runner or job.get("steps"):
+            state = "started_interrupted" if job.get("conclusion") in {"cancelled", None} else "started_failed"
+            retry.append(index)
+        else:
+            raise ValueError(f"shard {index} missing checkpoint has indeterminate provenance")
+        states[str(index)] = {"state": state, "job_id": job["id"], "checkpoint": None}
+    return {"schema_version": "1", "calibration_id": calibration_id,
+            "source_run_id": expected_run_id, "source_run_attempt": expected_run_attempt,
+            "matrix": {"shard": retry}, "shard_count": len(retry),
+            "shards": states, "accounting": accounting}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1016,6 +1248,8 @@ def main() -> int:
     aggregation_record = sub.add_parser("aggregation-recovery-record")
     wave = sub.add_parser("validate-wave")
     budget = sub.add_parser("budget-gate")
+    calibration_continuation = sub.add_parser("plan-calibration-continuation")
+    calibration_budget = sub.add_parser("calibration-budget")
     for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
@@ -1091,8 +1325,39 @@ def main() -> int:
         choices=("wave-2", "wave-3", "aggregate", "complete"),
         required=True,
     )
+    calibration_continuation.add_argument("--jobs", type=Path, required=True)
+    calibration_continuation.add_argument("--provenance", type=Path, required=True)
+    calibration_continuation.add_argument("--checkpoints", type=Path, required=True)
+    calibration_continuation.add_argument("--reports", type=Path, required=True)
+    calibration_continuation.add_argument("--manifests", type=Path, required=True)
+    calibration_continuation.add_argument("--stage", choices=("1", "2", "3"), required=True)
+    calibration_continuation.add_argument("--calibration-id", required=True)
+    calibration_continuation.add_argument("--run-id", required=True)
+    calibration_continuation.add_argument("--run-attempt", required=True)
+    calibration_continuation.add_argument("--revision", required=True)
+    calibration_continuation.add_argument("--output", type=Path, required=True)
+    calibration_budget.add_argument("--accounting", type=Path, required=True)
+    calibration_budget.add_argument("--ceiling", type=int, required=True)
+    calibration_budget.add_argument("--cancellation-reserve", type=int, required=True)
+    calibration_budget.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "plan-calibration-continuation":
+            manifests = [_load_json(path) for path in sorted(args.manifests.glob("partition-*.json"))]
+            result = plan_calibration_continuation(
+                args.provenance, args.jobs, args.checkpoints, args.reports, manifests,
+                WAVES[f"wave-{args.stage}"], args.calibration_id, args.run_id,
+                args.run_attempt, args.revision, args.stage,
+            )
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "calibration-budget":
+            result = evaluate_calibration_budget(
+                _load_json(args.accounting), ceiling=args.ceiling,
+                cancellation_reserve=args.cancellation_reserve,
+            )
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0 if result["passed"] else 2
         if args.command == "budget-gate":
             if args.source and any(value is not None for value in (
                 args.prior_jobs, args.prior_run_id, args.prior_run_attempt,

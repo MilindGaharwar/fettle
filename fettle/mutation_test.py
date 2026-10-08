@@ -906,7 +906,10 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
     outcomes: dict[str, dict] = {}
     attempts: list[dict] = []
     seen_attempts: set[str] = set()
-    terminal_states = set(_STATES) - {"untested"}
+    # `skipped` means mutmut did not make the required mutation decision. It is
+    # retained in raw reports for diagnostics, but cannot close a calibration
+    # ledger or disappear from the required corpus.
+    terminal_states = set(_STATES) - {"untested", "skipped"}
     for checkpoint in checkpoints:
         if not isinstance(checkpoint, dict) or not required <= set(checkpoint) <= allowed:
             raise ValueError("mutation checkpoint has an unsupported schema")
@@ -1040,6 +1043,8 @@ def execute_pending_mutations(
                 observed = [state for state in _STATES if engine_id in ids[state]]
                 if len(observed) != 1 or observed[0] == "untested":
                     raise OSError("mutmut did not produce one terminal outcome")
+                if observed[0] == "skipped":
+                    raise OSError("mutmut skipped a required mutation outcome")
                 duration_ms = round((time.monotonic() - attempt_started) * 1000)
                 merged["outcomes"][record["fingerprint"]] = {
                     "state": observed[0], "duration_ms": duration_ms,
@@ -2445,6 +2450,16 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     score = compute_score(*(report[state] for state in _STATES[:5]))
     violations: list[str] = []
     debt: list[str] = []
+    skipped = report.get("skipped", 0)
+    required_incomplete = False
+    if not isinstance(skipped, int) or isinstance(skipped, bool) or skipped < 0:
+        required_incomplete = True
+        violations.append("required skipped outcome count is malformed")
+    elif skipped:
+        required_incomplete = True
+        violations.append(f"required skipped outcomes are incomplete: {skipped} observed")
+    if required_incomplete:
+        score = None
     checks = (
         ("untested", "max_untested", 0, "untested"),
         ("timeout", "max_mutant_timeouts", None, "timeout"),
@@ -2461,7 +2476,7 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     target = float(cfg.get("score_target", 70))
     decided = report["killed"] + report["survived"]
     minimum = int(cfg.get("minimum_scored_mutants", 0))
-    score_eligible = decided >= minimum
+    score_eligible = not required_incomplete and decided >= minimum
     if score is None:
         violations.append("no decided mutants were reported")
     elif not score_eligible:
@@ -2474,24 +2489,44 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
         "score": None if score is None else round(score, 1),
         "score_eligible": score_eligible,
         "eligible": not violations and not debt,
-        "passed": mode != "enforce" or not violations,
+        "passed": not required_incomplete and (mode != "enforce" or not violations),
         "reasons": reasons,
     }
 
 
 def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
     """Select one completed report per shard while rejecting conflicting retries."""
-    attempts: dict[int, list[dict]] = {index: [] for index in range(shard_count)}
+    return select_shard_subset_attempts(reports, shard_count, list(range(shard_count)))
+
+
+def select_shard_subset_attempts(
+    reports: list[dict],
+    shard_count: int,
+    expected_shards: list[int],
+) -> list[dict]:
+    """Select one compatible completed report for every explicitly required shard."""
+    if (
+        not isinstance(shard_count, int) or isinstance(shard_count, bool) or shard_count < 1
+        or len(expected_shards) != len(set(expected_shards))
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            or not 0 <= index < shard_count
+            for index in expected_shards
+        )
+    ):
+        raise ValueError("required shard subset has invalid topology")
+    expected = set(expected_shards)
+    attempts: dict[int, list[dict]] = {index: [] for index in expected_shards}
     for report in reports:
         index = report.get("shard_index") if isinstance(report, dict) else None
         if (
             not isinstance(index, int) or isinstance(index, bool)
-            or index not in attempts or report.get("shard_count") != shard_count
+            or index not in expected or report.get("shard_count") != shard_count
         ):
             raise ValueError("shard attempt has invalid topology")
         attempts[index].append(report)
     selected = []
-    for index in range(shard_count):
+    for index in sorted(expected):
         completed = [report for report in attempts[index] if report.get("status") == "completed"]
         if not completed:
             raise ValueError(f"shard {index} has no completed attempt")

@@ -325,8 +325,8 @@ def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
     assert "- finalize" in workflow
     assert 'WAVES["wave-"+stage]' in workflow
     assert '"1":8,"2":16,"3":32' in workflow
-    assert "pattern: mutation-shard-${{ github.event.inputs.stage_1_run_id }}-*" in workflow
-    assert "pattern: mutation-shard-${{ github.event.inputs.stage_2_run_id }}-*" in workflow
+    assert "name: mutation-calibration-stage-${{ github.event.inputs.stage_1_run_id }}" in workflow
+    assert "name: mutation-calibration-stage-${{ github.event.inputs.stage_2_run_id }}" in workflow
     assert "Validate prior calibration stages before fan-out" in workflow
     assert "len(identities) != 1" in workflow
     assert "identity != prior_identity" in workflow
@@ -340,7 +340,7 @@ def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
     assert "name: mutation (calibration accounting)" in workflow
     assert "runner_minute_ceiling:" in workflow
     assert "int(value)<=12000" in workflow
-    assert "fail-fast: ${{ github.event.inputs.mode == 'calibration' }}" in workflow
+    assert "fail-fast: false" in workflow
     readback = workflow.split("\n  evidence-readback:", 1)[1]
     assert "github.event.inputs.calibration_stage != '3'" in readback
 
@@ -477,7 +477,7 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--prior-jobs source-jobs.json" in continuation
     assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
     assert continuation.count("--next-wave complete") == 2
-    assert "billing_authority" not in first
+    assert 'assert result["billing_authority"] is False' in first
     assert "Operational ceiling, not a guaranteed provider billing cap." not in first
 
 
@@ -558,7 +558,7 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
         " && github.event.inputs.mode != 'preflight'"
             " && github.event.inputs.mode != 'diagnostic-canary'"
             " && github.event.inputs.mode != 'staged-preflight'"
-            " && github.event.inputs.mode != 'finalize'\n    needs: prepare"
+        " && github.event.inputs.mode != 'finalize'\n    needs: [prepare, calibration-launch-gate]"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow
@@ -609,6 +609,52 @@ def test_mutation_calibration_checkpoints_are_explicit_and_isolated():
     assert "if: always()" in workflow
     assert "github.event.inputs.resume_run_id != ''" in workflow
     assert "if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'" in workflow
+
+
+def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accounting():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "plan-calibration-continuation" in workflow
+    assert "calibration-source-provenance.json" in workflow
+    assert "calibration-resume-bundle-${{ github.run_id }}" in workflow
+    assert "name: mutation (calibration launch gate)" in workflow
+    assert "name: mutation (monitor calibration budget)" in workflow
+    assert "--cancellation-reserve 1200" in workflow
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' in workflow
+    assert "needs: [prepare, calibration-launch-gate]" in workflow
+    assert "EXPECTED_SHARDS: ${{ needs.prepare.outputs.execution_matrix }}" in workflow
+    assert '[[ "$terminal" -eq "$expected" ]] && break' in workflow
+    assert "Retain monitor accounting before cancellation" in workflow
+    assert '"calibration_id":os.environ["CALIBRATION_ID"]' in workflow
+    assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" in workflow
+    assert 'print(report["charged_runner_minutes"])' in workflow
+    assert 'retained["charged_runner_minutes"]' in workflow
+    assert 'sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"]' in workflow
+    assert 'accounting.get("calibration_id")==os.environ["CALIBRATION_ID"]' in workflow
+    assert "needs: [prepare, calibration-launch-gate]" in workflow
+    assert "fail-fast: false" in workflow
+    accounting = workflow.split("\n  calibration-accounting:", 1)[1].split("\n  aggregate:", 1)[0]
+    assert "if: always()" in accounting
+    assert "billing_authority" in accounting
+
+
+def test_staged_preflight_publishes_consumer_aliases_with_provenance():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+
+    assert "preflight-publication.json" in workflow
+    assert "mutation-manifests-${{ github.run_id }}" in workflow
+    assert "mutation-preflight-${{ github.run_id }}" in workflow
+    assert '"candidate_sha": "${{ github.event.inputs.candidate_sha }}"' in workflow
+    assert '"source_run_id": "${{ github.event.inputs.source_run_id }}"' in workflow
+    assert "Download published consumer aliases" in workflow
+    assert 'published_aggregate.read_bytes() == Path("retained/mutation-preflight.json").read_bytes()' in workflow
+
+    consumer = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    assert "assert preflight_attestation.is_file() and manifest_attestation.is_file()" in consumer
+    assert 'publication.get("manifest_count") == len(manifests) == 256' in consumer
+    assert 'publication.get("manifest_topology_sha256") == topology' in consumer
+    assert 'publication.get("publication_run_attempt") == "1"' in consumer
+    assert 'completion.get("source", {}).get("run_id") == publication["source_run_id"]' in consumer
 
 
 def test_explicit_calibration_uses_required_pr_check_name_and_enforces_result():

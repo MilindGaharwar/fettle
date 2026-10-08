@@ -62,6 +62,7 @@ from fettle.mutation_test import (
     report_from_mutation_checkpoint,
     prepare_shard_replay_matrix,
     select_shard_attempts,
+    select_shard_subset_attempts,
     run_resumable_mutation_shard,
     write_changed_partition_manifests,
 )
@@ -710,6 +711,23 @@ def test_policy_suspicious_budget_boundaries(mode, budget, count, passed, reason
     assert (reason is None) == (not result["reasons"])
     if reason:
         assert reason in result["reasons"][0]
+
+
+@pytest.mark.parametrize("mode", ["advisory", "enforce"])
+def test_required_skipped_outcome_is_always_incomplete(mode):
+    result = evaluate_policy(
+        {
+            "killed": 9, "survived": 1, "timeout": 0,
+            "suspicious": 0, "untested": 0, "skipped": 1,
+        },
+        {"mode": mode, "score_target": 70, "max_untested": 0},
+    )
+
+    assert result["passed"] is False
+    assert result["eligible"] is False
+    assert result["score"] is None
+    assert result["score_eligible"] is False
+    assert "required skipped" in result["reasons"][0]
 
 
 def test_policy_suppresses_only_tiny_scope_score_decision():
@@ -2661,6 +2679,19 @@ def test_execution_error_attempt_leaves_mutant_pending_and_unscored():
     assert merged["outcomes"] == {}
 
 
+def test_skipped_checkpoint_outcome_remains_pending_and_unscored():
+    checkpoint = _checkpoint(
+        outcomes={"a" * 64: {"state": "skipped", "duration_ms": 1}},
+        attempts=[{
+            "fingerprint": "a" * 64, "status": "completed",
+            "state": "skipped", "duration_ms": 1,
+        }],
+    )
+
+    with pytest.raises(ValueError, match="outcome is malformed"):
+        merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+
 def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(tmp_path):
     corpus = [
         {
@@ -2722,6 +2753,34 @@ def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tm
     assert result["pending"] == 1
     assert result["attempts"][-1]["status"] == "execution_error"
     assert result["outcomes"] == {}
+
+
+def test_pending_execution_skipped_result_is_retryable_and_unscored(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    observed = {state: [] for state in (
+        "killed", "survived", "timeout", "suspicious", "untested", "skipped",
+    )}
+    observed["skipped"] = ["1"]
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", return_value=_proc(0)),
+        patch("fettle.mutation_test._collect_range_results", return_value=(observed, None)),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert result["attempts"][-1]["status"] == "execution_error"
+    assert "skipped a required" in result["attempts"][-1]["message"]
 
 
 def test_pending_execution_fatal_exit_retains_bounded_diagnostics_without_an_outcome(tmp_path):
@@ -3618,6 +3677,22 @@ def test_shard_attempt_selection_requires_one_completed_attempt_per_index():
 
     with pytest.raises(ValueError, match="no completed attempt"):
         select_shard_attempts([timeout], 1)
+
+
+def test_shard_subset_selection_accepts_only_explicit_stage_members():
+    first = {"shard_index": 8, "shard_count": 256, "status": "completed"}
+    second = {"shard_index": 27, "shard_count": 256, "status": "completed"}
+
+    assert select_shard_subset_attempts([second, first], 256, [8, 27]) == [first, second]
+
+
+def test_shard_subset_selection_rejects_missing_or_conflicting_stage_attempts():
+    report = {"shard_index": 8, "shard_count": 256, "status": "completed", "killed": 1}
+
+    with pytest.raises(ValueError, match="shard 27 has no completed attempt"):
+        select_shard_subset_attempts([report], 256, [8, 27])
+    with pytest.raises(ValueError, match="conflicting completed attempts"):
+        select_shard_subset_attempts([report, {**report, "killed": 2}], 256, [8])
 
 
 def test_replay_matrix_selects_only_incomplete_initial_shards():
