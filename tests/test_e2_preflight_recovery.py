@@ -134,6 +134,15 @@ def _fixture(monkeypatch, tmp_path):
             "conclusion": "failure",
         }] if job_id == recovery.API_RETRY_FAILURE_JOB_ID else [],
     } for job_id, (name, conclusion) in recovery.API_RETRY_FAILURE_JOB_INVENTORY.items()]
+    identity_jobs = [{
+        "id": job_id, "run_id": int(recovery.IDENTITY_FAILURE_RUN_ID),
+        "run_attempt": 1, "name": name,
+        "runner_id": 1 if job_id == recovery.IDENTITY_FAILURE_JOB_ID else None,
+        "conclusion": conclusion,
+        "steps": [{
+            "name": "Build exact continuation plan", "conclusion": "failure",
+        }] if job_id == recovery.IDENTITY_FAILURE_JOB_ID else [],
+    } for job_id, (name, conclusion) in recovery.IDENTITY_FAILURE_JOB_INVENTORY.items()]
     artifacts = []
     for wave in ("wave-1", "wave-2"):
         for index in recovery.WAVES[wave]:
@@ -212,6 +221,21 @@ def _fixture(monkeypatch, tmp_path):
             [{"total_count": 0, "artifacts": []}],
         ),
         "api_retry_failure_log_path": tmp_path / "api-retry-failure.log",
+        "identity_run_path": _write(tmp_path / "identity-run.json", {
+            "id": int(recovery.IDENTITY_FAILURE_RUN_ID), "run_attempt": 1,
+            "head_sha": recovery.IDENTITY_FAILURE_ORCHESTRATION_SHA,
+            "head_branch": recovery.RECOVERY_BRANCH, "event": "workflow_dispatch",
+            "status": "completed", "conclusion": "failure",
+        }),
+        "identity_jobs_path": _write(
+            tmp_path / "identity-jobs.json",
+            [{"total_count": len(identity_jobs), "jobs": identity_jobs}],
+        ),
+        "identity_artifacts_path": _write(
+            tmp_path / "identity-artifacts.json",
+            [{"total_count": 0, "artifacts": []}],
+        ),
+        "identity_failure_log_path": tmp_path / "identity-failure.log",
         "prior_runs_path": _write(tmp_path / "prior-runs.json", [
             {
                 "databaseId": int(recovery.API_FAILURE_RUN_ID),
@@ -224,6 +248,13 @@ def _fixture(monkeypatch, tmp_path):
                 "databaseId": int(recovery.API_RETRY_FAILURE_RUN_ID),
                 "headBranch": recovery.RECOVERY_BRANCH,
                 "headSha": recovery.API_RETRY_FAILURE_ORCHESTRATION_SHA,
+                "event": "workflow_dispatch", "status": "completed",
+                "conclusion": "failure",
+            },
+            {
+                "databaseId": int(recovery.IDENTITY_FAILURE_RUN_ID),
+                "headBranch": recovery.RECOVERY_BRANCH,
+                "headSha": recovery.IDENTITY_FAILURE_ORCHESTRATION_SHA,
                 "event": "workflow_dispatch", "status": "completed",
                 "conclusion": "failure",
             },
@@ -240,6 +271,10 @@ def _fixture(monkeypatch, tmp_path):
     paths["api_failure_log_path"].write_text("gh: Server Error (HTTP 502)\n")
     paths["api_retry_failure_log_path"].write_text(
         "gh: Server Error (HTTP 502)\n" * 3,
+    )
+    paths["identity_failure_log_path"].write_text(
+        "staged preflight rejected: source and continuation execution identities "
+        "are incompatible\n",
     )
     return paths
 
@@ -263,7 +298,8 @@ def test_authorized_handoff_recovery_accepts_only_pinned_complete_source(monkeyp
      "layout-started", "layout-log", "layout-artifact", "api-job",
      "api-retry-job", "api-retry-canary", "api-retry-count",
      "api-retry-history", "api-retry-history-conflict", "api-retry-history-duplicate",
-     "api-retry-runner", "api-retry-steps", "api-runner", "api-steps"],
+     "api-retry-runner", "api-retry-steps", "api-runner", "api-steps",
+     "identity-job", "identity-canary", "identity-artifact", "identity-log"],
 )
 def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, tmp_path, fault):
     paths = _fixture(monkeypatch, tmp_path)
@@ -397,6 +433,21 @@ def test_authorized_handoff_recovery_rejects_incompatible_evidence(monkeypatch, 
         pages = json.loads(paths["api_jobs_path"].read_text())
         pages[0]["jobs"][1]["steps"] = None
         paths["api_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "identity-job":
+        pages = json.loads(paths["identity_jobs_path"].read_text())
+        pages[0]["jobs"][1]["runner_id"] = 0
+        paths["identity_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "identity-canary":
+        pages = json.loads(paths["identity_jobs_path"].read_text())
+        canary = next(job for job in pages[0]["jobs"] if job["name"].endswith("canary)"))
+        canary["conclusion"] = "success"
+        paths["identity_jobs_path"].write_text(json.dumps(pages))
+    elif fault == "identity-artifact":
+        paths["identity_artifacts_path"].write_text(json.dumps([{
+            "total_count": 1, "artifacts": [{"name": "unexpected"}],
+        }]))
+    elif fault == "identity-log":
+        paths["identity_failure_log_path"].write_text("different failure\n")
     else:
         paths["source_failure_log_path"].write_text("different error\n")
 

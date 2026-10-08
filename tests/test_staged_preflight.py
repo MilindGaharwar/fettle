@@ -32,6 +32,7 @@ from scripts.staged_preflight import (
     validate_continuation_topology,
     validate_continuation_artifacts,
     validate_manifest_handoff,
+    validate_canary_handoff,
     validate_preflight_report_handoff,
 )
 
@@ -60,6 +61,32 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     assert validate_continuation_topology() == {
         "matrix_jobs": 216, "support_jobs": 9, "expanded_jobs": 225, "platform_limit": 256,
     }
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("execution_cutoff",), 699),
+        (("cancellation_headroom",), 99),
+        (("launch_ceiling", "wave-3"), 282),
+        (("recovery_projection", "support_completion_reserve_minutes"), 29),
+    ],
+)
+def test_build_plan_rejects_any_change_to_authorized_recovery_budget(
+    monkeypatch, tmp_path, path, value,
+):
+    root, manifests, _reports, _items, identity, _plan = _fixture(monkeypatch, tmp_path)
+    changed = BUDGET
+    container = changed
+    for key in path[:-1]:
+        container = container[key]
+    original = container[path[-1]]
+    container[path[-1]] = value
+    try:
+        with pytest.raises(ValueError, match="explicitly authorized controls"):
+            build_plan(root, manifests, "a" * 40, identity)
+    finally:
+        container[path[-1]] = original
 
 
 def _fixture(monkeypatch, tmp_path):
@@ -180,6 +207,75 @@ def test_report_handoff_reads_exact_manifest_and_report(monkeypatch, tmp_path):
     report_path.write_text("")
     with pytest.raises(json.JSONDecodeError):
         validate_preflight_report_handoff(root, artifact_root, plan_path, report_path, index)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [None, "zero-generated", "failed", "dirty", "process", "manifest", "report", "size"],
+)
+def test_canary_handoff_requires_genuine_bound_terminal_evidence(
+    monkeypatch, tmp_path, fault,
+):
+    root, _manifests, reports, items, _identity, plan_path = _fixture(monkeypatch, tmp_path)
+    plan = json.loads(plan_path.read_text())
+    plan["execution_wave"] = {"shards": WAVES["wave-3"], "max_parallel": 8}
+    plan_path.write_text(json.dumps(plan))
+    artifact_root = tmp_path / "artifact"
+    manifest_root = artifact_root / "source-plan/mutation-manifests"
+    manifest_root.mkdir(parents=True)
+    for index, item in enumerate(items):
+        (manifest_root / f"partition-{index}.json").write_text(json.dumps(item))
+    monkeypatch.setattr(
+        "scripts.staged_preflight._load_manifests", lambda *_args, **_kwargs: items,
+    )
+    index = WAVES["wave-3"][0]
+    fingerprint = f"{index + 1:064x}"
+    report_path = reports / "mutation-preflight.json"
+    report = {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "shard_index": index, "shard_count": 256,
+        "manifest_digest": items[index]["digest"], "line_ranges": items[index]["ranges"],
+        "files": items[index]["files"], "generated": 1, "canonicalized": 1,
+        "collisions": 0, "fingerprints": [fingerprint],
+        "corpus": [{"fingerprint": fingerprint}],
+    }
+    if fault == "zero-generated":
+        report.update({"generated": 0, "canonicalized": 0, "fingerprints": [], "corpus": []})
+    report_path.write_text(json.dumps(report))
+    manifest_path = manifest_root / f"partition-{index}.json"
+    terminal = {
+        "schema_version": "1", "passed": True, "execution_outcome": "success",
+        "source_restored": True, "mutmut_processes_remaining": [],
+        "manifest_path": f"staged-plan/source-plan/mutation-manifests/partition-{index}.json",
+        "manifest_sha256": _file_sha(manifest_path),
+        "report_sha256": _file_sha(report_path), "report_size": report_path.stat().st_size,
+    }
+    if fault == "failed":
+        terminal["execution_outcome"] = "failure"
+    if fault == "dirty":
+        terminal["source_restored"] = False
+    if fault == "process":
+        terminal["mutmut_processes_remaining"] = ["123"]
+    if fault == "manifest":
+        terminal["manifest_sha256"] = "0" * 64
+    if fault == "report":
+        terminal["report_sha256"] = "0" * 64
+    if fault == "size":
+        terminal["report_size"] += 1
+    terminal_path = reports / "canary-terminal.json"
+    terminal_path.write_text(json.dumps(terminal))
+
+    if fault is None:
+        result = validate_canary_handoff(
+            root, artifact_root, plan_path, report_path, terminal_path, index,
+        )
+        assert result["passed"] is True
+        assert result["terminal_sha256"] == _file_sha(terminal_path)
+    else:
+        with pytest.raises(ValueError):
+            validate_canary_handoff(
+                root, artifact_root, plan_path, report_path, terminal_path, index,
+            )
 
 
 def test_wave_validation_accepts_exact_complete_membership(monkeypatch, tmp_path):
@@ -829,6 +925,84 @@ def test_fresh_continuation_uses_validated_immutable_candidate_inputs(monkeypatc
     assert result["source"]["validations"]["wave-2"]["passed"] is True
     assert result["origin_assignment"]["0"]["run_id"] == "37"
     assert result["origin_assignment"]["35"]["run_id"] == "38"
+
+
+def test_fresh_continuation_allows_changed_launch_controls(monkeypatch, tmp_path):
+    root, manifests_dir, wave_1_reports, manifests, _, source_plan_path = _fixture(
+        monkeypatch, tmp_path,
+    )
+    source_plan = json.loads(source_plan_path.read_text())
+    source_plan["workflow"]["run_id"] = "37"
+    source_plan["workflow"]["workflow_ref"] = SOURCE_WORKFLOW_REF
+    source_plan["budget"] = {
+        key: value for key, value in source_plan["budget"].items()
+        if key not in {"execution_cutoff", "recovery_projection"}
+    }
+    source_plan["budget"]["launch_ceiling"]["wave-3"] = 95
+    source_plan_path.write_text(json.dumps(source_plan))
+    _write_wave(wave_1_reports, manifests, "wave-1")
+    wave_2_reports = tmp_path / "wave-2-reports"
+    wave_2_reports.mkdir()
+    _write_wave(wave_2_reports, manifests, "wave-2")
+    source_identity = source_plan["workflow"]
+    validations = []
+    for wave, reports in (("wave-1", wave_1_reports), ("wave-2", wave_2_reports)):
+        validation = validate_wave(
+            root, source_plan_path, manifests_dir, reports, wave, "a" * 40,
+            source_identity,
+        )
+        path = tmp_path / f"{wave}-validation.json"
+        path.write_text(json.dumps(validation))
+        validations.append(path)
+
+    result = build_fresh_continuation_plan(
+        root, source_plan_path, wave_1_reports, wave_2_reports,
+        validations[0], validations[1], manifests_dir, _file_sha(source_plan_path),
+        "37", "a" * 40, SOURCE_WORKFLOW_REF, "b" * 40,
+        {
+            "repository": "owner/repo", "workflow": "Staged preflight continuation",
+            "workflow_ref": "ref", "run_id": "38", "run_attempt": "1",
+        },
+        FROZEN_CANDIDATE,
+    )
+
+    assert result["budget"] == BUDGET
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operational_ceiling_runner_minutes", 801),
+        ("wave_allowances", {"wave-1": 20, "wave-2": 75, "wave-3": 501}),
+        ("orchestration_and_aggregation", 106),
+        ("cancellation_headroom", 99),
+    ],
+)
+def test_fresh_continuation_rejects_changed_execution_budget(
+    monkeypatch, tmp_path, field, value,
+):
+    root, manifests_dir, reports, _manifests, _, source_plan_path = _fixture(
+        monkeypatch, tmp_path,
+    )
+    source_plan = json.loads(source_plan_path.read_text())
+    source_plan["workflow"]["run_id"] = "37"
+    source_plan["workflow"]["workflow_ref"] = SOURCE_WORKFLOW_REF
+    source_plan["budget"][field] = value
+    source_plan_path.write_text(json.dumps(source_plan))
+    validation = tmp_path / "validation.json"
+    validation.write_text("{}")
+
+    with pytest.raises(ValueError, match="execution budgets"):
+        build_fresh_continuation_plan(
+            root, source_plan_path, reports, reports, validation, validation,
+            manifests_dir, _file_sha(source_plan_path), "37", "a" * 40,
+            SOURCE_WORKFLOW_REF, "b" * 40,
+            {
+                "repository": "owner/repo", "workflow": "continuation",
+                "workflow_ref": "ref", "run_id": "38", "run_attempt": "1",
+            },
+            FROZEN_CANDIDATE,
+        )
 
 
 def test_fresh_continuation_rejects_changed_candidate_or_plan_digest(monkeypatch, tmp_path):

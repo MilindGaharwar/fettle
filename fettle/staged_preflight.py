@@ -108,8 +108,22 @@ BUDGET = {
         "complete": 700,
     },
 }
+AUTHORIZED_RECOVERY_BUDGET_SHA256 = "b87dedc8f4da90ecbfa9b1292319f035acfa7b6668e5e514c482d600d709571a"
 MATRIX_JOB_LIMIT = 256
 CONTINUATION_SUPPORT_JOBS = 9
+
+
+def _execution_budget_identity(budget: object) -> dict | None:
+    """Select immutable execution allocation from mutable launch controls."""
+    if not isinstance(budget, dict):
+        return None
+    keys = (
+        "operational_ceiling_runner_minutes",
+        "wave_allowances",
+        "orchestration_and_aggregation",
+        "cancellation_headroom",
+    )
+    return {key: budget.get(key) for key in keys}
 
 
 def _digest(value: object) -> str:
@@ -235,6 +249,40 @@ def validate_preflight_report_handoff(
     }
 
 
+def validate_canary_handoff(
+    root: Path,
+    artifact_root: Path,
+    plan_path: Path,
+    report_path: Path,
+    terminal_path: Path,
+    expected_shard: int,
+) -> dict:
+    """Bind a genuine canary report to its downloaded terminal execution record."""
+    result = validate_preflight_report_handoff(
+        root, artifact_root, plan_path, report_path, expected_shard,
+    )
+    report = _load_json(report_path)
+    terminal = _load_json(terminal_path)
+    manifest_path = artifact_root / MANIFEST_RELATIVE_ROOT / f"partition-{expected_shard}.json"
+    if (
+        not isinstance(report.get("generated"), int)
+        or isinstance(report.get("generated"), bool)
+        or report["generated"] <= 0
+        or terminal.get("schema_version") != "1"
+        or terminal.get("passed") is not True
+        or terminal.get("execution_outcome") != "success"
+        or terminal.get("source_restored") is not True
+        or terminal.get("mutmut_processes_remaining") != []
+        or terminal.get("manifest_path")
+        != f"staged-plan/{MANIFEST_RELATIVE_ROOT.as_posix()}/partition-{expected_shard}.json"
+        or terminal.get("manifest_sha256") != _file_digest(manifest_path)
+        or terminal.get("report_sha256") != _file_digest(report_path)
+        or terminal.get("report_size") != report_path.stat().st_size
+    ):
+        raise ValueError("canary execution provenance is failed, incomplete, or incompatible")
+    return {**result, "terminal_sha256": _file_digest(terminal_path)}
+
+
 def build_plan(
     root: Path,
     manifests_dir: Path,
@@ -250,6 +298,8 @@ def build_plan(
     members = [index for wave in WAVES.values() for index in wave]
     if len(members) != SHARD_COUNT or sorted(members) != list(range(SHARD_COUNT)):
         raise ValueError("fixed waves do not cover each shard exactly once")
+    if _digest(BUDGET) != AUTHORIZED_RECOVERY_BUDGET_SHA256:
+        raise ValueError("recovery budget differs from the explicitly authorized controls")
     allocated = (
         sum(BUDGET["wave_allowances"].values())
         + BUDGET["orchestration_and_aggregation"]
@@ -707,10 +757,14 @@ def build_fresh_continuation_plan(
     )
     compatibility_keys = (
         "candidate_sha", "runtime", "dependencies", "policy", "shard_count",
-        "manifest_digests", "manifest_topology_digest", "waves", "budget",
+        "manifest_digests", "manifest_topology_digest", "waves",
     )
     if any(current[key] != source_plan.get(key) for key in compatibility_keys):
         raise ValueError("source and continuation execution identities are incompatible")
+    if _execution_budget_identity(current["budget"]) != _execution_budget_identity(
+        source_plan.get("budget")
+    ):
+        raise ValueError("source and continuation execution budgets are incompatible")
     validations = {}
     for wave, reports_dir, validation_path in (
         ("wave-1", wave_1_reports_dir, wave_1_validation_path),
@@ -1229,6 +1283,7 @@ def main() -> int:
     report_handoff.add_argument("--artifact-root", type=Path, required=True)
     report_handoff.add_argument("--plan", type=Path, required=True)
     report_handoff.add_argument("--report", type=Path, required=True)
+    report_handoff.add_argument("--terminal", type=Path)
     report_handoff.add_argument("--shard", type=int, required=True)
     report_handoff.add_argument("--output", type=Path, required=True)
     budget.add_argument("--jobs", type=Path, required=True)
@@ -1323,8 +1378,15 @@ def main() -> int:
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0
         if args.command == "validate-report-handoff":
-            result = validate_preflight_report_handoff(
-                args.root, args.artifact_root, args.plan, args.report, args.shard,
+            result = (
+                validate_canary_handoff(
+                    args.root, args.artifact_root, args.plan, args.report,
+                    args.terminal, args.shard,
+                )
+                if args.terminal is not None
+                else validate_preflight_report_handoff(
+                    args.root, args.artifact_root, args.plan, args.report, args.shard,
+                )
             )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0

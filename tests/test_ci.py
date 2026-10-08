@@ -478,6 +478,7 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "--source setup-jobs.json 37580393007 1" in workflow
     assert "--source layout-jobs.json 37589782905 1" in workflow
     assert "--source api-retry-jobs.json 37602471821 1" in workflow
+    assert "--source identity-jobs.json 37605831970 1" in workflow
     assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
     assert '"status == \\"completed\\"' not in workflow
     assert 'operator_authorized_dispatch_recovery' not in workflow
@@ -586,6 +587,7 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--source setup-jobs.json 37580393007 1" in continuation
     assert "--source layout-jobs.json 37589782905 1" in continuation
     assert continuation.count("--source api-retry-jobs.json 37602471821 1") == 5
+    assert continuation.count("--source identity-jobs.json 37605831970 1") == 5
     assert "--next-wave wave-3 --output launch-budget.json" in continuation
     budget_source = (Path(PLUGIN_DIR) / "fettle/staged_preflight.py").read_text()
     assert '"execution_cutoff": 700' in budget_source
@@ -629,6 +631,38 @@ def test_continuation_support_jobs_install_every_invoked_tool():
     assert "uv venv --python 3.12.13" in validation
     assert "astral-sh/setup-uv@" in aggregate
     assert "uv venv --python 3.12.13" in aggregate
+
+
+def test_continuation_keeps_control_scripts_and_candidate_execution_separate():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+
+    assert workflow.count("control/scripts/staged_preflight.py") == 13
+    assert "candidate/.venv/bin/python control/scripts/e2_preflight_recovery.py" in workflow
+    assert "candidate/.venv/bin/python control/scripts/staged_preflight.py" in workflow
+    assert workflow.count("ref: f5560685d1f9eaea05107947fb0ecab791ad9478") == 7
+    assert workflow.count("uv run --no-sync python -m fettle.mutation_test --root .") == 2
+    assert "cp control/" not in workflow
+    assert "rsync" not in workflow
+    assert "--root control" not in workflow
+    assert '"control_sha": os.environ["RECOVERY_ORCHESTRATION_SHA"]' in workflow
+    assert '"candidate_sha": "f5560685d1f9eaea05107947fb0ecab791ad9478"' in workflow
+    assert 'for name in ("staged_preflight.py", "e2_preflight_recovery.py")' in workflow
+    assert '"candidate/fettle.staged_preflight"' in workflow
+    assert workflow.count('"candidate/fettle.mutation_test"') == 7
+    assert '"canary": ["candidate/fettle.mutation_test"]' in workflow
+    assert '"readback": []' in workflow
+
+
+def test_canary_readback_binds_terminal_evidence_and_uploads_no_stand_ins():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    canary = workflow.split("\n  canary:", 1)[1].split("\n  canary-readback:", 1)[0]
+    readback = workflow.split("\n  canary-readback:", 1)[1].split("\n  remaining-launch-gate:", 1)[0]
+
+    assert "report_sha256" in canary
+    assert "mutation-preflight.json\n            canary-terminal.json" in canary
+    assert "--terminal canary-report/canary-terminal.json" in readback
+    assert "stand-in" not in workflow.lower()
+    assert "non_authoritative" not in workflow
 
 
 def test_mutation_execution_reuses_explicit_sha_bound_preflight():

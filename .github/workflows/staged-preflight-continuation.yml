@@ -104,6 +104,10 @@ jobs:
           retry_api api-retry-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37602471821/attempts/1/jobs?per_page=100"
           retry_api api-retry-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37602471821/artifacts?per_page=100"
           retry_api api-retry-failure.log gh run view 37602471821 --repo "$GITHUB_REPOSITORY" --job 112729922474 --log
+          retry_api identity-run.json gh api "repos/$GITHUB_REPOSITORY/actions/runs/37605831970"
+          retry_api identity-jobs.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37605831970/attempts/1/jobs?per_page=100"
+          retry_api identity-artifacts.json gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37605831970/artifacts?per_page=100"
+          retry_api identity-failure.log gh run view 37605831970 --repo "$GITHUB_REPOSITORY" --job 112740947462 --log
           mkdir layout-logs
           for job in 112688644249 112688644256 112688644298 112688644321 112688644327 112688644359 112688644384 112688644514; do
             retry_api "layout-logs/shard-$job.log" gh run view 37589782905 --repo "$GITHUB_REPOSITORY" --job "$job" --log
@@ -162,6 +166,9 @@ jobs:
             --api-retry-run api-retry-run.json --api-retry-jobs api-retry-jobs.json \
             --api-retry-artifacts api-retry-artifacts.json \
             --api-retry-failure-log api-retry-failure.log \
+            --identity-run identity-run.json --identity-jobs identity-jobs.json \
+            --identity-artifacts identity-artifacts.json \
+            --identity-failure-log identity-failure.log \
             --plan source-plan/staged-preflight-plan.json \
             --manifests source-plan/mutation-manifests --wave-1-reports wave-1-reports \
             --wave-2-reports wave-2-reports \
@@ -190,7 +197,7 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output continuation-plan.json
           python - <<'PY'
-          import json, os
+          import hashlib, json, os
           from pathlib import Path
           path = Path("continuation-plan.json")
           plan = json.loads(path.read_text())
@@ -201,9 +208,36 @@ jobs:
               "orchestration_sha": os.environ["RECOVERY_ORCHESTRATION_SHA"],
               "prior_failed_runs": [
                   "37580393007", "37589782905", "37600554367", "37602471821",
+                  "37605831970",
               ],
               "canary_shard": 35,
               "canary_artifact_is_eligible": True,
+          }
+          plan["script_provenance"] = {
+              "control_sha": os.environ["RECOVERY_ORCHESTRATION_SHA"],
+              "candidate_sha": "f5560685d1f9eaea05107947fb0ecab791ad9478",
+              "control_scripts": {
+                  name: hashlib.sha256(Path("control/scripts", name).read_bytes()).hexdigest()
+                  for name in ("staged_preflight.py", "e2_preflight_recovery.py")
+              },
+              "jobs": {
+                  "prepare": [
+                      "control/e2_preflight_recovery.py",
+                      "control/staged_preflight.py",
+                      "candidate/fettle.staged_preflight",
+                      "candidate/fettle.mutation_test",
+                  ],
+                  "launch-gate": ["control/staged_preflight.py", "candidate/fettle.mutation_test"],
+                  "canary": ["candidate/fettle.mutation_test"],
+                  "canary-readback": ["control/staged_preflight.py", "candidate/fettle.mutation_test"],
+                  "remaining-launch-gate": ["control/staged_preflight.py"],
+                  "remaining-shards": ["candidate/fettle.mutation_test"],
+                  "monitor": ["control/staged_preflight.py"],
+                  "validate": ["control/staged_preflight.py", "candidate/fettle.mutation_test"],
+                  "aggregate": ["control/staged_preflight.py", "candidate/fettle.mutation_test"],
+                  "readback": [],
+                  "terminal-accounting": ["control/staged_preflight.py"],
+              },
           }
           path.write_text(json.dumps(plan, indent=2) + "\n")
           PY
@@ -247,6 +281,10 @@ jobs:
             api-retry-jobs.json
             api-retry-artifacts.json
             api-retry-failure.log
+            identity-run.json
+            identity-jobs.json
+            identity-artifacts.json
+            identity-failure.log
             prior-runs.json
             recovery-authorization.json
             manifest-handoff.json
@@ -262,6 +300,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: control
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
+          path: candidate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
@@ -280,12 +322,14 @@ jobs:
           cp staged-plan/layout-jobs.json layout-jobs.json
           cp staged-plan/api-jobs.json api-jobs.json
           cp staged-plan/api-retry-jobs.json api-retry-jobs.json
+          cp staged-plan/identity-jobs.json identity-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
             --source api-jobs.json 37600554367 1 \
             --source api-retry-jobs.json 37602471821 1 \
+            --source identity-jobs.json 37605831970 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave wave-3 --output launch-budget.json
           python control/scripts/staged_preflight.py recovery-budget-projection \
@@ -294,7 +338,7 @@ jobs:
       - name: Validate downloaded manifest handoff before execution
         run: |
           python control/scripts/staged_preflight.py validate-manifest-handoff \
-            --root control --artifact-root staged-plan \
+            --root candidate --artifact-root staged-plan \
             --plan staged-plan/continuation-plan.json --output manifest-handoff.json
       - name: Recheck exclusive recovery identity before matrix expansion
         env:
@@ -310,7 +354,7 @@ jobs:
                        and run.get("headBranch") == os.environ["GITHUB_REF_NAME"]
                        and str(run["databaseId"]) not in {
                             "37580393007", "37589782905", os.environ["GITHUB_RUN_ID"],
-                            "37600554367", "37602471821",
+                            "37600554367", "37602471821", "37605831970",
                        }]
           if competing:
               raise SystemExit("another recovery execution exists")
@@ -326,6 +370,7 @@ jobs:
             layout-jobs.json
             api-jobs.json
             api-retry-jobs.json
+            identity-jobs.json
             current-jobs.json
             current-runs.json
             launch-budget.json
@@ -404,6 +449,9 @@ jobs:
               "report_exists": Path("mutation-preflight.json").is_file(),
               "report_size": Path("mutation-preflight.json").stat().st_size
               if Path("mutation-preflight.json").is_file() else 0,
+              "report_sha256": hashlib.sha256(
+                  Path("mutation-preflight.json").read_bytes()
+              ).hexdigest() if Path("mutation-preflight.json").is_file() else None,
           }
           result["passed"] = (
               result["execution_outcome"] == "success"
@@ -434,6 +482,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: control
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: f5560685d1f9eaea05107947fb0ecab791ad9478
+          path: candidate
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-continuation-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -445,9 +497,10 @@ jobs:
       - name: Validate downloaded canary through final consumer contract
         run: |
           python control/scripts/staged_preflight.py validate-report-handoff \
-            --root control --artifact-root staged-plan \
+            --root candidate --artifact-root staged-plan \
             --plan staged-plan/continuation-plan.json \
             --report canary-report/mutation-preflight.json \
+            --terminal canary-report/canary-terminal.json \
             --shard "${{ needs.prepare.outputs.canary_shard }}" \
             --output canary-readback.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -480,12 +533,14 @@ jobs:
           cp staged-plan/layout-jobs.json layout-jobs.json
           cp staged-plan/api-jobs.json api-jobs.json
           cp staged-plan/api-retry-jobs.json api-retry-jobs.json
+          cp staged-plan/identity-jobs.json identity-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
             --source setup-jobs.json 37580393007 1 \
             --source layout-jobs.json 37589782905 1 \
             --source api-jobs.json 37600554367 1 \
             --source api-retry-jobs.json 37602471821 1 \
+            --source identity-jobs.json 37605831970 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output post-canary-accounting.json
           python - <<'PY'
@@ -521,6 +576,7 @@ jobs:
             layout-jobs.json
             api-jobs.json
             api-retry-jobs.json
+            identity-jobs.json
             current-jobs.json
             post-canary-accounting.json
             canary-minutes.txt
@@ -591,6 +647,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37602471821/attempts/1/jobs?per_page=100" > api-retry-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37605831970/attempts/1/jobs?per_page=100" > identity-jobs.json
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (continuation shard ")) | select(.status == "completed" and .conclusion != "success")] | length' current-jobs.json)
@@ -606,6 +663,7 @@ jobs:
               --source layout-jobs.json 37589782905 1 \
               --source api-jobs.json 37600554367 1 \
               --source api-retry-jobs.json 37602471821 1 \
+              --source identity-jobs.json 37605831970 1 \
               --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
               --next-wave complete --output monitor-budget.json; then
               echo "Operational execution ceiling reached or accounting became indeterminate; cancelling run"
@@ -627,6 +685,7 @@ jobs:
             layout-jobs.json
             api-jobs.json
             api-retry-jobs.json
+            identity-jobs.json
             current-jobs.json
             monitor-budget.json
           retention-days: 90
@@ -677,6 +736,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37602471821/attempts/1/jobs?per_page=100" > api-retry-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37605831970/attempts/1/jobs?per_page=100" > identity-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           candidate/.venv/bin/python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
@@ -684,6 +744,7 @@ jobs:
             --source layout-jobs.json 37589782905 1 \
             --source api-jobs.json 37600554367 1 \
             --source api-retry-jobs.json 37602471821 1 \
+            --source identity-jobs.json 37605831970 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave aggregate --output aggregate-budget.json
       - name: Retain continuation validation
@@ -699,6 +760,7 @@ jobs:
             layout-jobs.json
             api-jobs.json
             api-retry-jobs.json
+            identity-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error
@@ -860,6 +922,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37589782905/attempts/1/jobs?per_page=100" > layout-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37600554367/attempts/1/jobs?per_page=100" > api-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37602471821/attempts/1/jobs?per_page=100" > api-retry-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/37605831970/attempts/1/jobs?per_page=100" > identity-jobs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/1/jobs?per_page=100" > current-jobs.json
           python control/scripts/staged_preflight.py budget-gate --jobs current-jobs.json \
             --source source-jobs.json 37573662156 1 \
@@ -867,6 +930,7 @@ jobs:
             --source layout-jobs.json 37589782905 1 \
             --source api-jobs.json 37600554367 1 \
             --source api-retry-jobs.json 37602471821 1 \
+            --source identity-jobs.json 37605831970 1 \
             --run-id "$GITHUB_RUN_ID" --run-attempt 1 \
             --next-wave complete --output complete-budget.json
       - name: Retain terminal accounting
@@ -880,6 +944,7 @@ jobs:
             layout-jobs.json
             api-jobs.json
             api-retry-jobs.json
+            identity-jobs.json
             current-jobs.json
           retention-days: 90
           if-no-files-found: error

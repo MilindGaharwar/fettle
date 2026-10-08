@@ -53,6 +53,22 @@ API_RETRY_FAILURE_JOB_INVENTORY = {
     112730612783: ("Aggregate exact 256-report corpus", "skipped"),
     112730613280: ("Reconcile terminal cumulative budget", "skipped"),
 }
+IDENTITY_FAILURE_RUN_ID = "37605831970"
+IDENTITY_FAILURE_ORCHESTRATION_SHA = "34b05d20851d9e7bdf1b2f5b9bab3fb3ee9e2010"
+IDENTITY_FAILURE_JOB_ID = 112740947462
+IDENTITY_FAILURE_JOB_INVENTORY = {
+    112740947462: ("Validate immutable preflight sources", "failure"),
+    112741465830: ("Reconcile cumulative launch budget", "skipped"),
+    112741466125: ("mutation (continuation shard ${{ needs.prepare.outputs.canary_shard }} canary)", "skipped"),
+    112741467343: ("Reconcile post-canary completion budget", "skipped"),
+    112741467430: ("Validate canary artifact handoff", "skipped"),
+    112741468335: ("mutation (continuation shard ${{ matrix.shard }})", "skipped"),
+    112741468679: ("Monitor failures and operational ceiling", "skipped"),
+    112741469166: ("Validate complete continuation wave", "skipped"),
+    112741469682: ("Aggregate exact 256-report corpus", "skipped"),
+    112741470770: ("Read back durable consolidated evidence", "skipped"),
+    112741471541: ("Reconcile terminal cumulative budget", "skipped"),
+}
 LAYOUT_FAILURE_ORCHESTRATION_SHA = "dba75c1684ab7557721d93eac0eb58683dd9517b"
 LAYOUT_FAILURE_SHARD_JOBS = {
     112688644249: 35,
@@ -169,6 +185,8 @@ def validate_source_exception(
     api_failure_log_path: Path,
     api_retry_run_path: Path, api_retry_jobs_path: Path,
     api_retry_artifacts_path: Path, api_retry_failure_log_path: Path,
+    identity_run_path: Path, identity_jobs_path: Path,
+    identity_artifacts_path: Path, identity_failure_log_path: Path,
     prior_runs_path: Path, plan_path: Path, manifests_dir: Path,
     wave_1_reports: Path, wave_2_reports: Path, wave_1_validation: Path,
     wave_2_validation: Path,
@@ -433,12 +451,70 @@ def validate_source_exception(
     if _load(api_retry_artifacts_path) != [{"total_count": 0, "artifacts": []}]:
         raise ValueError("prior API retry unexpectedly retained artifacts")
 
+    identity_run = _load(identity_run_path)
+    if not isinstance(identity_run, dict) or (
+        str(identity_run.get("id")) != IDENTITY_FAILURE_RUN_ID
+        or str(identity_run.get("run_attempt")) != "1"
+        or identity_run.get("head_sha") != IDENTITY_FAILURE_ORCHESTRATION_SHA
+        or identity_run.get("head_branch") != RECOVERY_BRANCH
+        or identity_run.get("event") != "workflow_dispatch"
+        or identity_run.get("status") != "completed"
+        or identity_run.get("conclusion") != "failure"
+    ):
+        raise ValueError("prior identity run is not the authorized pre-execution failure")
+    identity_jobs = _jobs(identity_jobs_path)
+    identity_inventory = {
+        job.get("id"): (job.get("name"), job.get("conclusion"))
+        for job in identity_jobs
+    }
+    identity_started = [
+        job for job in identity_jobs
+        if isinstance(job.get("runner_id"), int)
+        and not isinstance(job.get("runner_id"), bool)
+        and job["runner_id"] > 0
+    ]
+    identity_prepare = next(
+        (job for job in identity_jobs if job.get("id") == IDENTITY_FAILURE_JOB_ID),
+        {},
+    )
+    identity_skipped = [
+        job for job in identity_jobs if job.get("id") != IDENTITY_FAILURE_JOB_ID
+    ]
+    if (
+        len(identity_inventory) != len(identity_jobs)
+        or identity_inventory != IDENTITY_FAILURE_JOB_INVENTORY
+        or len(identity_started) != 1
+        or identity_started[0].get("id") != IDENTITY_FAILURE_JOB_ID
+        or not isinstance(identity_prepare.get("steps"), list)
+        or not identity_prepare["steps"]
+        or any(str(job.get("run_id")) != IDENTITY_FAILURE_RUN_ID
+               or str(job.get("run_attempt")) != "1" for job in identity_jobs)
+        or any(job.get("runner_id") is not None or job.get("steps") != []
+               for job in identity_skipped)
+        or any(str(job.get("name", "")).startswith("mutation (continuation shard ")
+               and job.get("conclusion") != "skipped" for job in identity_jobs)
+    ):
+        raise ValueError("prior identity failure inventory is incomplete or conflicting")
+    identity_failed_steps = [
+        step for step in identity_prepare["steps"] if step.get("conclusion") == "failure"
+    ]
+    identity_log = identity_failure_log_path.read_text(encoding="utf-8")
+    if (
+        [step.get("name") for step in identity_failed_steps]
+        != ["Build exact continuation plan"]
+        or "source and continuation execution identities are incompatible" not in identity_log
+    ):
+        raise ValueError("prior identity failure is not the pinned plan-build failure")
+    if _load(identity_artifacts_path) != [{"total_count": 0, "artifacts": []}]:
+        raise ValueError("prior identity failure unexpectedly retained artifacts")
+
     prior_runs = _load(prior_runs_path)
     if not isinstance(prior_runs, list) or any(not isinstance(item, dict) for item in prior_runs):
         raise ValueError("prior continuation run inventory is malformed")
     expected_api_history = {
         API_FAILURE_RUN_ID: API_FAILURE_ORCHESTRATION_SHA,
         API_RETRY_FAILURE_RUN_ID: API_RETRY_FAILURE_ORCHESTRATION_SHA,
+        IDENTITY_FAILURE_RUN_ID: IDENTITY_FAILURE_ORCHESTRATION_SHA,
     }
     for run_id, head_sha in expected_api_history.items():
         matches = [item for item in prior_runs if str(item.get("databaseId")) == run_id]
@@ -460,7 +536,7 @@ def validate_source_exception(
         )
         and str(item.get("databaseId")) not in {
             SETUP_RUN_ID, LAYOUT_FAILURE_RUN_ID, API_FAILURE_RUN_ID,
-            API_RETRY_FAILURE_RUN_ID,
+            API_RETRY_FAILURE_RUN_ID, IDENTITY_FAILURE_RUN_ID,
         }
     ]
     if competing:
@@ -576,6 +652,12 @@ def validate_source_exception(
             "mutation_jobs_executed": 0,
             "verdict": "permanently failed; bounded evidence-fetch HTTP 502",
         },
+        "prior_identity_failure": {
+            "run_id": IDENTITY_FAILURE_RUN_ID,
+            "run_attempt": "1",
+            "mutation_jobs_executed": 0,
+            "verdict": "permanently failed; continuation-plan identity comparison",
+        },
         "plan_sha256": SOURCE_PLAN_SHA256,
         "manifest_topology_digest": plan["manifest_topology_digest"],
         "retained_reports": len(found), "validations": validations,
@@ -605,6 +687,10 @@ def main() -> int:
     parser.add_argument("--api-retry-jobs", type=Path, required=True)
     parser.add_argument("--api-retry-artifacts", type=Path, required=True)
     parser.add_argument("--api-retry-failure-log", type=Path, required=True)
+    parser.add_argument("--identity-run", type=Path, required=True)
+    parser.add_argument("--identity-jobs", type=Path, required=True)
+    parser.add_argument("--identity-artifacts", type=Path, required=True)
+    parser.add_argument("--identity-failure-log", type=Path, required=True)
     parser.add_argument("--prior-runs", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--manifests", type=Path, required=True)
@@ -632,6 +718,9 @@ def main() -> int:
             api_retry_jobs_path=args.api_retry_jobs,
             api_retry_artifacts_path=args.api_retry_artifacts,
             api_retry_failure_log_path=args.api_retry_failure_log,
+            identity_run_path=args.identity_run, identity_jobs_path=args.identity_jobs,
+            identity_artifacts_path=args.identity_artifacts,
+            identity_failure_log_path=args.identity_failure_log,
             plan_path=args.plan, manifests_dir=args.manifests,
             wave_1_reports=args.wave_1_reports, wave_2_reports=args.wave_2_reports,
             wave_1_validation=args.wave_1_validation,
