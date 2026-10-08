@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,13 @@ from fettle.quality_scan import ToolScanResult  # noqa: E402
 from fettle.result import ResultStatus  # noqa: E402
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
+
+
+def _run_actions_bash(script, *, cwd, env):
+    return subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        cwd=cwd, env=env, capture_output=True, text=True,
+    )
 
 
 def _git_repo(files: dict) -> str:
@@ -425,7 +433,10 @@ def test_staged_preflight_first_run_is_frozen_bounded_and_fail_closed():
     assert "needs: [staged-prepare, staged-wave-1-gate]" in staged
     assert staged.count("validate-wave") == 2
     assert "mutation (monitor staged preflight budget)" in staged
-    assert "gh run cancel \"$GITHUB_RUN_ID\"" in staged
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' in staged
+    assert "if: always()\n        uses: actions/upload-artifact@" in staged
+    assert "monitor-final-status.txt" in staged
+    assert "cancellation-attempt.json" in staged
     assert "gh workflow run staged-preflight-continuation.yml" in staged
     assert '--repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"' in staged
     assert "source_plan_sha256" in staged
@@ -549,7 +560,13 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "source_plan_sha256:" in workflow
     assert "fresh-continuation-plan" in workflow
     assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in workflow
-    assert "gh run cancel \"$GITHUB_RUN_ID\"" in workflow
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' in workflow
+    assert "if: always()\n        uses: actions/upload-artifact@" in workflow
+    assert "monitor-final-status.txt" in workflow
+    assert "cancellation-attempt.json" in workflow
+    assert 'source_uncertainty=api' in workflow
+    assert 'source_uncertainty=accounting' in workflow
+    assert 'reason="persistent-source-${source_uncertainty}-uncertainty"' in workflow
     assert '"status == \\"completed\\"' not in workflow
     assert '.status == "completed" and .conclusion == "success"' in workflow
     assert "--aggregate-preflight staged-reports --shard-count 256" in workflow
@@ -568,9 +585,351 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert "--next-wave complete --output monitor-budget.json" in first
     assert "--prior-jobs source-jobs.json" in continuation
     assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
-    assert continuation.count("--next-wave complete") == 2
+    assert continuation.count("--next-wave complete") == 3
     assert 'assert result["billing_authority"] is False' in first
     assert "Operational ceiling, not a guaranteed provider billing cap." not in first
+
+
+def test_staged_monitor_cancellation_is_repo_bound_from_workspace_root(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    steps = workflow["jobs"]["staged-monitor"]["steps"]
+    cancel = next(
+        step["run"] for step in steps
+        if step.get("name") == "Request cancellation after retaining diagnostics"
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / "control").mkdir(parents=True)
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    capture = workspace / "gh-args.txt"
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GH_CAPTURE\"\n")
+    gh.chmod(0o755)
+    (workspace / "cancellation-requested.txt").write_text("operational-cutoff\n")
+    result = _run_actions_bash(
+        cancel, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GH_CAPTURE": str(capture),
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_RUN_ID": "37",
+        },
+    )
+
+    assert result.returncode == 2
+    assert capture.read_text().splitlines() == [
+        "api", "--method", "POST", "repos/owner/repo/actions/runs/37/cancel",
+    ]
+    assert (workspace / "cancellation-final-status.txt").read_text() == "accepted\n"
+
+
+def test_staged_monitor_surfaces_cancellation_api_failure(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    )
+    steps = workflow["jobs"]["monitor"]["steps"]
+    cancel = next(
+        step["run"] for step in steps
+        if step.get("name") == "Request cancellation after retaining diagnostics"
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / "control").mkdir(parents=True)
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nexit 23\n")
+    gh.chmod(0o755)
+    (workspace / "cancellation-requested.txt").write_text("persistent-accounting-uncertainty\n")
+    result = _run_actions_bash(
+        cancel, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_RUN_ID": "37",
+        },
+    )
+
+    assert result.returncode == 23
+    assert (workspace / "cancellation-final-status.txt").read_text() == "api-failure-23\n"
+
+
+def test_staged_monitor_lifecycle_resamples_and_retains_each_snapshot(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    steps = workflow["jobs"]["staged-monitor"]["steps"]
+    monitor = next(
+        step["run"] for step in steps
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    fixtures = workspace / "fixtures"
+    fixtures.mkdir()
+    fixture = json.loads(
+        (Path(PLUGIN_DIR) / "tests/fixtures/staged_preflight_runner_acquisition.json").read_text()
+    )
+    assert fixture["provenance"]["kind"] == "reconstructed_runner_acquisition_sequence"
+    assert "precise original trigger is uncertain" in fixture["provenance"]["limitation"]
+    states = fixture["states"]
+    started = datetime.now(UTC) - timedelta(seconds=2)
+    completed = started + timedelta(seconds=1)
+    for state in states:
+        if state["started_at"] is not None:
+            state["started_at"] = started.isoformat().replace("+00:00", "Z")
+        if state["completed_at"] is not None:
+            state["completed_at"] = completed.isoformat().replace("+00:00", "Z")
+    for sample, state in enumerate(states, 1):
+        jobs = [
+            {
+                "id": index, "run_id": 37, "run_attempt": 1,
+                "name": f"mutation (staged preflight wave 2 shard {index})",
+                **state,
+            }
+            for index in range(32)
+        ]
+        (fixtures / f"{sample}.json").write_text(json.dumps([{
+            "total_count": len(jobs), "jobs": jobs,
+        }]))
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        "n=$(cat \"$GH_COUNTER\" 2>/dev/null || echo 0)\n"
+        "n=$((n + 1)); [ \"$n\" -gt 5 ] && n=5\n"
+        "printf '%s' \"$n\" > \"$GH_COUNTER\"\n"
+        "cat \"$GH_FIXTURES/$n.json\"\n"
+    )
+    gh.chmod(0o755)
+    sleep = bin_dir / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "GH_COUNTER": str(workspace / "counter"),
+            "GH_FIXTURES": str(fixtures),
+            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "37",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (workspace / "monitor-final-status.txt").read_text() == "completed\n"
+    assert not (workspace / "cancellation-requested.txt").exists()
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 5
+    assert json.loads((workspace / "monitor-budget.json").read_text())["passed"] is True
+
+
+def test_staged_monitor_persistent_malformed_metadata_requests_cancellation(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    steps = workflow["jobs"]["staged-monitor"]["steps"]
+    monitor = next(
+        step["run"] for step in steps
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    malformed = workspace / "malformed.json"
+    malformed.write_text(json.dumps([{"total_count": 1, "jobs": [{
+        "id": 1, "run_id": 37, "run_attempt": 1,
+        "name": "mutation (staged preflight wave 2 shard 0)",
+        "status": "queued", "conclusion": None,
+        "started_at": None, "completed_at": None,
+        "runner_id": 10, "runner_name": None,
+        "runner_group_id": None, "runner_group_name": None, "steps": [],
+    }]}]))
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\ncat \"$GH_FIXTURE\"\n")
+    gh.chmod(0o755)
+    sleep = bin_dir / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "GH_FIXTURE": str(malformed),
+            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "37",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+
+    assert result.returncode == 0
+    assert (workspace / "monitor-final-status.txt").read_text() == (
+        "persistent-accounting-uncertainty\n"
+    )
+    assert (workspace / "cancellation-requested.txt").is_file()
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 3
+    attempt = json.loads((workspace / "cancellation-attempt.json").read_text())
+    assert attempt == {
+        "repository": "owner/repo", "run_id": "37",
+        "reason": "persistent-accounting-uncertainty", "status": "pending",
+    }
+
+
+def test_staged_monitor_malformed_json_is_resampled_then_requests_cancellation(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    monitor = next(
+        step["run"] for step in workflow["jobs"]["staged-monitor"]["steps"]
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nprintf '%s\\n' '{not-json'\n")
+    gh.chmod(0o755)
+    sleep = bin_dir / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "37",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+
+    assert result.returncode == 0
+    assert (workspace / "monitor-final-status.txt").read_text() == (
+        "persistent-accounting-uncertainty\n"
+    )
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 3
+
+
+def test_staged_monitor_budget_crossing_requests_cancellation(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    monitor = next(
+        step["run"] for step in workflow["jobs"]["staged-monitor"]["steps"]
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    started = (datetime.now(UTC) - timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
+    jobs = [{
+        "id": index, "run_id": 37, "run_attempt": 1,
+        "name": f"mutation (staged preflight wave 2 shard {index})",
+        "status": "in_progress", "conclusion": None,
+        "started_at": started, "completed_at": None,
+        "runner_id": index + 1, "runner_name": f"runner-{index}",
+        "runner_group_id": 0, "runner_group_name": "GitHub Actions",
+        "steps": [{"name": "work", "status": "in_progress", "conclusion": None}],
+    } for index in range(32)]
+    fixture = workspace / "jobs.json"
+    fixture.write_text(json.dumps([{"total_count": 32, "jobs": jobs}]))
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\ncat \"$GH_FIXTURE\"\n")
+    gh.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "GH_FIXTURE": str(fixture),
+            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "37",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+
+    assert result.returncode == 0
+    assert (workspace / "monitor-final-status.txt").read_text() == "operational-cutoff\n"
+    budget = json.loads((workspace / "monitor-budget.json").read_text())
+    assert budget["launch_ceiling"] == 700
+    assert budget["passed"] is False
+    assert (workspace / "cancellation-requested.txt").is_file()
+
+
+def test_continuation_monitor_reuses_validated_source_snapshot(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    )
+    monitor = next(
+        step["run"] for step in workflow["jobs"]["monitor"]["steps"]
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    ).replace("${{ github.event.inputs.source_run_id }}", "36")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    completed = datetime.now(UTC)
+    started = completed - timedelta(seconds=1)
+
+    def job(index, run_id, name):
+        return {
+            "id": index, "run_id": run_id, "run_attempt": 1, "name": name,
+            "status": "completed", "conclusion": "success",
+            "started_at": started.isoformat().replace("+00:00", "Z"),
+            "completed_at": completed.isoformat().replace("+00:00", "Z"),
+            "runner_id": index + 1, "runner_name": f"runner-{index}",
+            "runner_group_id": 0, "runner_group_name": "GitHub Actions",
+            "steps": [{"name": "work", "status": "completed", "conclusion": "success"}],
+        }
+
+    source = workspace / "source.json"
+    source.write_text(json.dumps([{"total_count": 1, "jobs": [job(1, 36, "source support")]}]))
+    current_jobs = [
+        job(index + 100, 37, f"mutation (continuation shard {index})")
+        for index in range(216)
+    ]
+    current = workspace / "current.json"
+    current.write_text(json.dumps([{"total_count": 216, "jobs": current_jobs}]))
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  */runs/36/*) printf x >> \"$SOURCE_CALLS\"; cat \"$SOURCE_FIXTURE\" ;;\n"
+        "  *) cat \"$CURRENT_FIXTURE\" ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "SOURCE_CALLS": str(workspace / "source-calls"),
+            "SOURCE_FIXTURE": str(source), "CURRENT_FIXTURE": str(current),
+            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "37",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (workspace / "source-calls").read_text() == "x"
+    assert (workspace / "source-jobs.json").read_bytes() == source.read_bytes()
+    assert (workspace / "monitor-final-status.txt").read_text() == "completed\n"
+    assert not (workspace / "cancellation-requested.txt").exists()
 
 
 def test_aggregation_recovery_cannot_execute_mutations_and_retains_failure_evidence():

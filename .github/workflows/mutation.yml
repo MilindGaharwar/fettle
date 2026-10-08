@@ -746,36 +746,111 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          : > monitor-accounting.log
+          printf '%s\n' 'monitoring' > monitor-final-status.txt
+          mkdir -p monitor-snapshots
+          sample=0
+          uncertainty=0
           while true; do
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs.json
+            sample=$((sample + 1))
+            snapshot="monitor-snapshots/jobs-$sample.json"
+            if ! gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > "$snapshot" 2>> monitor-accounting.log; then
+              uncertainty=$((uncertainty + 1))
+              if [ "$uncertainty" -ge 3 ]; then
+                printf '%s\n' 'persistent-api-uncertainty' > monitor-final-status.txt
+                printf '%s\n' 'persistent-api-uncertainty' > cancellation-requested.txt
+                printf '{"repository":"%s","run_id":"%s","reason":"%s","status":"pending"}\n' \
+                  "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "persistent-api-uncertainty" > cancellation-attempt.json
+                break
+              fi
+              sleep 15
+              continue
+            fi
+            cp "$snapshot" jobs.json
+            rm -f monitor-budget.json
+            if python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
+              --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --next-wave complete --output monitor-budget.json \
+              2> >(tee -a monitor-accounting.log >&2); then
+              uncertainty=0
+            else
+              status=$?
+              if [ "$status" -eq 2 ] && jq -e '.passed == false' monitor-budget.json >/dev/null 2>&1; then
+                printf '%s\n' 'operational-cutoff' > monitor-final-status.txt
+                printf '%s\n' 'operational-cutoff' > cancellation-requested.txt
+                printf '{"repository":"%s","run_id":"%s","reason":"%s","status":"pending"}\n' \
+                  "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "operational-cutoff" > cancellation-attempt.json
+                break
+              fi
+              uncertainty=$((uncertainty + 1))
+              if [ "$uncertainty" -ge 3 ]; then
+                printf '%s\n' 'persistent-accounting-uncertainty' > monitor-final-status.txt
+                printf '%s\n' 'persistent-accounting-uncertainty' > cancellation-requested.txt
+                printf '{"repository":"%s","run_id":"%s","reason":"%s","status":"pending"}\n' \
+                  "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "persistent-accounting-uncertainty" > cancellation-attempt.json
+                break
+              fi
+              sleep 15
+              continue
+            fi
             failed=$(jq '[.[].jobs[] | select(.name | startswith("mutation (staged preflight wave 2 shard ")) | select(.status == "completed" and .conclusion != "success")] | length' jobs.json)
             succeeded=$(jq '[.[].jobs[] | select(.name | startswith("mutation (staged preflight wave 2 shard ")) | select(.status == "completed" and .conclusion == "success")] | length' jobs.json)
             if [ "$failed" -ne 0 ]; then
-              echo "Wave 2 shard failure detected; cancelling run"
-              gh run cancel "$GITHUB_RUN_ID"
-              exit 2
-            fi
-            if ! python control/scripts/staged_preflight.py budget-gate --jobs jobs.json \
-              --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-              --next-wave complete --output monitor-budget.json; then
-              echo "Operational execution cutoff reached or accounting became indeterminate; cancelling run"
-              gh run cancel "$GITHUB_RUN_ID"
-              exit 2
+              printf '%s\n' 'wave-2-shard-failure' > monitor-final-status.txt
+              printf '%s\n' 'wave-2-shard-failure' > cancellation-requested.txt
+              printf '{"repository":"%s","run_id":"%s","reason":"%s","status":"pending"}\n' \
+                "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "wave-2-shard-failure" > cancellation-attempt.json
+              break
             fi
             if [ "$succeeded" -eq 32 ]; then
+              printf '%s\n' 'completed' > monitor-final-status.txt
               break
             fi
             sleep 60
           done
       - name: Retain monitor accounting
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-preflight-monitor-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             jobs.json
             monitor-budget.json
+            monitor-accounting.log
+            monitor-snapshots
+            monitor-final-status.txt
+            cancellation-requested.txt
+            cancellation-attempt.json
           retention-days: 90
-          if-no-files-found: error
+          if-no-files-found: warn
+      - name: Request cancellation after retaining diagnostics
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f cancellation-requested.txt ]; then
+            if output=$(gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" 2>&1); then
+              printf '%s\n' "$output" > cancellation-response.log
+              printf '%s\n' 'accepted' > cancellation-final-status.txt
+              exit 2
+            else
+              status=$?
+              printf '%s\n' "$output" > cancellation-response.log
+              printf 'api-failure-%s\n' "$status" > cancellation-final-status.txt
+              exit "$status"
+            fi
+          fi
+      - name: Retain cancellation outcome when runner remains available
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-preflight-cancellation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            cancellation-attempt.json
+            cancellation-response.log
+            cancellation-final-status.txt
+          retention-days: 90
+          if-no-files-found: warn
 
   staged-dispatch-continuation:
     if: always() && github.event.inputs.mode == 'staged-preflight'

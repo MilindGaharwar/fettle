@@ -480,13 +480,12 @@ def test_accounting_excludes_proven_skipped_job_but_records_reversed_timestamp(t
 
 
 @pytest.mark.parametrize("field", ["runner_id", "runner_name", "runner_group_id", "runner_group_name"])
-@pytest.mark.parametrize("status", ["completed", "queued"])
-def test_accounting_rejects_nonexecuted_status_with_any_runner_identity(tmp_path, field, status):
+def test_accounting_rejects_skipped_job_with_any_runner_identity(tmp_path, field):
     job = _job(
         1,
-        status=status,
-        conclusion="skipped" if status == "completed" else None,
-        end="2026-10-06T01:00:00Z" if status == "completed" else None,
+        status="completed",
+        conclusion="skipped",
+        end="2026-10-06T01:00:00Z",
         runner_id=None,
         steps=[],
     )
@@ -532,6 +531,66 @@ def test_accounting_charges_in_progress_job_to_observation_time(tmp_path):
 
     assert result["estimated_runner_minutes"] == 3
     assert result["included_jobs"][0]["basis"] == "elapsed through observation time"
+
+
+@pytest.mark.parametrize("status", ["queued", "requested", "pending", "waiting"])
+def test_accounting_charges_runner_acquisition_transition(tmp_path, status):
+    job = _job(1, status=status, conclusion=None, end=None, steps=[])
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 1, 3, tzinfo=UTC),
+        expected_run_id="7", expected_run_attempt="1",
+    )
+
+    assert result["estimated_runner_minutes"] == 3
+    assert result["included_jobs"][0]["basis"] == (
+        "runner-acquisition transition elapsed through observation time"
+    )
+
+
+def test_accounting_rejects_transition_with_unbounded_metadata(tmp_path):
+    missing_start = _job(1, status="queued", conclusion=None, start=None, end=None)
+
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [missing_start]}])
+    with pytest.raises(ValueError):
+        account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
+
+
+def test_accounting_charges_and_flags_partial_identity_during_acquisition(tmp_path):
+    partial_runner = _job(2, status="queued", conclusion=None, end=None)
+    partial_runner["runner_name"] = None
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [partial_runner]}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 1, 3, tzinfo=UTC),
+        expected_run_id="7", expected_run_attempt="1",
+    )
+
+    assert result["estimated_runner_minutes"] == 3
+    assert result["anomalies"][0]["reason"] == (
+        "active job runner identity is partial during acquisition"
+    )
+
+
+def test_accounting_rejects_partial_identity_after_completion(tmp_path):
+    completed = _job(2)
+    completed["runner_name"] = None
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [completed]}])
+
+    with pytest.raises(ValueError, match="partial"):
+        account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
+
+
+def test_accounting_does_not_exclude_started_job_with_missing_execution_metadata(tmp_path):
+    job = _job(
+        1, status="queued", conclusion=None, end=None, runner_id=None, steps=[],
+    )
+    job.update({"runner_name": None, "runner_group_id": None, "runner_group_name": None})
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="indeterminate"):
+        account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
 
 
 @pytest.mark.parametrize(

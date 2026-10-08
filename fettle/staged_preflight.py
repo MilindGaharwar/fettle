@@ -1046,7 +1046,14 @@ def account_runner_minutes(
             raise ValueError(f"job {job['id']} runner identity is incomplete")
         runner_identity = {field: job[field] for field in runner_fields}
         runner_id = runner_identity["runner_id"]
-        has_runner_identity = any(value is not None for value in runner_identity.values())
+        runner_pair = [runner_identity[field] is not None for field in ("runner_id", "runner_name")]
+        group_pair = [
+            runner_identity[field] is not None for field in ("runner_group_id", "runner_group_name")
+        ]
+        partial_runner_identity = len(set(runner_pair)) != 1 or len(set(group_pair)) != 1
+        if partial_runner_identity and status == "completed":
+            raise ValueError(f"job {job['id']} runner identity is partial")
+        has_runner_identity = any(runner_pair) or any(group_pair)
         steps = job.get("steps")
         if not isinstance(steps, list):
             raise ValueError(f"job {job['id']} steps are missing or malformed")
@@ -1073,7 +1080,8 @@ def account_runner_minutes(
             continue
         if (
             status in {"queued", "requested", "pending", "waiting"}
-            and conclusion is None and not has_runner_identity and not steps and completed is None
+            and conclusion is None and not has_runner_identity and not steps
+            and started is None and completed is None
         ):
             excluded.append({
                 "id": job["id"], "name": job.get("name"), "status": status,
@@ -1088,9 +1096,23 @@ def account_runner_minutes(
                 raise ValueError(f"completed job {job['id']} has no conclusion")
             end = _parse_time(completed, "completed_at")
             basis = "completed observed interval"
-        elif status == "in_progress" and conclusion is None and completed is None:
+        elif (
+            status in {"in_progress", "queued", "requested", "pending", "waiting"}
+            and conclusion is None and completed is None
+            and (status == "in_progress" or has_runner_identity or steps)
+        ):
             end = current
-            basis = "elapsed through observation time"
+            if partial_runner_identity:
+                anomalies.append({
+                    "id": job["id"],
+                    "reason": "active job runner identity is partial during acquisition",
+                    "runner_identity": runner_identity,
+                })
+            basis = (
+                "elapsed through observation time"
+                if status == "in_progress"
+                else "runner-acquisition transition elapsed through observation time"
+            )
         else:
             raise ValueError(f"job {job['id']} usage is indeterminate")
         if end < start:
