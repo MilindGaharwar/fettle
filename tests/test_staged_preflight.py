@@ -20,6 +20,7 @@ from scripts.staged_preflight import (
     SOURCE_RUN_ID,
     SOURCE_WORKFLOW_REF,
     WAVES,
+    WAVE_3_BATCHES,
     account_runner_minutes,
     combine_accounting,
     build_plan,
@@ -37,6 +38,7 @@ from scripts.staged_preflight import (
     validate_continuation_topology,
     validate_continuation_artifacts,
     validate_continuation_dispatches,
+    validate_continuation_batch,
     validate_source_handoff,
 )
 
@@ -69,8 +71,15 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
-        "matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223, "platform_limit": 256,
+        "matrix_jobs": 216,
+        "matrix_batches": WAVE_3_BATCHES,
+        "matrix_batch_sizes": [32, 32, 32, 32, 32, 32, 24],
+        "support_jobs": 13,
+        "expanded_jobs": 229,
+        "per_matrix_platform_limit": 256,
+        "project_expanded_job_limit": 256,
     }
+    assert [index for batch in WAVE_3_BATCHES for index in batch] == WAVES["wave-3"]
 
 
 def _fixture(monkeypatch, tmp_path):
@@ -113,6 +122,137 @@ def _write_wave(reports: Path, manifests: list[dict], wave="wave-1"):
             "generated": 1, "canonicalized": 1, "collisions": 0,
             "fingerprints": [fingerprint], "corpus": [{"fingerprint": fingerprint}],
         }))
+
+
+def _batch_fixture(monkeypatch, tmp_path, batch=1):
+    root, manifests_dir, reports, manifests, _, _ = _fixture(monkeypatch, tmp_path)
+    identity = {
+        "repository": "owner/repo", "workflow": "Staged preflight continuation",
+        "workflow_ref": "owner/repo/.github/workflows/staged-preflight-continuation.yml@refs/heads/test",
+        "run_id": "39", "run_attempt": "1",
+    }
+    candidate = "c" * 40
+    for manifest in manifests:
+        manifest["revision"] = candidate
+    plan = build_plan(root, manifests_dir, candidate, identity, candidate_sha=candidate)
+    plan.update({
+        "mode": "fresh-staged-preflight-continuation",
+        "topology": validate_continuation_topology(),
+    })
+    plan_path = tmp_path / "continuation-plan.json"
+    plan_path.write_text(json.dumps(plan))
+    completed = [index for members in WAVE_3_BATCHES[:batch] for index in members]
+    for index in completed:
+        path = reports / str(index)
+        path.mkdir()
+        fingerprint = f"{index + 1:064x}"
+        (path / "mutation-preflight.json").write_text(json.dumps({
+            "status": "completed", "passed": True, "engine_version": "2.5.1",
+            "shard_index": index, "shard_count": 256,
+            "manifest_digest": manifests[index]["digest"],
+            "line_ranges": manifests[index]["ranges"], "files": manifests[index]["files"],
+            "generated": 1, "canonicalized": 1, "collisions": 0,
+            "fingerprints": [fingerprint], "corpus": [{"fingerprint": fingerprint}],
+        }))
+    jobs = []
+    for index in completed:
+        jobs.append({
+            "id": 1000 + index, "run_id": 39, "run_attempt": 1,
+            "name": f"mutation (continuation shard {index})", "status": "completed",
+            "conclusion": "success", "steps": [{"name": "run", "conclusion": "success"}],
+        })
+    jobs_path = tmp_path / "jobs.json"
+    jobs_path.write_text(json.dumps({"total_count": len(jobs), "jobs": jobs}))
+    artifacts = [{
+        "id": 2000 + index,
+        "name": f"mutation-preflight-wave-3-39-1-{index}",
+        "size_in_bytes": 100, "digest": f"sha256:{index:064x}", "expired": False,
+        "workflow_run": {"id": 39, "head_sha": candidate},
+    } for index in completed]
+    artifacts_path = tmp_path / "artifacts.json"
+    artifacts_path.write_text(json.dumps({"total_count": len(artifacts), "artifacts": artifacts}))
+    return root, manifests_dir, reports, plan_path, jobs_path, artifacts_path, identity, candidate
+
+
+def test_batch_admission_validates_exact_evidence_and_emits_only_next_matrix(monkeypatch, tmp_path):
+    fixture = _batch_fixture(monkeypatch, tmp_path)
+
+    result = validate_continuation_batch(
+        fixture[0], fixture[3], fixture[1], fixture[2], fixture[4], fixture[5],
+        batch=1, orchestration_sha=fixture[7], identity=fixture[6],
+    )
+
+    assert result["validated_shards"] == WAVE_3_BATCHES[0]
+    assert result["cumulative_shards"] == WAVE_3_BATCHES[0]
+    assert result["next_matrix"] == {"shard": WAVE_3_BATCHES[1]}
+
+
+@pytest.mark.parametrize("batch", range(1, 7))
+def test_batch_admission_validates_each_cumulative_boundary(monkeypatch, tmp_path, batch):
+    fixture = _batch_fixture(monkeypatch, tmp_path, batch=batch)
+
+    result = validate_continuation_batch(
+        fixture[0], fixture[3], fixture[1], fixture[2], fixture[4], fixture[5],
+        batch=batch, orchestration_sha=fixture[7], identity=fixture[6],
+    )
+
+    expected = [index for members in WAVE_3_BATCHES[:batch] for index in members]
+    assert result["validated_shards"] == WAVE_3_BATCHES[batch - 1]
+    assert result["cumulative_shards"] == expected
+    assert result["next_matrix"] == {"shard": WAVE_3_BATCHES[batch]}
+
+
+@pytest.mark.parametrize(
+    "fault", ["failed", "cancelled", "missing-job", "duplicate-job", "missing-artifact",
+              "duplicate-artifact", "incompatible-artifact", "missing-report",
+              "duplicate-report", "malformed-report", "later-job", "identity"],
+)
+def test_batch_admission_rejects_non_pass_evidence(monkeypatch, tmp_path, fault):
+    fixture = list(_batch_fixture(monkeypatch, tmp_path))
+    jobs_path, artifacts_path, reports, identity = fixture[4], fixture[5], fixture[2], fixture[6]
+    jobs_payload = json.loads(jobs_path.read_text())
+    artifacts_payload = json.loads(artifacts_path.read_text())
+    if fault in {"failed", "cancelled"}:
+        jobs_payload["jobs"][0]["conclusion"] = fault
+    elif fault == "missing-job":
+        jobs_payload["jobs"].pop()
+    elif fault == "duplicate-job":
+        jobs_payload["jobs"].append(deepcopy(jobs_payload["jobs"][0]))
+        jobs_payload["jobs"][-1]["id"] += 9000
+    elif fault == "later-job":
+        later = deepcopy(jobs_payload["jobs"][0])
+        later["id"] += 9000
+        later["name"] = f"mutation (continuation shard {WAVE_3_BATCHES[1][0]})"
+        jobs_payload["jobs"].append(later)
+    elif fault == "missing-artifact":
+        artifacts_payload["artifacts"].pop()
+    elif fault == "duplicate-artifact":
+        artifacts_payload["artifacts"].append(deepcopy(artifacts_payload["artifacts"][0]))
+        artifacts_payload["artifacts"][-1]["id"] += 9000
+    elif fault == "incompatible-artifact":
+        artifacts_payload["artifacts"][0]["workflow_run"]["head_sha"] = "d" * 40
+    elif fault in {"missing-report", "malformed-report", "duplicate-report"}:
+        target = next(reports.rglob("mutation-preflight.json"))
+        if fault == "missing-report":
+            target.unlink()
+        elif fault == "malformed-report":
+            target.write_text("[]")
+        else:
+            duplicate = reports / "duplicate"
+            duplicate.mkdir()
+            (duplicate / target.name).write_bytes(target.read_bytes())
+    else:
+        identity = {**identity, "run_id": "40"}
+    jobs_payload["total_count"] = len(jobs_payload["jobs"])
+    artifacts_payload["total_count"] = len(artifacts_payload["artifacts"])
+    jobs_path.write_text(json.dumps(jobs_payload))
+    artifacts_path.write_text(json.dumps(artifacts_payload))
+
+    with pytest.raises(ValueError):
+        validate_continuation_batch(
+            fixture[0], fixture[3], fixture[1], fixture[2], fixture[4], fixture[5],
+            batch=1, orchestration_sha=fixture[7], identity=identity,
+        )
 
 
 def test_wave_validation_accepts_exact_complete_membership(monkeypatch, tmp_path):
@@ -1448,7 +1588,7 @@ def test_continuation_plan_revalidates_both_runs_and_schedules_only_wave_three(
     )
 
     assert result["execution_wave"]["shards"] == WAVES["wave-3"]
-    assert result["topology"]["expanded_jobs"] == 223
+    assert result["topology"]["expanded_jobs"] == 229
     assert result["origin_assignment"]["8"]["run_id"] == SOURCE_RUN_ID
     assert result["origin_assignment"]["0"]["run_id"] == RECOVERY_RUN_ID
     assert result["origin_assignment"]["35"]["run_id"] == "39"
@@ -1484,7 +1624,7 @@ def test_fresh_continuation_uses_validated_immutable_candidate_inputs(monkeypatc
     result = build_fresh_continuation_plan(
         root, source_plan_path, wave_1_reports, wave_2_reports,
         validations[0], validations[1], manifests_dir, _file_sha(source_plan_path),
-        "37", "a" * 40, SOURCE_WORKFLOW_REF, "b" * 40,
+        "37", "a" * 40, SOURCE_WORKFLOW_REF, FROZEN_CANDIDATE,
         continuation_identity, FROZEN_CANDIDATE,
     )
 

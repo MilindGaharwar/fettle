@@ -97,8 +97,13 @@ BUDGET = {
     "launch_ceiling": {"wave-2": 32, "wave-3": 152, "aggregate": 952, "complete": 1120},
 }
 MATRIX_JOB_LIMIT = 256
-CONTINUATION_SUPPORT_JOBS = 7
+PROJECT_CONTINUATION_JOB_LIMIT = 256
+CONTINUATION_SUPPORT_JOBS = 13
 SOURCE_WORKFLOW_PATH = ".github/workflows/mutation.yml"
+WAVE_3_BATCHES = [
+    WAVES["wave-3"][offset:offset + 32]
+    for offset in range(0, len(WAVES["wave-3"]), 32)
+]
 
 
 def _digest(value: object) -> str:
@@ -726,15 +731,166 @@ def build_aggregation_recovery_record(
 
 
 def validate_continuation_topology() -> dict:
-    matrix_jobs = len(WAVES["wave-3"])
+    matrix_jobs = sum(len(batch) for batch in WAVE_3_BATCHES)
     expanded_jobs = matrix_jobs + CONTINUATION_SUPPORT_JOBS
-    if matrix_jobs != 216 or expanded_jobs > MATRIX_JOB_LIMIT:
-        raise ValueError("continuation workflow exceeds the fixed matrix-job topology")
+    if (
+        [len(batch) for batch in WAVE_3_BATCHES] != [32, 32, 32, 32, 32, 32, 24]
+        or [index for batch in WAVE_3_BATCHES for index in batch] != WAVES["wave-3"]
+        or any(len(batch) > MATRIX_JOB_LIMIT for batch in WAVE_3_BATCHES)
+        or expanded_jobs > PROJECT_CONTINUATION_JOB_LIMIT
+    ):
+        raise ValueError("continuation workflow exceeds the reviewed project topology")
     return {
         "matrix_jobs": matrix_jobs,
+        "matrix_batches": WAVE_3_BATCHES,
+        "matrix_batch_sizes": [len(batch) for batch in WAVE_3_BATCHES],
         "support_jobs": CONTINUATION_SUPPORT_JOBS,
         "expanded_jobs": expanded_jobs,
-        "platform_limit": MATRIX_JOB_LIMIT,
+        "per_matrix_platform_limit": MATRIX_JOB_LIMIT,
+        "project_expanded_job_limit": PROJECT_CONTINUATION_JOB_LIMIT,
+    }
+
+
+_CONTINUATION_SHARD_JOB = re.compile(r"^mutation \(continuation shard (\d+)\)$")
+
+
+def validate_continuation_batch(
+    root: Path,
+    plan_path: Path,
+    manifests_dir: Path,
+    reports_dir: Path,
+    jobs_path: Path,
+    artifacts_path: Path,
+    *,
+    batch: int,
+    orchestration_sha: str,
+    identity: dict,
+) -> dict:
+    """Admit the next fixed matrix only after exact cumulative batch evidence passes."""
+    if batch not in range(1, len(WAVE_3_BATCHES)):
+        raise ValueError("only batches with a successor can emit an admission matrix")
+    plan = _load_json(plan_path)
+    topology = validate_continuation_topology()
+    candidate_sha = plan.get("candidate_sha")
+    if (
+        not isinstance(candidate_sha, str)
+        or candidate_sha != orchestration_sha
+        or plan.get("orchestration_sha") != orchestration_sha
+        or plan.get("workflow") != identity
+        or plan.get("topology") != topology
+    ):
+        raise ValueError("batch identity or topology differs from the unified successor plan")
+
+    completed_batches = WAVE_3_BATCHES[:batch]
+    completed_shards = [index for members in completed_batches for index in members]
+    preceding_shards = WAVE_3_BATCHES[batch - 1]
+    next_shards = WAVE_3_BATCHES[batch]
+    manifests = _load_manifests(root, manifests_dir, candidate_sha)
+    if plan.get("manifest_digests") != [item["digest"] for item in manifests]:
+        raise ValueError("batch manifest digests differ from the frozen topology")
+
+    jobs = _load_api_pages(jobs_path, "jobs")
+    shard_jobs: dict[int, dict] = {}
+    for job in jobs:
+        if (
+            str(job.get("run_id", "")) != identity["run_id"]
+            or str(job.get("run_attempt", "")) != identity["run_attempt"]
+        ):
+            raise ValueError("batch job origin differs from the continuation run")
+        match = _CONTINUATION_SHARD_JOB.fullmatch(str(job.get("name", "")))
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if index in shard_jobs:
+            raise ValueError("batch jobs contain a duplicate shard")
+        shard_jobs[index] = job
+    if any(index not in shard_jobs for index in completed_shards):
+        raise ValueError("cumulative batch job membership is incomplete")
+    if any(index not in completed_shards for index in shard_jobs):
+        raise ValueError("a later batch was instantiated before admission")
+    for index in completed_shards:
+        job = shard_jobs[index]
+        if (
+            job.get("status") != "completed"
+            or job.get("conclusion") != "success"
+            or not isinstance(job.get("steps"), list)
+            or not job["steps"]
+            or any(step.get("conclusion") not in {"success", "skipped"} for step in job["steps"])
+        ):
+            raise ValueError(f"admitted batch shard {index} is not terminal-successful")
+
+    artifacts = _load_api_pages(artifacts_path, "artifacts")
+    artifact_prefix = f"mutation-preflight-wave-3-{identity['run_id']}-{identity['run_attempt']}-"
+    artifact_indexes: list[int] = []
+    for artifact in artifacts:
+        name = str(artifact.get("name", ""))
+        if not name.startswith(artifact_prefix):
+            continue
+        suffix = name.removeprefix(artifact_prefix)
+        if not suffix.isdigit():
+            raise ValueError("batch artifact has a malformed shard identity")
+        index = int(suffix)
+        origin = artifact.get("workflow_run")
+        if (
+            not isinstance(artifact.get("id"), int)
+            or isinstance(artifact.get("id"), bool)
+            or not isinstance(artifact.get("size_in_bytes"), int)
+            or artifact["size_in_bytes"] <= 0
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", "")))
+            or artifact.get("expired") is not False
+            or not isinstance(origin, dict)
+            or str(origin.get("id", "")) != identity["run_id"]
+            or origin.get("head_sha") != orchestration_sha
+        ):
+            raise ValueError("batch artifact evidence is malformed or incompatible")
+        artifact_indexes.append(index)
+    if (
+        len(artifact_indexes) != len(set(artifact_indexes))
+        or sorted(artifact_indexes) != sorted(completed_shards)
+    ):
+        raise ValueError("cumulative batch artifact membership is incomplete or substituted")
+
+    report_paths = sorted(reports_dir.rglob("mutation-preflight.json"))
+    reports = [_load_json(path) for path in report_paths]
+    by_index: dict[int, dict] = {}
+    for report in reports:
+        index = report.get("shard_index")
+        if not isinstance(index, int) or isinstance(index, bool) or index in by_index:
+            raise ValueError("cumulative batch reports contain a malformed or duplicate shard")
+        if index not in completed_shards:
+            raise ValueError("cumulative batch reports contain an unadmitted shard")
+        manifest = manifests[index]
+        fingerprints = report.get("fingerprints")
+        corpus = report.get("corpus")
+        if (
+            report.get("status") != "completed"
+            or report.get("passed") is not True
+            or report.get("engine_version") != "2.5.1"
+            or report.get("shard_count") != SHARD_COUNT
+            or report.get("manifest_digest") != manifest["digest"]
+            or report.get("line_ranges") != manifest["ranges"]
+            or report.get("files") != manifest["files"]
+            or report.get("generated") != report.get("canonicalized")
+            or report.get("collisions") != 0
+            or not isinstance(fingerprints, list)
+            or not isinstance(corpus, list)
+            or len(fingerprints) != report.get("generated")
+            or len(corpus) != len(fingerprints)
+            or len(fingerprints) != len(set(fingerprints))
+            or any(not isinstance(item, dict) for item in corpus)
+            or any(not isinstance(item, str) for item in fingerprints)
+            or sorted(item.get("fingerprint") for item in corpus) != sorted(fingerprints)
+        ):
+            raise ValueError(f"batch report {index!r} is failed, malformed, or incompatible")
+        by_index[index] = report
+    if sorted(by_index) != sorted(completed_shards):
+        raise ValueError("cumulative batch reports are incomplete")
+    return {
+        "schema_version": "1", "status": "completed", "passed": True,
+        "candidate_sha": candidate_sha, "orchestration_sha": orchestration_sha,
+        "validated_batch": batch, "validated_shards": preceding_shards,
+        "cumulative_shards": completed_shards, "next_matrix": {"shard": next_shards},
+        "report_digests": {str(index): _digest(by_index[index]) for index in sorted(by_index)},
     }
 
 
@@ -754,6 +910,8 @@ def build_fresh_continuation_plan(
     identity: dict,
     candidate_sha: str,
 ) -> dict:
+    if candidate_sha != orchestration_sha:
+        raise ValueError("fresh continuation requires one unified successor identity")
     if not re.fullmatch(r"[0-9a-f]{64}", source_plan_sha256):
         raise ValueError("source plan digest must be a full lowercase SHA-256")
     if _file_digest(source_plan_path) != source_plan_sha256:
@@ -1573,6 +1731,7 @@ def main() -> int:
     calibration_budget = sub.add_parser("calibration-budget")
     source_handoff = sub.add_parser("validate-source-handoff")
     dispatches = sub.add_parser("validate-continuation-dispatches")
+    batch_admission = sub.add_parser("validate-continuation-batch")
     for command in (plan, recovery, continuation, fresh_continuation, wave):
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--manifests", type=Path, required=True)
@@ -1679,6 +1838,20 @@ def main() -> int:
     dispatches.add_argument("--source-run-id", required=True)
     dispatches.add_argument("--current-run-id")
     dispatches.add_argument("--output", type=Path, required=True)
+    batch_admission.add_argument("--root", type=Path, required=True)
+    batch_admission.add_argument("--plan", type=Path, required=True)
+    batch_admission.add_argument("--manifests", type=Path, required=True)
+    batch_admission.add_argument("--reports", type=Path, required=True)
+    batch_admission.add_argument("--jobs", type=Path, required=True)
+    batch_admission.add_argument("--artifacts", type=Path, required=True)
+    batch_admission.add_argument("--batch", type=int, required=True)
+    batch_admission.add_argument("--orchestration-sha", required=True)
+    batch_admission.add_argument("--repository", required=True)
+    batch_admission.add_argument("--workflow", required=True)
+    batch_admission.add_argument("--workflow-ref", required=True)
+    batch_admission.add_argument("--run-id", required=True)
+    batch_admission.add_argument("--run-attempt", required=True)
+    batch_admission.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "validate-source-handoff":
@@ -1693,6 +1866,19 @@ def main() -> int:
         if args.command == "validate-continuation-dispatches":
             result = validate_continuation_dispatches(
                 args.runs, args.source_run_id, args.current_run_id,
+            )
+            args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
+        if args.command == "validate-continuation-batch":
+            identity = {
+                "repository": args.repository, "workflow": args.workflow,
+                "workflow_ref": args.workflow_ref, "run_id": args.run_id,
+                "run_attempt": args.run_attempt,
+            }
+            result = validate_continuation_batch(
+                args.root, args.plan, args.manifests, args.reports, args.jobs,
+                args.artifacts, batch=args.batch,
+                orchestration_sha=args.orchestration_sha, identity=identity,
             )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0

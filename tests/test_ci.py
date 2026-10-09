@@ -1,6 +1,7 @@
 """`fettle ci` — composed gate + generated workflow (CI enforcement WP-2)."""
 
 import os
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.join(PLUGIN_DIR))
 from fettle import ci  # noqa: E402
 from fettle.quality_scan import ToolScanResult  # noqa: E402
 from fettle.result import ResultStatus  # noqa: E402
+from scripts.staged_preflight import combine_accounting  # noqa: E402
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
@@ -449,7 +451,7 @@ def test_staged_preflight_first_run_is_frozen_bounded_and_fail_closed():
     assert "merge-multiple: true" not in staged
 
 
-def test_staged_handoff_commands_bind_repo_ref_and_separate_candidate(tmp_path):
+def test_staged_handoff_commands_bind_repo_ref_and_unified_successor(tmp_path):
     mutation = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
     )
@@ -464,30 +466,28 @@ def test_staged_handoff_commands_bind_repo_ref_and_separate_candidate(tmp_path):
     receiver_steps = continuation["jobs"]["prepare"]["steps"]
     bind = next(
         step["run"] for step in receiver_steps
-        if step.get("name") == "Bind separate candidate and orchestration identities"
+        if step.get("name") == "Bind unified candidate and orchestration identity"
     )
 
     workspace = tmp_path / "workspace"
     control = workspace / "control"
-    candidate = workspace / "candidate"
     control.mkdir(parents=True)
-    candidate.mkdir()
-    for repo, content in ((control, "control"), (candidate, "candidate")):
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-        (repo / "identity.txt").write_text(content)
-        subprocess.run(["git", "add", "identity.txt"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.name=test", "-c", "user.email=test@example.com",
-             "commit", "-qm", content],
-            cwd=repo, check=True,
-        )
+    subprocess.run(["git", "init", "-q"], cwd=control, check=True)
+    (control / "identity.txt").write_text("successor")
+    subprocess.run(["git", "add", "identity.txt"], cwd=control, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "successor"], cwd=control, check=True,
+    )
+    candidate = workspace / "candidate"
+    subprocess.run(["git", "clone", "-q", str(control), str(candidate)], check=True)
     control_sha = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=control, text=True,
     ).strip()
     candidate_sha = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=candidate, text=True,
     ).strip()
-    assert control_sha != candidate_sha
+    assert control_sha == candidate_sha
 
     (workspace / "source-plan").mkdir()
     (workspace / "source-plan/staged-preflight-plan.json").write_text("{}\n")
@@ -539,6 +539,13 @@ def test_staged_handoff_commands_bind_repo_ref_and_separate_candidate(tmp_path):
         shell=True, check=True,
     )
 
+    rejected = subprocess.run(
+        expanded_bind, cwd=workspace,
+        env={**env, "GITHUB_SHA": "f" * 40, "CANDIDATE_SHA": candidate_sha},
+        shell=True,
+    )
+    assert rejected.returncode != 0
+
 
 def test_staged_preflight_keeps_authoritative_check_non_qualifying():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -555,12 +562,74 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     workflow = workflow_path.read_text()
     jobs = yaml.safe_load(workflow)["jobs"]
 
-    assert set(jobs) == {"prepare", "launch-gate", "remaining-shards", "monitor", "validate", "aggregate", "readback", "terminal-accounting"}
-    assert sum("strategy" in job for job in jobs.values()) == 1
-    assert len(jobs) - 1 == 7
-    assert workflow.count("strategy:") == 1
-    assert workflow.count("matrix:") == 2  # strategy plus the prepare output key
-    assert "max-parallel: 8" in workflow
+    batches = [f"wave-3-batch-{index}" for index in range(1, 8)]
+    admissions = [f"wave-3-admission-{index}" for index in range(1, 7)]
+    assert set(jobs) == {
+        "prepare", "launch-gate", *batches, *admissions, "monitor", "validate",
+        "aggregate", "readback", "terminal-accounting",
+    }
+    assert sum("strategy" in job for job in jobs.values()) == 7
+    assert len(jobs) == 20
+    assert workflow.count("strategy:") == 7
+    assert workflow.count("max-parallel: 8") == 7
+    assert jobs["wave-3-batch-1"]["needs"] == ["prepare", "launch-gate"]
+    for index in range(1, 7):
+        assert jobs[f"wave-3-admission-{index}"]["needs"] == [
+            "prepare", "launch-gate" if index == 1 else f"wave-3-admission-{index - 1}",
+        ]
+        assert jobs[f"wave-3-batch-{index + 1}"]["needs"] == [
+            "prepare", f"wave-3-admission-{index}",
+        ]
+        matrix = jobs[f"wave-3-batch-{index + 1}"]["strategy"]["matrix"]
+        assert matrix == f"${{{{ fromJSON(needs.wave-3-admission-{index}.outputs.matrix) }}}}"
+    assert jobs["validate"]["needs"] == ["prepare", "wave-3-batch-7", "monitor"]
+    assert jobs["monitor"]["needs"] == "wave-3-admission-6"
+    monitor_steps = jobs["monitor"]["steps"]
+    prior = next(
+        step for step in monitor_steps
+        if step.get("name") == "Download preceding admission accounting"
+    )
+    assert prior["with"]["name"] == (
+        "mutation-continuation-admission-6-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+    monitor = next(
+        step["run"] for step in monitor_steps
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    assert "historical_args=(--historical-accounting prior-admission/admission-budget.json)" in monitor
+    for index in range(1, 7):
+        steps = jobs[f"wave-3-admission-{index}"]["steps"]
+        names = [step.get("name") for step in steps]
+        assert names.index("Observe batch and enforce cumulative global budget") < names.index(
+            "Wait for admitted artifact inventory"
+        ) < names.index("Download admitted reports") < names.index(
+            "Validate terminal evidence and emit next matrix"
+        )
+        observe = next(
+            step["run"] for step in steps
+            if step.get("name") == "Observe batch and enforce cumulative global budget"
+        )
+        assert "admission-budget-non-pass" in observe
+        assert "admission-shard-failure" in observe
+        assert "admission-observer-error" in observe
+        assert "admission-observer-deadline" in observe
+        assert "observer_deadline=" in observe
+        assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' not in observe
+        assert names[0] == "Arm fail-closed admission containment"
+        arm = steps[0]["run"]
+        assert "armed-through-diagnostics-retention" in arm
+        assert "admission-containment-armed.txt" in arm
+        assert "admission-observer-started-at.txt" in arm
+        disarm_index = names.index("Disarm admission containment after retained success")
+        retain_index = names.index("Retain admission evidence")
+        assert disarm_index > names.index("Validate terminal evidence and emit next matrix")
+        assert disarm_index > retain_index
+        cancel_index = names.index("Request cancellation after retaining admission diagnostics")
+        assert cancel_index > retain_index
+        cancel = steps[cancel_index]
+        assert cancel["if"] == "always()"
+        assert "admission-containment-armed.txt" in cancel["run"]
+        assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' in cancel["run"]
     assert "workflow_dispatch:" in workflow
     assert "candidate_sha:" in workflow
     assert "source_plan_sha256:" in workflow
@@ -580,6 +649,23 @@ def test_staged_continuation_has_only_remaining_matrix_and_bounded_topology():
     assert "staged-wave-2" not in workflow
 
 
+def test_staged_admission_production_shell_fragments_parse():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    )
+
+    for index in range(1, 7):
+        steps = workflow["jobs"][f"wave-3-admission-{index}"]["steps"]
+        for step in steps:
+            if "run" not in step:
+                continue
+            result = subprocess.run(
+                ["bash", "-n"], input=step["run"], text=True,
+                capture_output=True,
+            )
+            assert result.returncode == 0, f"batch {index} {step.get('name')}: {result.stderr}"
+
+
 def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     first = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
     continuation = (
@@ -593,7 +679,9 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
     assert 'historical_args+=(--historical-accounting "$prior_budget")' in first
     assert "--prior-jobs source-jobs.json" in continuation
     assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
-    assert continuation.count("--next-wave complete") == 3
+    assert continuation.count("--next-wave complete") == 9
+    assert continuation.count('cp "$budget" admission-budget.json') == 6
+    assert continuation.count("--job-timeout-minutes 35") == 7
     assert '--observed-at "$observed_at" --job-timeout-minutes 35' in continuation
     assert 'historical_args+=(--historical-accounting "$prior_budget")' in continuation
     assert first.count("--historical-accounting monitor-accounting/monitor-budget.json") == 1
@@ -998,6 +1086,20 @@ def test_continuation_monitor_reuses_validated_source_snapshot(tmp_path):
     ]
     current = workspace / "current.json"
     current.write_text(json.dumps([{"total_count": 216, "jobs": current_jobs}]))
+    (workspace / "prior-admission").mkdir()
+    prior_accounting = {
+        **combine_accounting(
+            source, current,
+            expected_prior_run_id="36", expected_prior_run_attempt="1",
+            expected_current_run_id="37", expected_current_run_attempt="1",
+        ),
+        "launch_ceiling": 1120,
+        "next_wave": "complete",
+        "passed": True,
+    }
+    (workspace / "prior-admission/admission-budget.json").write_text(
+        json.dumps(prior_accounting)
+    )
     bin_dir = workspace / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
@@ -1197,6 +1299,8 @@ def test_staged_preflight_publishes_consumer_aliases_with_provenance():
     assert '"source_run_id": "${{ github.event.inputs.source_run_id }}"' in workflow
     assert "Download published consumer aliases" in workflow
     assert 'published_aggregate.read_bytes() == Path("retained/mutation-preflight.json").read_bytes()' in workflow
+    assert 'preflight_completion.read_bytes() == Path("retained/staged-preflight-continuation.json").read_bytes()' in workflow
+    assert 'publication["manifest_count"] == len(manifests) == 256' in workflow
 
     consumer = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
     assert "assert preflight_attestation.is_file() and manifest_attestation.is_file()" in consumer
@@ -1282,6 +1386,22 @@ def test_staged_publication_readback_and_calibration_consumer_delivery_path(tmp_
     )
     subprocess.run([sys.executable, "-c", _python_heredoc(readback)], cwd=workspace, check=True)
     assert json.loads((workspace / "readback-checksums.json").read_text())
+
+    altered_completion = b"{}\n"
+    for alias in (manifest_alias, preflight_alias):
+        (alias / "staged-preflight-continuation.json").write_bytes(altered_completion)
+        attestation = alias / "preflight-publication.json"
+        payload = json.loads(attestation.read_text())
+        payload["completion_sha256"] = hashlib.sha256(altered_completion).hexdigest()
+        attestation.write_text(json.dumps(payload, indent=2) + "\n")
+    rejected = subprocess.run(
+        [sys.executable, "-c", _python_heredoc(readback)], cwd=workspace,
+        capture_output=True, text=True,
+    )
+    assert rejected.returncode != 0
+    for alias in (manifest_alias, preflight_alias):
+        shutil.copy2(workspace / "staged-preflight-continuation.json", alias)
+        shutil.copy2(workspace / "preflight-publication.json", alias)
 
     shutil.copytree(manifest_alias, workspace / "mutation-manifests")
     shutil.copytree(preflight_alias, workspace / "retained-preflight")

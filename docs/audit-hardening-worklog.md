@@ -1,5 +1,120 @@
 # Audit Hardening Worklog
 
+## 2026-10-09: Bounded Wave-3 Admission Implemented Locally
+
+### Corrected admission sensitivity and final review repairs
+
+The earlier all-32 final-admission example was wrong: after 192 completed shards the
+actual final batch has 24 members, not 32. At the stated illustrative assumptions its
+value is `62.37 + 711.11 + (24 × 6.35) + 168 = 1,093.88` runner-minutes. This single
+example does not establish schedule-wide safety. Using the same assumptions, and only
+for sensitivity (the `711.11` confirmed execution is distributed across its 192 shards
+to expose each boundary), the actual boundaries are:
+
+| Batch admitted | Prior completed shards | Confirmed source + completed exposure | Newly unresolved acquisition exposure at 6.35 minutes | Support allowance | Sensitivity total |
+|---:|---:|---:|---:|---:|---:|
+| 1 (32) | 0 | 62.37 | 203.20 | 168 | 433.57 |
+| 2 (32) | 32 | 180.89 | 203.20 | 168 | 552.09 |
+| 3 (32) | 64 | 299.41 | 203.20 | 168 | 670.61 |
+| 4 (32) | 96 | 417.93 | 203.20 | 168 | 789.13 |
+| 5 (32) | 128 | 536.44 | 203.20 | 168 | 907.64 |
+| 6 (32) | 160 | 654.96 | 203.20 | 168 | 1,026.16 |
+| 7 (24) | 192 | 773.48 | 152.40 | 168 | 1,093.88 |
+
+Within each 32-member batch, unresolved exposure ranges from `0` to `203.20` at that
+captured age; for the 24-member final batch it ranges from `0` to `152.40`. Production
+accounting does not assume the proportional confirmed values in this table: it reads
+the complete source/current job inventories, charges confirmed intervals, and charges
+ambiguous acquisition from dispatch through the explicit observation. Observer and
+other support occupancy are also present in the current-run inventory; `168` above is
+the retained schedule allowance, not a measured replacement for those jobs.
+
+Each 30-second admission poll can add roughly four shard runner-minutes at eight active
+children, plus observer/support occupancy. The staged budget gate applies observed
+usage directly to the unchanged `complete=1120` gate; unlike the separate calibration
+budget evaluator, it does not add a per-active-job cancellation-lag charge. The 100
+minutes between that productive gate and the `1,220` allowance remains the unchanged
+cancellation reserve.
+Historical floors propagate observer-to-observer and from admission 6 into the final
+monitor, so later timestamp reconciliation cannot reduce a higher prior observation.
+Runner acquisition order is not controlled by the workflow: an observer may acquire
+after its sibling matrix, and cancellation latency can exceed the estimate. Therefore
+neither the table nor bounded admission promises a provider billing cap. Delayed
+observation can still stop the chain correctly without proving the entire schedule fits
+the `1,220` allowance.
+
+Independent review of baseline patch
+`68a421f09a965408cb37613d0bbd93279803522ba439f55bea78faf0aafedb26`
+found two concrete local defects. Admission setup failures could occur before a
+cancellation marker existed, and durable readback did not byte-compare the published
+completion record with its retained source or independently recompute published
+manifest topology. The workflow now arms fail-closed containment as its first admission
+step, uses a 34-minute internal observer deadline before the 40-minute job timeout,
+retains diagnostics, disarms only after validation, and then cancels on any remaining
+containment or failure marker. The armed-state file is distinct from cancellation
+reasons, so successful retained diagnostics are not contradictory. Readback now
+requires completion byte equality and recomputes exact 256-manifest
+count and topology digest. Focused regressions cover these contracts. Independent
+refresh and integration verdicts are recorded after final validation below.
+
+Authorized uncommitted work from base `5addd785b08b35e684bd38d1859f898ef69590bf`
+replaced the eager 216-child wave-3 matrix with seven fixed matrices sized
+`32/32/32/32/32/32/24`, each retaining maximum parallelism 8. Six admission jobs
+start with their corresponding batch, preserve cumulative transient accounting and
+the preceding historical floor against the unchanged `complete=1120` gate, then
+require exact cumulative terminal-success jobs, compatible reports, and complete
+artifact provenance before emitting the next matrix. Failure, cancellation, missing,
+duplicate, malformed, incompatible, or contradictory evidence emits no matrix.
+
+The continuation plan now records the seven matrices, the per-matrix GitHub limit,
+and a separate project-owned `229` expanded-job invariant (216 shard jobs plus 13
+support jobs). Candidate, checked-out executable, orchestration, and delivery SHA are
+required to be one unified successor. Existing source/recovery admission, the 1,220
+allowance, initial gates, accounting semantics, historical floors, cancellation
+reserve, report names, final 256-report aggregation, publication aliases, retention,
+and readback remain unchanged. Historical `223`-job records and all prior non-pass
+outcomes remain historical facts.
+
+Final local validation: actionlint, Ruff, diff hygiene, all normal pre-commit hooks,
+the Fettle changed-file scan, and the full suite passed (`4,541 passed, 20 skipped`).
+The full-suite result remains compatible because subsequent repairs touched only this
+workflow, its documentation, and focused workflow tests. Focused production-script and
+staged-preflight coverage was rerun on the final behavior (`200 passed`),
+including all six cumulative admission boundaries, shell parsing, unified identity,
+historical-floor carry into the final monitor, and failure/cancellation ordering.
+
+Three independent automated review attempts inspected the actual diff and production
+paths but exhausted their bounded step budgets before complete approval. Their one
+actionable coverage gap (multi-batch cumulative validation) was closed. A reported
+artifact-threshold blocker was stale: current cumulative thresholds are exactly
+`32/64/96/128/160/192`, and batch 1 has no prior-admission path. Disposition review
+found and fixed two real blockers the reviewers had not established: cancellation now
+occurs only after admission diagnostics are uploaded, and the final-batch monitor now
+imports admission 6's historical accounting floor. This paragraph records preliminary
+history; the completed final reviews below supersede its former lack of approval.
+
+Three subsequent narrow read-only verifiers also exhausted their step budgets. Their
+reported blockers were disproved against the current files: batch 7 uses exactly
+`fromJSON(needs.wave-3-admission-6.outputs.matrix)`; the final monitor starts from the
+same admission; cumulative validation iterates every previously admitted shard; and
+historical-floor plus `complete=1120` enforcement intentionally lives in each
+production `budget-gate` invocation rather than the evidence-only validator. These
+incomplete verdicts are retained as preliminary review output, not approval.
+
+Final independent review was partitioned across admission containment, accounting and
+budget, and evidence/production execution. Each reviewer verified the actual local diff,
+inspected production paths and relevant tests, and returned PASS after independently
+closing its findings. A separate bounded cross-scope integration review also returned
+PASS. Resolved findings remain recorded above: setup/timeout containment, completion
+readback binding, manifest-topology readback, truthful armed-versus-cancellation state,
+and a negative retained/published mismatch regression. Final focused evidence is `200
+passed`; actionlint, Ruff, diff hygiene, all pre-commit hooks, Fettle changed-file scan,
+and completion checkpoint validation passed. Strict completion remains honestly
+incomplete because AH07 is blocked; no milestone-complete claim is made.
+
+No commit, push, dispatch, mutation execution, report reuse, calibration, budget
+increase, or completion claim occurred.
+
 ## 2026-10-07: Bounded Final-Candidate Repair Implemented
 
 Owner authorization superseded the implementation prohibition in the proposal. The
