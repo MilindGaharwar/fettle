@@ -21,6 +21,7 @@ from scripts.staged_preflight import (
     SOURCE_WORKFLOW_REF,
     WAVES,
     WAVE_3_BATCHES,
+    calibration_stage_3_batches,
     account_runner_minutes,
     combine_accounting,
     build_plan,
@@ -968,7 +969,9 @@ def test_calibration_budget_charges_active_jobs_for_cancellation_lag():
     accounting = {
         "estimated_runner_minutes": 10791,
         "included_jobs": [
-            {"status": "in_progress"}, {"status": "in_progress"}, {"status": "completed"},
+            {"status": "in_progress", "minutes": 1, "basis": "elapsed through observation time", "execution_evidence": "confirmed"},
+            {"status": "in_progress", "minutes": 1, "basis": "elapsed through observation time", "execution_evidence": "confirmed"},
+            {"status": "completed"},
         ],
     }
 
@@ -977,6 +980,53 @@ def test_calibration_budget_charges_active_jobs_for_cancellation_lag():
     assert result["cancellation_lag_charge"] == 10
     assert result["charged_runner_minutes"] == 10801
     assert result["passed"] is False
+
+
+def test_calibration_budget_accepts_conservatively_bounded_queued_acquisition():
+    accounting = {
+        "estimated_runner_minutes": 100,
+        "included_jobs": [{
+            "status": "queued", "minutes": 100,
+            "basis": "queued acquisition exposure bounded from dispatch through observation",
+            "execution_evidence": "absent",
+        }],
+    }
+
+    result = evaluate_calibration_budget(accounting, ceiling=1500, cancellation_reserve=1200)
+
+    assert result["active_jobs"] == 1
+    assert result["cancellation_lag_charge"] == 5
+    assert result["charged_runner_minutes"] == 105
+    assert result["passed"] is True
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        {"status": "queued", "minutes": 1, "basis": "unknown", "execution_evidence": "absent"},
+        {"status": "queued", "minutes": 1, "basis": "queued acquisition exposure bounded from dispatch through observation", "execution_evidence": "confirmed"},
+        {"status": "queued", "minutes": -1, "basis": "queued acquisition exposure bounded from dispatch through observation", "execution_evidence": "absent"},
+    ],
+)
+def test_calibration_budget_rejects_malformed_acquisition(job):
+    with pytest.raises(ValueError, match="acquisition|active"):
+        evaluate_calibration_budget(
+            {"estimated_runner_minutes": 1, "included_jobs": [job]},
+            ceiling=1500, cancellation_reserve=1200,
+        )
+
+
+def test_calibration_stage_3_batches_are_exact_and_fixed():
+    batches = calibration_stage_3_batches(WAVES["wave-3"])
+
+    assert [len(batch) for batch in batches] == [32, 32, 32, 32, 32, 32, 24]
+    assert len(WAVES["wave-3"]) == 216
+    assert [shard for batch in batches for shard in batch] == WAVES["wave-3"]
+    assert len(set(shard for batch in batches for shard in batch)) == 216
+    assert set(WAVES["wave-1"]) | set(WAVES["wave-2"]) | set(WAVES["wave-3"]) == set(range(256))
+
+    with pytest.raises(ValueError, match="exact frozen shard membership"):
+        calibration_stage_3_batches(WAVES["wave-3"][:-1])
 
 
 def test_sparse_continuation_requires_job_provenance_for_missing_checkpoints(tmp_path):
@@ -991,7 +1041,7 @@ def test_sparse_continuation_requires_job_provenance_for_missing_checkpoints(tmp
         _job(3, run_id=37, conclusion="skipped", runner_id=None, steps=[]),
     ]
     for index, job in enumerate(jobs):
-        job["name"] = f"mutation (full shard {index}, advisory)"
+        job["name"] = f"execute / mutation (full shard {index}, advisory)"
     jobs_path = _jobs_file(tmp_path, [{"total_count": 3, "jobs": jobs}])
     checkpoints = tmp_path / "checkpoints"
     checkpoint_dir = checkpoints / "mutation-checkpoint-calibration-a-0"

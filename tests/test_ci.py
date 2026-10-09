@@ -369,6 +369,8 @@ def test_finalization_rejects_non_allowlisted_or_mode_changes():
 
     assert '"docs/completion/audit-hardening.json"' in finalization
     assert '"docs/final-candidate-readiness.md"' in finalization
+    assert '"docs/completion/evidence/external/audit-hardening/run-05-locator.json"' in finalization
+    assert '"docs/completion/evidence/external/audit-hardening"' not in finalization
     assert '["git", "diff", "--raw", "--no-abbrev", executable, head]' in finalization
     assert 'fields[0] != ":100644" or fields[1] != "100644"' in finalization
     assert "set(changed) - allowed" in finalization
@@ -1209,7 +1211,9 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
         " && github.event.inputs.mode != 'preflight'"
             " && github.event.inputs.mode != 'diagnostic-canary'"
             " && github.event.inputs.mode != 'staged-preflight'"
-        " && github.event.inputs.mode != 'finalize'\n    needs: [prepare, calibration-launch-gate]"
+        " && github.event.inputs.mode != 'finalize'"
+        " && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')"
+        "\n    needs: [prepare, calibration-launch-gate]"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")
     assert "MODE='${{ github.event.inputs.mode || 'preflight' }}'" in workflow
@@ -1276,6 +1280,9 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert "EXPECTED_SHARDS: ${{ needs.prepare.outputs.execution_matrix }}" in workflow
     assert '[[ "$terminal" -eq "$expected" ]] && break' in workflow
     assert "Retain monitor accounting before cancellation" in workflow
+    assert "steps.monitor.outcome" in workflow
+    assert "steps.retain-monitor.outcome" in workflow
+    assert "job_timeout_minutes=35" in workflow
     assert '"calibration_id":os.environ["CALIBRATION_ID"]' in workflow
     assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" in workflow
     assert 'print(report["charged_runner_minutes"])' in workflow
@@ -1287,6 +1294,49 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     accounting = workflow.split("\n  calibration-accounting:", 1)[1].split("\n  aggregate:", 1)[0]
     assert "if: always()" in accounting
     assert "billing_authority" in accounting
+    assert "from datetime import datetime, timezone" in accounting
+    assert "job_timeout_minutes=35" in accounting
+    assert "Download stage 3 admission accounting floors" in accounting
+    assert "retain_historical_accounting_floor(current, admission_floors)" in accounting
+
+
+def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+
+    batch_names = [f"calibration-stage-3-batch-{number}" for number in range(1, 8)]
+    admission_names = [f"calibration-stage-3-admit-{number}" for number in range(2, 8)]
+    assert all(name in jobs for name in batch_names + admission_names)
+    assert jobs[batch_names[0]]["needs"] == ["prepare", "calibration-launch-gate"]
+    for number in range(2, 8):
+        batch = jobs[f"calibration-stage-3-batch-{number}"]
+        admission = jobs[f"calibration-stage-3-admit-{number}"]
+        assert admission["if"].startswith("always()")
+        assert admission["needs"] == ["prepare", f"calibration-stage-3-batch-{number - 1}"]
+        assert batch["needs"] == ["prepare", f"calibration-stage-3-admit-{number}"]
+        assert batch["strategy"]["max-parallel"] == 32
+    assert "calibration_stage == '3'" in jobs["full-shard"]["if"]
+    assert jobs["calibration-stage-3-batch-7"] in [jobs[name] for name in batch_names]
+
+
+def test_calibration_reusable_workflows_preserve_worker_and_containment_contracts():
+    shard = (Path(PLUGIN_DIR) / ".github/workflows/mutation-calibration-shard.yml").read_text()
+    admission = (Path(PLUGIN_DIR) / ".github/workflows/mutation-calibration-admission.yml").read_text()
+
+    assert 'python-version: "3.12.13"' in shard
+    assert "--timeout 1740 --json" in shard
+    assert "retention-days: 90" in shard
+    assert 'if [[ -n "${{ inputs.resume_run_id }}" ]]' in shard
+    assert '--resume-checkpoints "calibration-resume/resume-checkpoints/' in shard
+    assert "select_shard_subset_attempts" in admission
+    assert "if report.get(\"shard_index\") in completed_prefix" in admission
+    assert "retain_historical_accounting_floor" in admission
+    assert "--paginate --slurp" in admission
+    assert "completed_prefix = [index for batch in fixed[:completed_batches] for index in batch]" in admission
+    assert "a later batch report exists before admission" in admission
+    assert "select_shard_subset_attempts(reports, 256, completed_prefix)" in admission
+    assert "steps.validate.outcome != 'success' || steps.retain.outcome != 'success'" in admission
+    assert 'cancel" || true' in admission
 
 
 def test_staged_preflight_publishes_consumer_aliases_with_provenance():

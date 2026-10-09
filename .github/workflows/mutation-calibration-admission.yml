@@ -1,0 +1,175 @@
+name: Mutation calibration admission
+
+on:
+  workflow_call:
+    inputs:
+      completed_batches:
+        required: true
+        type: number
+      expected_matrix:
+        required: true
+        type: string
+      runner_minute_ceiling:
+        required: true
+        type: string
+      calibration_id:
+        required: true
+        type: string
+      resume_run_id:
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  admit:
+    name: mutation (validate calibration batch ${{ inputs.completed_batches }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 2
+        with:
+          name: mutation-calibration-launch-${{ github.run_id }}
+          path: calibration-launch
+      - name: Download cumulative calibration reports
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-shard-${{ github.run_id }}-*
+          path: calibration-shards
+      - name: Download earlier admission accounting
+        if: inputs.completed_batches > 1
+        timeout-minutes: 2
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-calibration-admission-${{ github.run_id }}-*
+          path: prior-admission
+      - name: Download selected calibration resume bundle
+        if: inputs.resume_run_id != ''
+        timeout-minutes: 2
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: calibration-resume-bundle-${{ github.run_id }}
+          path: calibration-resume
+      - name: Validate completed batch and cumulative budget
+        id: validate
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          COMPLETED_BATCHES: ${{ inputs.completed_batches }}
+          EXPECTED_MATRIX: ${{ inputs.expected_matrix }}
+          RUNNER_MINUTE_CEILING: ${{ inputs.runner_minute_ceiling }}
+          CALIBRATION_ID: ${{ inputs.calibration_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-admission.json
+          OBSERVED_AT="$observed_at" python - <<'PY'
+          import json, os
+          from datetime import datetime
+          from pathlib import Path
+          from fettle.mutation_test import select_shard_subset_attempts
+          from fettle.staged_preflight import (
+              WAVES, account_runner_minutes, calibration_stage_3_batches,
+              evaluate_calibration_budget, retain_historical_accounting_floor,
+          )
+          output = Path("calibration-admission.json")
+          try:
+              completed_batches = int(os.environ["COMPLETED_BATCHES"])
+              selected = json.loads(os.environ["EXPECTED_MATRIX"])["shard"]
+              fixed = calibration_stage_3_batches(WAVES["wave-3"])
+              completed_prefix = [index for batch in fixed[:completed_batches] for index in batch]
+              current_reports = [
+                  json.loads(path.read_text())
+                  for path in Path("calibration-shards").rglob("mutation-report.json")
+              ]
+              if any(report.get("shard_index") not in completed_prefix for report in current_reports):
+                  raise ValueError("a later batch report exists before admission")
+              reports = current_reports
+              resume_reports = Path("calibration-resume/resume-reports")
+              if resume_reports.is_dir():
+                  reports.extend(
+                      report for report in (
+                          json.loads(path.read_text())
+                          for path in resume_reports.rglob("mutation-report.json")
+                      )
+                      if report.get("shard_index") in completed_prefix
+                  )
+              selected_reports = select_shard_subset_attempts(reports, 256, completed_prefix)
+              identity = None
+              for report in selected_reports:
+                  current = tuple(report.get(field) for field in (
+                      "revision", "calibration_id", "preflight_digest",
+                      "preflight_corpus_digest", "environment_digest",
+                  ))
+                  if (report.get("status") != "completed"
+                          or report.get("calibration_id") != os.environ["CALIBRATION_ID"]):
+                      raise ValueError("completed calibration batch report is incompatible")
+                  if identity is not None and current != identity:
+                      raise ValueError("completed calibration batch identity differs")
+                  identity = current
+              usage = account_runner_minutes(
+                  Path("jobs-admission.json"), datetime.fromisoformat(os.environ["OBSERVED_AT"].replace("Z", "+00:00")),
+                  expected_run_id=os.environ["GITHUB_RUN_ID"],
+                  expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], job_timeout_minutes=35,
+              )
+              history = sorted(Path("prior-admission").rglob("calibration-admission-current.json"))
+              usage = retain_historical_accounting_floor(usage, history)
+              Path("calibration-admission-current.json").write_text(
+                  json.dumps(usage, indent=2) + "\n"
+              )
+              launch = json.loads(Path("calibration-launch/launch-accounting.json").read_text())
+              usage.update({
+                  "stage": "3", "calibration_id": os.environ["CALIBRATION_ID"],
+                  "prior_runner_minutes": launch["prior_runner_minutes"],
+                  "admitted_batches": completed_batches,
+                  "admitted_shards": completed_prefix,
+                  "remaining_selected_shards": selected,
+              })
+              usage["estimated_runner_minutes"] = round(
+                  usage["estimated_runner_minutes"] + usage["prior_runner_minutes"], 2,
+              )
+              result = evaluate_calibration_budget(
+                  usage, ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]), cancellation_reserve=1200,
+              )
+          except Exception as exc:
+              result = {
+                  "schema_version": "1", "kind": "calibration_admission_containment",
+                  "stage": "3", "calibration_id": os.environ.get("CALIBRATION_ID"),
+                  "passed": False, "billing_authority": False,
+                  "containment_reason": f"{type(exc).__name__}: {exc}",
+              }
+          output.write_text(json.dumps(result, indent=2) + "\n")
+          raise SystemExit(0 if result.get("passed") is True else 2)
+          PY
+      - name: Retain batch admission evidence
+        id: retain
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-admission-${{ github.run_id }}-${{ inputs.completed_batches }}
+          path: |
+            jobs-admission.json
+            calibration-admission.json
+            calibration-admission-current.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Contain failed admission
+        if: always() && (steps.validate.outcome != 'success' || steps.retain.outcome != 'success')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! -f calibration-admission.json ]]; then
+            printf '%s\n' '{"schema_version":"1","kind":"calibration_admission_containment","passed":false,"billing_authority":false,"containment_reason":"admission setup, polling, deadline, or retention failed before a complete decision"}' > calibration-admission.json
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
+          exit 2

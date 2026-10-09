@@ -1,0 +1,93 @@
+name: Mutation calibration shard
+
+on:
+  workflow_call:
+    inputs:
+      shard:
+        required: true
+        type: number
+      preflight_run_id:
+        required: true
+        type: string
+      calibration_id:
+        required: true
+        type: string
+      resume_run_id:
+        required: false
+        type: string
+      execute:
+        required: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  execute:
+    if: inputs.execute
+    name: mutation (full shard ${{ inputs.shard }}, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+          uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-manifests-${{ github.run_id }}
+          path: mutation-manifests
+      - name: Download retained preflight aggregate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-preflight-${{ inputs.preflight_run_id }}
+          path: retained-preflight
+          run-id: ${{ inputs.preflight_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download selected calibration resume bundle
+        if: inputs.resume_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: calibration-resume-bundle-${{ github.run_id }}
+          path: calibration-resume
+      - name: Resumable calibration shard evidence
+        timeout-minutes: 30
+        env:
+          CALIBRATION_ID: ${{ inputs.calibration_id }}
+        run: |
+          args=(
+            --root .
+            --resume-manifest mutation-manifests/partition-${{ inputs.shard }}.json
+            --retained-preflight retained-preflight/mutation-preflight.json
+            --calibration-id "$CALIBRATION_ID"
+            --checkpoint-output mutation-checkpoint.json
+            --timeout 1740 --json
+          )
+          if [[ -n "${{ inputs.resume_run_id }}" ]]; then
+            args+=(--resume-checkpoints "calibration-resume/resume-checkpoints/mutation-checkpoint-$CALIBRATION_ID-${{ inputs.shard }}")
+          fi
+          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json
+      - name: Retain resumable execution checkpoint
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-checkpoint-${{ inputs.calibration_id }}-${{ inputs.shard }}
+          path: mutation-checkpoint.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain mutation shard
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-shard-${{ github.run_id }}-${{ inputs.shard }}
+          path: mutation-report.json
+          if-no-files-found: error
+          retention-days: 90

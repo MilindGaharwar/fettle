@@ -106,6 +106,16 @@ WAVE_3_BATCHES = [
 ]
 
 
+def calibration_stage_3_batches(selected_shards: list[int]) -> list[list[int]]:
+    """Return the reviewed fixed admission topology for calibration stage 3."""
+    if selected_shards != WAVES["wave-3"]:
+        raise ValueError("stage 3 admission requires the exact frozen shard membership")
+    batches = [selected_shards[offset:offset + 32] for offset in range(0, len(selected_shards), 32)]
+    if [len(batch) for batch in batches] != [32, 32, 32, 32, 32, 32, 24]:
+        raise ValueError("stage 3 admission topology is malformed")
+    return batches
+
+
 def _digest(value: object) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
@@ -1504,16 +1514,26 @@ def evaluate_calibration_budget(
         raise ValueError("calibration ceiling or cancellation reserve is invalid")
     cutoff = ceiling - cancellation_reserve
     included = accounting.get("included_jobs")
-    if (
-        not isinstance(included, list)
-        or any(
-            not isinstance(job, dict)
-            or job.get("status") not in {"completed", "in_progress"}
-            for job in included
-        )
-    ):
+    active_statuses = {"in_progress", "queued", "requested", "pending", "waiting"}
+    if not isinstance(included, list):
         raise ValueError("calibration included job accounting is malformed")
-    active_jobs = sum(job.get("status") == "in_progress" for job in included)
+    for job in included:
+        if not isinstance(job, dict) or job.get("status") not in {"completed", *active_statuses}:
+            raise ValueError("calibration included job accounting is malformed")
+        if job.get("status") != "completed" and (
+            not isinstance(job.get("minutes"), (int, float))
+            or isinstance(job.get("minutes"), bool)
+            or job["minutes"] < 0
+            or not isinstance(job.get("basis"), str)
+            or job.get("execution_evidence") not in {"confirmed", "absent"}
+        ):
+            raise ValueError("calibration included job active accounting is malformed")
+        if job.get("status") != "in_progress" and job.get("status") != "completed" and (
+            job.get("execution_evidence") != "absent"
+            or job.get("basis") != "queued acquisition exposure bounded from dispatch through observation"
+        ):
+            raise ValueError("calibration included job acquisition accounting is malformed")
+    active_jobs = sum(job.get("status") in active_statuses for job in included)
     cancellation_lag_minutes = active_jobs * 5
     charged = observed + cancellation_lag_minutes
     return {
@@ -1534,7 +1554,9 @@ def evaluate_calibration_budget(
     }
 
 
-_CALIBRATION_JOB = re.compile(r"^mutation \(full shard (\d+), advisory\)$")
+_CALIBRATION_JOB = re.compile(
+    r"^(?:[^/]+ / )?mutation \(full shard (\d+), advisory\)$"
+)
 
 
 def plan_calibration_continuation(
