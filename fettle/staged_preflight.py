@@ -90,11 +90,11 @@ WAVES["wave-3"] = [
 ]
 MAX_PARALLEL = {"wave-1": 2, "wave-2": 4, "wave-3": 8}
 BUDGET = {
-    "operational_ceiling_runner_minutes": 800,
-    "wave_allowances": {"wave-1": 20, "wave-2": 75, "wave-3": 500},
-    "orchestration_and_aggregation": 105,
+    "operational_ceiling_runner_minutes": 1220,
+    "wave_allowances": {"wave-1": 32, "wave-2": 120, "wave-3": 800},
+    "orchestration_and_aggregation": 168,
     "cancellation_headroom": 100,
-    "launch_ceiling": {"wave-2": 20, "wave-3": 95, "aggregate": 595, "complete": 700},
+    "launch_ceiling": {"wave-2": 32, "wave-3": 152, "aggregate": 952, "complete": 1120},
 }
 MATRIX_JOB_LIMIT = 256
 CONTINUATION_SUPPORT_JOBS = 7

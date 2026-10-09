@@ -48,12 +48,24 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     assert 27 in WAVES["wave-1"]
     assert len(members) == len(set(members)) == 256
     assert sorted(members) == list(range(256))
-    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 800
+    assert BUDGET == {
+        "operational_ceiling_runner_minutes": 1220,
+        "wave_allowances": {"wave-1": 32, "wave-2": 120, "wave-3": 800},
+        "orchestration_and_aggregation": 168,
+        "cancellation_headroom": 100,
+        "launch_ceiling": {
+            "wave-2": 32,
+            "wave-3": 152,
+            "aggregate": 952,
+            "complete": 1120,
+        },
+    }
+    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 1220
     assert BUDGET["launch_ceiling"] == {
-        "wave-2": 20,
-        "wave-3": 95,
-        "aggregate": 595,
-        "complete": 700,
+        "wave-2": 32,
+        "wave-3": 152,
+        "aggregate": 952,
+        "complete": 1120,
     }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
@@ -425,11 +437,11 @@ def test_accounting_acquisition_exposure_can_cross_budget_gate(tmp_path):
     path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
 
     result = account_runner_minutes(
-        path, datetime(2026, 10, 6, 1, 30, tzinfo=UTC), expected_run_id="7",
+        path, datetime(2026, 10, 6, 1, 36, tzinfo=UTC), expected_run_id="7",
         expected_run_attempt="1", job_timeout_minutes=35,
     )
 
-    assert result["estimated_runner_minutes"] == 960
+    assert result["estimated_runner_minutes"] == 1152
     assert result["estimated_runner_minutes"] > BUDGET["launch_ceiling"]["complete"]
 
 
@@ -773,8 +785,10 @@ def test_accounting_rejects_boolean_integer_fields(tmp_path, field):
 
 @pytest.mark.parametrize(
     ("used", "next_wave", "passed"),
-    [(20, "wave-2", True), (20.01, "wave-2", False), (95, "wave-3", True),
-     (595, "aggregate", True), (700, "complete", True), (700.01, "complete", False)],
+    [(32, "wave-2", True), (32.01, "wave-2", False),
+     (100.77, "wave-3", True), (152, "wave-3", True), (152.01, "wave-3", False),
+     (952, "aggregate", True), (952.01, "aggregate", False),
+     (1120, "complete", True), (1120.01, "complete", False)],
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
