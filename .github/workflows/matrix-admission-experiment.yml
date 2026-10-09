@@ -1,0 +1,49 @@
+name: Matrix admission experiment
+run-name: Matrix admission experiment ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - experiment/matrix-admission-20261009
+    paths:
+      - .github/workflows/matrix-admission-experiment.yml
+
+permissions:
+  contents: read
+
+jobs:
+  batch-a:
+    name: experiment batch A (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [0, 1]
+    steps:
+      - name: Hold batch A for observation
+        run: sleep 90
+
+  gate:
+    name: experiment admission gate
+    needs: batch-a
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.admit.outputs.matrix }}
+    steps:
+      - name: Admit batch B
+        id: admit
+        run: echo 'matrix={"shard":[2,3]}' >> "$GITHUB_OUTPUT"
+
+  batch-b:
+    name: experiment batch B (${{ matrix.shard }})
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.gate.outputs.matrix) }}
+    steps:
+      - name: Hold batch B after admission
+        run: sleep 30
