@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import platform
 import re
 import sys
@@ -997,6 +998,7 @@ def account_runner_minutes(
     *,
     expected_run_id: str | None = None,
     expected_run_attempt: str | None = None,
+    job_timeout_minutes: int | None = None,
 ) -> dict:
     raw = jobs_path.read_bytes()
     pages = json.loads(raw)
@@ -1026,6 +1028,14 @@ def account_runner_minutes(
         raise ValueError("jobs response pagination is incomplete")
     total = 0.0
     current = now or datetime.now(UTC)
+    observation_is_explicit = now is not None
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("observation time must be timezone-aware")
+    if job_timeout_minutes is not None and (
+        not isinstance(job_timeout_minutes, int) or isinstance(job_timeout_minutes, bool)
+        or job_timeout_minutes < 1
+    ):
+        raise ValueError("job timeout must be a positive integer")
     included = []
     excluded = []
     anomalies = []
@@ -1113,16 +1123,53 @@ def account_runner_minutes(
                 if status == "in_progress"
                 else "runner-acquisition transition elapsed through observation time"
             )
+        elif (
+            status in {"queued", "requested", "pending", "waiting"}
+            and conclusion is None and completed is None
+            and not has_runner_identity and not steps and started is not None
+        ):
+            if not observation_is_explicit or job_timeout_minutes is None:
+                raise ValueError(
+                    f"job {job['id']} acquisition exposure has no explicit observation bound"
+                )
+            reported_start = _parse_time(started, "started_at")
+            dispatched = _parse_time(job.get("created_at"), "created_at")
+            exposure_start = dispatched
+            if current < reported_start or current < dispatched:
+                raise ValueError(f"job {job['id']} acquisition timing is reversed")
+            start = exposure_start
+            end = current
+            anomalies.append({
+                "id": job["id"],
+                "reason": "queued job reported started_at without execution evidence",
+                "resource_usage_basis": "bounded exposure only; not evidence of execution",
+                "observed_at": current.isoformat(),
+                "exposure_started_at": exposure_start.isoformat(),
+                "timeout_minutes": job_timeout_minutes,
+                "timeout_bound_applied": False,
+                "timeout_note": (
+                    "reported start is revision-prone, so execution timeout cannot safely "
+                    "truncate dispatch-to-observation exposure"
+                ),
+            })
+            basis = "queued acquisition exposure bounded from dispatch through observation"
         else:
             raise ValueError(f"job {job['id']} usage is indeterminate")
         if end < start:
             raise ValueError(f"executed job {job['id']} timing is reversed")
         minutes = (end - start).total_seconds() / 60
         total += minutes
+        if status == "in_progress" or has_runner_identity or steps:
+            execution_evidence = "confirmed"
+        elif status == "completed":
+            execution_evidence = "ambiguous"
+        else:
+            execution_evidence = "absent"
         included.append({
             "id": job["id"], "name": job.get("name"), "status": status,
             "conclusion": conclusion, "runner_id": runner_id, "started_at": started,
             "completed_at": completed, "minutes": round(minutes, 2), "basis": basis,
+            "execution_evidence": execution_evidence,
         })
     return {
         "schema_version": "1",
@@ -1154,18 +1201,21 @@ def combine_accounting(
     expected_prior_run_attempt: str,
     expected_current_run_id: str,
     expected_current_run_attempt: str,
+    job_timeout_minutes: int | None = None,
 ) -> dict:
     prior = account_runner_minutes(
         prior_jobs_path,
         now,
         expected_run_id=expected_prior_run_id,
         expected_run_attempt=expected_prior_run_attempt,
+        job_timeout_minutes=job_timeout_minutes,
     )
     current = account_runner_minutes(
         current_jobs_path,
         now,
         expected_run_id=expected_current_run_id,
         expected_run_attempt=expected_current_run_attempt,
+        job_timeout_minutes=job_timeout_minutes,
     )
     return {
         "schema_version": "1",
@@ -1178,11 +1228,19 @@ def combine_accounting(
     }
 
 
-def combine_accounting_sources(sources: list[tuple[Path, str, str]], now: datetime | None = None) -> dict:
+def combine_accounting_sources(
+    sources: list[tuple[Path, str, str]],
+    now: datetime | None = None,
+    *,
+    job_timeout_minutes: int | None = None,
+) -> dict:
     if not sources:
         raise ValueError("at least one accounting source is required")
     reports = [
-        account_runner_minutes(path, now, expected_run_id=run_id, expected_run_attempt=attempt)
+        account_runner_minutes(
+            path, now, expected_run_id=run_id, expected_run_attempt=attempt,
+            job_timeout_minutes=job_timeout_minutes,
+        )
         for path, run_id, attempt in sources
     ]
     return {
@@ -1191,6 +1249,79 @@ def combine_accounting_sources(sources: list[tuple[Path, str, str]], now: dateti
         "billing_authority": False,
         "estimated_runner_minutes": round(sum(item["estimated_runner_minutes"] for item in reports), 2),
         "sources": reports,
+    }
+
+
+def retain_historical_accounting_floor(accounting: dict, historical_paths: list[Path]) -> dict:
+    """Keep later reconciliation from reducing previously observed exposure."""
+    def validate(report: dict) -> tuple[list[tuple[str, str]], float]:
+        observed = report.get("estimated_runner_minutes")
+        if (
+            report.get("schema_version") != "1"
+            or report.get("billing_authority") is not False
+            or not isinstance(observed, (int, float)) or isinstance(observed, bool)
+            or not math.isfinite(observed) or observed < 0
+        ):
+            raise ValueError("accounting report is malformed")
+        if report.get("kind") == "operational_runner_time_estimate":
+            run_id = report.get("expected_run_id")
+            attempt = report.get("expected_run_attempt")
+            if not isinstance(run_id, str) or not isinstance(attempt, str):
+                raise ValueError("historical accounting source identity is malformed")
+            return [(run_id, attempt)], observed
+        sources = report.get("sources")
+        if (
+            report.get("kind") != "combined_operational_runner_time_estimate"
+            or not isinstance(sources, list) or not sources
+        ):
+            raise ValueError("historical accounting kind or sources are malformed")
+        validated = [validate(source) for source in sources]
+        source_total = round(sum(value for _identities, value in validated), 2)
+        reconciled = report.get("terminal_reconciled_runner_minutes", observed)
+        if (
+            not isinstance(reconciled, (int, float)) or isinstance(reconciled, bool)
+            or not math.isfinite(reconciled) or reconciled < 0
+            or not math.isclose(reconciled, source_total, rel_tol=0, abs_tol=0.01)
+        ):
+            raise ValueError("combined accounting total does not reconcile")
+        if "terminal_reconciled_runner_minutes" in report:
+            floor = report.get("historical_observed_runner_minutes_floor")
+            applied = report.get("historical_floor_applied")
+            if (
+                not isinstance(floor, (int, float)) or isinstance(floor, bool)
+                or not math.isfinite(floor) or floor < 0
+                or not isinstance(applied, bool)
+                or not math.isclose(observed, max(reconciled, floor), rel_tol=0, abs_tol=0.01)
+                or applied is not (floor > reconciled)
+            ):
+                raise ValueError("historical accounting floor is malformed")
+        return (
+            [identity for source_identities, _value in validated for identity in source_identities],
+            observed,
+        )
+
+    expected_identities, terminal = validate(accounting)
+    if not historical_paths:
+        return accounting
+    historical = []
+    for path in historical_paths:
+        report = _load_json(path)
+        report_identities, observed = validate(report)
+        if report_identities != expected_identities:
+            raise ValueError("historical accounting has incompatible origin")
+        historical.append({
+            "path": str(path),
+            "sha256": _file_digest(path),
+            "estimated_runner_minutes": observed,
+        })
+    floor = max(item["estimated_runner_minutes"] for item in historical)
+    return {
+        **accounting,
+        "terminal_reconciled_runner_minutes": terminal,
+        "historical_observed_runner_minutes_floor": floor,
+        "estimated_runner_minutes": round(max(terminal, floor), 2),
+        "historical_floor_applied": floor > terminal,
+        "historical_accounting": historical,
     }
 
 
@@ -1502,6 +1633,9 @@ def main() -> int:
     wave.add_argument("--orchestration-sha", required=True)
     wave.add_argument("--output", type=Path, required=True)
     budget.add_argument("--jobs", type=Path, required=True)
+    budget.add_argument("--observed-at")
+    budget.add_argument("--job-timeout-minutes", type=int)
+    budget.add_argument("--historical-accounting", type=Path, action="append", default=[])
     budget.add_argument("--prior-jobs", type=Path)
     budget.add_argument("--prior-run-id")
     budget.add_argument("--prior-run-attempt")
@@ -1579,6 +1713,10 @@ def main() -> int:
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0 if result["passed"] else 2
         if args.command == "budget-gate":
+            observed_at = (
+                datetime.fromisoformat(args.observed_at.replace("Z", "+00:00"))
+                if args.observed_at else None
+            )
             if args.source and any(value is not None for value in (
                 args.prior_jobs, args.prior_run_id, args.prior_run_attempt,
                 args.additional_prior_jobs, args.additional_prior_run_id,
@@ -1595,21 +1733,26 @@ def main() -> int:
             if args.source:
                 accounting = combine_accounting_sources([
                     (Path(path), run_id, attempt) for path, run_id, attempt in args.source
-                ] + [(args.jobs, args.run_id, args.run_attempt)])
+                ] + [(args.jobs, args.run_id, args.run_attempt)], observed_at,
+                    job_timeout_minutes=args.job_timeout_minutes)
             elif args.prior_jobs is None:
                 accounting = account_runner_minutes(
                     args.jobs,
+                    observed_at,
                     expected_run_id=args.run_id,
                     expected_run_attempt=args.run_attempt,
+                    job_timeout_minutes=args.job_timeout_minutes,
                 )
             elif args.additional_prior_jobs is None:
                 accounting = combine_accounting(
                     args.prior_jobs,
                     args.jobs,
+                    observed_at,
                     expected_prior_run_id=args.prior_run_id,
                     expected_prior_run_attempt=args.prior_run_attempt,
                     expected_current_run_id=args.run_id,
                     expected_current_run_attempt=args.run_attempt,
+                    job_timeout_minutes=args.job_timeout_minutes,
                 )
             else:
                 accounting = combine_accounting_sources([
@@ -1617,7 +1760,10 @@ def main() -> int:
                     (args.additional_prior_jobs, args.additional_prior_run_id,
                      args.additional_prior_run_attempt),
                     (args.jobs, args.run_id, args.run_attempt),
-                ])
+                ], observed_at, job_timeout_minutes=args.job_timeout_minutes)
+            accounting = retain_historical_accounting_floor(
+                accounting, args.historical_accounting,
+            )
             observed = accounting["estimated_runner_minutes"]
             ceiling = BUDGET["launch_ceiling"][args.next_wave]
             result = {**accounting,

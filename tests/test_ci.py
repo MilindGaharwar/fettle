@@ -1,6 +1,7 @@
 """`fettle ci` — composed gate + generated workflow (CI enforcement WP-2)."""
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,11 @@ def _run_actions_bash(script, *, cwd, env):
         ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
         cwd=cwd, env=env, capture_output=True, text=True,
     )
+
+
+def _python_heredoc(script):
+    marker = "python - <<'PY'\n"
+    return script.split(marker, 1)[1].split("\nPY", 1)[0]
 
 
 def _git_repo(files: dict) -> str:
@@ -582,10 +588,16 @@ def test_staged_preflight_budget_gates_are_cumulative_across_both_runs():
 
     assert "--next-wave wave-2 --output wave-1-budget.json" in first
     assert "--next-wave wave-3 --output wave-2-budget.json" in first
-    assert "--next-wave complete --output monitor-budget.json" in first
+    assert '--next-wave complete --output "$budget_snapshot"' in first
+    assert '--observed-at "$observed_at" --job-timeout-minutes 35' in first
+    assert 'historical_args+=(--historical-accounting "$prior_budget")' in first
     assert "--prior-jobs source-jobs.json" in continuation
     assert "--prior-run-id ${{ github.event.inputs.source_run_id }}" in continuation
     assert continuation.count("--next-wave complete") == 3
+    assert '--observed-at "$observed_at" --job-timeout-minutes 35' in continuation
+    assert 'historical_args+=(--historical-accounting "$prior_budget")' in continuation
+    assert first.count("--historical-accounting monitor-accounting/monitor-budget.json") == 1
+    assert continuation.count("--historical-accounting monitor-accounting/monitor-budget.json") == 2
     assert 'assert result["billing_authority"] is False' in first
     assert "Operational ceiling, not a guaranteed provider billing cap." not in first
 
@@ -728,6 +740,89 @@ def test_staged_monitor_lifecycle_resamples_and_retains_each_snapshot(tmp_path):
     assert not (workspace / "cancellation-requested.txt").exists()
     assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 5
     assert json.loads((workspace / "monitor-budget.json").read_text())["passed"] is True
+    assert len(list((workspace / "monitor-snapshots").glob("budget-*.json"))) == 4
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json.observed-at"))) == 5
+
+
+def test_staged_monitor_replays_exact_retained_timestamp_revision_lifecycle(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    monitor = next(
+        step["run"] for step in workflow["jobs"]["staged-monitor"]["steps"]
+        if step.get("name") == "Stop on failure or exhausted execution budget"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
+    source = Path(PLUGIN_DIR) / "tests/fixtures/staged_preflight_accounting_revision"
+    fixtures = workspace / "fixtures"
+    fixtures.mkdir()
+    for index in range(1, 4):
+        shutil.copy2(source / f"jobs-{index}.json", fixtures / f"{index}.json")
+    shutil.copy2(source / "jobs-terminal.json", fixtures / "4.json")
+    observations = [
+        item["observed_at"] for item in json.loads(
+            (Path(PLUGIN_DIR) / "tests/fixtures/staged_preflight_accounting_revision.json").read_text()
+        )["observations"]
+    ] + ["2026-10-08T15:13:16.532084+00:00"]
+    (workspace / "observations.txt").write_text("\n".join(observations) + "\n")
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        "n=$(cat \"$GH_COUNTER\" 2>/dev/null || echo 0)\n"
+        "n=$((n + 1)); [ \"$n\" -gt 4 ] && n=4\n"
+        "printf '%s' \"$n\" > \"$GH_COUNTER\"\n"
+        "cat \"$GH_FIXTURES/$n.json\"\n"
+    )
+    gh.chmod(0o755)
+    python = bin_dir / "python"
+    python.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = -c ] && printf '%s' \"$2\" | grep -q 'datetime.now'; then\n"
+        "  sed -n \"$(cat \"$GH_COUNTER\")p\" \"$OBSERVATIONS\"\n"
+        "else\n"
+        f"  exec {sys.executable} \"$@\"\n"
+        "fi\n"
+    )
+    python.chmod(0o755)
+    sleep = bin_dir / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+
+    result = _run_actions_bash(
+        monitor, cwd=workspace,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GH_COUNTER": str(workspace / "counter"),
+            "GH_FIXTURES": str(fixtures),
+            "OBSERVATIONS": str(workspace / "observations.txt"),
+            "GITHUB_REPOSITORY": "MilindGaharwar/fettle",
+            "GITHUB_RUN_ID": "37795579761", "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (workspace / "monitor-final-status.txt").read_text() == "completed\n"
+    budgets = [
+        json.loads(path.read_text())
+        for path in sorted((workspace / "monitor-snapshots").glob("budget-*.json"))
+    ]
+    assert len(budgets) == 4
+    assert [
+        next(job for job in report.get("included_jobs", []) if job["id"] == 113377920861)["minutes"]
+        for report in budgets[:3]
+    ] == [0.12, 0.38, 0.65]
+    assert all(report["passed"] is True for report in budgets)
+    assert budgets[-1]["estimated_runner_minutes"] >= max(
+        report["estimated_runner_minutes"] for report in budgets[:-1]
+    )
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 4
+    assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json.observed-at"))) == 4
+    assert not (workspace / "cancellation-requested.txt").exists()
 
 
 def test_staged_monitor_persistent_malformed_metadata_requests_cancellation(tmp_path):
@@ -777,6 +872,7 @@ def test_staged_monitor_persistent_malformed_metadata_requests_cancellation(tmp_
     )
     assert (workspace / "cancellation-requested.txt").is_file()
     assert len(list((workspace / "monitor-snapshots").glob("jobs-*.json"))) == 3
+    assert not list((workspace / "monitor-snapshots").glob("budget-*.json"))
     attempt = json.loads((workspace / "cancellation-attempt.json").read_text())
     assert attempt == {
         "repository": "owner/repo", "run_id": "37",
@@ -930,6 +1026,8 @@ def test_continuation_monitor_reuses_validated_source_snapshot(tmp_path):
     assert (workspace / "source-jobs.json").read_bytes() == source.read_bytes()
     assert (workspace / "monitor-final-status.txt").read_text() == "completed\n"
     assert not (workspace / "cancellation-requested.txt").exists()
+    assert len(list((workspace / "monitor-snapshots").glob("current-budget-*.json"))) == 1
+    assert len(list((workspace / "monitor-snapshots").glob("current-jobs-*.json.observed-at"))) == 1
 
 
 def test_aggregation_recovery_cannot_execute_mutations_and_retains_failure_evidence():
@@ -1106,6 +1204,97 @@ def test_staged_preflight_publishes_consumer_aliases_with_provenance():
     assert 'publication.get("manifest_topology_sha256") == topology' in consumer
     assert 'publication.get("publication_run_attempt") == "1"' in consumer
     assert 'completion.get("source", {}).get("run_id") == publication["source_run_id"]' in consumer
+
+
+def test_staged_publication_readback_and_calibration_consumer_delivery_path(tmp_path):
+    continuation = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/staged-preflight-continuation.yml").read_text()
+    )
+    mutation = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    candidate = "a" * 40
+    source_run = "37"
+    publication_run = "38"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manifests = workspace / "staged-plan/mutation-manifests"
+    manifests.mkdir(parents=True)
+    for index in range(256):
+        (manifests / f"partition-{index}.json").write_text(
+            json.dumps({"shard_index": index}) + "\n"
+        )
+    (workspace / "mutation-preflight.json").write_text(json.dumps({
+        "status": "completed", "passed": True, "revision": candidate,
+        "shard_count": 256, "generated": 256, "canonicalized": 256,
+        "collisions": 0,
+    }) + "\n")
+    (workspace / "staged-preflight-continuation.json").write_text(json.dumps({
+        "status": "completed", "passed": True, "kind": "fresh_staged_preflight",
+        "candidate_sha": candidate, "source": {"run_id": source_run},
+        "origins": {str(index): {"run_id": publication_run} for index in range(256)},
+    }) + "\n")
+
+    aggregate_steps = continuation["jobs"]["aggregate"]["steps"]
+    publish = next(
+        step["run"] for step in aggregate_steps
+        if step.get("name") == "Build provenance-bound consumer publication"
+    )
+    publish = (
+        publish.replace("${{ github.event.inputs.candidate_sha }}", candidate)
+        .replace("${{ github.event.inputs.source_run_id }}", source_run)
+        .replace("${{ github.run_id }}", publication_run)
+        .replace("${{ github.run_attempt }}", "1")
+    )
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    python = bin_dir / "python"
+    python.symlink_to(sys.executable)
+    subprocess.run(
+        ["/bin/bash", "-e", "-c", publish], cwd=workspace,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}, check=True,
+    )
+
+    retained = workspace / "retained"
+    retained.mkdir()
+    for name in ("mutation-preflight.json", "staged-preflight-continuation.json"):
+        shutil.copy2(workspace / name, retained / name)
+    published = workspace / "published"
+    manifest_alias = published / f"mutation-manifests-{publication_run}"
+    preflight_alias = published / f"mutation-preflight-{publication_run}"
+    shutil.copytree(workspace / "published-manifests", manifest_alias)
+    preflight_alias.mkdir(parents=True)
+    for name in (
+        "mutation-preflight.json", "preflight-publication.json",
+        "staged-preflight-continuation.json",
+    ):
+        shutil.copy2(workspace / name, preflight_alias / name)
+
+    readback_steps = continuation["jobs"]["readback"]["steps"]
+    readback = next(
+        step["run"] for step in readback_steps
+        if step.get("name") == "Verify downloaded aggregate and origin record"
+    )
+    readback = (
+        readback.replace("${{ github.event.inputs.candidate_sha }}", candidate)
+        .replace("${{ github.event.inputs.source_run_id }}", source_run)
+        .replace("${{ github.run_id }}", publication_run)
+    )
+    subprocess.run([sys.executable, "-c", _python_heredoc(readback)], cwd=workspace, check=True)
+    assert json.loads((workspace / "readback-checksums.json").read_text())
+
+    shutil.copytree(manifest_alias, workspace / "mutation-manifests")
+    shutil.copytree(preflight_alias, workspace / "retained-preflight")
+    prepare_steps = mutation["jobs"]["prepare"]["steps"]
+    consume = next(
+        step["run"] for step in prepare_steps
+        if step.get("name") == "Verify retained SHA-bound preflight"
+    )
+    subprocess.run(
+        [sys.executable, "-c", _python_heredoc(consume)], cwd=workspace,
+        env={**os.environ, "GITHUB_SHA": candidate, "PREFLIGHT_RUN_ID": publication_run},
+        check=True,
+    )
 
 
 def test_explicit_calibration_uses_required_pr_check_name_and_enforces_result():

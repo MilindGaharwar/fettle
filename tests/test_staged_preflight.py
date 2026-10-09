@@ -1,4 +1,5 @@
 import json
+import hashlib
 import subprocess
 import sys
 from copy import deepcopy
@@ -31,6 +32,7 @@ from scripts.staged_preflight import (
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
+    retain_historical_accounting_floor,
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
@@ -304,6 +306,7 @@ def _job(job_id, *, status="completed", conclusion="success", start="2026-10-06T
          end="2026-10-06T01:02:00Z", runner_id=10, steps=None, run_id=7, run_attempt=1):
     return {
         "id": job_id, "run_id": run_id, "run_attempt": run_attempt,
+        "created_at": start,
         "status": status, "conclusion": conclusion, "started_at": start,
         "completed_at": end, "runner_id": runner_id, "runner_name": "runner" if runner_id else None,
         "runner_group_id": None, "runner_group_name": None,
@@ -315,6 +318,127 @@ def _jobs_file(tmp_path, pages, name="jobs.json"):
     path = tmp_path / name
     path.write_text(json.dumps(pages))
     return path
+
+
+def test_accounting_preserves_observed_acquisition_exposure_and_terminal_revision(tmp_path):
+    fixture = json.loads((Path(__file__).parent / "fixtures/staged_preflight_accounting_revision.json").read_text())
+    responses = Path(__file__).parent / "fixtures/staged_preflight_accounting_revision"
+    charges = []
+    for index, observation in enumerate(fixture["observations"], 1):
+        path = responses / f"jobs-{index}.json"
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == fixture["provenance"]["snapshot_sha256"][index - 1]
+
+        result = account_runner_minutes(
+            path, datetime.fromisoformat(observation["observed_at"].replace("Z", "+00:00")),
+            expected_run_id="37795579761", expected_run_attempt="1", job_timeout_minutes=35,
+        )
+
+        anomalous = next(job for job in result["included_jobs"] if job["id"] == fixture["provenance"]["job_id"])
+        charges.append(anomalous["minutes"])
+        assert anomalous["execution_evidence"] == "absent"
+        anomaly = next(item for item in result["anomalies"] if item["id"] == anomalous["id"])
+        assert anomaly["resource_usage_basis"].startswith("bounded exposure")
+    assert charges == [0.12, 0.38, 0.65]
+
+    path = responses / "jobs-terminal.json"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == fixture["provenance"]["terminal_jobs_sha256"]
+    result = account_runner_minutes(path, expected_run_id="37795579761", expected_run_attempt="1")
+    corrected = next(job for job in result["included_jobs"] if job["id"] == fixture["provenance"]["job_id"])
+    assert corrected["minutes"] == 1.17
+    assert corrected["started_at"] == fixture["terminal"]["started_at"]
+    assert corrected["execution_evidence"] == "confirmed"
+
+
+def test_accounting_does_not_use_execution_timeout_to_erase_queue_exposure(tmp_path):
+    job = _job(1, status="queued", conclusion=None, start="2026-10-06T01:00:00Z",
+               end=None, runner_id=None, steps=[])
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 2, tzinfo=UTC), expected_run_id="7",
+        expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 60
+    assert result["anomalies"][0]["timeout_bound_applied"] is False
+    assert "cannot safely truncate" in result["anomalies"][0]["timeout_note"]
+
+
+def test_accounting_does_not_trust_later_reported_start_to_reduce_exposure(tmp_path):
+    job = _job(1, status="queued", conclusion=None, start="2026-10-06T01:30:00Z",
+               end=None, runner_id=None, steps=[])
+    job["created_at"] = "2026-10-06T01:00:00Z"
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 3, tzinfo=UTC), expected_run_id="7",
+        expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 120
+    assert result["anomalies"][0]["timeout_bound_applied"] is False
+
+
+def test_accounting_uses_dispatch_when_reported_start_precedes_it(tmp_path):
+    job = _job(1, status="queued", conclusion=None, start="2026-10-06T01:00:00Z",
+               end=None, runner_id=None, steps=[])
+    job["created_at"] = "2026-10-06T01:30:00Z"
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 2, tzinfo=UTC), expected_run_id="7",
+        expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 30
+
+
+@pytest.mark.parametrize("now, timeout", [(None, 35), (datetime(2026, 10, 6, 1, 1, tzinfo=UTC), None)])
+def test_accounting_rejects_acquisition_exposure_without_explicit_bound(tmp_path, now, timeout):
+    job = _job(1, status="queued", conclusion=None, start="2026-10-06T01:00:00Z",
+               end=None, runner_id=None, steps=[])
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="explicit observation bound"):
+        account_runner_minutes(path, now, expected_run_id="7", expected_run_attempt="1",
+                               job_timeout_minutes=timeout)
+
+
+def test_accounting_rejects_acquisition_exposure_without_dispatch_time(tmp_path):
+    job = _job(1, status="queued", conclusion=None, end=None, runner_id=None, steps=[])
+    job.pop("created_at")
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="created_at"):
+        account_runner_minutes(
+            path, datetime(2026, 10, 6, 1, 1, tzinfo=UTC), expected_run_id="7",
+            expected_run_attempt="1", job_timeout_minutes=35,
+        )
+
+
+def test_accounting_acquisition_exposure_can_cross_budget_gate(tmp_path):
+    jobs = [
+        _job(index, status="queued", conclusion=None, start="2026-10-06T01:00:00Z",
+             end=None, runner_id=None, steps=[])
+        for index in range(1, 33)
+    ]
+    path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
+
+    result = account_runner_minutes(
+        path, datetime(2026, 10, 6, 1, 30, tzinfo=UTC), expected_run_id="7",
+        expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 960
+    assert result["estimated_runner_minutes"] > BUDGET["launch_ceiling"]["complete"]
+
+
+def test_accounting_rejects_naive_explicit_observation_time(tmp_path):
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1)]}])
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        account_runner_minutes(path, datetime(2026, 10, 6, 1, 1),
+                               expected_run_id="7", expected_run_attempt="1")
 
 
 def _source_handoff_fixture(tmp_path):
@@ -589,7 +713,7 @@ def test_accounting_does_not_exclude_started_job_with_missing_execution_metadata
     job.update({"runner_name": None, "runner_group_id": None, "runner_group_name": None})
     path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
 
-    with pytest.raises(ValueError, match="indeterminate"):
+    with pytest.raises(ValueError, match="explicit observation bound"):
         account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
 
 
@@ -995,6 +1119,141 @@ def test_three_run_accounting_preserves_every_explicit_origin(tmp_path):
 
     assert result["estimated_runner_minutes"] == 6
     assert [item["expected_run_id"] for item in result["sources"]] == ["37", "38", "39"]
+
+
+def test_terminal_reconciliation_preserves_higher_historical_accounting_floor(tmp_path):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps({
+        **terminal, "estimated_runner_minutes": 3.5,
+    }))
+
+    result = retain_historical_accounting_floor(terminal, [historical_path])
+
+    assert result["terminal_reconciled_runner_minutes"] == 2
+    assert result["historical_observed_runner_minutes_floor"] == 3.5
+    assert result["estimated_runner_minutes"] == 3.5
+    assert result["historical_floor_applied"] is True
+    assert result["historical_accounting"][0]["sha256"] == _file_sha(historical_path)
+
+
+def test_terminal_reconciliation_keeps_later_higher_terminal_total(tmp_path):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps({
+        **terminal, "estimated_runner_minutes": 1.5,
+    }))
+
+    result = retain_historical_accounting_floor(terminal, [historical_path])
+
+    assert result["terminal_reconciled_runner_minutes"] == 2
+    assert result["estimated_runner_minutes"] == 2
+    assert result["historical_floor_applied"] is False
+
+
+def test_terminal_reconciliation_accepts_prior_floored_combined_report(tmp_path):
+    prior = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}], "prior.json"),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    current = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(2, run_id=38)]}], "current.json"),
+        expected_run_id="38", expected_run_attempt="1",
+    )
+    terminal = {
+        "schema_version": "1", "kind": "combined_operational_runner_time_estimate",
+        "billing_authority": False, "estimated_runner_minutes": 4, "sources": [prior, current],
+    }
+    first_path = tmp_path / "first.json"
+    first_path.write_text(json.dumps({
+        **terminal, "estimated_runner_minutes": 5,
+        "sources": [{**prior, "estimated_runner_minutes": 3}, current],
+    }))
+    first = retain_historical_accounting_floor(terminal, [first_path])
+    retained_path = tmp_path / "retained.json"
+    retained_path.write_text(json.dumps(first))
+
+    result = retain_historical_accounting_floor(terminal, [retained_path])
+
+    assert result["terminal_reconciled_runner_minutes"] == 4
+    assert result["estimated_runner_minutes"] == 5
+    assert result["historical_floor_applied"] is True
+
+
+def test_terminal_reconciliation_validates_current_accounting_without_history(tmp_path):
+    malformed = {
+        "schema_version": "999", "kind": "operational_runner_time_estimate",
+        "billing_authority": False, "expected_run_id": "37", "expected_run_attempt": "1",
+        "estimated_runner_minutes": 2,
+    }
+
+    with pytest.raises(ValueError, match="malformed"):
+        retain_historical_accounting_floor(malformed, [])
+
+
+def test_terminal_reconciliation_rejects_historical_origin_drift(tmp_path):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps({
+        **terminal, "expected_run_id": "99",
+    }))
+
+    with pytest.raises(ValueError, match="incompatible origin"):
+        retain_historical_accounting_floor(terminal, [historical_path])
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("schema_version", "999"), ("billing_authority", True),
+     ("estimated_runner_minutes", float("nan")),
+     ("estimated_runner_minutes", float("inf"))],
+)
+def test_terminal_reconciliation_rejects_malformed_current_accounting(tmp_path, field, value):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    terminal[field] = value
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps(account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(2, run_id=37)]}], "prior.json"),
+        expected_run_id="37", expected_run_attempt="1",
+    )))
+
+    with pytest.raises(ValueError, match="malformed"):
+        retain_historical_accounting_floor(terminal, [historical_path])
+
+
+@pytest.mark.parametrize("field", ["schema_version", "billing_authority"])
+def test_terminal_reconciliation_rejects_malformed_nested_historical_source(tmp_path, field):
+    prior = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}], "prior.json"),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    current = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(2, run_id=38)]}], "current.json"),
+        expected_run_id="38", expected_run_attempt="1",
+    )
+    combined = {
+        "schema_version": "1", "kind": "combined_operational_runner_time_estimate",
+        "billing_authority": False, "estimated_runner_minutes": 4, "sources": [prior, current],
+    }
+    historical = json.loads(json.dumps(combined))
+    historical["sources"][0][field] = "999" if field == "schema_version" else True
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps(historical))
+
+    with pytest.raises(ValueError, match="malformed"):
+        retain_historical_accounting_floor(combined, [historical_path])
 
 
 def test_four_run_accounting_adds_aggregation_overhead_once(tmp_path):
