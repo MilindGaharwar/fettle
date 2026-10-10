@@ -210,16 +210,17 @@ jobs:
           uv run --no-sync python - <<'PY'
           import json, os, pathlib, sys
           from datetime import datetime, timezone
+          from fettle.mutation_test import read_calibration_representation_inventory
           from fettle.staged_preflight import WAVES
           expected = {"stage-1": WAVES["wave-1"]}
           if os.environ["CALIBRATION_STAGE"] == "3":
               expected["stage-2"] = WAVES["wave-2"]
           prior_identity = None
           for directory, indexes in expected.items():
-              paths = sorted(pathlib.Path("prior-calibration", directory).rglob("mutation-report.json"))
-              if len(paths) != len(indexes):
+              inventories = sorted(pathlib.Path("prior-calibration", directory).rglob("representation-inventory.json"))
+              if len(inventories) != 1:
                   sys.exit(2)
-              reports = [json.loads(path.read_text()) for path in paths]
+              reports = read_calibration_representation_inventory(inventories[0])
               identity_fields = (
                   "revision", "calibration_id", "preflight_digest",
                   "preflight_corpus_digest", "environment_digest",
@@ -323,7 +324,9 @@ jobs:
             --checkpoints resume-checkpoints --reports resume-reports \
             --manifests mutation-manifests --stage "$CALIBRATION_STAGE" \
             --calibration-id "$CALIBRATION_ID" --run-id "$RESUME_RUN_ID" \
-            --run-attempt 1 --revision "$GITHUB_SHA" --output calibration-continuation.json
+            --run-attempt 1 --revision "$GITHUB_SHA" \
+            --historical-accounting resume-accounting/calibration-accounting.json \
+            --output calibration-continuation.json
           echo "execution_matrix=$(python -c 'import json; print(json.dumps(json.load(open("calibration-continuation.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
       - name: Record calibration source provenance
         if: github.event.inputs.mode == 'calibration'
@@ -986,7 +989,7 @@ jobs:
               cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json
             }
             export BASE_RUN_ID="$base_run_id"
-            base=$(python -c 'import json,os,sys; report=json.load(open("prior-accounting/calibration-accounting.json")); sources=report.get("sources",[report]); expected_stage=os.environ["CALIBRATION_STAGE"] if os.environ["RESUME_RUN_ID"] else str(int(os.environ["CALIBRATION_STAGE"])-1); valid=report.get("calibration_id")==os.environ["CALIBRATION_ID"] and report.get("stage")==expected_stage and report.get("ceiling")==int(os.environ["RUNNER_MINUTE_CEILING"]) and sources and sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"] and isinstance(report.get("charged_runner_minutes"),(int,float)); sys.exit(2) if not valid else None; print(report["charged_runner_minutes"])')
+            base=$(python -c 'import json,os,sys; report=json.load(open("prior-accounting/calibration-accounting.json")); sources=report.get("sources",[report]); expected_stage=os.environ["CALIBRATION_STAGE"] if os.environ["RESUME_RUN_ID"] else str(int(os.environ["CALIBRATION_STAGE"])-1); values=(report.get("charged_runner_minutes"),report.get("estimated_runner_minutes")); valid=report.get("calibration_id")==os.environ["CALIBRATION_ID"] and report.get("stage")==expected_stage and report.get("ceiling")==int(os.environ["RUNNER_MINUTE_CEILING"]) and sources and sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"] and all(isinstance(value,(int,float)) and not isinstance(value,bool) for value in values); sys.exit(2) if not valid else None; print(max(values))')
           fi
           export BASE_USAGE="$base"
           python - <<'PY'
@@ -1093,7 +1096,9 @@ jobs:
           if [[ "$HAS_RESUME" == "true" ]]; then
             args+=(--resume-checkpoints "calibration-resume/resume-checkpoints/mutation-checkpoint-$CALIBRATION_ID-${{ matrix.shard }}")
           fi
-          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json
+          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json.tmp
+          uv run --no-sync python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
+          mv mutation-report.json.tmp mutation-report.json
       - name: Retain resumable execution checkpoint
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1113,7 +1118,7 @@ jobs:
 
   calibration-stage-3-batch-1:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-launch-gate]
+    needs: [prepare, calibration-stage-3-observer-ready]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1142,7 +1147,7 @@ jobs:
 
   calibration-stage-3-batch-2:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-2]
+    needs: [prepare, calibration-stage-3-admit-2, calibration-stage-3-observer-live-2]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1171,7 +1176,7 @@ jobs:
 
   calibration-stage-3-batch-3:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-3]
+    needs: [prepare, calibration-stage-3-admit-3, calibration-stage-3-observer-live-3]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1200,7 +1205,7 @@ jobs:
 
   calibration-stage-3-batch-4:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-4]
+    needs: [prepare, calibration-stage-3-admit-4, calibration-stage-3-observer-live-4]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1229,7 +1234,7 @@ jobs:
 
   calibration-stage-3-batch-5:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-5]
+    needs: [prepare, calibration-stage-3-admit-5, calibration-stage-3-observer-live-5]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1258,7 +1263,7 @@ jobs:
 
   calibration-stage-3-batch-6:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-6]
+    needs: [prepare, calibration-stage-3-admit-6, calibration-stage-3-observer-live-6]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1287,7 +1292,7 @@ jobs:
 
   calibration-stage-3-batch-7:
     if: github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
-    needs: [prepare, calibration-stage-3-admit-7]
+    needs: [prepare, calibration-stage-3-admit-7, calibration-stage-3-observer-live-7]
     strategy:
       fail-fast: false
       max-parallel: 32
@@ -1300,12 +1305,55 @@ jobs:
       resume_run_id: ${{ github.event.inputs.resume_run_id }}
       execute: ${{ matrix.execute }}
 
+  calibration-stage-3-observer-ready:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: [prepare, calibration-launch-gate]
+    name: mutation (require stage 3 observer readiness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Require active observer before first admission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+        run: |
+          deadline=$((SECONDS + 300))
+          while (( SECONDS < deadline )); do
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-ready-jobs.json
+            state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-ready-jobs.json)
+            if [[ "$state" == "in_progress" ]] && gh run download "$GITHUB_RUN_ID" --name "mutation-calibration-observer-ready-$GITHUB_RUN_ID" --dir observer-ready 2>/dev/null; then
+              python - <<'PY'
+          import json, os, sys
+          record = json.load(open("observer-ready/observer-readiness.json"))
+          valid = (
+              record.get("schema_version") == "1"
+              and record.get("kind") == "calibration_observer_readiness"
+              and record.get("run_id") == os.environ["GITHUB_RUN_ID"]
+              and record.get("run_attempt") == os.environ["GITHUB_RUN_ATTEMPT"]
+              and record.get("calibration_id") == os.environ["CALIBRATION_ID"]
+              and record.get("stage") == "3"
+              and record.get("ready") is True
+          )
+          sys.exit(0 if valid else 2)
+          PY
+              exit 0
+            fi
+            rm -rf observer-ready
+            [[ "$state" == "completed" || "$state" == "invalid" ]] && break
+            sleep 15
+          done
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
+          exit 2
+
   calibration-monitor:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '3'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
     needs: [prepare, calibration-launch-gate]
     name: mutation (monitor calibration budget)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: ${{ github.event.inputs.calibration_stage == '3' && 335 || 100 }}
     permissions:
       actions: write
       contents: read
@@ -1318,6 +1366,31 @@ jobs:
         with:
           name: mutation-calibration-launch-${{ github.run_id }}
           path: calibration-launch
+      - name: Establish observer readiness
+        if: github.event.inputs.calibration_stage == '3'
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          record = {
+              "schema_version": "1", "kind": "calibration_observer_readiness",
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "calibration_id": os.environ["CALIBRATION_ID"],
+              "stage": "3", "ready": True,
+          }
+          Path("observer-readiness.json").write_text(json.dumps(record, indent=2) + "\n")
+          PY
+      - name: Publish observer readiness
+        if: github.event.inputs.calibration_stage == '3'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-observer-ready-${{ github.run_id }}
+          path: observer-readiness.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Monitor active usage and request bounded cancellation
         id: monitor
         continue-on-error: true
@@ -1328,28 +1401,121 @@ jobs:
           CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
           CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
         run: |
-          deadline=$((SECONDS + 2100))
+          observer_contract=$(python -c 'import json,os; from fettle.staged_preflight import calibration_observer_contract,calibration_stage_3_observer_contract; matrix=json.loads(os.environ["EXPECTED_SHARDS"])["shard"]; stage=os.environ["CALIBRATION_STAGE"]; contract=calibration_stage_3_observer_contract(matrix) if stage=="3" else calibration_observer_contract(len(matrix),{"1":8,"2":16}[stage],expected_shards=matrix); print(json.dumps(contract,separators=(",",":")))')
+          printf '%s\n' "$observer_contract" > calibration-observer-contract.json
+          started=$SECONDS
+          mkdir -p monitor-history admission-accounting
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-monitor.json
-            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python -c 'import json,os,pathlib; from datetime import datetime; from fettle.staged_preflight import account_runner_minutes,evaluate_calibration_budget; usage=account_runner_minutes(pathlib.Path("jobs-monitor.json"),datetime.fromisoformat(os.environ["OBSERVED_AT"].replace("Z","+00:00")),expected_run_id=os.environ["GITHUB_RUN_ID"],expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],job_timeout_minutes=35); launch=json.load(open("calibration-launch/launch-accounting.json")); usage.update({"stage":os.environ["CALIBRATION_STAGE"],"calibration_id":os.environ["CALIBRATION_ID"],"prior_runner_minutes":launch["prior_runner_minutes"]}); usage["estimated_runner_minutes"]=round(usage["estimated_runner_minutes"]+usage["prior_runner_minutes"],2); result=evaluate_calibration_budget(usage,ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),cancellation_reserve=1200); pathlib.Path("calibration-monitor-budget.json").write_text(json.dumps(result,indent=2)+"\n")'
+            if [[ "$CALIBRATION_STAGE" == "3" ]]; then
+              rm -rf admission-accounting/*
+              gh run download "$GITHUB_RUN_ID" --pattern "mutation-calibration-admission-$GITHUB_RUN_ID-*" --dir admission-accounting || true
+            fi
+            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python - <<'PY'
+          import json, os
+          from datetime import datetime
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              account_runner_minutes, evaluate_calibration_budget,
+              reserve_bounded_support_minutes, retain_historical_accounting_floor,
+          )
+          usage = account_runner_minutes(
+              Path("jobs-monitor.json"),
+              datetime.fromisoformat(os.environ["OBSERVED_AT"].replace("Z", "+00:00")),
+              expected_run_id=os.environ["GITHUB_RUN_ID"],
+              expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], job_timeout_minutes=35,
+          )
+          history = sorted(Path("monitor-history").glob("*.json"))
+          admission_floors = sorted(
+              Path("admission-accounting").rglob("calibration-admission-current.json")
+          )
+          for floor in admission_floors:
+              decision = json.loads(floor.with_name("calibration-admission.json").read_text())
+              if (
+                  decision.get("passed") is not True or decision.get("stage") != "3"
+                  or decision.get("calibration_id") != os.environ["CALIBRATION_ID"]
+                  or decision.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]
+                  or decision.get("expected_run_attempt") != os.environ["GITHUB_RUN_ATTEMPT"]
+                  or not isinstance(decision.get("admitted_batches"), int)
+              ):
+                  raise ValueError("stage 3 admission accounting provenance is incompatible")
+          history.extend(admission_floors)
+          usage = retain_historical_accounting_floor(usage, history)
+          launch = json.load(open("calibration-launch/launch-accounting.json"))
+          snapshot = Path("monitor-history") / f'{len(history):04d}.json'
+          snapshot.write_text(json.dumps(usage, indent=2) + "\n")
+          combined = {**usage,
+              "stage": os.environ["CALIBRATION_STAGE"],
+              "calibration_id": os.environ["CALIBRATION_ID"],
+              "prior_runner_minutes": launch["prior_runner_minutes"],
+          }
+          combined["estimated_runner_minutes"] = round(
+              usage["estimated_runner_minutes"] + usage["prior_runner_minutes"], 2,
+          )
+          result = evaluate_calibration_budget(
+              combined, ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),
+              cancellation_reserve=1200,
+          )
+          Path("calibration-monitor-budget.json").write_text(json.dumps(result, indent=2) + "\n")
+          PY
             passed=$(jq -r '.passed' calibration-monitor-budget.json)
-            [[ "$passed" == "false" ]] && break
-            expected=$(jq '.shard | length' <<< "$EXPECTED_SHARDS")
-            terminal=$(jq '[.[].jobs[] | select(.name | startswith("mutation (full shard ")) | select(.status == "completed")] | length' jobs-monitor.json)
-            [[ "$terminal" -eq "$expected" ]] && break
-            [[ "$SECONDS" -ge "$deadline" ]] && exit 2
+            ELAPSED_SECONDS=$((SECONDS - started)) BUDGET_PASSED="$passed" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              calibration_stage_3_admitted_shards,
+              calibration_stage_3_completed_admissions,
+              evaluate_calibration_observer,
+          )
+          pages = json.loads(Path("jobs-monitor.json").read_text())
+          jobs = [job for page in pages for job in page["jobs"]]
+          contract = json.loads(Path("calibration-observer-contract.json").read_text())
+          admitted = (
+              calibration_stage_3_admitted_shards(contract["expected_shards"], jobs)
+              if os.environ["CALIBRATION_STAGE"] == "3" else None
+          )
+          completed_admissions = (
+              calibration_stage_3_completed_admissions(jobs)
+              if os.environ["CALIBRATION_STAGE"] == "3" else 0
+          )
+          final_batch_jobs = [
+              job for job in jobs
+              if str(job.get("name", "")).startswith("calibration-stage-3-batch-7 / ")
+          ]
+          route_complete = (
+              bool(final_batch_jobs)
+              and all(job.get("status") == "completed" for job in final_batch_jobs)
+              if os.environ["CALIBRATION_STAGE"] == "3" else True
+          )
+          result = evaluate_calibration_observer(
+              contract, jobs, elapsed_seconds=int(os.environ["ELAPSED_SECONDS"]),
+              budget_passed=os.environ["BUDGET_PASSED"] == "true",
+              admitted_shards=admitted,
+              completed_admissions=completed_admissions,
+              route_complete=route_complete,
+          )
+          Path("calibration-monitor-lifecycle.json").write_text(json.dumps(result, indent=2) + "\n")
+          PY
+            action=$(jq -r '.action' calibration-monitor-lifecycle.json)
+            [[ "$action" == "complete" ]] && break
+            [[ "$action" == "cancel" ]] && exit 2
             sleep 60
           done
       - name: Retain monitor accounting before cancellation
         id: retain-monitor
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-calibration-monitor-${{ github.run_id }}
           path: |
-            jobs-monitor.json
-            calibration-monitor-budget.json
+             jobs-monitor.json
+             calibration-monitor-budget.json
+             calibration-observer-contract.json
+             calibration-monitor-lifecycle.json
+             monitor-history
+             admission-accounting
           if-no-files-found: error
           retention-days: 90
       - name: Request run cancellation at cutoff
@@ -1366,11 +1532,105 @@ jobs:
             exit 2
           fi
 
+  calibration-stage-3-observer-live-2:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-2
+    name: mutation (require stage 3 observer after admission 1)
+    runs-on: ubuntu-latest
+    permissions: &stage3_observer_liveness_permissions
+      actions: write
+      contents: read
+    steps: &stage3_observer_liveness
+      - name: Require live observer before next batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-live-jobs.json
+          state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-live-jobs.json)
+          if [[ "$state" != "in_progress" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
+            exit 2
+          fi
+
+  calibration-stage-3-observer-watchdog:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-observer-ready
+    name: mutation (watch stage 3 observer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 335
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel if observer is lost before valid completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          terminal_deadline=0
+          while true; do
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-watchdog-jobs.json
+            state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-watchdog-jobs.json)
+            [[ "$state" == "in_progress" ]] && { sleep 60; continue; }
+            if [[ "$state" == "completed" ]]; then
+              (( terminal_deadline == 0 )) && terminal_deadline=$((SECONDS + 300))
+              rm -rf observer-terminal
+              if gh run download "$GITHUB_RUN_ID" --name "mutation-calibration-monitor-$GITHUB_RUN_ID" --dir observer-terminal 2>/dev/null; then
+                if jq -e '.action == "complete" and .passed == true and (.terminal_shards | sort) == (.expected_shards | sort)' observer-terminal/calibration-monitor-lifecycle.json >/dev/null; then
+                  exit 0
+                fi
+              fi
+              (( SECONDS < terminal_deadline )) && { sleep 15; continue; }
+            fi
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
+            exit 2
+          done
+
+  calibration-stage-3-observer-live-3:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-3
+    name: mutation (require stage 3 observer after admission 2)
+    runs-on: ubuntu-latest
+    permissions: *stage3_observer_liveness_permissions
+    steps: *stage3_observer_liveness
+
+  calibration-stage-3-observer-live-4:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-4
+    name: mutation (require stage 3 observer after admission 3)
+    runs-on: ubuntu-latest
+    permissions: *stage3_observer_liveness_permissions
+    steps: *stage3_observer_liveness
+
+  calibration-stage-3-observer-live-5:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-5
+    name: mutation (require stage 3 observer after admission 4)
+    runs-on: ubuntu-latest
+    permissions: *stage3_observer_liveness_permissions
+    steps: *stage3_observer_liveness
+
+  calibration-stage-3-observer-live-6:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-6
+    name: mutation (require stage 3 observer after admission 5)
+    runs-on: ubuntu-latest
+    permissions: *stage3_observer_liveness_permissions
+    steps: *stage3_observer_liveness
+
+  calibration-stage-3-observer-live-7:
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: calibration-stage-3-admit-7
+    name: mutation (require stage 3 observer after admission 6)
+    runs-on: ubuntu-latest
+    permissions: *stage3_observer_liveness_permissions
+    steps: *stage3_observer_liveness
+
   calibration-accounting:
     if: always() && github.event.inputs.mode == 'calibration'
     needs: [prepare, full-shard, calibration-monitor, calibration-stage-3-batch-7]
     name: mutation (calibration accounting)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -1382,6 +1642,11 @@ jobs:
         with:
           pattern: mutation-calibration-admission-${{ github.run_id }}-*
           path: admission-accounting
+      - name: Download terminal observer evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-monitor-${{ github.run_id }}
+          path: terminal-observer
       - name: Collect cumulative job accounting
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1411,10 +1676,38 @@ jobs:
               expected_run_id=os.environ["GITHUB_RUN_ID"],
               expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], job_timeout_minutes=35,
           )
+          lifecycle = json.loads(pathlib.Path("terminal-observer/calibration-monitor-lifecycle.json").read_text())
+          monitor = json.loads(pathlib.Path("terminal-observer/calibration-monitor-budget.json").read_text())
+          if (
+              lifecycle.get("action") != "complete" or lifecycle.get("passed") is not True
+              or sorted(lifecycle.get("terminal_shards", []))
+                 != sorted(lifecycle.get("expected_shards", []))
+              or monitor.get("passed") is not True
+              or monitor.get("stage") != os.environ["CALIBRATION_STAGE"]
+              or monitor.get("calibration_id") != os.environ["CALIBRATION_ID"]
+              or monitor.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])
+              or monitor.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]
+              or monitor.get("expected_run_attempt") != os.environ["GITHUB_RUN_ATTEMPT"]
+          ):
+              raise ValueError("terminal observer evidence is incomplete or incompatible")
           admission_floors = sorted(pathlib.Path("admission-accounting").rglob("calibration-admission-current.json"))
           if os.environ["CALIBRATION_STAGE"] == "3":
-              if not admission_floors:
+              if len(admission_floors) != 6:
                   raise ValueError("stage 3 admission accounting floors are missing")
+              admitted_batches = []
+              for floor in admission_floors:
+                  decision = json.loads(floor.with_name("calibration-admission.json").read_text())
+                  if (
+                      decision.get("passed") is not True or decision.get("stage") != "3"
+                      or decision.get("calibration_id") != os.environ["CALIBRATION_ID"]
+                      or decision.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]
+                      or decision.get("expected_run_attempt") != os.environ["GITHUB_RUN_ATTEMPT"]
+                      or not isinstance(decision.get("admitted_batches"), int)
+                  ):
+                      raise ValueError("stage 3 admission accounting provenance is incompatible")
+                  admitted_batches.append(decision["admitted_batches"])
+              if sorted(admitted_batches) != list(range(1, 7)):
+                  raise ValueError("stage 3 admission accounting sequence is incomplete")
               current = retain_historical_accounting_floor(current, admission_floors)
           records = [current]
           total = current["estimated_runner_minutes"]
@@ -1431,15 +1724,35 @@ jobs:
                       or not sources or sources[-1].get("expected_run_id") != base_run_id
                       or not isinstance(retained.get("charged_runner_minutes"), (int, float))):
                   raise ValueError("prior cumulative accounting is incompatible")
-              total = round(total + retained["charged_runner_minutes"], 2)
+              retained_floor = max(
+                  retained["charged_runner_minutes"],
+                  retained.get("estimated_runner_minutes", retained["charged_runner_minutes"]),
+              )
+              total = round(total + retained_floor, 2)
               records.insert(0, retained)
-          result = evaluate_calibration_budget(
-              {"schema_version": "1", "stage": os.environ["CALIBRATION_STAGE"],
+          cumulative = {"schema_version": "1", "stage": os.environ["CALIBRATION_STAGE"],
                "calibration_id": os.environ.get("CALIBRATION_ID"),
-               "estimated_runner_minutes": total, "included_jobs": current["included_jobs"],
-               "sources": records},
+               "estimated_runner_minutes": max(
+                   total, monitor["estimated_runner_minutes"], monitor["charged_runner_minutes"],
+               ), "included_jobs": current["included_jobs"], "sources": records,
+               "monitor_floor_runner_minutes": max(
+                   monitor["estimated_runner_minutes"], monitor["charged_runner_minutes"],
+               )}
+          cumulative = reserve_bounded_support_minutes(cumulative, {
+              "mutation (calibration accounting)": 15,
+              "mutation (assemble evidence)": 30,
+              "mutation evidence": 10,
+          })
+          result = evaluate_calibration_budget(
+              cumulative,
               ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]), cancellation_reserve=1200,
           )
+          result["observer_evidence"] = {
+              "lifecycle": lifecycle,
+              "budget_sha256": __import__("hashlib").sha256(
+                  pathlib.Path("terminal-observer/calibration-monitor-budget.json").read_bytes()
+              ).hexdigest(),
+          }
           assert result["billing_authority"] is False
           pathlib.Path("calibration-accounting.json").write_text(json.dumps(result, indent=2)+"\n")
           sys.exit(0 if result["passed"] else 2)
@@ -1452,6 +1765,7 @@ jobs:
           path: |
             calibration-accounting.json
             jobs-*.json
+            terminal-observer
           retention-days: 90
           if-no-files-found: error
 
@@ -1460,6 +1774,7 @@ jobs:
     name: mutation (assemble evidence)
     needs: [prepare, full-shard, calibration-stage-3-batch-7, calibration-accounting]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1474,6 +1789,16 @@ jobs:
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
           uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
+      - name: Require successful bounded accounting before publication
+        if: github.event.inputs.mode == 'calibration'
+        env:
+          ACCOUNTING_RESULT: ${{ needs.calibration-accounting.result }}
+        run: test "$ACCOUNTING_RESULT" = success
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event.inputs.mode == 'calibration'
+        with:
+          name: mutation-calibration-accounting-${{ github.run_id }}
+          path: retained-accounting
       - name: Bind authoritative check to exact candidate
         if: github.event.inputs.mode != 'finalize'
         env:
@@ -1567,7 +1892,53 @@ jobs:
           if [[ -d calibration-resume/resume-reports ]]; then
             cp -R calibration-resume/resume-reports/. calibration-shards/resume/
           fi
-          uv run --no-sync python -m fettle.mutation_test --root . --aggregate calibration-shards \
+          uv run --no-sync python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.mutation_test import (
+              build_calibration_representation_inventory,
+              load_mutation_report_candidates,
+              read_calibration_representation_inventory,
+              select_shard_subset_attempts,
+          )
+          from fettle.staged_preflight import WAVES
+          selected = []
+          for stage in ("stage-1", "stage-2"):
+              inventories = sorted(Path("calibration-shards", stage).rglob("representation-inventory.json"))
+              if len(inventories) != 1:
+                  raise ValueError(f"{stage} requires exactly one validated representation inventory")
+              selected.extend(read_calibration_representation_inventory(inventories[0]))
+          candidates, quarantined = load_mutation_report_candidates(Path("calibration-shards"))
+          stage_3_attempts = [
+              report for report in candidates
+              if report.get("shard_index") in WAVES["wave-3"]
+          ]
+          stage_3 = select_shard_subset_attempts(stage_3_attempts, 256, WAVES["wave-3"])
+          selected.extend(stage_3)
+          if sorted(report.get("shard_index") for report in selected) != list(range(256)):
+              raise ValueError("validated calibration representations do not cover 256 shards")
+          output = Path("validated-calibration-reports")
+          output.mkdir()
+          for report in selected:
+              target = output / str(report["shard_index"])
+              target.mkdir()
+              retained = {key: value for key, value in report.items() if not key.startswith("_retained_")}
+              target.joinpath("mutation-report.json").write_text(json.dumps(retained, indent=2) + "\n")
+          copied, copied_quarantine = load_mutation_report_candidates(output)
+          assert not copied_quarantine
+          inventory = build_calibration_representation_inventory(
+              output, copied, list(range(256)), quarantined,
+          )
+          output.joinpath("representation-inventory.json").write_text(
+              json.dumps(inventory, indent=2) + "\n"
+          )
+          readback = read_calibration_representation_inventory(
+              output / "representation-inventory.json"
+          )
+          if len(readback) != 256:
+              raise ValueError("validated calibration representation readback is incomplete")
+          PY
+          uv run --no-sync python -m fettle.mutation_test --root . --aggregate validated-calibration-reports \
             --aggregate-scope mutation-manifests \
             --aggregate-preflight-evidence retained-preflight/mutation-preflight.json \
             --calibration-id "$CALIBRATION_ID" \
@@ -1586,7 +1957,11 @@ jobs:
           from fettle.mutation_test import select_shard_subset_attempts
           from fettle.staged_preflight import WAVES
           expected = WAVES["wave-" + os.environ["CALIBRATION_STAGE"]]
-          reports = [json.loads(path.read_text()) for path in Path("calibration-shards").rglob("mutation-report.json")]
+          from fettle.mutation_test import (
+              build_calibration_representation_inventory,
+              load_mutation_report_candidates,
+          )
+          reports, quarantined = load_mutation_report_candidates(Path("calibration-shards"))
           attempts = [report for report in reports if report.get("shard_index") in expected]
           selected = select_shard_subset_attempts(attempts, 256, expected)
           output = Path("calibration-stage-reports")
@@ -1594,7 +1969,16 @@ jobs:
           for report in selected:
               target = output / str(report["shard_index"])
               target.mkdir()
-              target.joinpath("mutation-report.json").write_text(json.dumps(report, indent=2) + "\n")
+              retained = {key: value for key, value in report.items() if not key.startswith("_retained_")}
+              target.joinpath("mutation-report.json").write_text(json.dumps(retained, indent=2) + "\n")
+          copied, copied_quarantine = load_mutation_report_candidates(output)
+          assert not copied_quarantine
+          inventory = build_calibration_representation_inventory(
+              output, copied, expected, quarantined,
+          )
+          output.joinpath("representation-inventory.json").write_text(
+              json.dumps(inventory, indent=2) + "\n"
+          )
           PY
       - name: Retain cumulative calibration stage
         if: github.event.inputs.mode == 'calibration'
@@ -1620,6 +2004,29 @@ jobs:
         run: >-
           python -c 'import json,os;
           json.dump({"status":"unknown","message":"calibration stage "+os.environ["CALIBRATION_STAGE"]+" retained; all three stages are required","revision":os.environ["CANDIDATE_SHA"],"score":None,"passed":False,"qualification_executed":False},open("mutation-report.json","w"),separators=(",",":"))'
+      - name: Bind successful accounting readback to calibration evidence
+        if: github.event.inputs.mode == 'calibration'
+        env:
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          report_path = Path("mutation-report.json")
+          accounting_path = Path("retained-accounting/calibration-accounting.json")
+          report = json.loads(report_path.read_text())
+          accounting = json.loads(accounting_path.read_text())
+          if (
+              accounting.get("passed") is not True
+              or accounting.get("stage") != os.environ["CALIBRATION_STAGE"]
+              or accounting.get("calibration_id") != os.environ["CALIBRATION_ID"]
+              or not isinstance(accounting.get("observer_evidence"), dict)
+          ):
+              raise ValueError("calibration accounting readback is incompatible")
+          report["accounting_sha256"] = hashlib.sha256(accounting_path.read_bytes()).hexdigest()
+          report_path.write_text(json.dumps(report, indent=2) + "\n")
+          PY
       - name: Download frozen-candidate calibration
         if: github.event.inputs.mode == 'finalize'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1686,15 +2093,23 @@ jobs:
     needs: aggregate
     name: mutation evidence
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-evidence-${{ github.run_id }}
           path: retained-evidence
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.event.inputs.mode == 'calibration'
+        with:
+          name: mutation-calibration-accounting-${{ github.run_id }}
+          path: retained-accounting
       - name: Independently read back authoritative evidence
+        env:
+          MODE: ${{ github.event.inputs.mode }}
         run: |
           python - <<'PY'
-          import hashlib, json, pathlib, sys
+          import hashlib, json, os, pathlib, sys
           report_path = pathlib.Path("retained-evidence/mutation-report.json")
           checksum_path = pathlib.Path("retained-evidence/mutation-report.sha256")
           try:
@@ -1703,6 +2118,14 @@ jobs:
               actual = hashlib.sha256(report_path.read_bytes()).hexdigest()
           except (OSError, UnicodeError, ValueError, json.JSONDecodeError, IndexError):
               sys.exit(2)
-          sys.exit(0 if expected == actual and report.get("status") == "completed"
-                   and report.get("passed") is True else 2)
+          valid = expected == actual and report.get("status") == "completed" and report.get("passed") is True
+          if os.environ["MODE"] == "calibration":
+              accounting_path = pathlib.Path("retained-accounting/calibration-accounting.json")
+              accounting = json.loads(accounting_path.read_text())
+              valid = (
+                  valid and accounting.get("passed") is True
+                  and report.get("accounting_sha256")
+                      == hashlib.sha256(accounting_path.read_bytes()).hexdigest()
+              )
+          sys.exit(0 if valid else 2)
           PY

@@ -890,6 +890,100 @@ def _write_json_atomic(path: Path, value: dict) -> None:
             os.unlink(temporary)
 
 
+def load_mutation_report_candidates(root: Path) -> tuple[list[dict], list[dict]]:
+    """Load canonical reports while retaining zero-byte historical objects as quarantine."""
+    reports = []
+    quarantined = []
+    for path in sorted(root.rglob("mutation-report.json")) if root.exists() else []:
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if not raw:
+            quarantined.append({
+                "path": path.as_posix(), "sha256": digest, "size": 0,
+                "reason": "zero-byte historical report is not a selectable representation",
+            })
+            continue
+        try:
+            report = json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"mutation report {path} is malformed") from exc
+        if not isinstance(report, dict):
+            raise ValueError(f"mutation report {path} is not a JSON object")
+        reports.append({**report, "_retained_path": path.as_posix(), "_retained_sha256": digest})
+    return reports, quarantined
+
+
+def build_calibration_representation_inventory(
+    reports_root: Path,
+    selected: list[dict],
+    expected_shards: list[int],
+    quarantined: list[dict],
+) -> dict:
+    """Bind consolidation to one explicitly selected immutable report per shard."""
+    by_shard = {report.get("shard_index"): report for report in selected}
+    if sorted(by_shard) != sorted(expected_shards) or len(by_shard) != len(selected):
+        raise ValueError("calibration representation inventory is incomplete or duplicated")
+    representations = []
+    for index in sorted(expected_shards):
+        report = by_shard[index]
+        path = report.get("_retained_path")
+        digest = report.get("_retained_sha256")
+        if not isinstance(path, str) or not re.fullmatch(r"[0-9a-f]{64}", str(digest)):
+            raise ValueError("selected report lacks retained representation identity")
+        try:
+            relative_path = Path(path).relative_to(reports_root)
+        except ValueError as exc:
+            raise ValueError("selected report is outside the reports root") from exc
+        representations.append({
+            "shard_index": index, "kind": "report",
+            "path": relative_path.as_posix(), "sha256": digest,
+        })
+    return {
+        "schema_version": "1", "kind": "calibration_representation_inventory",
+        "reports_root": reports_root.as_posix(),
+        "representations": representations,
+        "quarantined": quarantined,
+    }
+
+
+def read_calibration_representation_inventory(path: Path) -> list[dict]:
+    """Read only the digest-bound report representations selected by validation."""
+    inventory = json.loads(path.read_text(encoding="utf-8"))
+    entries = inventory.get("representations") if isinstance(inventory, dict) else None
+    if (
+        inventory.get("schema_version") != "1"
+        or inventory.get("kind") != "calibration_representation_inventory"
+        or not isinstance(entries, list) or not entries
+    ):
+        raise ValueError("calibration representation inventory is malformed")
+    reports_root = path.parent
+    declared_root = inventory.get("reports_root")
+    if isinstance(declared_root, str) and Path(declared_root).name != path.parent.name:
+        reports_root = path.parent
+    reports = []
+    seen = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict) or entry.get("kind") != "report"
+            or not isinstance(entry.get("shard_index"), int)
+            or isinstance(entry.get("shard_index"), bool)
+            or entry["shard_index"] in seen
+            or not isinstance(entry.get("path"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", "")))
+        ):
+            raise ValueError("calibration representation inventory entry is malformed")
+        report_path = reports_root / entry["path"]
+        raw = report_path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+            raise ValueError("calibration representation digest differs")
+        report = json.loads(raw)
+        if not isinstance(report, dict) or report.get("shard_index") != entry["shard_index"]:
+            raise ValueError("calibration representation content differs")
+        reports.append(report)
+        seen.add(entry["shard_index"])
+    return reports
+
+
 def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: set[str]) -> dict:
     """Merge compatible terminal evidence while leaving failed attempts pending."""
     if not checkpoints:

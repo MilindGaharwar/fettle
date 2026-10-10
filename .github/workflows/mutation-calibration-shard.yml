@@ -74,7 +74,9 @@ jobs:
           if [[ -n "${{ inputs.resume_run_id }}" ]]; then
             args+=(--resume-checkpoints "calibration-resume/resume-checkpoints/mutation-checkpoint-$CALIBRATION_ID-${{ inputs.shard }}")
           fi
-          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json
+          uv run --no-sync python -m fettle.mutation_test "${args[@]}" > mutation-report.json.tmp
+          uv run --no-sync python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
+          mv mutation-report.json.tmp mutation-report.json
       - name: Retain resumable execution checkpoint
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

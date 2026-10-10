@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from fettle.mutation_test import aggregate_preflight_shards
+from fettle.mutation_test import (
+    aggregate_preflight_shards,
+    build_calibration_representation_inventory,
+    load_mutation_report_candidates,
+    read_calibration_representation_inventory,
+)
 from scripts.staged_preflight import (
     ARTIFACT_RETENTION_DAYS,
     BUDGET,
@@ -21,6 +26,11 @@ from scripts.staged_preflight import (
     SOURCE_WORKFLOW_REF,
     WAVES,
     WAVE_3_BATCHES,
+    calibration_observer_contract,
+    calibration_stage_3_admitted_shards,
+    calibration_stage_3_completed_admissions,
+    calibration_stage_3_observer_contract,
+    evaluate_calibration_observer,
     calibration_stage_3_batches,
     account_runner_minutes,
     combine_accounting,
@@ -35,6 +45,7 @@ from scripts.staged_preflight import (
     plan_calibration_continuation,
     evaluate_calibration_budget,
     retain_historical_accounting_floor,
+    reserve_bounded_support_minutes,
     validate_wave,
     validate_continuation_topology,
     validate_continuation_artifacts,
@@ -42,6 +53,382 @@ from scripts.staged_preflight import (
     validate_continuation_batch,
     validate_source_handoff,
 )
+
+
+def test_stage_2_observer_contract_covers_two_worker_waves_and_shutdown():
+    contract = calibration_observer_contract(32, 16)
+
+    assert contract["worker_waves"] == 2
+    assert contract["components"] == {
+        "worker_waves_minutes": 70,
+        "scheduling_minutes": 5,
+        "polling_minutes": 1,
+        "publication_minutes": 5,
+        "cancellation_minutes": 5,
+        "reconciliation_minutes": 5,
+        "shutdown_minutes": 9,
+    }
+    assert contract["observer_deadline_seconds"] == 5460
+    assert contract["job_timeout_minutes"] == 100
+    assert contract["completion_guaranteed"] is False
+
+
+@pytest.mark.parametrize(
+    ("shards", "parallelism", "waves"),
+    [(8, 8, 1), (32, 16, 2), (216, 32, 7), (15, 16, 1)],
+)
+def test_observer_contract_characterizes_supported_layouts(shards, parallelism, waves):
+    assert calibration_observer_contract(shards, parallelism)["worker_waves"] == waves
+
+
+def test_observer_controlled_clock_completes_successful_multi_wave_layout():
+    contract = calibration_observer_contract(32, 16)
+    first_wave = [
+        {"name": f"mutation (full shard {index}, advisory)", "status": "completed"}
+        for index in range(16)
+    ]
+    second_wave = [
+        {"name": f"mutation (full shard {index}, advisory)", "status": "in_progress"}
+        for index in range(16, 32)
+    ]
+
+    active = evaluate_calibration_observer(
+        contract, first_wave + second_wave, elapsed_seconds=2_100, budget_passed=True,
+    )
+    terminal = evaluate_calibration_observer(
+        contract,
+        first_wave + [{**job, "status": "completed"} for job in second_wave],
+        elapsed_seconds=4_200,
+        budget_passed=True,
+    )
+
+    assert active["action"] == "continue"
+    assert active["terminal_workers"] == 16
+    assert terminal["action"] == "complete"
+    assert terminal["terminal_workers"] == 32
+    assert terminal["completion_guaranteed"] is False
+
+
+def test_observer_controlled_clock_expires_with_partial_evidence_retained():
+    contract = calibration_observer_contract(32, 16)
+    jobs = [
+        {"name": f"mutation (full shard {index}, advisory)", "status": "completed"}
+        for index in range(17)
+    ]
+
+    result = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=5_460, budget_passed=True,
+    )
+
+    assert result["action"] == "cancel"
+    assert result["passed"] is False
+    assert result["terminal_workers"] == 17
+    assert result["reason"] == (
+        "observer deadline expired before all admitted workers became terminal"
+    )
+
+
+def test_stage_3_observer_covers_seven_batches_and_six_admissions():
+    contract = calibration_stage_3_observer_contract(WAVES["wave-3"])
+
+    assert contract["worker_waves"] == 7
+    assert contract["admission_dependencies"] == 6
+    assert contract["components"]["worker_waves_minutes"] == 245
+    assert contract["components"]["admission_dependencies_minutes"] == 60
+    assert contract["observer_deadline_seconds"] == 326 * 60
+    assert contract["job_timeout_minutes"] == 335
+    assert contract["completion_guaranteed"] is False
+
+
+def test_sparse_stage_3_observer_uses_occupied_batches_and_required_admissions():
+    selected = [WAVE_3_BATCHES[0][0], WAVE_3_BATCHES[3][0], WAVE_3_BATCHES[6][0]]
+
+    contract = calibration_stage_3_observer_contract(selected)
+
+    assert contract["worker_waves"] == 3
+    assert contract["admission_dependencies"] == 6
+    assert contract["observer_deadline_seconds"] == (105 + 60 + 21) * 60
+    assert contract["job_timeout_minutes"] == 195
+
+
+def test_sparse_early_stage_3_route_retains_all_actual_admission_dependencies():
+    selected = [WAVE_3_BATCHES[0][0]]
+
+    contract = calibration_stage_3_observer_contract(selected)
+
+    assert contract["worker_waves"] == 1
+    assert contract["admission_dependencies"] == 6
+    assert contract["observer_deadline_seconds"] == (35 + 60 + 21) * 60
+
+
+def test_stage_3_admission_distinguishes_future_from_missing_terminal_workers():
+    selected = [WAVE_3_BATCHES[0][0], WAVE_3_BATCHES[1][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [{
+        "name": f"calibration-stage-3-batch-1 / mutation (full shard {selected[0]}, advisory)",
+        "status": "completed",
+    }]
+    admitted = calibration_stage_3_admitted_shards(selected, jobs)
+
+    result = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=60, budget_passed=True,
+        admitted_shards=admitted, completed_admissions=0,
+    )
+
+    assert result["missing_terminal_shards"] == []
+    assert result["pending_admission_shards"] == [selected[1]]
+    assert result["action"] == "continue"
+
+
+def test_stage_3_successful_admission_extends_exact_observer_identity_set():
+    selected = [WAVE_3_BATCHES[0][0], WAVE_3_BATCHES[1][0]]
+    jobs = [{
+        "name": "calibration-stage-3-admit-2 / mutation (validate calibration batch 1)",
+        "status": "completed", "conclusion": "success",
+    }]
+
+    assert calibration_stage_3_admitted_shards(selected, jobs) == selected
+    assert calibration_stage_3_completed_admissions(jobs) == 1
+
+
+def test_sparse_stage_3_observer_waits_for_all_actual_admission_handoffs():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    worker = {
+        "name": f"caller / mutation (full shard {selected[0]}, advisory)",
+        "status": "completed",
+    }
+    waiting = evaluate_calibration_observer(
+        contract, [worker], elapsed_seconds=60, budget_passed=True,
+        admitted_shards=selected, completed_admissions=1,
+    )
+    complete = evaluate_calibration_observer(
+        contract, [worker], elapsed_seconds=120, budget_passed=True,
+        admitted_shards=selected, completed_admissions=6, route_complete=True,
+    )
+
+    assert waiting["action"] == "continue"
+    assert waiting["pending_admission_shards"] == []
+    assert complete["action"] == "complete"
+
+
+def test_sparse_stage_3_observer_waits_for_terminal_empty_final_batch_node():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    worker = {
+        "name": f"batch-1 / mutation (full shard {selected[0]}, advisory)",
+        "status": "completed",
+    }
+
+    waiting = evaluate_calibration_observer(
+        contract, [worker], elapsed_seconds=120, budget_passed=True,
+        admitted_shards=selected, completed_admissions=6, route_complete=False,
+    )
+    complete = evaluate_calibration_observer(
+        contract, [worker], elapsed_seconds=180, budget_passed=True,
+        admitted_shards=selected, completed_admissions=6, route_complete=True,
+    )
+
+    assert waiting["action"] == "continue"
+    assert waiting["route_complete"] is False
+    assert complete["action"] == "complete"
+
+
+def test_stage_3_observer_rejects_impossible_admission_count():
+    contract = calibration_stage_3_observer_contract([WAVE_3_BATCHES[0][0]])
+
+    with pytest.raises(ValueError, match="sample is malformed"):
+        evaluate_calibration_observer(
+            contract, [], elapsed_seconds=1, budget_passed=True,
+            completed_admissions=7,
+        )
+
+
+def test_stage_3_controlled_path_stays_observed_through_all_batches():
+    selected = [batch[0] for batch in WAVE_3_BATCHES]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = []
+
+    for batch_number, shard in enumerate(selected, 1):
+        admitted = calibration_stage_3_admitted_shards(selected, jobs)
+        assert shard in admitted
+        active = jobs + [{
+            "name": f"batch-{batch_number} / mutation (full shard {shard}, advisory)",
+            "status": "in_progress",
+        }]
+        sample = evaluate_calibration_observer(
+            contract, active, elapsed_seconds=batch_number * 2_000,
+            budget_passed=True, admitted_shards=admitted,
+            completed_admissions=batch_number - 1,
+        )
+        assert sample["action"] == "continue"
+        jobs.append({
+            "name": f"batch-{batch_number} / mutation (full shard {shard}, advisory)",
+            "status": "completed",
+        })
+        if batch_number < 7:
+            before_admission = evaluate_calibration_observer(
+                contract, jobs, elapsed_seconds=batch_number * 2_000 + 60,
+                budget_passed=True, admitted_shards=admitted,
+                completed_admissions=batch_number - 1,
+            )
+            assert before_admission["action"] == "continue"
+            jobs.append({
+                "name": (
+                    f"admit-{batch_number + 1} / "
+                    f"mutation (validate calibration batch {batch_number})"
+                ),
+                "status": "completed", "conclusion": "success",
+            })
+
+    terminal = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=14_000, budget_passed=True,
+        admitted_shards=calibration_stage_3_admitted_shards(selected, jobs),
+        completed_admissions=calibration_stage_3_completed_admissions(jobs),
+        route_complete=True,
+    )
+    assert terminal["action"] == "complete"
+    assert terminal["terminal_shards"] == sorted(selected)
+
+
+def test_stage_3_active_batch_budget_failure_and_expiry_cancel():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [{
+        "name": f"batch-1 / mutation (full shard {selected[0]}, advisory)",
+        "status": "in_progress",
+    }]
+
+    budget = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=60, budget_passed=False,
+        admitted_shards=selected,
+    )
+    expired = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=contract["observer_deadline_seconds"],
+        budget_passed=True, admitted_shards=selected,
+    )
+
+    assert budget["action"] == "cancel"
+    assert budget["reason"] == "budget cutoff or accounting validation did not pass"
+    assert expired["action"] == "cancel"
+    assert expired["reason"] == "observer deadline expired before all admitted workers became terminal"
+
+
+def test_accounting_includes_observer_admission_support_and_reconciliation_cost(tmp_path):
+    names = [
+        "mutation (monitor calibration budget)",
+        "mutation (validate calibration batch 1)",
+        "mutation (watch stage 3 observer)",
+        "mutation (calibration accounting)",
+    ]
+    jobs = []
+    for job_id, name in enumerate(names, 1):
+        job = _job(job_id)
+        job["name"] = name
+        jobs.append(job)
+    path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
+
+    result = account_runner_minutes(
+        path, expected_run_id="7", expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 8
+    assert [item["name"] for item in result["included_jobs"]] == names
+
+
+def test_terminal_accounting_reserves_unobserved_bounded_support_costs():
+    accounting = {
+        "estimated_runner_minutes": 100.0,
+        "included_jobs": [
+            {"name": "mutation (calibration accounting)", "status": "in_progress", "minutes": 2.0},
+        ],
+    }
+
+    result = reserve_bounded_support_minutes(accounting, {
+        "mutation (calibration accounting)": 15,
+        "mutation (assemble evidence)": 30,
+        "mutation evidence": 10,
+    })
+
+    assert result["bounded_support_reserve_minutes"] == 53
+    assert result["estimated_runner_minutes"] == 153
+    assert [item["reserved_minutes"] for item in result["bounded_support_reservations"]] == [
+        13, 30, 10,
+    ]
+
+
+def test_terminal_accounting_does_not_reserve_completed_support_job_again():
+    accounting = {
+        "estimated_runner_minutes": 4.0,
+        "included_jobs": [
+            {"name": "mutation evidence", "status": "completed", "minutes": 4.0},
+        ],
+    }
+
+    result = reserve_bounded_support_minutes(accounting, {"mutation evidence": 10})
+
+    assert result["bounded_support_reserve_minutes"] == 0
+    assert result["estimated_runner_minutes"] == 4
+
+
+def test_terminal_accounting_rejects_duplicate_bounded_support_identity():
+    accounting = {
+        "estimated_runner_minutes": 1.0,
+        "included_jobs": [
+            {"name": "mutation evidence", "status": "queued", "minutes": 0.0},
+            {"name": "mutation evidence", "status": "queued", "minutes": 0.0},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="duplicated"):
+        reserve_bounded_support_minutes(accounting, {"mutation evidence": 10})
+
+
+@pytest.mark.parametrize("name", [
+    "mutation (full shard 999, advisory)",
+    "mutation (full shard broken, advisory)",
+])
+def test_observer_rejects_unexpected_or_malformed_worker_identity(name):
+    contract = calibration_observer_contract(1, 1, expected_shards=[7])
+
+    with pytest.raises(ValueError, match="unexpected|malformed"):
+        evaluate_calibration_observer(
+            contract, [{"name": name, "status": "in_progress"}],
+            elapsed_seconds=1, budget_passed=True,
+        )
+
+
+def test_observer_rejects_duplicate_and_early_workers_without_matching_support_jobs():
+    selected = [WAVE_3_BATCHES[0][0], WAVE_3_BATCHES[1][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    direct = {"name": f"mutation (full shard {selected[0]}, advisory)", "status": "completed"}
+    prefixed = {"name": f"caller / mutation (full shard {selected[0]}, advisory)", "status": "completed"}
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_calibration_observer(
+            contract, [direct, prefixed, {"name": "mutation evidence", "status": "in_progress"}],
+            elapsed_seconds=1, budget_passed=True, admitted_shards=[selected[0]],
+        )
+    with pytest.raises(ValueError, match="before admission"):
+        evaluate_calibration_observer(
+            contract,
+            [{"name": f"caller / mutation (full shard {selected[1]}, advisory)", "status": "queued"}],
+            elapsed_seconds=1, budget_passed=True, admitted_shards=[selected[0]],
+        )
+
+
+def test_observer_ignores_nonexecuted_sparse_batch_placeholder():
+    contract = calibration_observer_contract(1, 1, expected_shards=[7])
+    placeholder = {
+        "name": "caller / mutation (full shard 0, advisory)",
+        "status": "completed", "conclusion": "skipped", "runner_id": None, "steps": [],
+    }
+
+    result = evaluate_calibration_observer(
+        contract, [placeholder], elapsed_seconds=1, budget_passed=True,
+    )
+
+    assert result["observed_worker_jobs"] == 0
+    assert result["missing_terminal_shards"] == [7]
 
 
 def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
@@ -797,6 +1184,50 @@ def test_accounting_charges_every_completed_executed_job(tmp_path, conclusion):
     assert result["included_jobs"][0]["conclusion"] == conclusion
 
 
+def test_accounting_conservatively_charges_ambiguous_cancelled_job(tmp_path):
+    job = _job(
+        1, conclusion="cancelled", start="2026-10-06T01:00:01Z",
+        end="2026-10-06T01:00:00Z", runner_id=None, steps=[],
+    )
+    job["name"] = "mutation (full shard 0, advisory)"
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = account_runner_minutes(
+        path, expected_run_id="7", expected_run_attempt="1", job_timeout_minutes=35,
+    )
+
+    assert result["estimated_runner_minutes"] == 35
+    assert result["included_jobs"][0]["execution_evidence"] == "ambiguous"
+    assert result["included_jobs"][0]["started_at"] == "2026-10-06T01:00:01Z"
+    assert result["included_jobs"][0]["completed_at"] == "2026-10-06T01:00:00Z"
+    assert result["anomalies"][0]["reason"] == (
+        "cancelled job has no affirmative execution disposition"
+    )
+
+
+def test_accounting_rejects_unbounded_ambiguous_cancelled_job(tmp_path):
+    job = _job(1, conclusion="cancelled", runner_id=None, steps=[])
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="indeterminate"):
+        account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
+
+
+def test_accounting_does_not_apply_worker_timeout_to_ambiguous_support_job(tmp_path):
+    job = _job(
+        1, conclusion="cancelled", start="2026-10-06T01:00:01Z",
+        end="2026-10-06T01:00:00Z", runner_id=None, steps=[],
+    )
+    job["name"] = "mutation evidence"
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="indeterminate"):
+        account_runner_minutes(
+            path, expected_run_id="7", expected_run_attempt="1",
+            job_timeout_minutes=35,
+        )
+
+
 def test_accounting_charges_in_progress_job_to_observation_time(tmp_path):
     job = _job(1, status="in_progress", conclusion=None, end=None)
     path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
@@ -1105,21 +1536,18 @@ def test_sparse_continuation_proves_skipped_shard_never_acquired_runner(tmp_path
     assert result["shards"]["0"]["state"] == "never_started"
 
 
-def test_sparse_continuation_retries_cancelled_no_runner_but_charges_interval(tmp_path):
+def test_sparse_continuation_rejects_cancelled_no_runner_as_indeterminate(tmp_path):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
     job = _job(1, run_id=37, conclusion="cancelled", runner_id=None, steps=[])
     job["name"] = "mutation (full shard 0, advisory)"
     jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
 
-    result = plan_calibration_continuation(
-        _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
-        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
-        "f" * 40, "1",
-    )
-
-    assert result["matrix"] == {"shard": [0]}
-    assert result["shards"]["0"]["state"] == "cancelled_before_execution"
-    assert result["accounting"]["estimated_runner_minutes"] == 2
+    with pytest.raises(ValueError, match="indeterminate provenance"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
 
 
 @pytest.mark.parametrize("fault", ["calibration", "candidate", "manifest", "duplicate"])
@@ -1218,6 +1646,98 @@ def test_sparse_continuation_associates_partial_report_by_exact_checkpoint_ident
     assert result["matrix"] == {"shard": [0]}
     assert result["shards"]["0"]["state"] == "started_partial"
     assert result["shards"]["0"]["pending"] == 1
+
+
+def test_sparse_continuation_accepts_cancelled_checkpoint_and_quarantines_zero_byte_report(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="cancelled")
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {"1" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [{
+            "fingerprint": "2" * 64, "status": "execution_error", "message": "failed",
+        }],
+        "status": "incomplete", "pending": 1,
+    }
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    report_dir = tmp_path / "reports" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    report_dir.joinpath("mutation-report.json").write_bytes(b"")
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    assert result["shards"]["0"]["state"] == "started_partial_checkpoint_only"
+    assert result["shards"]["0"]["pending"] == 1
+    assert result["validated_representations"]["0"]["kind"] == "checkpoint"
+    assert result["quarantined_reports"][0]["size"] == 0
+    assert result["shards"]["0"]["representation"]["sha256"] == _file_sha(
+        checkpoint_dir / "mutation-checkpoint.json"
+    )
+
+
+def test_sparse_continuation_rejects_checkpoint_only_for_uncancelled_producer(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="success")
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        }, "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }))
+
+    with pytest.raises(ValueError, match="successful shard"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out"])
+def test_sparse_continuation_rejects_checkpoint_only_for_non_cancelled_failure(
+    tmp_path, conclusion,
+):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion=conclusion)
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        }, "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }))
+
+    with pytest.raises(ValueError, match="matching retained report"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
 
 
 def test_sparse_continuation_rejects_successful_job_with_partial_evidence(tmp_path):
@@ -1458,6 +1978,67 @@ def test_terminal_reconciliation_preserves_higher_historical_accounting_floor(tm
     assert result["estimated_runner_minutes"] == 3.5
     assert result["historical_floor_applied"] is True
     assert result["historical_accounting"][0]["sha256"] == _file_sha(historical_path)
+
+
+def test_accounting_floor_cannot_regress_from_919_51_to_854_38(tmp_path):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    paths = []
+    for name, amount in (("earlier", 854.38), ("maximum", 919.51)):
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps({**terminal, "estimated_runner_minutes": amount}))
+        paths.append(path)
+
+    result = retain_historical_accounting_floor(terminal, paths)
+
+    assert result["historical_observed_runner_minutes_floor"] == 919.51
+    assert result["estimated_runner_minutes"] == 919.51
+    assert [item["estimated_runner_minutes"] for item in result["historical_accounting"]] == [
+        854.38, 919.51,
+    ]
+
+
+def test_accounting_floor_uses_conservative_charged_amount(tmp_path):
+    terminal = account_runner_minutes(
+        _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(1, run_id=37)]}]),
+        expected_run_id="37", expected_run_attempt="1",
+    )
+    historical_path = tmp_path / "monitor.json"
+    historical_path.write_text(json.dumps({
+        **terminal,
+        "estimated_runner_minutes": 844.51,
+        "charged_runner_minutes": 919.51,
+    }))
+
+    result = retain_historical_accounting_floor(terminal, [historical_path])
+
+    assert result["historical_observed_runner_minutes_floor"] == 919.51
+    assert result["estimated_runner_minutes"] == 919.51
+
+
+def test_explicit_representation_inventory_excludes_quarantine_and_detects_tampering(tmp_path):
+    reports = tmp_path / "reports"
+    valid = reports / "valid" / "mutation-report.json"
+    empty = reports / "historical" / "mutation-report.json"
+    valid.parent.mkdir(parents=True)
+    empty.parent.mkdir(parents=True)
+    valid.write_text(json.dumps({"status": "completed", "shard_index": 0}) + "\n")
+    empty.write_bytes(b"")
+    candidates, quarantine = load_mutation_report_candidates(reports)
+    inventory = build_calibration_representation_inventory(reports, candidates, [0], quarantine)
+    inventory_path = reports / "inventory.json"
+    inventory_path.write_text(json.dumps(inventory))
+
+    selected = read_calibration_representation_inventory(inventory_path)
+
+    assert selected == [{"status": "completed", "shard_index": 0}]
+    assert inventory["representations"][0]["path"] == "valid/mutation-report.json"
+    assert inventory["quarantined"][0]["path"] == empty.as_posix()
+    valid.write_text(json.dumps({"status": "completed", "shard_index": 1}))
+    with pytest.raises(ValueError, match="digest differs"):
+        read_calibration_representation_inventory(inventory_path)
 
 
 def test_terminal_reconciliation_keeps_later_higher_terminal_total(tmp_path):

@@ -105,6 +105,255 @@ WAVE_3_BATCHES = [
     for offset in range(0, len(WAVES["wave-3"]), 32)
 ]
 
+CALIBRATION_OBSERVER_ALLOWANCES = {
+    "scheduling_minutes": 5,
+    "polling_minutes": 1,
+    "publication_minutes": 5,
+    "cancellation_minutes": 5,
+    "reconciliation_minutes": 5,
+    "shutdown_minutes": 9,
+}
+
+_CALIBRATION_JOB = re.compile(
+    r"^(?:[^/]+ / )?mutation \(full shard (\d+), advisory\)$"
+)
+_CALIBRATION_ADMISSION_JOB = re.compile(
+    r"^(?:[^/]+ / )?mutation \(validate calibration batch (\d+)\)$"
+)
+
+
+def calibration_observer_contract(
+    shard_count: int,
+    max_parallel: int,
+    *,
+    worker_timeout_minutes: int = 35,
+    expected_shards: list[int] | None = None,
+    worker_waves: int | None = None,
+    admission_dependencies: int = 0,
+) -> dict:
+    """Derive a finite observer lifecycle without weakening worker or budget limits."""
+    for name, value in (
+        ("shard count", shard_count),
+        ("maximum parallelism", max_parallel),
+        ("worker timeout", worker_timeout_minutes),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"calibration observer {name} must be a positive integer")
+    expected = list(range(shard_count)) if expected_shards is None else expected_shards
+    if (
+        len(expected) != shard_count
+        or len(expected) != len(set(expected))
+        or any(not isinstance(index, int) or isinstance(index, bool) or index < 0 for index in expected)
+    ):
+        raise ValueError("calibration observer expected shards are malformed")
+    waves = math.ceil(shard_count / max_parallel) if worker_waves is None else worker_waves
+    if (
+        not isinstance(waves, int) or isinstance(waves, bool) or waves < 1
+        or not isinstance(admission_dependencies, int) or isinstance(admission_dependencies, bool)
+        or admission_dependencies < 0
+    ):
+        raise ValueError("calibration observer wave or admission topology is malformed")
+    components = {
+        "worker_waves_minutes": waves * worker_timeout_minutes,
+        **CALIBRATION_OBSERVER_ALLOWANCES,
+    }
+    if admission_dependencies:
+        components["admission_dependencies_minutes"] = admission_dependencies * 10
+    observer_minutes = sum(
+        value for name, value in components.items() if name != "shutdown_minutes"
+    )
+    return {
+        "schema_version": "1",
+        "kind": "calibration_observer_contract",
+        "shard_count": shard_count,
+        "expected_shards": expected,
+        "max_parallel": max_parallel,
+        "worker_timeout_minutes": worker_timeout_minutes,
+        "worker_waves": waves,
+        "admission_dependencies": admission_dependencies,
+        "components": components,
+        "observer_deadline_seconds": observer_minutes * 60,
+        "job_timeout_minutes": observer_minutes + components["shutdown_minutes"],
+        "completion_guaranteed": False,
+    }
+
+
+def calibration_stage_3_observer_contract(selected_shards: list[int]) -> dict:
+    """Derive stage-3 containment from occupied fixed batches and required admissions."""
+    if (
+        not selected_shards
+        or len(selected_shards) != len(set(selected_shards))
+        or any(index not in WAVES["wave-3"] for index in selected_shards)
+    ):
+        raise ValueError("stage 3 observer selection is malformed")
+    occupied = [
+        number for number, batch in enumerate(WAVE_3_BATCHES, 1)
+        if any(index in selected_shards for index in batch)
+    ]
+    return calibration_observer_contract(
+        len(selected_shards), 32, expected_shards=selected_shards,
+        worker_waves=len(occupied), admission_dependencies=len(WAVE_3_BATCHES) - 1,
+    )
+
+
+def calibration_stage_3_admitted_shards(
+    selected_shards: list[int], jobs: list[dict],
+) -> list[int]:
+    """Return the exact stage-3 prefix admitted by successful sequential gates."""
+    contract = calibration_stage_3_observer_contract(selected_shards)
+    completed: set[int] = set()
+    for job in jobs:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            continue
+        match = _CALIBRATION_ADMISSION_JOB.fullmatch(job["name"])
+        if match is None:
+            continue
+        batch = int(match.group(1))
+        if batch not in range(1, 7) or batch in completed:
+            raise ValueError("stage 3 admission identity is duplicate or malformed")
+        if job.get("status") == "completed" and job.get("conclusion") == "success":
+            completed.add(batch)
+    prefix = 0
+    while prefix + 1 in completed:
+        prefix += 1
+    if completed != set(range(1, prefix + 1)):
+        raise ValueError("stage 3 admission success is non-contiguous")
+    admitted_batches = min(prefix + 1, 7)
+    admitted = {
+        index for batch in WAVE_3_BATCHES[:admitted_batches] for index in batch
+    }
+    expected = contract["expected_shards"]
+    return [index for index in expected if index in admitted]
+
+
+def calibration_stage_3_completed_admissions(jobs: list[dict]) -> int:
+    """Count the contiguous successful stage-3 admission handoffs."""
+    completed: set[int] = set()
+    for job in jobs:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            continue
+        match = _CALIBRATION_ADMISSION_JOB.fullmatch(job["name"])
+        if match is None:
+            continue
+        batch = int(match.group(1))
+        if batch not in range(1, 7) or batch in completed:
+            raise ValueError("stage 3 admission identity is duplicate or malformed")
+        if job.get("status") == "completed" and job.get("conclusion") == "success":
+            completed.add(batch)
+    prefix = 0
+    while prefix + 1 in completed:
+        prefix += 1
+    if completed != set(range(1, prefix + 1)):
+        raise ValueError("stage 3 admission success is non-contiguous")
+    return prefix
+
+
+def evaluate_calibration_observer(
+    contract: dict,
+    jobs: list[dict],
+    *,
+    elapsed_seconds: int,
+    budget_passed: bool,
+    admitted_shards: list[int] | None = None,
+    completed_admissions: int = 0,
+    route_complete: bool = True,
+) -> dict:
+    """Evaluate one controlled-clock observer sample without claiming completion."""
+    if (
+        contract.get("kind") != "calibration_observer_contract"
+        or not isinstance(contract.get("shard_count"), int)
+        or not isinstance(contract.get("observer_deadline_seconds"), int)
+        or not isinstance(elapsed_seconds, int) or isinstance(elapsed_seconds, bool)
+        or elapsed_seconds < 0
+        or not isinstance(budget_passed, bool)
+        or not isinstance(jobs, list)
+        or not isinstance(completed_admissions, int) or isinstance(completed_admissions, bool)
+        or completed_admissions < 0
+        or completed_admissions > contract.get("admission_dependencies", 0)
+        or not isinstance(route_complete, bool)
+    ):
+        raise ValueError("calibration observer sample is malformed")
+    expected_shards = contract.get("expected_shards")
+    if (
+        not isinstance(expected_shards, list)
+        or len(expected_shards) != contract["shard_count"]
+        or len(expected_shards) != len(set(expected_shards))
+    ):
+        raise ValueError("calibration observer expected identities are malformed")
+    admitted = expected_shards if admitted_shards is None else admitted_shards
+    if (
+        not isinstance(admitted, list) or len(admitted) != len(set(admitted))
+        or any(index not in expected_shards for index in admitted)
+    ):
+        raise ValueError("calibration observer admitted identities are malformed")
+    worker_jobs: dict[int, dict] = {}
+    for job in jobs:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            continue
+        name = job["name"]
+        match = _CALIBRATION_JOB.fullmatch(name)
+        if match is None:
+            if "mutation (full shard " in name:
+                raise ValueError("calibration observer saw a malformed worker identity")
+            continue
+        index = int(match.group(1))
+        if (
+            job.get("status") == "completed" and job.get("conclusion") == "skipped"
+            and not job.get("runner_id") and not job.get("steps")
+        ):
+            continue
+        if index not in expected_shards:
+            raise ValueError("calibration observer saw an unexpected worker identity")
+        if index not in admitted:
+            raise ValueError("calibration observer saw a worker before admission")
+        if index in worker_jobs:
+            raise ValueError("calibration observer saw a duplicate worker identity")
+        worker_jobs[index] = job
+    terminal_shards = sorted(
+        index for index, job in worker_jobs.items() if job.get("status") == "completed"
+    )
+    terminal = len(terminal_shards)
+    expected = len(expected_shards)
+    if not budget_passed:
+        action = "cancel"
+        reason = "budget cutoff or accounting validation did not pass"
+    elif (
+        terminal_shards == sorted(expected_shards)
+        and sorted(admitted) == sorted(expected_shards)
+        and completed_admissions == contract.get("admission_dependencies", 0)
+        and route_complete
+    ):
+        action = "complete"
+        reason = "all admitted workers are terminal"
+    elif elapsed_seconds >= contract["observer_deadline_seconds"]:
+        action = "cancel"
+        reason = "observer deadline expired before all admitted workers became terminal"
+    else:
+        action = "continue"
+        reason = "admitted workers remain non-terminal within the observer deadline"
+    return {
+        "schema_version": "1",
+        "kind": "calibration_observer_sample",
+        "passed": action == "complete",
+        "billing_authority": False,
+        "completion_guaranteed": False,
+        "elapsed_seconds": elapsed_seconds,
+        "expected_workers": expected,
+        "expected_shards": expected_shards,
+        "admitted_shards": admitted,
+        "observed_worker_jobs": len(worker_jobs),
+        "terminal_workers": terminal,
+        "terminal_shards": terminal_shards,
+        "missing_terminal_shards": sorted(set(admitted) - set(terminal_shards)),
+        "pending_admission_shards": sorted(set(expected_shards) - set(admitted)),
+        "completed_admissions": completed_admissions,
+        "expected_admissions": contract.get("admission_dependencies", 0),
+        "route_complete": route_complete,
+        "action": action,
+        "reason": reason,
+        "contract": contract,
+    }
+
 
 def calibration_stage_3_batches(selected_shards: list[int]) -> list[list[int]]:
     """Return the reviewed fixed admission topology for calibration stage 3."""
@@ -1257,6 +1506,39 @@ def account_runner_minutes(
                 })
             continue
         if (
+            status == "completed" and conclusion == "cancelled"
+            and not has_runner_identity and not steps
+        ):
+            bounded_worker = (
+                job_timeout_minutes is not None
+                and _CALIBRATION_JOB.fullmatch(str(job.get("name", ""))) is not None
+            )
+            anomalies.append({
+                "id": job["id"],
+                "reason": "cancelled job has no affirmative execution disposition",
+                "started_at": started,
+                "completed_at": completed,
+                "runner_identity": runner_identity,
+                "steps": steps,
+                "conservative_timeout_minutes": (
+                    job_timeout_minutes if bounded_worker else None
+                ),
+            })
+            if not bounded_worker:
+                raise ValueError(
+                    f"cancelled job {job['id']} execution is indeterminate; raw anomaly preserved"
+                )
+            total += job_timeout_minutes
+            included.append({
+                "id": job["id"], "name": job.get("name"), "status": status,
+                "conclusion": conclusion, "runner_id": runner_id,
+                "started_at": started, "completed_at": completed,
+                "minutes": float(job_timeout_minutes),
+                "basis": "conservative worker-timeout charge for ambiguous cancellation",
+                "execution_evidence": "ambiguous",
+            })
+            continue
+        if (
             status in {"queued", "requested", "pending", "waiting"}
             and conclusion is None and not has_runner_identity and not steps
             and started is None and completed is None
@@ -1436,7 +1718,13 @@ def retain_historical_accounting_floor(accounting: dict, historical_paths: list[
             attempt = report.get("expected_run_attempt")
             if not isinstance(run_id, str) or not isinstance(attempt, str):
                 raise ValueError("historical accounting source identity is malformed")
-            return [(run_id, attempt)], observed
+            charged = report.get("charged_runner_minutes", observed)
+            if (
+                not isinstance(charged, (int, float)) or isinstance(charged, bool)
+                or not math.isfinite(charged) or charged < observed
+            ):
+                raise ValueError("historical accounting effective charge is malformed")
+            return [(run_id, attempt)], charged
         sources = report.get("sources")
         if (
             report.get("kind") != "combined_operational_runner_time_estimate"
@@ -1554,9 +1842,57 @@ def evaluate_calibration_budget(
     }
 
 
-_CALIBRATION_JOB = re.compile(
-    r"^(?:[^/]+ / )?mutation \(full shard (\d+), advisory\)$"
-)
+def reserve_bounded_support_minutes(
+    accounting: dict,
+    support_bounds: dict[str, int],
+) -> dict:
+    """Conservatively reserve unobserved time for explicitly bounded support jobs."""
+    observed = accounting.get("estimated_runner_minutes")
+    included = accounting.get("included_jobs")
+    if (
+        not isinstance(observed, (int, float)) or isinstance(observed, bool) or observed < 0
+        or not isinstance(included, list)
+        or not isinstance(support_bounds, dict) or not support_bounds
+        or any(
+            not isinstance(name, str) or not name
+            or not isinstance(bound, int) or isinstance(bound, bool) or bound < 1
+            for name, bound in support_bounds.items()
+        )
+    ):
+        raise ValueError("bounded support accounting is malformed")
+    by_name: dict[str, dict] = {}
+    for job in included:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            raise ValueError("bounded support included job is malformed")
+        if job["name"] in support_bounds:
+            if job["name"] in by_name:
+                raise ValueError("bounded support job identity is duplicated")
+            by_name[job["name"]] = job
+    reservations = []
+    for name, bound in support_bounds.items():
+        job = by_name.get(name)
+        already_observed = 0.0
+        if job is not None:
+            minutes = job.get("minutes")
+            if not isinstance(minutes, (int, float)) or isinstance(minutes, bool) or minutes < 0:
+                raise ValueError("bounded support observed minutes are malformed")
+            already_observed = (
+                float(bound) if job.get("status") == "completed"
+                else min(float(minutes), float(bound))
+            )
+        reserve = round(max(0.0, bound - already_observed), 2)
+        reservations.append({
+            "name": name, "bound_minutes": bound,
+            "already_observed_minutes": already_observed,
+            "reserved_minutes": reserve,
+        })
+    total = round(sum(item["reserved_minutes"] for item in reservations), 2)
+    return {
+        **accounting,
+        "estimated_runner_minutes": round(observed + total, 2),
+        "bounded_support_reserve_minutes": total,
+        "bounded_support_reservations": reservations,
+    }
 
 
 def plan_calibration_continuation(
@@ -1571,6 +1907,7 @@ def plan_calibration_continuation(
     expected_run_attempt: str,
     expected_revision: str,
     expected_stage: str,
+    historical_accounting_paths: list[Path] | None = None,
 ) -> dict:
     """Select sparse continuation shards from checkpoints plus execution provenance."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id):
@@ -1603,7 +1940,10 @@ def plan_calibration_continuation(
         raise ValueError("calibration manifest topology is malformed")
     accounting = account_runner_minutes(
         jobs_path, expected_run_id=expected_run_id,
-        expected_run_attempt=expected_run_attempt,
+        expected_run_attempt=expected_run_attempt, job_timeout_minutes=35,
+    )
+    accounting = retain_historical_accounting_floor(
+        accounting, historical_accounting_paths or [],
     )
     raw = json.loads(jobs_path.read_text(encoding="utf-8"))
     pages = raw if isinstance(raw, list) else [raw]
@@ -1666,8 +2006,18 @@ def plan_calibration_continuation(
             raise ValueError(f"shard {index} checkpoint is malformed")
         checkpoint_by_shard[index] = (path, checkpoint)
     reports_by_shard: dict[int, list[dict]] = {index: [] for index in selected_shards}
+    quarantined_reports = []
     for path in sorted(reports_dir.rglob("mutation-report.json")) if reports_dir.exists() else []:
-        report = _load_json(path)
+        try:
+            report = _load_json(path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            if path.stat().st_size != 0:
+                raise ValueError(f"report {path} is malformed and cannot be quarantined") from exc
+            quarantined_reports.append({
+                "path": path.as_posix(), "sha256": _file_digest(path), "size": 0,
+                "reason": "zero-byte historical report interrupted before atomic publication",
+            })
+            continue
         index = report.get("shard_index")
         if index is None and report.get("status") == "incomplete":
             identity = report.get("identity")
@@ -1697,10 +2047,6 @@ def plan_calibration_continuation(
             job.get("status") in {"queued", "requested", "pending", "waiting"}
             or job.get("status") == "completed"
             and job.get("conclusion") == "skipped"))
-        cancelled_before_execution = (
-            job.get("status") == "completed" and job.get("conclusion") == "cancelled"
-            and not has_runner and not job.get("steps")
-        )
         if checkpoint_entry is not None:
             path, checkpoint = checkpoint_entry
             if checkpoint["status"] == "completed" and checkpoint["pending"] == 0:
@@ -1729,25 +2075,41 @@ def plan_calibration_continuation(
                         or report.get("environment_digest") != checkpoint["identity"]["environment_digest"]):
                     raise ValueError(f"completed shard {index} report identity differs")
                 state = "completed"
+                representation = {
+                    "kind": "report", "path": next(
+                        path.as_posix() for path in sorted(reports_dir.rglob("mutation-report.json"))
+                        if path.stat().st_size and _load_json(path) == report
+                    ),
+                }
             else:
                 if job.get("status") == "completed" and job.get("conclusion") == "success":
                     raise ValueError(f"successful shard {index} has an incomplete checkpoint")
                 partial_reports = [report for report in reports_by_shard[index]
                                    if report.get("status") == "incomplete"]
-                if len(partial_reports) != 1 or partial_reports[0] != checkpoint:
+                cancelled_producer = (
+                    job.get("status") == "completed"
+                    and job.get("conclusion") == "cancelled"
+                    and (has_runner or job.get("steps"))
+                )
+                checkpoint_only = not partial_reports and cancelled_producer
+                if not checkpoint_only and (
+                    len(partial_reports) != 1 or partial_reports[0] != checkpoint
+                ):
                     raise ValueError(
                         f"partial shard {index} requires exactly one matching retained report"
                     )
-                state = "started_partial"
+                state = "started_partial_checkpoint_only" if checkpoint_only else "started_partial"
+                representation = {"kind": "checkpoint", "path": path.as_posix()}
                 retry.append(index)
             states[str(index)] = {"state": state, "job_id": job["id"],
-                                  "checkpoint": path.as_posix(), "pending": checkpoint["pending"]}
+                                  "checkpoint": path.as_posix(), "pending": checkpoint["pending"],
+                                  "representation": {
+                                      **representation,
+                                      "sha256": _file_digest(Path(representation["path"])),
+                                  }}
             continue
         if never_started:
             state = "never_started"
-            retry.append(index)
-        elif cancelled_before_execution:
-            state = "cancelled_before_execution"
             retry.append(index)
         elif job.get("status") == "completed" and job.get("conclusion") == "success":
             raise ValueError(f"successful shard {index} has no checkpoint")
@@ -1757,10 +2119,19 @@ def plan_calibration_continuation(
         else:
             raise ValueError(f"shard {index} missing checkpoint has indeterminate provenance")
         states[str(index)] = {"state": state, "job_id": job["id"], "checkpoint": None}
+    representations = {
+        str(index): {
+            **states[str(index)].get("representation", {"kind": "pending", "path": None}),
+            "state": states[str(index)]["state"],
+        }
+        for index in selected_shards
+    }
     return {"schema_version": "1", "calibration_id": calibration_id,
             "source_run_id": expected_run_id, "source_run_attempt": expected_run_attempt,
             "matrix": {"shard": retry}, "shard_count": len(retry),
-            "shards": states, "accounting": accounting}
+            "shards": states, "accounting": accounting,
+            "validated_representations": representations,
+            "quarantined_reports": quarantined_reports}
 
 
 def main() -> int:
@@ -1868,6 +2239,9 @@ def main() -> int:
     calibration_continuation.add_argument("--run-id", required=True)
     calibration_continuation.add_argument("--run-attempt", required=True)
     calibration_continuation.add_argument("--revision", required=True)
+    calibration_continuation.add_argument(
+        "--historical-accounting", type=Path, action="append", default=[],
+    )
     calibration_continuation.add_argument("--output", type=Path, required=True)
     calibration_budget.add_argument("--accounting", type=Path, required=True)
     calibration_budget.add_argument("--ceiling", type=int, required=True)
@@ -1935,7 +2309,7 @@ def main() -> int:
             result = plan_calibration_continuation(
                 args.provenance, args.jobs, args.checkpoints, args.reports, manifests,
                 WAVES[f"wave-{args.stage}"], args.calibration_id, args.run_id,
-                args.run_attempt, args.revision, args.stage,
+                args.run_attempt, args.revision, args.stage, args.historical_accounting,
             )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0

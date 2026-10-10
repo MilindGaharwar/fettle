@@ -1278,14 +1278,14 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"' in workflow
     assert "needs: [prepare, calibration-launch-gate]" in workflow
     assert "EXPECTED_SHARDS: ${{ needs.prepare.outputs.execution_matrix }}" in workflow
-    assert '[[ "$terminal" -eq "$expected" ]] && break' in workflow
+    assert '[[ "$action" == "complete" ]] && break' in workflow
     assert "Retain monitor accounting before cancellation" in workflow
     assert "steps.monitor.outcome" in workflow
     assert "steps.retain-monitor.outcome" in workflow
     assert "job_timeout_minutes=35" in workflow
-    assert '"calibration_id":os.environ["CALIBRATION_ID"]' in workflow
+    assert '"calibration_id": os.environ["CALIBRATION_ID"]' in workflow
     assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" in workflow
-    assert 'print(report["charged_runner_minutes"])' in workflow
+    assert "print(max(values))" in workflow
     assert 'retained["charged_runner_minutes"]' in workflow
     assert 'sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"]' in workflow
     assert 'accounting.get("calibration_id")==os.environ["CALIBRATION_ID"]' in workflow
@@ -1300,6 +1300,131 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert "retain_historical_accounting_floor(current, admission_floors)" in accounting
 
 
+def test_calibration_monitor_uses_derived_lifecycle_and_leaves_shutdown_room():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    monitor = workflow["jobs"]["calibration-monitor"]
+    source = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert "335" in monitor["timeout-minutes"]
+    assert "100" in monitor["timeout-minutes"]
+    assert '{"1":8,"2":16}[stage]' in source
+    assert "calibration_observer_contract(len(matrix)" in source
+    assert "calibration_stage_3_observer_contract(matrix)" in source
+    assert "evaluate_calibration_observer" in source
+    assert "calibration-observer-contract.json" in source
+    assert "calibration-monitor-lifecycle.json" in source
+    assert '[[ "$action" == "cancel" ]] && exit 2' in source
+    assert "deadline=$((SECONDS + 2100))" not in source
+
+
+def test_stage_3_observer_readiness_loss_and_cancellation_are_fail_closed():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+    ready = jobs["calibration-stage-3-observer-ready"]
+    monitor = jobs["calibration-monitor"]
+    watchdog = jobs["calibration-stage-3-observer-watchdog"]
+
+    assert ready["needs"] == ["prepare", "calibration-launch-gate"]
+    assert ready["timeout-minutes"] == 10
+    assert jobs["calibration-stage-3-batch-1"]["needs"] == [
+        "prepare", "calibration-stage-3-observer-ready",
+    ]
+    assert any(step.get("name") == "Establish observer readiness" for step in monitor["steps"])
+    assert any(step.get("name") == "Publish observer readiness" for step in monitor["steps"])
+    assert watchdog["needs"] == "calibration-stage-3-observer-ready"
+    assert watchdog["timeout-minutes"] == 335
+    watchdog_script = watchdog["steps"][0]["run"]
+    assert "calibration-monitor-lifecycle.json" in watchdog_script
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true' in watchdog_script
+    for number in range(2, 8):
+        live = jobs[f"calibration-stage-3-observer-live-{number}"]
+        batch = jobs[f"calibration-stage-3-batch-{number}"]
+        assert live["needs"] == f"calibration-stage-3-admit-{number}"
+        assert live["permissions"] == {"actions": "write", "contents": "read"}
+        assert f"calibration-stage-3-observer-live-{number}" in batch["needs"]
+
+
+def test_stage_3_monitor_accounts_support_costs_and_validates_floor_provenance():
+    source = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    monitor = source.split("\n  calibration-monitor:", 1)[1].split(
+        "\n  calibration-stage-3-observer-live-2:", 1,
+    )[0]
+
+    assert 'account_runner_minutes(' in monitor
+    assert 'Path("jobs-monitor.json")' in monitor
+    assert 'retain_historical_accounting_floor(usage, history)' in monitor
+    assert 'decision.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]' in monitor
+    assert 'decision.get("calibration_id") != os.environ["CALIBRATION_ID"]' in monitor
+    assert 'cancellation_reserve=1200' in monitor
+    assert 'monitor-history' in monitor
+    assert 'final_batch_jobs = [' in monitor
+    assert 'route_complete=route_complete' in monitor
+    assert 'steps.retain-monitor.outcome' in monitor
+    assert 'cancel" || true' in monitor
+    workflow = yaml.safe_load(source)
+    retain = next(
+        step for step in workflow["jobs"]["calibration-monitor"]["steps"]
+        if step.get("name") == "Retain monitor accounting before cancellation"
+    )
+    assert retain["timeout-minutes"] == 5
+    cancel = next(
+        step for step in workflow["jobs"]["calibration-monitor"]["steps"]
+        if step.get("name") == "Request run cancellation at cutoff"
+    )
+    assert cancel["if"] == "always()"
+
+
+def test_terminal_accounting_and_aggregate_require_observer_package():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+    accounting = jobs["calibration-accounting"]
+    aggregate = jobs["aggregate"]
+    source = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    accounting_source = source.split("\n  calibration-accounting:", 1)[1].split(
+        "\n  aggregate:", 1,
+    )[0]
+
+    assert accounting["timeout-minutes"] == 15
+    assert aggregate["timeout-minutes"] == 30
+    assert jobs["evidence-readback"]["timeout-minutes"] == 10
+    assert "Download terminal observer evidence" in accounting_source
+    assert 'lifecycle.get("action") != "complete"' in accounting_source
+    assert 'len(admission_floors) != 6' in accounting_source
+    assert 'sorted(admitted_batches) != list(range(1, 7))' in accounting_source
+    assert 'reserve_bounded_support_minutes(cumulative' in accounting_source
+    assert '"mutation (calibration accounting)": 15' in accounting_source
+    assert '"mutation (assemble evidence)": 30' in accounting_source
+    assert '"mutation evidence": 10' in accounting_source
+    assert 'monitor.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]' in accounting_source
+    assert 'monitor.get("expected_run_attempt") != os.environ["GITHUB_RUN_ATTEMPT"]' in accounting_source
+    assert any(
+        step.get("name") == "Require successful bounded accounting before publication"
+        for step in aggregate["steps"]
+    )
+    assert any(
+        step.get("name") == "Bind successful accounting readback to calibration evidence"
+        for step in aggregate["steps"]
+    )
+    assert 'report["accounting_sha256"]' in source
+    assert 'name: mutation-calibration-accounting-${{ github.run_id }}' in source
+    assert 'report.get("accounting_sha256")' in source
+
+
+def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    reusable = (Path(PLUGIN_DIR) / ".github/workflows/mutation-calibration-shard.yml").read_text()
+
+    for source in (workflow, reusable):
+        assert "> mutation-report.json.tmp" in source
+        assert "mv mutation-report.json.tmp mutation-report.json" in source
+    assert "load_mutation_report_candidates" in workflow
+    assert "build_calibration_representation_inventory" in workflow
+    assert "read_calibration_representation_inventory" in workflow
+    assert "--aggregate validated-calibration-reports" in workflow
+    assert "representation-inventory.json" in workflow
+    assert "max(values)" in workflow
+
+
 def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():
     workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
     jobs = workflow["jobs"]
@@ -1307,13 +1432,16 @@ def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():
     batch_names = [f"calibration-stage-3-batch-{number}" for number in range(1, 8)]
     admission_names = [f"calibration-stage-3-admit-{number}" for number in range(2, 8)]
     assert all(name in jobs for name in batch_names + admission_names)
-    assert jobs[batch_names[0]]["needs"] == ["prepare", "calibration-launch-gate"]
+    assert jobs[batch_names[0]]["needs"] == ["prepare", "calibration-stage-3-observer-ready"]
     for number in range(2, 8):
         batch = jobs[f"calibration-stage-3-batch-{number}"]
         admission = jobs[f"calibration-stage-3-admit-{number}"]
         assert admission["if"].startswith("always()")
         assert admission["needs"] == ["prepare", f"calibration-stage-3-batch-{number - 1}"]
-        assert batch["needs"] == ["prepare", f"calibration-stage-3-admit-{number}"]
+        assert batch["needs"] == [
+            "prepare", f"calibration-stage-3-admit-{number}",
+            f"calibration-stage-3-observer-live-{number}",
+        ]
         assert batch["strategy"]["max-parallel"] == 32
     assert "calibration_stage == '3'" in jobs["full-shard"]["if"]
     assert jobs["calibration-stage-3-batch-7"] in [jobs[name] for name in batch_names]
