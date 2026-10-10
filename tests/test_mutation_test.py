@@ -110,7 +110,11 @@ def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(t
     )
 
     with pytest.raises(subprocess.TimeoutExpired):
-        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 0.2)
+        _run_mutmut_process(
+            [sys.executable, "-c", script, "--paths-to-mutate=src/nested.py"],
+            str(tmp_path),
+            0.2,
+        )
 
     assert source.read_text() == "VALUE = 'original'\n"
     assert source.stat().st_mode & 0o777 == initial_mode
@@ -387,6 +391,7 @@ def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path
     source = tmp_path / "src" / "nested.py"
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
 
     class InterruptedProcess:
         pid = 123
@@ -410,9 +415,14 @@ def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path
     monkeypatch.setattr("fettle.mutation_test._terminate_process_tree", lambda child: None)
 
     with pytest.raises(KeyboardInterrupt):
-        _run_mutmut_process(["mutmut", "run", "1"], str(tmp_path), 10)
+        _run_mutmut_process(
+            ["mutmut", "run", "1", "--paths-to-mutate=src/nested.py"],
+            str(tmp_path),
+            10,
+        )
 
     assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
     assert not (tmp_path / "src/nested.py.bak").exists()
 
 
@@ -501,12 +511,18 @@ def test_mutmut_process_rejects_unexplained_mode_drift(tmp_path):
     assert source.stat().st_mode & 0o777 == 0o644
 
 
-def test_mutmut_process_restores_in_scope_mode_only_drift(tmp_path):
+@pytest.mark.parametrize("exit_code", [0, 1, 2])
+def test_mutmut_process_restores_in_scope_mode_after_engine_consumes_backup(tmp_path, exit_code):
     source = tmp_path / "src" / "command.py"
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
     source.chmod(0o755)
-    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+    script = (
+        "from pathlib import Path; import shutil,sys; "
+        "p=Path('src/command.py'); b=Path('src/command.py.bak'); "
+        "b.write_bytes(p.read_bytes()); p.write_text(\"VALUE = 'mutated'\\n\"); "
+        f"shutil.move(b, p); sys.exit({exit_code})"
+    )
 
     result = _run_mutmut_process(
         [
@@ -517,9 +533,10 @@ def test_mutmut_process_restores_in_scope_mode_only_drift(tmp_path):
         10,
     )
 
-    assert result.returncode == 0
+    assert result.returncode == exit_code
     assert source.read_text() == "VALUE = 'original'\n"
     assert source.stat().st_mode & 0o777 == 0o755
+    assert not source.with_name(source.name + ".bak").exists()
 
 
 def test_mutmut_process_rejects_out_of_scope_mode_only_drift(tmp_path):
@@ -2728,9 +2745,59 @@ def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(
     assert result["outcomes"]["a" * 64]["state"] == "killed"
     assert result["outcomes"]["b" * 64]["state"] == "survived"
     assert run.call_args.args[0] == [
-        "mutmut", "run", "42", "--test-time-base", "60", "--runner",
+        "mutmut", "run", "42", "--paths-to-mutate=src/a.py",
+        "--test-time-base", "60", "--runner",
         "python -m pytest -x --assert=plain tests/test_a.py",
     ]
+
+
+def test_pending_execution_rejects_conflicting_regenerated_locator(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {
+        "status": "completed", "corpus": [{
+            **corpus[0], "locator": {"file": "src/other.py", "engine_id": "42"},
+        }],
+    }
+
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+    ):
+        with pytest.raises(ValueError, match="regenerated mutation locator differs"):
+            execute_pending_mutations(
+                str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+                [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+            )
+
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("engine_id", ["", "0", "-1", "abc", "١"])
+def test_pending_execution_rejects_invalid_regenerated_engine_id(tmp_path, engine_id):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {
+        "status": "completed", "corpus": [{
+            **corpus[0], "locator": {"file": "src/a.py", "engine_id": engine_id},
+        }],
+    }
+
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+    ):
+        with pytest.raises(ValueError, match="regenerated mutation engine ID is invalid"):
+            execute_pending_mutations(
+                str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+                [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+            )
+
+    run.assert_not_called()
 
 
 def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tmp_path):

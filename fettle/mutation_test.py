@@ -1025,12 +1025,19 @@ def execute_pending_mutations(
             remaining = timeout - int(time.monotonic() - started)
             if remaining < 1:
                 break
-            engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
+            regenerated = current[record["fingerprint"]]
+            locator = regenerated.get("locator", {})
+            if regenerated.get("file") != file or locator.get("file") != file:
+                raise ValueError(f"regenerated mutation locator differs for {file}")
+            engine_id = locator.get("engine_id")
+            if not isinstance(engine_id, str) or re.fullmatch(r"[1-9][0-9]*", engine_id) is None:
+                raise ValueError(f"regenerated mutation engine ID is invalid for {file}")
             attempt_started = time.monotonic()
             run = None
             try:
                 run = _run([
-                    "mutmut", "run", engine_id, "--test-time-base", str(timeout), "--runner",
+                    "mutmut", "run", engine_id, "--paths-to-mutate=" + file,
+                    "--test-time-base", str(timeout), "--runner",
                     "python -m pytest -x --assert=plain " + shlex.join(mapping[file]),
                 ], root, remaining)
                 if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
