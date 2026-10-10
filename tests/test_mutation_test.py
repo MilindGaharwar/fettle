@@ -2670,6 +2670,27 @@ def test_checkpoint_merge_is_idempotent_and_pending_selects_only_unfinished():
     assert len(merged["attempts"]) == 2
 
 
+def test_checkpoint_merge_preserves_execution_error_after_later_terminal_outcome():
+    fingerprint = "a" * 64
+    failed = _checkpoint(attempts=[{
+        "fingerprint": fingerprint, "status": "execution_error",
+        "message": "runner exited", "stdout": "partial", "stderr": "",
+    }])
+    completed = _checkpoint(
+        outcomes={fingerprint: {"state": "killed", "duration_ms": 1}},
+        attempts=[{"fingerprint": fingerprint, "status": "completed"}],
+    )
+
+    merged = merge_mutation_checkpoints([failed, completed], {fingerprint})
+
+    assert merged["status"] == "completed"
+    assert merged["pending"] == 0
+    assert merged["outcomes"] == {fingerprint: {"state": "killed", "duration_ms": 1}}
+    assert [attempt["status"] for attempt in merged["attempts"]] == [
+        "execution_error", "completed",
+    ]
+
+
 @pytest.mark.parametrize(
     "checkpoints,message",
     [

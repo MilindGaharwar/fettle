@@ -1122,7 +1122,7 @@ def test_sparse_continuation_retries_cancelled_no_runner_but_charges_interval(tm
     assert result["accounting"]["estimated_runner_minutes"] == 2
 
 
-@pytest.mark.parametrize("fault", ["calibration", "manifest", "duplicate"])
+@pytest.mark.parametrize("fault", ["calibration", "candidate", "manifest", "duplicate"])
 def test_sparse_continuation_rejects_incompatible_or_conflicting_checkpoints(tmp_path, fault):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
     jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [
@@ -1134,7 +1134,8 @@ def test_sparse_continuation_rejects_incompatible_or_conflicting_checkpoints(tmp
     payload = {
         "schema_version": "1", "calibration_id": "other" if fault == "calibration" else "calibration-a",
         "identity": {
-            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "revision": ("0" if fault == "candidate" else "f") * 40,
+            "preflight_digest": "e" * 64,
             "manifest_digest": "b" * 64 if fault == "manifest" else "a" * 64,
             "corpus_digest": "d" * 64, "environment_digest": "c" * 64,
         },
@@ -1182,6 +1183,121 @@ def test_sparse_continuation_rejects_conflicting_shared_checkpoint_identity(tmp_
         plan_calibration_continuation(
             _calibration_run_file(tmp_path), jobs_path, checkpoints, tmp_path / "reports",
             manifests, [0, 1], "calibration-a", "37", "1", "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_associates_partial_report_by_exact_checkpoint_identity(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="failure")
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {"1" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [{"fingerprint": "2" * 64, "status": "execution_error"}],
+        "status": "incomplete", "pending": 1,
+    }
+    checkpoint_dir = tmp_path / "checkpoints" / "downloaded-artifact"
+    report_dir = tmp_path / "reports" / "downloaded-artifact"
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    report_dir.joinpath("mutation-report.json").write_text(json.dumps(checkpoint))
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    assert result["shards"]["0"]["state"] == "started_partial"
+    assert result["shards"]["0"]["pending"] == 1
+
+
+def test_sparse_continuation_rejects_successful_job_with_partial_evidence(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37)
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    report_dir = tmp_path / "reports" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    report_dir.joinpath("mutation-report.json").write_text(json.dumps(checkpoint))
+
+    with pytest.raises(ValueError, match="successful shard 0 has an incomplete checkpoint"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+@pytest.mark.parametrize(
+    "fault", [
+        "missing", "contradictory", "duplicate", "forged-index", "empty-partial",
+        "preflight", "environment", "corpus",
+    ],
+)
+def test_sparse_continuation_rejects_unbound_partial_report(tmp_path, fault):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="failure")
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    report_dir = tmp_path / "reports" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    report = json.loads(json.dumps(checkpoint))
+    if fault == "missing":
+        report.pop("identity")
+    elif fault == "contradictory":
+        report["pending"] = 2
+    elif fault == "forged-index":
+        report["shard_index"] = 0
+    elif fault == "empty-partial":
+        report["pending"] = 0
+        checkpoint["pending"] = 0
+        checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    elif fault in {"preflight", "environment", "corpus"}:
+        report["identity"][f"{fault}_digest"] = "0" * 64
+    report_dir.joinpath("mutation-report.json").write_text(json.dumps(report))
+    if fault == "duplicate":
+        duplicate = tmp_path / "reports" / "second-artifact"
+        duplicate.mkdir()
+        duplicate.joinpath("mutation-report.json").write_text(json.dumps(checkpoint))
+
+    with pytest.raises(ValueError):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
         )
 
 

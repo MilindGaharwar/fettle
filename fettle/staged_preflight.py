@@ -1642,6 +1642,8 @@ def plan_calibration_continuation(
         compatible_identity = (
             identity["revision"], identity["preflight_digest"], identity["environment_digest"],
         )
+        if identity["revision"] != expected_revision:
+            raise ValueError(f"checkpoint {path} revision differs from the candidate")
         if shared_identity is not None and compatible_identity != shared_identity:
             raise ValueError("calibration checkpoints have conflicting shared identity")
         shared_identity = compatible_identity
@@ -1659,13 +1661,27 @@ def plan_calibration_continuation(
                 or not isinstance(checkpoint.get("pending"), int)
                 or isinstance(checkpoint.get("pending"), bool) or checkpoint["pending"] < 0
                 or not isinstance(checkpoint.get("outcomes"), dict)
-                or not isinstance(checkpoint.get("attempts"), list)):
+                or not isinstance(checkpoint.get("attempts"), list)
+                or (checkpoint["status"] == "completed") != (checkpoint["pending"] == 0)):
             raise ValueError(f"shard {index} checkpoint is malformed")
         checkpoint_by_shard[index] = (path, checkpoint)
     reports_by_shard: dict[int, list[dict]] = {index: [] for index in selected_shards}
     for path in sorted(reports_dir.rglob("mutation-report.json")) if reports_dir.exists() else []:
         report = _load_json(path)
         index = report.get("shard_index")
+        if index is None and report.get("status") == "incomplete":
+            identity = report.get("identity")
+            matches = [
+                shard for shard, (_, checkpoint) in checkpoint_by_shard.items()
+                if isinstance(identity, dict)
+                and identity.get("manifest_digest") == manifest_by_shard[shard]["digest"]
+                and report == checkpoint
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"partial report {path} does not match exactly one retained checkpoint"
+                )
+            index = matches[0]
         if index not in reports_by_shard:
             raise ValueError(f"report {path} is outside the selected calibration stage")
         reports_by_shard[index].append(report)
@@ -1688,6 +1704,8 @@ def plan_calibration_continuation(
         if checkpoint_entry is not None:
             path, checkpoint = checkpoint_entry
             if checkpoint["status"] == "completed" and checkpoint["pending"] == 0:
+                if any(report.get("status") != "completed" for report in reports_by_shard[index]):
+                    raise ValueError(f"completed shard {index} has contradictory retained reports")
                 completed_reports = [report for report in reports_by_shard[index]
                                      if report.get("status") == "completed"]
                 if len(completed_reports) > 1:
@@ -1712,6 +1730,14 @@ def plan_calibration_continuation(
                     raise ValueError(f"completed shard {index} report identity differs")
                 state = "completed"
             else:
+                if job.get("status") == "completed" and job.get("conclusion") == "success":
+                    raise ValueError(f"successful shard {index} has an incomplete checkpoint")
+                partial_reports = [report for report in reports_by_shard[index]
+                                   if report.get("status") == "incomplete"]
+                if len(partial_reports) != 1 or partial_reports[0] != checkpoint:
+                    raise ValueError(
+                        f"partial shard {index} requires exactly one matching retained report"
+                    )
                 state = "started_partial"
                 retry.append(index)
             states[str(index)] = {"state": state, "job_id": job["id"],
