@@ -431,10 +431,18 @@ def test_mutmut_process_sigterm_restores_source(tmp_path):
     source = tmp_path / "src" / "nested.py"
     source.parent.mkdir()
     source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    original_mode = source.stat().st_mode & 0o777
+    unrelated_backup = tmp_path / "src/user-notes.py.bak"
+    unrelated_backup.write_text("user backup\n")
+    unrelated_file = tmp_path / "notes.txt"
+    unrelated_file.write_text("leave me alone\n")
     child = (
-        "from pathlib import Path; import time; "
+        "from pathlib import Path; import os,time; "
         "p=Path('src/nested.py'); Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
-        "p.write_text(\"VALUE = 'mutated'\\n\"); time.sleep(30)"
+        "p.write_text(\"VALUE = 'mutated'\\n\"); p.chmod(0o600); "
+        "ready=Path('fixture-ready.tmp'); ready.write_text(str(os.getpid())); "
+        "os.replace(ready, 'fixture-ready'); time.sleep(30)"
     )
     wrapper = (
         "import sys; from fettle.mutation_test import _run_mutmut_process; "
@@ -447,11 +455,17 @@ def test_mutmut_process_sigterm_restores_source(tmp_path):
     )
     try:
         deadline = __import__("time").monotonic() + 5
-        while not source.with_name(source.name + ".bak").exists():
+        ready = tmp_path / "fixture-ready"
+        while not ready.exists():
             assert process.poll() is None
             if __import__("time").monotonic() >= deadline:
                 pytest.fail("mutation child did not apply its fixture mutation")
             __import__("time").sleep(0.01)
+        child_pid = int(ready.read_text())
+        ready.unlink()
+        assert source.read_text() == "VALUE = 'mutated'\n"
+        assert source.stat().st_mode & 0o777 == 0o600
+        assert source.with_name(source.name + ".bak").read_text() == "VALUE = 'original'\n"
         process.terminate()
         process.communicate(timeout=10)
     finally:
@@ -461,7 +475,12 @@ def test_mutmut_process_sigterm_restores_source(tmp_path):
 
     assert process.returncode != 0
     assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == original_mode
     assert not (tmp_path / "src/nested.py.bak").exists()
+    with pytest.raises(ProcessLookupError):
+        os.killpg(child_pid, 0)
+    assert unrelated_backup.read_text() == "user backup\n"
+    assert unrelated_file.read_text() == "leave me alone\n"
 
 
 def test_mutmut_process_rejects_unexplained_source_drift_and_residue(tmp_path):
