@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "milestone": "audit-hardening",
+  "revision": "integration-candidate-2026-10-05",
+  "observations": {
+    "ah00": "confirmed for the current development candidate: isolated Python 3.12.13, Git/disposable init, complete dependencies/build tools, focused baseline tests, and TLS-enabled all-source scan pass",
+    "ah01": "confirmed locally: 165 focused tests pass; a real clean scan exits 0 and a fresh environment without either analyzer returns structured tool_error with exit 2",
+    "ah02": "confirmed locally: 21 focused tests pass; empty scope exits 2, while a clean enforced scan exits 0 and emits findings metadata plus SARIF",
+    "ah03": "confirmed locally: 293 focused tests and the live config-error block/recovery/trace fixture pass; durable run-05 executed seven partitions once each and a separate read-only verifier confirmed all 299 canonical fingerprints, 269 killed, 30 survived, zero indeterminate outcomes, exact equivalence-set reconciliation, source restoration, and no mutation-cache residue",
+    "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
+    "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
+    "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
+    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, and aggregation-only recovery 37560100974 accepted an exact 256-report preflight for candidate 0fc41fd with 45,432 canonical details and zero collisions. Source runs 37464324954, 37476889333, and 37550308775 retain their failed verdicts. Preflight acceptance does not satisfy mutation qualification: exact-candidate calibration remains unexecuted and unauthorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+  },
+  "dispatcher_baseline": {
+    "role": "diagnostic baseline, not final qualification",
+    "root": "external://local/audit-hardening/dispatcher-qualification",
+    "aggregate_sha256": "1ea08a3e8f2b5d30add7226739c899b0c463868105e850a8b4a96130984a33db",
+    "terminal_sha256": "ac7e9b25911dd04536d6dd04a3d1b8a3d90daa7c92ca208b4c81901663808e18",
+    "candidate_source_sha256": "4a44ac7b53601c944a283c6aa1fd64bb3cfcfbd69a927a500da279274663bf84",
+    "candidate_test_sha256": "6db84f5fcde134956c7cffe325a7b5a5a62f42b0659a1b8de3170cd0d25ce1a1",
+    "partitions": 40,
+    "killed": 91,
+    "survived": 208,
+    "timeout": 0,
+    "suspicious": 0,
+    "untested": 0,
+    "skipped": 0
+  },
+  "dispatcher_remediation": {
+    "role": "developmental narrow replay, not final qualification",
+    "root": "external://local/audit-hardening/dispatcher-remediation",
+    "ledger_sha256": "09b760cef4006b811ae46e1d6bb73055e70adb7454abb5df52c0a3ac5f4254c4",
+    "supported_python": "3.12.13",
+    "actionable_test_gaps": 178,
+    "unresolved": 0,
+    "demonstrated_production_defects": 0,
+    "equivalence_candidates": 30,
+    "engine_artifacts": 0,
+    "production_source_changed": false
+  },
+  "ah00_supported_environment": {
+    "role": "current-candidate local acceptance evidence, not final qualification",
+    "root": "external://local/audit-hardening/dispatcher-remediation",
+    "environment_sha256": "836a06e0881033ced7dd461e73fbca0f8e69abd4202420eb304e3f392d09ae9c",
+    "python": "3.12.13",
+    "platform": "Darwin-arm64",
+    "mutmut": "2.5.1",
+    "focused_tests": "497 passed",
+    "pip_check": "pass",
+    "build": "1.6.1",
+    "fettle_check_all": "pass with zero tool errors",
+    "credited_fingerprints_revalidated": 178,
+    "reviewed_equivalence_fingerprints": 30,
+    "equivalence_review_sha256": "964c1bb677aa4d3486eb4cf4fbb96621c18f252c639078da302906c3a802a1db",
+    "python_314_evidence": "retained under original identity and not relabeled as supported-runtime evidence"
+  },
+  "current_candidate_acceptance": {
+    "root": ".",
+    "evidence_root": "external://local/audit-hardening/candidate-acceptance",
+    "candidate_identity_sha256": "8b914da742cfdbf0ce4332d5264e9ffff4054cc80e0e7bb1621117c0dc170960",
+    "evidence_index_sha256": "aa2e7be6f71759556bba76965b2f51c07d17ac311911e4886b34b2c27303c0e0",
+    "live_summary_sha256": "6e4f82db60603862962ed633afbcd0ef6cd658b17e5ca57464fb9a344a12e228",
+    "ah03_live_summary_sha256": "cebf1251b8637aa16c552375b8c1f294fd9eabdcb1d50c2201973f3098885684",
+    "ah05_summary_sha256": "d46b616a158027ab9b7b610969828d608afab60cdb138c92b9cfbd1117f74c1d",
+    "focused_tests": {
+      "ah01": "165 passed",
+      "ah02": "21 passed",
+      "ah03": "293 passed",
+      "ah04": "59 passed",
+      "ah05": "21 passed",
+      "ah06": "339 passed, 20 skipped"
+    },
+    "full_tests": "4299 passed, 20 skipped",
+    "ruff": "pass",
+    "fettle_all": "pass; 195 files; zero findings and tool errors",
+    "fettle_changed": "pass; 11 files; zero findings and tool errors",
+    "wheel_sha256": "74b15c92f4b39b5dcc4f91a9ea64734ec402e99ddb9d9c4f37015d250d6d189d",
+    "sdist_sha256": "90f118b5e5e229367fb4d5142ada670b6bba990ed6397e609f880ca64d50dd65"
+  },
+  "ah03_run_05_qualification": {
+    "role": "durable held-out AH03 qualification with separate read-only artifact verification",
+    "external_root": "external://local/audit-hardening/run-05",
+    "external_verification_root": "external://local/audit-hardening/run-05-verification",
+    "revision": "4522a564791bce326ca4f340f7007f09e988b8e1",
+    "candidate_identity_sha256": "e3f3ee0bfc72545367897cd06c801116a70ad0e34106a147d217cea9f88346b1",
+    "execution_plan_sha256": "72e8e317f353d1e0c5d2d5e7ee062610e54ab58fbef4dcef84fe02b629265230",
+    "harness_sha256": "f44075f6153cf545e269bea29b770ae74ac4208d70e4402fb58a49b4d03e2d12",
+    "cache_lifecycle_sha256": "a733d24fd6f9432b681fe9c8382af7b1a74b4e905f2e56180e31250880432da4",
+    "partitions": 7,
+    "partition_fingerprints": [
+      42,
+      49,
+      54,
+      48,
+      45,
+      41,
+      20
+    ],
+    "canonical_fingerprints": 299,
+    "killed": 269,
+    "survived": 30,
+    "timeout": 0,
+    "suspicious": 0,
+    "untested": 0,
+    "skipped": 0,
+    "score": 90.0,
+    "equivalence_exact_match": true,
+    "source_restored": true,
+    "working_cache_residue": [],
+    "raw_package_file_count": 73,
+    "raw_package_total_bytes": 1363689,
+    "raw_package_index_sha256": "e40174d4e517623076a2b404ee3a8759a421e545fadcc8d14d1d906f5fc16db8",
+    "execution_files_listing_sha256": "0ab3a41ec1b2eef2f62815af73b617e74e10da957c49a1ba0fd7d9a7ebcc4189",
+    "read_only_verifier_sha256": "6f0cc037f9c8ed68bae32d369f9fdd67d809ae94e7c5d5ab59409217ee424ecf",
+    "verification_report_sha256": "863a5f85f9ffc7f418d01d1ca8b67da328d6559e8fa912db21cef2c5a6c280f7",
+    "verification_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "verification_exit": 0,
+    "external_verification_index_sha256": "dda3d4696e1833c5b0211b877eadf1d78f559c5192e8d15536a9c6bb859edc2a",
+    "equivalence_review_sha256": "964c1bb677aa4d3486eb4cf4fbb96621c18f252c639078da302906c3a802a1db",
+    "limitation": "The raw package and final verifier are durable local external artifacts, not yet available through an approved repository-portable immutable evidence channel."
+  },
+  "ah03_independent_automated_review": {
+    "reviewer": "OpenCode independent AI review agent",
+    "session": "ses_ef5f3739dffejfe55SkFud6wM8",
+    "review_sha256": "4049a3d5876da52671f3259be2e61d7d8483e39d8b9e7b0c74c882000bc4b291",
+    "dispatcher_defects": 0,
+    "limitations": [
+      "This is automated review, not human independence.",
+      "The final aggregate verifier is external to the immutable run-05 package but is included as a separate attestation in the private composite archive.",
+      "The frozen candidate contains broader Milestone A changes and two pre-existing executable-mode changes that require acceptance review."
+    ]
+  },
+  "ah07_finite_checklist": [
+    {
+      "item": "Portable immutable evidence channel",
+      "status": "blocked",
+      "required_evidence": "Repository-relative digest-bound index resolving the durable run-05 raw package, verifier output, and independent review without embedding workstation paths or copying bulky caches into Git",
+      "responsible_reviewer_or_environment": "Repository maintainer and approved immutable artifact store",
+      "remaining": "Approve a durable immutable store and replace the unresolved private-local run-05 archive URL, SHA-256, and byte count in docs/completion/evidence/external/audit-hardening/run-05-locator.json; retain its existing digest-bound content index, verifier output, and independent-review attestation. No upload or relocation is authorized yet."
+    },
+    {
+      "item": "Independent acceptance review",
+      "status": "confirmed",
+      "required_evidence": "Independent automated acceptance in a separate isolated session, with direct artifact inspection, executed checks, criterion verdicts, evidence references, findings, and limitations",
+      "responsible_reviewer_or_environment": "Independent automated reviewer that did not implement the integration changes",
+      "remaining": "None. The owner-authorized remediation-head review and post-repair automated addendum satisfy the replacement for the unavailable human reviewer. Do not infer human acceptance or usability validation."
+    },
+    {
+      "item": "Live host verification",
+      "status": "blocked",
+      "required_evidence": "Installed-candidate registration and safe real-session transport probes on every available and authenticated agent host; unavailable hosts remain explicit blocked inventory rows with exact recovery actions",
+      "responsible_reviewer_or_environment": "Operators with access to the available Claude Code and OpenCode installations; Codex CLI and Gemini CLI remain blocked unless they become available and authenticated before the evidence boundary",
+      "remaining": "Authorize and retain the defined harmless corrupt-policy deny and repaired-policy allow probes on available authenticated hosts for the final candidate. Current read-only inventory finds Claude Code 2.1.234 and OpenCode 2.0.20; Codex and Gemini are absent from PATH. Do not infer unavailable-host success or place credentials in repository evidence."
+    },
+    {
+      "item": "Final-candidate CI and mutation qualification",
+      "status": "blocked",
+      "required_evidence": "Fresh preflight and authoritative calibration bound to the future frozen final executable SHA, exact CPython 3.12.13, fresh manifests and corpus, hash-locked dependencies, unchanged policy, failure-path behavior, retained logs, terminal accounting, source restoration, and independent readback; exact-head required CI must also pass",
+      "responsible_reviewer_or_environment": "Repository CI environment and authorized maintainer",
+      "remaining": "Approve and implement the bounded final-candidate repair described in docs/exact-candidate-calibration-proposal.md, including the Node-24-native setup-uv pin and Windows portability correction; freeze the resulting SHA; obtain separate fresh-preflight and recalculated calibration authorization; then satisfy CI required and mutation evidence on the exact PR head. Recovery run 37560100974 remains historical evidence for 0fc41fd only."
+    }
+  ],
+  "mutation_preflight_incident": {
+    "run_id": 37438948512,
+    "candidate": "8c865a18a4a187ad782dc4db856e2cff23199253",
+    "status": "cancelled; diagnostic-only; permanently non-pass",
+    "archive_sha256": "8de38e2b26f7b861ecce29ce4847a9450301070d6ad1d750c8f81432f0fe55a7",
+    "job_counts": {"success": 9, "failure": 22, "cancelled": 228, "skipped": 1},
+    "shard_reports": {"completed": 13, "tool_error": 29, "malformed": 5, "missing": 209},
+    "job_shard_ledger_sha256": "6afdd188272f34c78834ace1cb90b10fcea2155c28c47b4f1a10085c48180f3b",
+    "earliest_failure_shards": [8, 27],
+    "root_cause": "mutmut 2.5.1 restores exact source bytes from a newly created backup but loses executable mode; the backup is consumed before Fettle verifies the whole source tree",
+    "repair_review_session": "ses_eef5d5ca9ffe0UE3pkRaG8dzTC",
+    "local_repair_evidence": "4368 passed, 20 skipped; exact shard 27 generated and canonicalized 61 details with zero collisions and restored exact bytes/mode",
+    "remote_canary": {
+      "run_id": 37448719286,
+      "repair_candidate": "bdae9225185b9d7497eadd1d2b853d1fa67f5187",
+      "diagnostic_shard": 27,
+      "diagnostic_result": "completed; passed; generated=61; canonicalized=61; collisions=0",
+      "authoritative_result": "unknown; passed=false; qualification_executed=false; job exit 2",
+      "diagnostic_report_sha256": "72fdbae3694a486413a8bc2dcdb19afa1dd2c69269db8b1d70ae130f6327103e",
+      "authoritative_report_sha256": "01403d8d067bd420f2ae274f45410fa99f32b17cabdb7008a402b1965fa27844",
+      "manifest_sha256": "8fb53a3bc07f2bf61c9b8ccf227c88cae6e0d70bd8764809c29308db1e9ba5f1",
+      "retained_root": "external://local/audit-hardening/candidate-bdae922/canary-37448719286",
+      "remote_expiry": "2027-01-04",
+      "qualification_effect": "none; diagnostic only"
+    },
+    "staged_preflight": {
+      "run_id": 37464324954,
+      "run_attempt": 1,
+      "candidate": "0fc41fdfee13e09f4bda3dc5eee177030882aa36",
+      "orchestration": "891562ba4909b16e6252a0eb7e8674393f43eba0",
+      "status": "failed closed after accepted wave 1; permanently non-pass",
+      "wave_1": {
+        "shards": [8, 27, 28, 37, 48, 50, 51, 53],
+        "reports": 8,
+        "generated": 629,
+        "canonicalized": 629,
+        "collisions": 0,
+        "validation_sha256": "42d41dc932b33506b7b8e4d2d2d597b40192285aac2e76fc9aa9891d4bccaec4"
+      },
+      "stop_reason": "GitHub job metadata contained skipped jobs whose completed_at preceded started_at by one second; budget evidence was contradictory and therefore non-pass",
+      "diagnostic_non_skipped_runner_minutes": 11.97,
+      "wave_2_executed": false,
+      "wave_3_executed": false,
+      "qualification_effect": "none; incomplete preflight",
+      "plan_sha256": "1e712595d7c6adccbd17aa284eaf4821afda82c9b61798022eeb6ea861190294",
+      "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-37464324954",
+      "retained_corpus_sha256": "d0740e31f2a51fe37d829cf39db7923ada054f450e4edc77e47939ddd9e82a4e",
+      "checksum_index_sha256": "2254c5f0492427712a97a0bc55d1fdba3ebb16cfa7b69182394e71297af5c9f5",
+      "recovery": {
+        "run_id": 37476889333,
+        "run_attempt": 1,
+        "orchestration": "7da9f5d07884a5913bdbc38f28b34344c839a9f9",
+        "status": "failed closed after accepted wave 2; permanently non-pass",
+        "wave_1_rerun": false,
+        "reused_wave_1_reports": 8,
+        "wave_2": {
+          "reports": 32,
+          "generated": 2405,
+          "validation": "passed",
+          "validation_sha256": "be9720e53a65cd794ceb4d446925359e78d92f18af1afd356ef1334de368d4ee"
+        },
+        "wave_3_reports": 0,
+        "stop_reason": "GitHub's documented 256-job workflow-run limit prevented the 216-shard wave-3 matrix from expanding after earlier jobs were materialized",
+        "launch_cumulative_operational_minutes": 53.63,
+        "terminal_recovery_operational_minutes": 45.13,
+        "terminal_cumulative_operational_minutes": 57.10,
+        "billing_authority": false,
+        "qualification_effect": "none; incomplete 40-of-256 preflight corpus",
+        "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-recovery-37476889333",
+        "incident_summary_sha256": "5f8fb9a0982a6f4cc8f10af501a428f62ffb6d865c74ca94457e5b2eb5a91786",
+        "terminal_accounting_sha256": "4a9a7185d80a0c5009df9ba174f20b2f06962bd5df4122c96fa42869c4c011cf",
+        "checksum_index_sha256": "05422c408164073ddcd2bba3816bcc222467fb0a7d99f8701278581f22f48714",
+        "continuation": {
+          "run_id": 37550308775,
+          "run_attempt": 1,
+          "orchestration": "9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807",
+          "status": "failed closed after all 216 continuation shards succeeded; permanently non-pass",
+          "topology": {"matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223},
+          "wave_3": {"jobs": 216, "successful_jobs": 216, "artifacts": 216, "generated": 42398},
+          "stop_reason": "validation support job install step failed with uv: command not found; workflow aggregate, readback, and terminal accounting were skipped",
+          "terminal_continuation_operational_minutes": 293.17,
+          "terminal_cumulative_operational_minutes": 350.27,
+          "billing_authority": false,
+          "offline_reconstruction": {
+            "status": "diagnostic-only; not workflow acceptance evidence",
+            "reports": 256,
+            "generated": 45432,
+            "canonicalized": 45432,
+            "collisions": 0,
+            "corpus_digest": "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2",
+            "aggregate_sha256": "dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173",
+            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216}
+          },
+          "qualification_effect": "none; workflow validation and durable aggregate readback did not complete",
+          "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-continuation-37550308775",
+          "checksum_index_sha256": "6873b92230399c8d99c0e118ea9fef3f426f1dbab820db0035160e8fb841cc79",
+          "aggregation_recovery": {
+            "run_id": 37560100974,
+            "run_attempt": 1,
+            "orchestration": "2a0bae35cf56a54b4d7ed1dc9747b2a145fabad1",
+            "status": "completed; passed; accepted linked preflight aggregate",
+            "mutation_jobs": 0,
+            "support_jobs": 3,
+            "reports": 256,
+            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216},
+            "generated": 45432,
+            "canonicalized": 45432,
+            "collisions": 0,
+            "corpus_digest": "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2",
+            "aggregate_sha256": "dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173",
+            "terminal_cumulative_operational_minutes": 351.11,
+            "recovery_operational_minutes": 0.84,
+            "completion_ceiling_minutes": 640,
+            "billing_authority": false,
+            "readback_checksum_index_sha256": "c9d3e125fa785aad1be32f7ff710e8ebeaca2ad10f07d858865393a5917beeb7",
+            "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-aggregation-recovery-37560100974",
+            "checksum_index_sha256": "c0695508dca55ec288548da1f76959ff796d1d38415349a622eef186aa798e60",
+            "qualification_effect": "preflight accepted; authoritative calibration remains required"
+          }
+        }
+      }
+    },
+    "decision_packet": "docs/completion/evidence/preflight-37438948512-incident.md"
+  },
+  "ah03_durable_attempts": {
+    "attempt_01": {
+      "root": "external://local/audit-hardening/run-01",
+      "status": "pre-execution persistence harness failure",
+      "mutants_executed": 0
+    },
+    "attempt_02": {
+      "root": "external://local/audit-hardening/run-02",
+      "status": "pre-execution stale-cache guard",
+      "harness_sha256": "67e18395a5689af9018f3383b7d9e5deaf3cead14c24999d0d32e9e52e22ebfb",
+      "qualification_identity_sha256": "e3f3ee0bfc72545367897cd06c801116a70ad0e34106a147d217cea9f88346b1",
+      "execution_plan_sha256": "70734b3a42f178a5551ad7b706e8aa7145cd59a71797957e9a3833eab3a6d9e8",
+      "preflight_cache_sha256": "b82b270b774561e1c528efb0769b4cef8b5d4bf8d98b1151fb5c443a273fe999",
+      "canonical_fingerprints": 299,
+      "mutants_executed": 0,
+      "terminal_reports": 0
+    },
+    "attempt_03": {
+      "root": "external://local/audit-hardening/run-03",
+      "status": "pre-execution process-detector false positive",
+      "cause": "broad process text matched lifecycle script source embedded in parent shell argv",
+      "mutants_executed": 0
+    },
+    "attempt_04": {
+      "root": "external://local/audit-hardening/run-04",
+      "status": "pre-execution process-detector false positive; correction budget exhausted",
+      "cause": "structured argv parser still matched literal module arguments embedded in parent shell here-document",
+      "mutants_executed": 0
+    },
+    "attempt_05": {
+      "root": "external://local/audit-hardening/run-05",
+      "status": "completed and independently verified",
+      "harness_sha256": "f44075f6153cf545e269bea29b770ae74ac4208d70e4402fb58a49b4d03e2d12",
+      "qualification_identity_sha256": "e3f3ee0bfc72545367897cd06c801116a70ad0e34106a147d217cea9f88346b1",
+      "execution_plan_sha256": "72e8e317f353d1e0c5d2d5e7ee062610e54ab58fbef4dcef84fe02b629265230",
+      "canonical_fingerprints": 299,
+      "mutants_executed": 299,
+      "terminal_reports": 7,
+      "verification_report_sha256": "863a5f85f9ffc7f418d01d1ca8b67da328d6559e8fa912db21cef2c5a6c280f7"
+    }
+  },
+  "limitations": [
+    "Historical worklog observations are provenance, not current-candidate acceptance.",
+    "The lost earlier replacement aggregate remains unsupported and is not substituted for durable run-05 evidence.",
+    "Run-05 external artifacts are locally durable and digest-indexed but not repository-portable until an immutable evidence channel is approved.",
+    "No human acceptance or human-usability validation was performed or inferred. Real-participant parity is a later WP-AH13/P77 criterion, and public-PyPI verification is a later WP-AH15/release criterion, not Milestone A. Current live-host execution and durable external resolution of the private archive remain unavailable."
+  ],
+  "uat_decision": "FIX_FIRST",
+  "integration_authorization": {
+    "date": "2026-10-05",
+    "qualified_scope": "68-path working-tree candidate containing Milestone A and concurrent UAT acceptance-integrity work",
+    "scope_acceptance": "accepted for integration review, not blanket acceptance of every change",
+    "human_review_requirement": "replaced by owner-authorized independent automated acceptance",
+    "human_acceptance_performed": false,
+    "human_usability_validation_performed": false,
+    "not_waived": [
+      "platform evidence",
+      "live-host evidence",
+      "artifact evidence",
+      "remote-CI evidence",
+      "strict completion"
+    ]
+  },
+  "portable_local_evidence": {
+    "run_05_complete_index_sha256": "deeb1788f2609cc01a185f221f44cc753b7618514ef3d4bae5bd957cb900bfe9",
+    "locator": "docs/completion/evidence/external/audit-hardening/run-05-locator.json",
+    "publication_status": "not published; raw evidence remains private; a composite archive was verified after fresh extraction, but its durable storage locator is not approved",
+    "sanitized_copy": {
+      "role": "distribution copy, not qualification evidence",
+      "file_count": 100,
+      "transformed_files": 21,
+      "absolute_path_replacements": 34,
+      "manifest_sha256": "34f1a531ef883f7bb293e5290a9badfab66e5e883c17ac10cbb1d8057ffc639c",
+      "archive_sha256": "4de5f7f44fcc591a4d7a566b80658dc51fa7365182bd95ee0099934f0706b7dd",
+      "location": "external://local/audit-hardening/sanitized-run-05"
+    }
+  }
+}

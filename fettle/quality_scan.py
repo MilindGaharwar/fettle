@@ -329,8 +329,11 @@ def _print_human(root: str, findings: list[dict], file_count: int) -> None:
     print(f"Summary: {len(errors)} errors, {len(warnings)} warnings, {len(infos)} info")
 
 
-def _print_json(findings: list[dict], file_count: int) -> None:
+def _print_json(findings: list[dict], file_count: int, *,
+                status: str = "pass", tool_errors: list[dict] | None = None) -> None:
     print(json.dumps({
+        "status": status,
+        "tool_errors": tool_errors or [],
         "file_count": file_count,
         "findings": findings,
         "summary": {
@@ -439,36 +442,15 @@ def main() -> int:
     args = parser.parse_args()
 
     root = os.path.abspath(args.root)
-
-    # [severity] config is the single source; constants are the fallback defaults.
-    cfg = load_config(root)
-    global ERROR_RULES, WARNING_PREFIXES
-    ERROR_RULES = set(cfg["severity"]["error_rules"])
-    WARNING_PREFIXES = set(cfg["severity"]["warning_prefixes"])
-
-    ignore_patterns = _load_ignore(root)
-    py_files = _collect_py_files(root, ignore_patterns)
-    file_count = len(py_files)
-
-    findings = run_ruff(py_files) + run_semgrep(py_files) + scan_spec_audit(root, cfg)
-
-    # Root-relative paths: keeps committed baselines portable across machines
-    # and checkout locations.
-    for f in findings:
-        if os.path.isabs(f["file"]):
-            f["file"] = os.path.relpath(f["file"], root)
-    findings = [f for f in findings if not _is_ignored(f["file"], ignore_patterns)]
-
-    # Deduplicate (same file+line+rule)
-    seen: dict[str, dict] = {}
-    for f in findings:
-        key = _finding_key(f)
-        if key not in seen:
-            seen[key] = f
-    findings = list(seen.values())
-
-    # Sort: severity (errors first), then file path, then line
-    findings.sort(key=lambda f: (_severity_order(f["severity"]), f["file"], f["line"]))
+    result = scan_project(root)
+    file_count = result["file_count"]
+    tool_errors = result["tool_errors"]
+    findings = [
+        {"file": finding["file"], "line": finding["line"], "rule": finding["code"],
+         "severity": finding["severity"].upper(), "message": finding["message"],
+         "tool": finding["tool"]}
+        for finding in result["findings"]
+    ]
 
     # Baseline diff
     if args.baseline and not args.update_baseline:
@@ -476,7 +458,7 @@ def main() -> int:
         findings = [f for f in findings if _finding_key(f) not in baseline]
 
     # Save baseline
-    if args.update_baseline:
+    if args.update_baseline and not tool_errors:
         bl_path = args.baseline or os.path.join(root, ".fettle", "baseline.json")
         bl_dir = os.path.dirname(bl_path)
         if bl_dir:
@@ -485,12 +467,17 @@ def main() -> int:
         print(f"Baseline saved: {bl_path} ({len(findings)} findings)", file=sys.stderr)
 
     # Output
+    status = result["status"] if tool_errors else ("violation" if findings else "pass")
     if args.json_output:
-        _print_json(findings, file_count)
+        _print_json(findings, file_count, status=status, tool_errors=tool_errors)
     else:
         _print_human(root, findings, file_count)
+    for error in tool_errors:
+        print(f"ERROR: {error['tool']}: {error['message']}", file=sys.stderr)
 
     # Exit code
+    if tool_errors:
+        return 2
     error_count = sum(1 for f in findings if f["severity"] == "ERROR")
     return 1 if error_count > 0 else 0
 

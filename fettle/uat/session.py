@@ -41,9 +41,9 @@ def drivable_surfaces() -> frozenset[str]:
         return DRIVABLE_SURFACES
 
 _CONSENT_TEXT = (
-    "UAT sessions launch an autonomous agent with permission checks disabled "
-    "inside an isolated worktree. It will run commands and, for web surfaces, "
-    "drive a browser against your app. Re-run with --yes to consent."
+    "UAT sessions launch an agent with normal host permission checks "
+    "inside an isolated worktree. Actions requiring unavailable approval remain "
+    "blocked. Re-run with --yes to consent; this does not grant tool permissions."
 )
 
 _PROMPT_HEADER = """\
@@ -108,12 +108,19 @@ def collect_scenarios(root: str) -> list[dict]:
     from fettle.spec_model import discover_specs
 
     out: list[dict] = []
-    for spec, _findings in discover_specs(root):
+    seen: set[str] = set()
+    for spec, findings in discover_specs(root):
+        if any(finding.get("severity") == "ERROR" for finding in findings):
+            raise ValueError("invalid specification; run 'fettle spec lint' before UAT")
         if spec is None or spec.status != "active":
             continue
         for scen in spec.scenarios:
+            scenario_id = f"{spec.spec_id}/{scen.id}"
+            if scenario_id in seen:
+                raise ValueError(f"duplicate scenario {scenario_id}; run 'fettle spec lint'")
+            seen.add(scenario_id)
             out.append({
-                "id": f"{spec.spec_id}/{scen.id}",
+                "id": scenario_id,
                 "title": scen.title,
                 "steps": list(scen.texts),
                 "requirements": [spec.requirements.get(r, "") for r in scen.traces],
@@ -134,9 +141,7 @@ def generate_profile(seed: str) -> dict:
         ("punctuation", "Unit #4 / A&B"),
     )
     inputs = []
-    for equivalence_class, template in values:
-        suffix = hashlib.sha256(f"{seed}:{equivalence_class}".encode()).hexdigest()[:8]
-        value = f"{template} [{suffix}]"
+    for equivalence_class, value in values:
         inputs.append({
             "equivalence_class": equivalence_class,
             "value": value,
@@ -145,7 +150,7 @@ def generate_profile(seed: str) -> dict:
     return {
         "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
         "inputs": inputs,
-        "equivalence_class_count": len({item["sha256"] for item in inputs}),
+        "equivalence_class_count": len({item["equivalence_class"] for item in inputs}),
     }
 
 
@@ -218,7 +223,8 @@ def _checkpoint_path(worktree: str) -> Path:
 def load_checkpoint(worktree: str) -> dict | None:
     """Read a session checkpoint; None when absent or unreadable."""
     try:
-        return json.loads(_checkpoint_path(worktree).read_text(encoding="utf-8"))
+        checkpoint = json.loads(_checkpoint_path(worktree).read_text(encoding="utf-8"))
+        return checkpoint if isinstance(checkpoint, dict) else None
     except (OSError, ValueError):
         return None
 
@@ -226,8 +232,7 @@ def load_checkpoint(worktree: str) -> dict | None:
 def _write_checkpoint(worktree: str, data: dict) -> str:
     path = _checkpoint_path(worktree)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        _write_bytes_atomic(path, (json.dumps(data, indent=2) + "\n").encode())
         return ""
     except OSError as exc:
         return f"cannot write checkpoint: {exc}"
@@ -323,6 +328,7 @@ def _write_session_evidence(worktree: str, checkpoint: dict, uat_cfg: dict) -> d
         source={"snapshot_digest": _digest({
             "session_id": checkpoint.get("session_id", ""),
             "transcript_digest": _file_digest(transcript),
+            "contract_digest": checkpoint.get("contract_digest"),
         })},
         policy_digest=_digest(uat_cfg),
         scope_digest=_digest({
@@ -357,7 +363,8 @@ def _redact_secrets(transcript: str) -> tuple[str, int]:
     if not findings:
         return transcript, 0
     lines = transcript.splitlines()
-    hit_lines = {f.line for f in findings if 1 <= f.line <= len(lines)}
+    hit_lines = {finding.line for finding in findings
+                 if finding.line is not None and 1 <= finding.line <= len(lines)}
     for i in hit_lines:
         lines[i - 1] = "[REDACTED: possible secret removed from transcript]"
     return "\n".join(lines) + "\n", len(hit_lines)
@@ -369,10 +376,10 @@ def run_session(root: str, config: dict, surface: str,
     """Full session for one surface. Returns a SessionResult, never raises.
 
     `runner` may be any object with .run(prompt, cwd, timeout_s) (test seam);
-    defaults to the configured agent runner. `consent` must be explicit —
-    sessions run an agent with permission checks disabled.
+    defaults to a permission-preserving runner. `consent` must be explicit;
+    it does not grant tool permissions or bypass hook trust.
     """
-    from fettle.runners import get_runner
+    from fettle.runners import get_uat_runner
     from fettle.uat.doctor import probe
     from fettle.work_items import claim_item
     from fettle.worktrees import create_worktree
@@ -409,7 +416,11 @@ def run_session(root: str, config: dict, surface: str,
                         "run 'fettle uat doctor'")
         return result
 
-    scenarios = collect_scenarios(root)
+    try:
+        scenarios = collect_scenarios(root)
+    except ValueError as exc:
+        result.error = str(exc)
+        return result
     if not scenarios:
         result.error = ("no active spec scenarios found — UAT needs at least one "
                         "active spec with GWT scenarios (see 'fettle spec lint')")
@@ -417,8 +428,8 @@ def run_session(root: str, config: dict, surface: str,
     result.scenario_ids = [s["id"] for s in scenarios]
 
     wt_path, err = create_worktree(root, session_id, config)
-    if err:
-        result.error = f"worktree provisioning failed: {err}"
+    if err or wt_path is None:
+        result.error = f"worktree provisioning failed: {err or 'no worktree returned'}"
         return result
     result.worktree = str(wt_path)
     claim_err = claim_item(root, session_id, session_id, str(wt_path))
@@ -429,9 +440,11 @@ def run_session(root: str, config: dict, surface: str,
     profile = generate_profile(session_id)
     prompt_cfg = dict(uat_cfg, profile=profile)
     prompt = build_prompt(surface, scenarios, prompt_cfg)
-    checkpoint = {
+    checkpoint: dict = {
         "session_id": session_id, "surface": surface,
         "scenario_ids": result.scenario_ids, "status": "running",
+        "contract_digest": _digest(scenarios),
+        "policy_digest": _digest(uat_cfg),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "canonical_evidence": bool(uat_cfg.get("canonical_evidence", True)),
         "profile": profile,
@@ -445,7 +458,7 @@ def run_session(root: str, config: dict, surface: str,
 
     if runner is None:
         try:
-            runner = get_runner(uat_cfg.get("runner", "claude"))
+            runner = get_uat_runner(uat_cfg.get("runner", "claude"))
         except ValueError as exc:
             result.error = str(exc)
             return result
@@ -463,9 +476,6 @@ def run_session(root: str, config: dict, surface: str,
     except OSError as exc:
         result.error = f"cannot persist transcript: {exc}"
 
-    # P72-A: retain a per-scenario observation artifact bundle so the
-    # reconciler can verify verdicts against captured evidence instead of
-    # trusting self-reported transcript text alone.
     try:
         from fettle.uat.artifacts import write_scenario_artifacts
 
@@ -473,7 +483,7 @@ def run_session(root: str, config: dict, surface: str,
         scenarios = [s for s in (collect_scenarios(root)
                      if root else []) if s["id"] in set(scenario_ids)]
         result.artifact_dir = write_scenario_artifacts(
-            wt_path, clean, scenarios, surface,
+            str(wt_path), clean, scenarios, surface,
         )
         checkpoint["artifact_dir"] = result.artifact_dir
         if surface == "web" and uat_cfg.get("app_url"):
@@ -504,9 +514,9 @@ def run_session(root: str, config: dict, surface: str,
             "reason": "uat.start_command is not configured",
         }
 
-    if run.error:
+    if run.error or run.exit_code != 0:
         result.status = "timeout" if "timed out" in run.error else "error"
-        result.error = result.error or run.error
+        result.error = result.error or run.error or f"runner exited {run.exit_code}"
     elif not result.error:
         result.status = "completed"
     checkpoint.update(status=result.status, transcript=result.transcript_path,
@@ -528,4 +538,5 @@ def run_session(root: str, config: dict, surface: str,
     checkpoint_err = _write_checkpoint(str(wt_path), checkpoint)
     if checkpoint_err and not result.error:
         result.error = checkpoint_err
+        result.status = "error"
     return result

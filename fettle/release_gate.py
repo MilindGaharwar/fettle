@@ -120,6 +120,8 @@ def run_check(ctx):
         completion = evaluate_manifests(ctx.cwd)
         if not completion.valid:
             findings.extend("completion: " + error for error in completion.errors)
+        elif not completion.complete:
+            findings.append("completion: milestone evidence is incomplete")
 
     assurance_policy = cfg.get("assurance_policy", "")
     if assurance_policy:

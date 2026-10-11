@@ -18,10 +18,13 @@ hash-chained ledger:
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 import subprocess
+import threading
 import time
+from functools import wraps
 from pathlib import Path
 
 LEDGER_REL = ".fettle/governance-ledger.jsonl"
@@ -30,6 +33,60 @@ SCHEMA_VERSION = 1
 
 _SECRET_KEY_MARKERS = ("secret", "token", "password", "prompt", "api_key", "apikey")
 CHECKPOINT_KIND = "checkpoint"
+LOCK_TIMEOUT_S = 5.0
+_held_locks = threading.local()
+
+
+def _serialized(operation):
+    @wraps(operation)
+    def locked(root: str, *args, **kwargs):
+        path = (Path(root) / ".fettle" / "governance-ledger.lock").resolve()
+        held: set[Path] = getattr(_held_locks, "paths", set())
+        if path in held:
+            return operation(root, *args, **kwargs)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a+b") as handle:
+            if os.name == "nt":
+                import msvcrt
+
+                if handle.seek(0, os.SEEK_END) == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+
+                def acquire():
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+                def release():
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                def acquire():
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                def release():
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+            deadline = time.monotonic() + LOCK_TIMEOUT_S
+            while True:
+                try:
+                    acquire()
+                    break
+                except OSError as exc:
+                    if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("ledger is busy; retry after the current operation") from exc
+                    time.sleep(0.01)
+            _held_locks.paths = held | {path}
+            try:
+                return operation(root, *args, **kwargs)
+            finally:
+                _held_locks.paths = held
+                release()
+    return locked
 
 
 def _paths(root: str) -> tuple[Path, Path]:
@@ -67,18 +124,20 @@ def _read_records(path: Path) -> list[dict]:
     return out
 
 
+@_serialized
 def read_ledger(root: str) -> list[dict]:
     path, _anchor = _paths(root)
     return _read_records(path)
 
 
+@_serialized
 def append_record(root: str, kind: str, **payload) -> dict:
     path, _anchor = _paths(root)
     records = _read_records(path)
     prev = records[-1]["hash"] if records else "0" * 64
     seq = (records[-1]["seq"] + 1) if records else 1
     clean = _redact(payload)
-    record = {
+    record: dict = {
         "schema_version": SCHEMA_VERSION,
         "seq": seq,
         "ts": round(time.time(), 3),
@@ -90,9 +149,12 @@ def append_record(root: str, kind: str, **payload) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     return record
 
 
+@_serialized
 def verify_chain(root: str) -> dict:
     """Full-chain verification. Reports the first break precisely."""
     try:
@@ -147,6 +209,7 @@ def verify_chain(root: str) -> dict:
     return {"status": "verified", "records": len(records), "terminal_hash": prev}
 
 
+@_serialized
 def anchor(root: str, commit: str | None = None,
            artifact_url: str | None = None) -> dict:
     """Bind the terminal digest to a repository commit or CI artifact URL."""
@@ -173,7 +236,8 @@ def _write_anchor(root: str, state: dict, commit: str | None,
     path, anchor_path = _paths(root)
     terminal = state["terminal_hash"]
     anchor_path.parent.mkdir(parents=True, exist_ok=True)
-    anchor_path.write_text(json.dumps({
+    temporary = anchor_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({
         "schema_version": SCHEMA_VERSION,
         "anchored_at": round(time.time(), 3),
         "commit": commit,
@@ -182,6 +246,7 @@ def _write_anchor(root: str, state: dict, commit: str | None,
         "records": state["records"],
         "terminal_hash": terminal,
     }, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, anchor_path)
     return {"status": "completed", "commit": commit,
             "artifact_url": artifact_url, "coverage": coverage,
             "records": state["records"], "terminal_hash": terminal}
@@ -194,6 +259,7 @@ def _rev_parse(root: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+@_serialized
 def verify_anchor(root: str) -> dict:
     """Check ledger against its last anchor: anchored | drifted | tampered."""
     _path, anchor_path = _paths(root)
@@ -239,6 +305,7 @@ def verify_anchor(root: str) -> dict:
     }
 
 
+@_serialized
 def terminal_hash_at(root: str, count: int) -> str:
     records = read_ledger(root)
     if not records or count <= 0:
@@ -246,6 +313,7 @@ def terminal_hash_at(root: str, count: int) -> str:
     return records[min(count, len(records)) - 1]["hash"]
 
 
+@_serialized
 def rotate(root: str, keep_last: int = 200) -> dict:
     """Prune history, preserving continuity through a checkpoint record."""
     path, _anchor = _paths(root)
@@ -290,6 +358,8 @@ def rotate(root: str, keep_last: int = 200) -> dict:
     with tmp.open("w", encoding="utf-8") as handle:
         for rec in new_records:
             handle.write(json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, path)
     return {"status": "completed", "pruned": len(pruned),
             "retention": {"policy": f"keep_last={keep_last}",

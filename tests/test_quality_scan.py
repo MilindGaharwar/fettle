@@ -34,6 +34,27 @@ VIOLATION = (
 CLEAN = "def f():\n    return 1\n"
 
 
+@pytest.mark.parametrize("status", [ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR])
+@pytest.mark.parametrize("update_baseline", [False, True])
+def test_standalone_scanner_failure_is_nonpass(tmp_path, monkeypatch, capsys, status, update_baseline):
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text("[]\n")
+    monkeypatch.setattr(sys, "argv", ["quality_scan", "--root", str(tmp_path), "--json",
+                                     "--baseline", str(baseline)]
+                        + (["--update-baseline"] if update_baseline else []))
+    for scanner in ("ruff", "semgrep"):
+        monkeypatch.setattr(quality_scan, "execute_" + scanner,
+                            lambda targets, tool=scanner: quality_scan.ToolScanResult(
+                                tool, status, message="analyzer unavailable"))
+    monkeypatch.setattr(quality_scan, "scan_spec_audit", lambda *args: [])
+
+    assert quality_scan.main() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == status.value
+    assert len(result["tool_errors"]) == 2
+    assert baseline.read_text() == "[]\n"
+
+
 def run_scan(root: str, *extra_args: str):
     """Run quality_scan.py and return (parsed json | None, rc, stderr)."""
     proc = subprocess.run(

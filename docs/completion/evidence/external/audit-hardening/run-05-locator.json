@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "subject": {
+    "candidate_identity_sha256": "e3f3ee0bfc72545367897cd06c801116a70ad0e34106a147d217cea9f88346b1",
+    "frozen_revision": "4522a564791bce326ca4f340f7007f09e988b8e1",
+    "run": "run-05"
+  },
+  "artifacts": [
+    {
+      "role": "qualification-package",
+      "repository_path": "docs/completion/evidence/external/audit-hardening/run-05/package.tar.zst",
+      "artifact_provider": "private-local-durable-store",
+      "artifact_id": "run-05-original",
+      "artifact_url": "external://local/audit-hardening/run-05",
+      "sha256": "UNRESOLVED_ARCHIVE_NOT_CREATED",
+      "bytes": "UNRESOLVED_ARCHIVE_NOT_CREATED",
+      "content_index": {
+        "repository_path": "docs/completion/evidence/external/audit-hardening/run-05/package-index.json",
+        "sha256": "deeb1788f2609cc01a185f221f44cc753b7618514ef3d4bae5bd957cb900bfe9",
+        "file_count": 100,
+        "uncompressed_bytes": 1388879
+      }
+    },
+    {
+      "role": "read-only-verification-attestation",
+      "repository_path": "docs/completion/evidence/external/audit-hardening/run-05/verification-report.json",
+      "artifact_provider": "private-local-durable-store",
+      "artifact_id": "run-05-verification-report",
+      "artifact_url": "external://local/audit-hardening/run-05-verification/report.json",
+      "sha256": "863a5f85f9ffc7f418d01d1ca8b67da328d6559e8fa912db21cef2c5a6c280f7"
+    },
+    {
+      "role": "automated-independent-review-attestation",
+      "repository_path": "docs/completion/evidence/external/audit-hardening/run-05/independent-review.md",
+      "artifact_provider": "private-local-durable-store",
+      "artifact_id": "run-05-automated-review",
+      "artifact_url": "external://local/audit-hardening/run-05-verification/independent-review.md",
+      "sha256": "4049a3d5876da52671f3259be2e61d7d8483e39d8b9e7b0c74c882000bc4b291",
+      "satisfies_human_reviewer_requirement": false
+    },
+    {
+      "role": "sanitized-distribution-copy",
+      "repository_path": "docs/completion/evidence/external/audit-hardening/run-05-sanitized.tar.gz",
+      "artifact_provider": "private-local-durable-store",
+      "artifact_id": "sanitized-run-05",
+      "artifact_url": "external://local/audit-hardening/sanitized-run-05",
+      "sha256": "4de5f7f44fcc591a4d7a566b80658dc51fa7365182bd95ee0099934f0706b7dd",
+      "transformation_manifest_sha256": "34f1a531ef883f7bb293e5290a9badfab66e5e883c17ac10cbb1d8057ffc639c",
+      "not_qualification_evidence": true
+    }
+  ],
+  "retention": {
+    "minimum": "through the support lifetime of every release authorized by this evidence",
+    "deletion_policy": "never delete while referenced by a completion or release record",
+    "public_access": false,
+    "publication_status": "not authorized"
+  },
+  "integrity_rules": [
+    "Repository paths are locators, not embedded evidence.",
+    "Artifact IDs, URLs, hashes, and byte counts must all resolve and agree.",
+    "Missing, mutable, inaccessible, or digest-mismatched artifacts are non-pass.",
+    "External attestations remain separate from the frozen run-05 package."
+  ]
+}

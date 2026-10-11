@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import signal
 import shlex
 import shutil
 import sqlite3
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import uuid
@@ -33,6 +35,7 @@ from fettle.evidence import (
     Validity,
     validate_artifact,
 )
+from fettle.runtime_secret_guard import redact_secrets
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -71,11 +74,412 @@ _MUTATION_CACHE_DIR = Path(".fettle/mutation-cache")
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    if argv[:2] == ["mutmut", "run"]:
+        return _run_mutmut_process(argv, root, timeout)
     return subprocess.run(argv, cwd=root, env=_ENV, capture_output=True, text=True, timeout=timeout)
+
+
+_SOURCE_IGNORES = {
+    ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
+    "__pycache__", "build", "dist", "node_modules", "venv",
+}
+_MUTATION_RESIDUE_SUFFIXES = {".bak", ".orig", ".rej"}
+_WINDOWS_CREATE_SUSPENDED = 0x00000004
+
+
+class _MutationProcessTerminationError(OSError):
+    """The mutation worker tree could not be confirmed stopped."""
+
+    def __init__(self, message: str, *, tree_stopped: bool = False) -> None:
+        super().__init__(message)
+        self.tree_stopped = tree_stopped
+
+
+def _attach_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    """Bind a Windows worker tree to a kill-on-close job object."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimitInformation),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(process._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException:
+        kernel32.CloseHandle(job)
+        raise
+    process._fettle_job_handle = job  # type: ignore[attr-defined]
+
+
+def _resume_windows_process(process: subprocess.Popen[str]) -> None:
+    """Resume a worker only after Job Object containment is established."""
+    import ctypes
+    from ctypes import wintypes
+
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = wintypes.LONG
+    status = ntdll.NtResumeProcess(wintypes.HANDLE(process._handle))
+    if status != 0:
+        raise OSError(f"NtResumeProcess failed with NTSTATUS 0x{status & 0xffffffff:08x}")
+
+
+def _stop_unattached_windows_process(process: subprocess.Popen[str]) -> None:
+    """Stop and confirm a suspended worker that could not join its Job Object."""
+    try:
+        process.kill()
+        process.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+        raise _MutationProcessTerminationError(
+            f"cannot confirm unattached Windows mutation process stopped: {exc}",
+            tree_stopped=False,
+        ) from exc
+
+
+def _close_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    job = getattr(process, "_fettle_job_handle", None)
+    if job is None:
+        raise OSError("mutation process has no Windows job object")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    termination_error = None
+    try:
+        if not kernel32.TerminateJobObject(job, 1):
+            termination_error = ctypes.WinError(ctypes.get_last_error())
+        wait_result = kernel32.WaitForSingleObject(job, 10_000)
+        if wait_result != 0:  # WAIT_OBJECT_0
+            if wait_result == 0x00000102:  # WAIT_TIMEOUT
+                raise _MutationProcessTerminationError(
+                    "timed out terminating Windows mutation job", tree_stopped=False,
+                )
+            raise _MutationProcessTerminationError(
+                f"cannot confirm Windows mutation job termination: {ctypes.WinError(ctypes.get_last_error())}",
+                tree_stopped=False,
+            )
+        if termination_error is not None:
+            raise _MutationProcessTerminationError(
+                f"Windows mutation job termination failed: {termination_error}", tree_stopped=True,
+            )
+    finally:
+        kernel32.CloseHandle(job)
+        process._fettle_job_handle = None  # type: ignore[attr-defined]
+
+
+def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set[str]]:
+    root_path = Path(root)
+    sources: dict[str, tuple[bytes, int]] = {}
+    residue: set[str] = set()
+    for path in root_path.rglob("*"):
+        relative = path.relative_to(root_path)
+        if any(part in _SOURCE_IGNORES for part in relative.parts):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix == ".py":
+            sources[relative.as_posix()] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+        if path.suffix in _MUTATION_RESIDUE_SUFFIXES:
+            residue.add(relative.as_posix())
+    return sources, residue
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    termination_error = None
+    tree_stopped = False
+    try:
+        if os.name == "posix":
+            # The session leader can exit before its workers. Kill the process
+            # group even after the leader has returned so no descendant can
+            # mutate source after the integrity check.
+            os.killpg(process.pid, signal.SIGKILL)
+        else:  # pragma: no cover - exercised by the Windows workflow
+            _close_windows_kill_job(process)
+        tree_stopped = True
+    except ProcessLookupError:
+        tree_stopped = True
+    except (OSError, subprocess.SubprocessError) as exc:
+        termination_error = exc
+        tree_stopped = getattr(exc, "tree_stopped", False)
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        if process.poll() is None:
+            process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait()
+    if termination_error is not None:
+        raise _MutationProcessTerminationError(
+            f"mutation process tree termination failed: {termination_error}",
+            tree_stopped=tree_stopped,
+        ) from termination_error
+
+
+def _restore_mutation_source_state(
+    root: str,
+    before_sources: dict[str, tuple[bytes, int]],
+    before_residue: set[str],
+    mutation_scope: set[str],
+) -> tuple[str, list[str]]:
+    root_path = Path(root)
+    try:
+        after_sources, after_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify source after mutation execution: {exc}", []
+    errors = []
+    restored = []
+    for relative, (content, mode) in before_sources.items():
+        if after_sources.get(relative) == (content, mode):
+            continue
+        target = root_path / relative
+        backup = target.with_name(target.name + ".bak")
+        try:
+            observed = after_sources.get(relative)
+            if observed is not None and observed[0] == content and relative in mutation_scope:
+                os.chmod(target, mode)
+                continue
+            backup_relative = backup.relative_to(root_path).as_posix()
+            if (
+                backup_relative in before_residue
+                or backup.is_symlink()
+                or not backup.is_file()
+                or backup.read_bytes() != content
+            ):
+                errors.append(f"{relative}: changed without a matching mutation backup")
+                continue
+            descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, suffix=".fettle-restore")
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary_name, mode)
+                os.replace(temporary_name, target)
+                backup.unlink()
+                restored.append(relative)
+            finally:
+                if os.path.exists(temporary_name):
+                    os.unlink(temporary_name)
+        except OSError as exc:
+            errors.append(f"{relative}: restoration failed ({exc})")
+    try:
+        restored_sources, restored_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify restored source: {exc}", restored
+    if restored_sources != before_sources:
+        errors.append("whole-source manifest differs after restoration")
+    new_residue = sorted(restored_residue - before_residue)
+    if new_residue:
+        errors.append("new mutation residue remains: " + ", ".join(new_residue))
+    return "; ".join(errors), restored
+
+
+def _mutmut_source_scope(argv: list[str]) -> set[str]:
+    prefix = "--paths-to-mutate="
+    values = [argument.removeprefix(prefix) for argument in argv if argument.startswith(prefix)]
+    if len(values) != 1:
+        return set()
+    scope = set()
+    for value in values[0].split(","):
+        path = Path(value)
+        if not value or path.is_absolute() or ".." in path.parts:
+            return set()
+        scope.add(path.as_posix())
+    return scope
+
+
+def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run mutmut with whole-source restoration and residue verification."""
+    try:
+        before_sources, before_residue = _mutation_source_state(root)
+    except OSError as exc:
+        raise OSError(f"cannot capture pre-run mutation source manifest: {exc}") from exc
+    mutation_scope = _mutmut_source_scope(argv)
+    popen_kwargs = {"start_new_session": True} if os.name == "posix" else {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _WINDOWS_CREATE_SUSPENDED,
+    }
+    stdout = stderr = ""
+    prior_handlers = {}
+    process = None
+    interrupted_by = None
+    if os.name == "posix" and threading.current_thread() is threading.main_thread():
+        def interrupted(signum, _frame):
+            nonlocal interrupted_by
+            interrupted_by = signum
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        for signum in (signal.SIGHUP, signal.SIGTERM):
+            prior_handlers[signum] = signal.signal(signum, interrupted)
+    try:
+        try:
+            process = subprocess.Popen(
+                argv, cwd=root, env=_ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **popen_kwargs,
+            )
+            if os.name == "nt":  # pragma: no cover - exercised by the Windows workflow
+                try:
+                    _attach_windows_kill_job(process)
+                    _resume_windows_process(process)
+                except (OSError, KeyboardInterrupt) as exc:
+                    try:
+                        if getattr(process, "_fettle_job_handle", None) is not None:
+                            _close_windows_kill_job(process)
+                        else:
+                            _stop_unattached_windows_process(process)
+                    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as cleanup_exc:
+                        if isinstance(cleanup_exc, _MutationProcessTerminationError):
+                            raise cleanup_exc from exc
+                        raise _MutationProcessTerminationError(
+                            f"Windows mutation startup cleanup failed: {cleanup_exc}",
+                            tree_stopped=False,
+                        ) from exc
+                    raise
+        except (OSError, KeyboardInterrupt) as exc:
+            if getattr(exc, "tree_stopped", True):
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue, mutation_scope,
+                )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from exc
+            raise
+        if interrupted_by is not None:
+            _terminate_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            _terminate_process_tree(process)
+            if interrupted_by is not None:
+                raise InterruptedError(
+                    f"mutation execution interrupted by signal {interrupted_by}"
+                )
+        except (subprocess.TimeoutExpired, OSError, KeyboardInterrupt) as exc:
+            termination_error = exc if isinstance(exc, _MutationProcessTerminationError) else None
+            if termination_error is None:
+                try:
+                    _terminate_process_tree(process)
+                except _MutationProcessTerminationError as cleanup_exc:
+                    termination_error = cleanup_exc
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+            tree_stopped = termination_error is None or termination_error.tree_stopped
+            if tree_stopped:
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue, mutation_scope,
+                )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from (
+                        termination_error or exc
+                    )
+            if termination_error is not None:
+                raise termination_error from exc
+            if isinstance(exc, subprocess.TimeoutExpired):
+                exc.output = stdout
+                exc.stderr = stderr
+            raise
+    finally:
+        for signum, handler in prior_handlers.items():
+            signal.signal(signum, handler)
+    integrity_error, restored = _restore_mutation_source_state(
+        root, before_sources, before_residue, mutation_scope,
+    )
+    if integrity_error:
+        raise OSError("mutation source integrity failure: " + integrity_error)
+    if restored:
+        raise OSError(
+            "mutation source integrity failure: mutmut returned without restoring: "
+            + ", ".join(restored)
+        )
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def _bounded(text: str) -> str:
     return text.strip()[-2000:]
+
+
+_ABSOLUTE_DIAGNOSTIC_PATH = re.compile(
+    r"(?i)(?:file:///|(?<![\w:/>])[A-Z]:[\\/]|(?<![\\])\\\\[^\\]"
+    r"|(?<![\w:/>.])/[A-Z0-9._~-])"
+)
+
+
+def _safe_mutation_diagnostic(value: object, root: str | None = None) -> str:
+    """Return bounded diagnostics without credentials or machine-local paths."""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = ""
+    if root:
+        resolved = str(Path(root).resolve())
+        text = text.replace(resolved, "<repo>").replace(resolved.replace("/", "\\"), "<repo>")
+    text = redact_secrets(text)
+    text = "\n".join(
+        "[REDACTED: absolute path]" if _ABSOLUTE_DIAGNOSTIC_PATH.search(line) else line
+        for line in text.splitlines()
+    )
+    return _bounded(text)
 
 
 def _error(status: str, message: str, **evidence) -> dict:
@@ -199,7 +603,7 @@ def _mapped_tests(
     files: list[str],
     test_mappings: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
-    """Map each production module to convention and direct-import tests."""
+    """Map each module to all matching tests, running its convention test first."""
     root_path = Path(root)
     test_paths = sorted((root_path / "tests").glob("test_*.py"))
     imports: dict[str, set[str]] = {}
@@ -225,11 +629,16 @@ def _mapped_tests(
             module = module.removesuffix(".__init__")
         matches = set(imports.get(module, set())) | set((test_mappings or {}).get(file, []))
         stem = Path(file).stem
+        owner = f"tests/test_{stem}.py"
         if stem not in {"__init__", "__main__"}:
-            candidate = root_path / "tests" / f"test_{stem}.py"
+            candidate = root_path / owner
+            if not candidate.is_file():
+                nested_name = module.split(".", 1)[-1].replace(".", "_")
+                owner = f"tests/test_{nested_name}.py"
+                candidate = root_path / owner
             if candidate.is_file():
                 matches.add(candidate.relative_to(root_path).as_posix())
-        mapped[file] = sorted(matches)
+        mapped[file] = sorted(matches, key=lambda test: (test != owner, test))
     return mapped
 
 
@@ -481,6 +890,100 @@ def _write_json_atomic(path: Path, value: dict) -> None:
             os.unlink(temporary)
 
 
+def load_mutation_report_candidates(root: Path) -> tuple[list[dict], list[dict]]:
+    """Load canonical reports while retaining zero-byte historical objects as quarantine."""
+    reports = []
+    quarantined = []
+    for path in sorted(root.rglob("mutation-report.json")) if root.exists() else []:
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if not raw:
+            quarantined.append({
+                "path": path.as_posix(), "sha256": digest, "size": 0,
+                "reason": "zero-byte historical report is not a selectable representation",
+            })
+            continue
+        try:
+            report = json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"mutation report {path} is malformed") from exc
+        if not isinstance(report, dict):
+            raise ValueError(f"mutation report {path} is not a JSON object")
+        reports.append({**report, "_retained_path": path.as_posix(), "_retained_sha256": digest})
+    return reports, quarantined
+
+
+def build_calibration_representation_inventory(
+    reports_root: Path,
+    selected: list[dict],
+    expected_shards: list[int],
+    quarantined: list[dict],
+) -> dict:
+    """Bind consolidation to one explicitly selected immutable report per shard."""
+    by_shard = {report.get("shard_index"): report for report in selected}
+    if sorted(by_shard) != sorted(expected_shards) or len(by_shard) != len(selected):
+        raise ValueError("calibration representation inventory is incomplete or duplicated")
+    representations = []
+    for index in sorted(expected_shards):
+        report = by_shard[index]
+        path = report.get("_retained_path")
+        digest = report.get("_retained_sha256")
+        if not isinstance(path, str) or not re.fullmatch(r"[0-9a-f]{64}", str(digest)):
+            raise ValueError("selected report lacks retained representation identity")
+        try:
+            relative_path = Path(path).relative_to(reports_root)
+        except ValueError as exc:
+            raise ValueError("selected report is outside the reports root") from exc
+        representations.append({
+            "shard_index": index, "kind": "report",
+            "path": relative_path.as_posix(), "sha256": digest,
+        })
+    return {
+        "schema_version": "1", "kind": "calibration_representation_inventory",
+        "reports_root": reports_root.as_posix(),
+        "representations": representations,
+        "quarantined": quarantined,
+    }
+
+
+def read_calibration_representation_inventory(path: Path) -> list[dict]:
+    """Read only the digest-bound report representations selected by validation."""
+    inventory = json.loads(path.read_text(encoding="utf-8"))
+    entries = inventory.get("representations") if isinstance(inventory, dict) else None
+    if (
+        inventory.get("schema_version") != "1"
+        or inventory.get("kind") != "calibration_representation_inventory"
+        or not isinstance(entries, list) or not entries
+    ):
+        raise ValueError("calibration representation inventory is malformed")
+    reports_root = path.parent
+    declared_root = inventory.get("reports_root")
+    if isinstance(declared_root, str) and Path(declared_root).name != path.parent.name:
+        reports_root = path.parent
+    reports = []
+    seen = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict) or entry.get("kind") != "report"
+            or not isinstance(entry.get("shard_index"), int)
+            or isinstance(entry.get("shard_index"), bool)
+            or entry["shard_index"] in seen
+            or not isinstance(entry.get("path"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", "")))
+        ):
+            raise ValueError("calibration representation inventory entry is malformed")
+        report_path = reports_root / entry["path"]
+        raw = report_path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+            raise ValueError("calibration representation digest differs")
+        report = json.loads(raw)
+        if not isinstance(report, dict) or report.get("shard_index") != entry["shard_index"]:
+            raise ValueError("calibration representation content differs")
+        reports.append(report)
+        seen.add(entry["shard_index"])
+    return reports
+
+
 def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: set[str]) -> dict:
     """Merge compatible terminal evidence while leaving failed attempts pending."""
     if not checkpoints:
@@ -497,7 +1000,10 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
     outcomes: dict[str, dict] = {}
     attempts: list[dict] = []
     seen_attempts: set[str] = set()
-    terminal_states = set(_STATES) - {"untested"}
+    # `skipped` means mutmut did not make the required mutation decision. It is
+    # retained in raw reports for diagnostics, but cannot close a calibration
+    # ledger or disappear from the required corpus.
+    terminal_states = set(_STATES) - {"untested", "skipped"}
     for checkpoint in checkpoints:
         if not isinstance(checkpoint, dict) or not required <= set(checkpoint) <= allowed:
             raise ValueError("mutation checkpoint has an unsupported schema")
@@ -532,6 +1038,19 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
                 raise ValueError("mutation checkpoint attempt is outside its corpus")
             if attempt.get("status") not in {"completed", "execution_error"}:
                 raise ValueError("mutation checkpoint attempt is malformed")
+            if attempt.get("status") == "execution_error":
+                allowed_attempt = {"fingerprint", "status", "message", "stdout", "stderr"}
+                if (
+                    not set(attempt) <= allowed_attempt
+                    or not isinstance(attempt.get("message"), str)
+                    or attempt["message"] != _safe_mutation_diagnostic(attempt["message"])
+                    or any(
+                        not isinstance(attempt.get(stream, ""), str)
+                        or attempt.get(stream, "") != _safe_mutation_diagnostic(attempt.get(stream, ""))
+                        for stream in ("stdout", "stderr")
+                    )
+                ):
+                    raise ValueError("mutation checkpoint execution diagnostic is unsafe")
             digest = _canonical_digest(attempt)
             if digest not in seen_attempts:
                 attempts.append(dict(attempt))
@@ -600,11 +1119,19 @@ def execute_pending_mutations(
             remaining = timeout - int(time.monotonic() - started)
             if remaining < 1:
                 break
-            engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
+            regenerated = current[record["fingerprint"]]
+            locator = regenerated.get("locator", {})
+            if regenerated.get("file") != file or locator.get("file") != file:
+                raise ValueError(f"regenerated mutation locator differs for {file}")
+            engine_id = locator.get("engine_id")
+            if not isinstance(engine_id, str) or re.fullmatch(r"[1-9][0-9]*", engine_id) is None:
+                raise ValueError(f"regenerated mutation engine ID is invalid for {file}")
             attempt_started = time.monotonic()
+            run = None
             try:
                 run = _run([
-                    "mutmut", "run", engine_id, "--test-time-base", str(timeout), "--runner",
+                    "mutmut", "run", engine_id, "--paths-to-mutate=" + file,
+                    "--test-time-base", str(timeout), "--runner",
                     "python -m pytest -x --assert=plain " + shlex.join(mapping[file]),
                 ], root, remaining)
                 if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
@@ -617,6 +1144,8 @@ def execute_pending_mutations(
                 observed = [state for state in _STATES if engine_id in ids[state]]
                 if len(observed) != 1 or observed[0] == "untested":
                     raise OSError("mutmut did not produce one terminal outcome")
+                if observed[0] == "skipped":
+                    raise OSError("mutmut skipped a required mutation outcome")
                 duration_ms = round((time.monotonic() - attempt_started) * 1000)
                 merged["outcomes"][record["fingerprint"]] = {
                     "state": observed[0], "duration_ms": duration_ms,
@@ -630,10 +1159,21 @@ def execute_pending_mutations(
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                merged["attempts"].append({
+                attempt = {
                     "fingerprint": record["fingerprint"], "status": "execution_error",
-                    "message": str(exc),
-                })
+                    "message": _safe_mutation_diagnostic(str(exc), root),
+                }
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    attempt.update(
+                        stdout=_safe_mutation_diagnostic(exc.output, root),
+                        stderr=_safe_mutation_diagnostic(exc.stderr, root),
+                    )
+                elif run is not None:
+                    attempt.update(
+                        stdout=_safe_mutation_diagnostic(run.stdout, root),
+                        stderr=_safe_mutation_diagnostic(run.stderr, root),
+                    )
+                merged["attempts"].append(attempt)
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
                 break
@@ -766,6 +1306,12 @@ def run_resumable_mutation_shard(
             "engine_version": MUTMUT_VERSION, "test_runner": _TEST_RUNNER,
             "tests_run": sorted({test for tests in mapping.values() for test in tests}),
             "line_ranges": manifest["ranges"], "shard_index": manifest["shard_index"],
+            "calibration_id": calibration_id,
+            "preflight_digest": identity["preflight_digest"],
+            "preflight_corpus_digest": preflight["corpus_digest"],
+            "manifest_digest": identity["manifest_digest"],
+            "corpus_digest": identity["corpus_digest"],
+            "environment_digest": identity["environment_digest"],
             "shard_count": manifest["shard_count"], **outcome_report, **policy,
             "threshold": float(cfg.get("score_target", 70)),
         }
@@ -895,7 +1441,8 @@ def _source_tree_digest(root: Path) -> str:
     ignored = {
         ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
         "__pycache__", ".mutmut-cache", "mutation-manifests", "mutation-preflight-shards",
-        "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json", "mutation-report.json",
+        "mutation-shards", "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json",
+        "mutation-report.json",
     }
     files = sorted(
         path for path in root.rglob("*")
@@ -1657,7 +2204,7 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     allowed = {(item["file"], line) for item in line_ranges for line in range(item["start"], item["end"] + 1)}
     ids = {state: [] for state in _STATES}
     for mutant_id, filename, line, status in rows:
-        if (filename, line) not in allowed:
+        if (filename, line + 1) not in allowed:
             continue
         state = _CACHE_STATES.get(status)
         if state is None:
@@ -2004,6 +2551,16 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     score = compute_score(*(report[state] for state in _STATES[:5]))
     violations: list[str] = []
     debt: list[str] = []
+    skipped = report.get("skipped", 0)
+    required_incomplete = False
+    if not isinstance(skipped, int) or isinstance(skipped, bool) or skipped < 0:
+        required_incomplete = True
+        violations.append("required skipped outcome count is malformed")
+    elif skipped:
+        required_incomplete = True
+        violations.append(f"required skipped outcomes are incomplete: {skipped} observed")
+    if required_incomplete:
+        score = None
     checks = (
         ("untested", "max_untested", 0, "untested"),
         ("timeout", "max_mutant_timeouts", None, "timeout"),
@@ -2020,7 +2577,7 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     target = float(cfg.get("score_target", 70))
     decided = report["killed"] + report["survived"]
     minimum = int(cfg.get("minimum_scored_mutants", 0))
-    score_eligible = decided >= minimum
+    score_eligible = not required_incomplete and decided >= minimum
     if score is None:
         violations.append("no decided mutants were reported")
     elif not score_eligible:
@@ -2033,24 +2590,44 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
         "score": None if score is None else round(score, 1),
         "score_eligible": score_eligible,
         "eligible": not violations and not debt,
-        "passed": mode != "enforce" or not violations,
+        "passed": not required_incomplete and (mode != "enforce" or not violations),
         "reasons": reasons,
     }
 
 
 def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
     """Select one completed report per shard while rejecting conflicting retries."""
-    attempts: dict[int, list[dict]] = {index: [] for index in range(shard_count)}
+    return select_shard_subset_attempts(reports, shard_count, list(range(shard_count)))
+
+
+def select_shard_subset_attempts(
+    reports: list[dict],
+    shard_count: int,
+    expected_shards: list[int],
+) -> list[dict]:
+    """Select one compatible completed report for every explicitly required shard."""
+    if (
+        not isinstance(shard_count, int) or isinstance(shard_count, bool) or shard_count < 1
+        or len(expected_shards) != len(set(expected_shards))
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            or not 0 <= index < shard_count
+            for index in expected_shards
+        )
+    ):
+        raise ValueError("required shard subset has invalid topology")
+    expected = set(expected_shards)
+    attempts: dict[int, list[dict]] = {index: [] for index in expected_shards}
     for report in reports:
         index = report.get("shard_index") if isinstance(report, dict) else None
         if (
             not isinstance(index, int) or isinstance(index, bool)
-            or index not in attempts or report.get("shard_count") != shard_count
+            or index not in expected or report.get("shard_count") != shard_count
         ):
             raise ValueError("shard attempt has invalid topology")
         attempts[index].append(report)
     selected = []
-    for index in range(shard_count):
+    for index in sorted(expected):
         completed = [report for report in attempts[index] if report.get("status") == "completed"]
         if not completed:
             raise ValueError(f"shard {index} has no completed attempt")
@@ -2096,6 +2673,9 @@ def aggregate_shards(
     threshold: float,
     test_mappings: dict[str, list[str]] | None = None,
     policy_config: dict | None = None,
+    manifests: list[dict] | None = None,
+    preflight: dict | None = None,
+    calibration_id: str | None = None,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -2106,6 +2686,45 @@ def aggregate_shards(
     expected_indexes = list(range(shard_count))
     if [report.get("shard_index") for report in reports] != expected_indexes:
         return _error("unknown", "Shard indexes are incomplete or duplicated")
+    qualification_inputs = (manifests, preflight, calibration_id)
+    if any(value is not None for value in qualification_inputs):
+        if not all(value is not None for value in qualification_inputs):
+            return _error("unknown", "Qualification source evidence is incomplete")
+        if (
+            not isinstance(manifests, list)
+            or len(manifests) != shard_count
+            or [manifest.get("shard_index") for manifest in manifests] != expected_indexes
+        ):
+            return _error("unknown", "Qualification manifests are incomplete or unordered")
+        try:
+            current_revision = _revision(root)
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            return _error("tool_error", f"Cannot verify qualification revision: {exc}")
+        if (
+            not isinstance(preflight, dict)
+            or preflight.get("status") != "completed"
+            or preflight.get("passed") is not True
+            or preflight.get("shard_count") != shard_count
+            or preflight.get("revision") != current_revision
+        ):
+            return _error("unknown", "Qualification preflight is incomplete or stale")
+        preflight_corpus = preflight.get("corpus")
+        if (
+            not isinstance(preflight_corpus, list)
+            or preflight.get("corpus_digest") != _canonical_digest(preflight_corpus)
+            or preflight.get("manifest_digests") != [manifest.get("digest") for manifest in manifests]
+        ):
+            return _error("unknown", "Qualification preflight identity is invalid")
+        if any(
+            manifest.get("revision") != current_revision
+            or manifest.get("shard_count") != shard_count
+            for manifest in manifests
+        ):
+            return _error("unknown", "Qualification manifest revision or topology is stale")
+        preflight_digest = _canonical_digest(preflight)
+    else:
+        preflight_corpus = None
+        preflight_digest = None
     for index, report in enumerate(reports):
         if report.get("status") != "completed":
             return _error("tool_error", f"Shard {index} is not completed")
@@ -2119,6 +2738,44 @@ def aggregate_shards(
             return _error("unknown", f"Shard {index} has invalid evidence: {exc}")
         if report.get("shard_count") != shard_count:
             return _error("unknown", f"Shard {index} has inconsistent shard count")
+        execution_fields = (
+            "preflight_digest", "preflight_corpus_digest", "manifest_digest",
+            "corpus_digest", "environment_digest",
+        )
+        if (
+            not isinstance(report.get("calibration_id"), str)
+            or not report["calibration_id"]
+            or any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in execution_fields)
+        ):
+            return _error("unknown", f"Shard {index} has incomplete qualification identity")
+        if manifests is not None and preflight is not None and calibration_id is not None:
+            manifest = manifests[index]
+            if (
+                report.get("files_tested") != manifest.get("files")
+                or report.get("line_ranges") != manifest.get("ranges")
+            ):
+                return _error("unknown", f"Shard {index} scope differs from its qualification manifest")
+            shard_corpus = sorted(
+                (
+                    record for record in preflight_corpus
+                    if isinstance(record, dict) and record.get("shard_index") == index
+                ),
+                key=lambda record: record.get("fingerprint", ""),
+            )
+            mapping = _mapped_tests(root, manifest["files"], test_mappings)
+            environment = _runtime_cache_identity(root, manifest["files"], mapping, policy_config or {})
+            if environment is None:
+                return _error("unknown", f"Shard {index} execution environment cannot be verified")
+            expected_qualification = {
+                "calibration_id": calibration_id,
+                "preflight_digest": preflight_digest,
+                "preflight_corpus_digest": preflight["corpus_digest"],
+                "manifest_digest": manifest["digest"],
+                "corpus_digest": _canonical_digest(shard_corpus),
+                "environment_digest": _checkpoint_environment_digest(environment),
+            }
+            if any(report.get(key) != value for key, value in expected_qualification.items()):
+                return _error("unknown", f"Shard {index} qualification identity is stale or unrelated")
         if report.get("engine_version") != MUTMUT_VERSION or report.get("test_runner") != _TEST_RUNNER:
             return _error("unknown", f"Shard {index} has unsupported execution identity")
         if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
@@ -2143,6 +2800,9 @@ def aggregate_shards(
     identity = ("revision", "engine_version", "test_runner")
     if any(any(report.get(key) != first.get(key) for key in identity) for report in reports[1:]):
         return _error("unknown", "Shard execution identities differ")
+    shared_identity = ("calibration_id", "preflight_digest", "preflight_corpus_digest")
+    if any(any(report.get(key) != first.get(key) for key in shared_identity) for report in reports[1:]):
+        return _error("unknown", "Shard qualification identities differ")
 
     expected = [
         path for path in _get_all_py_files(root, paths)
@@ -2200,6 +2860,18 @@ def aggregate_shards(
         }),
         "test_mapping_digest": _canonical_digest(mapping),
         "line_range_digest": _canonical_digest(line_ranges),
+        "calibration_id": first["calibration_id"],
+        "preflight_digest": first["preflight_digest"],
+        "corpus_digest": first["preflight_corpus_digest"],
+        "execution_identity_digest": _canonical_digest([
+            {
+                "shard_index": report["shard_index"],
+                "manifest_digest": report["manifest_digest"],
+                "corpus_digest": report["corpus_digest"],
+                "environment_digest": report["environment_digest"],
+            }
+            for report in reports
+        ]),
     }
     return {
         "schema_version": "2",
@@ -2577,6 +3249,7 @@ def main() -> int:
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
+    parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
@@ -2685,23 +3358,43 @@ def main() -> int:
             report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
             try:
                 reports = [json.loads(path.read_text()) for path in report_paths]
+                manifests = None
+                retained_preflight = None
                 if args.aggregate_scope:
                     manifests = [
                         load_partition_manifest(path)
                         for path in sorted(Path(args.aggregate_scope).glob("partition-*.json"))
                     ]
+                    manifests.sort(key=lambda manifest: manifest["shard_index"])
                     if len(manifests) != args.shard_count:
                         raise ValueError("aggregate scope manifests are incomplete")
                     paths = sorted({file for manifest in manifests for file in manifest["files"]})
-                    selection = _get_changed_py_files(args.root, mutation["paths"], args.base or mutation["base"])
-                    if selection["status"] != "completed":
-                        raise ValueError(selection["message"])
-                    expected = [
-                        file for file in selection["files"]
-                        if not any(file.startswith(item) for item in excluded)
-                    ]
+                    if args.aggregate_preflight_evidence:
+                        expected = [
+                            file for file in _get_all_py_files(args.root, mutation["paths"])
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
+                    else:
+                        selection = _get_changed_py_files(
+                            args.root, mutation["paths"], args.base or mutation["base"]
+                        )
+                        if selection["status"] != "completed":
+                            raise ValueError(selection["message"])
+                        expected = [
+                            file for file in selection["files"]
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
                     if paths != expected:
-                        raise ValueError("aggregate manifests do not match changed-file scope")
+                        scope = "full configured" if args.aggregate_preflight_evidence else "changed-file"
+                        raise ValueError(f"aggregate manifests do not match {scope} scope")
+                if args.aggregate_preflight_evidence:
+                    if not args.aggregate_scope or not args.calibration_id:
+                        raise ValueError(
+                            "qualification aggregation requires --aggregate-scope and --calibration-id"
+                        )
+                    retained_preflight = json.loads(
+                        Path(args.aggregate_preflight_evidence).read_text(encoding="utf-8")
+                    )
             except (OSError, json.JSONDecodeError) as exc:
                 report = _error("unknown", f"Cannot read shard reports: {exc}")
             except ValueError as exc:
@@ -2716,7 +3409,8 @@ def main() -> int:
                     return 2
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
-                    mutation["test_mappings"], mutation,
+                    mutation["test_mappings"], mutation, manifests, retained_preflight,
+                    args.calibration_id,
                 )
     else:
         if args.manifest_scope:

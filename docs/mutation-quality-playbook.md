@@ -12,11 +12,12 @@ debugging loop.
 4. Replay the smallest changed scope.
 5. Use a full run only after preflight and narrow replay succeed.
 
-PR orchestration waits for the initial shard matrix, derives a retry matrix from
-non-completed or missing reports, and retries only those original manifests. A
-missing report at that boundary means the terminal worker failed before retaining
-evidence; replay identity still comes from the original digest-bound manifest.
-The aggregate must select exactly one compatible completed attempt per shard. A
+PR orchestration prepares the changed-scope manifests but does not execute a
+mutation matrix automatically. A mutation-relevant PR remains unknown/non-pass
+until a maintainer explicitly dispatches the applicable preflight and replay or
+calibration stages. An explicit non-applicable changed scope may pass without
+execution. Replay identity comes from the original digest-bound manifest. The
+aggregate must select exactly one compatible completed attempt per shard. A
 retry timeout, missing attempt, or conflicting completed attempt remains exit 2
 and cannot establish a score or pass.
 
@@ -44,6 +45,12 @@ polyglot adapters do not imply polyglot mutation support.
   validation.
 - Independent calibrations may share one immutable preflight corpus, but never
   terminal outcomes. Run authoritative calibrations sequentially.
+- A failed staged-preflight run remains non-pass. Its successful shard reports may
+  contribute to a separately identified recovery corpus only when immutable artifact
+  hashes, candidate/runtime/dependency/policy identity, complete manifest topology,
+  exact-once shard origins, and cumulative original-budget accounting all validate.
+  Never rewrite the source run as successful or describe recovery as one uninterrupted
+  run.
 - Keep retained JSON bounded and secret-free. Do not add absolute paths,
   credentials, environment values, or raw unbounded process output.
 

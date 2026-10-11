@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Cross-file Python import analysis — AST-based import graph, broken import detector, contract checker."""
 
 import ast

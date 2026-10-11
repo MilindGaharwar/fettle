@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -431,16 +434,71 @@ def test_human_render_includes_repository_level_errors(tmp_path):
     assert "malformed work item frontmatter" in render_completion(result)
 
 
-def test_completion_cli_json_exit_code(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("fixture", "checkpoint", "process_exit"),
+    [
+        ("complete", False, 0),
+        ("complete", True, 0),
+        ("timeout", False, 1),
+        ("timeout", True, 0),
+        ("stale", False, 1),
+        ("stale", True, 0),
+        ("contradictory", False, 2),
+        ("contradictory", True, 2),
+        ("malformed", True, 2),
+        ("missing", True, 2),
+    ],
+)
+def test_completion_cli_checkpoint_preserves_evaluator_result(
+    tmp_path, monkeypatch, capsys, fixture, checkpoint, process_exit,
+):
     from fettle.cli import cmd_completion
 
-    root = _copy_fixture(tmp_path, "timeout")
+    root = _copy_fixture(tmp_path, fixture)
     (root / ".git").mkdir()
     (root / ".fettle.toml").write_text("")
     monkeypatch.chdir(root)
 
     with pytest.raises(SystemExit) as exc:
-        cmd_completion(argparse.Namespace(completion_action="validate", milestone=None, json=True))
+        cmd_completion(argparse.Namespace(
+            completion_action="validate", milestone=None, json=True,
+            checkpoint=checkpoint,
+        ))
 
-    assert exc.value.code == 1
-    assert json.loads(capsys.readouterr().out)["complete"] is False
+    assert exc.value.code == process_exit
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["exit_code"] == evaluate_manifests(root).exit_code
+    assert payload["valid"] is (payload["exit_code"] != 2)
+    assert payload["complete"] is (payload["exit_code"] == 0)
+    if payload["valid"] and not payload["complete"]:
+        criterion = payload["milestones"][0]["criteria"][0]
+        assert criterion["passed"] is False
+        assert criterion["reason"]
+        assert criterion["recovery"]
+
+
+def test_completion_checkpoint_flag_crosses_real_cli_boundary(tmp_path):
+    root = _copy_fixture(tmp_path, "timeout")
+    (root / ".git").mkdir()
+    (root / ".fettle.toml").write_text("")
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)}
+
+    strict = subprocess.run(
+        [sys.executable, "-m", "fettle.cli", "completion", "validate", "--json"],
+        cwd=root, env=env, capture_output=True, text=True, check=False,
+    )
+    checkpoint = subprocess.run(
+        [
+            sys.executable, "-m", "fettle.cli", "completion", "validate",
+            "--checkpoint", "--json",
+        ],
+        cwd=root, env=env, capture_output=True, text=True, check=False,
+    )
+
+    assert strict.returncode == 1
+    assert checkpoint.returncode == 0
+    assert json.loads(strict.stdout) == json.loads(checkpoint.stdout)
+    payload = json.loads(checkpoint.stdout)
+    assert payload["valid"] is True
+    assert payload["complete"] is False
+    assert payload["exit_code"] == 1

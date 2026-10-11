@@ -11,6 +11,351 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 
+@pytest.fixture
+def uat_cli_context(tmp_path):
+    from argparse import Namespace
+
+    arguments = Namespace(uat_action="run", contract=None, approve_contract=None,
+                          proposal=None, yes=False, surface="cli", json=True)
+    config = {"uat": {"enabled": True}}
+    with patch("fettle.paths.find_repo_root", return_value=tmp_path) as root_probe, \
+            patch("fettle.config.load_config", return_value=config) as load:
+        yield arguments, config, root_probe, load
+
+
+@pytest.mark.parametrize("error", [OSError("unreadable"), TypeError("type"), ValueError("policy")])
+def test_uat_configuration_errors_fail_closed(uat_cli_context, capsys, error):
+    from fettle.cli import cmd_uat
+
+    arguments, _, _, load = uat_cli_context
+    load.side_effect = error
+    with pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == f"Error: invalid UAT configuration: {error}; repair policy and retry\n"
+
+
+def test_uat_requires_repository(uat_cli_context, capsys):
+    from fettle.cli import cmd_uat
+
+    arguments, _, root_probe, load = uat_cli_context
+    root_probe.return_value = None
+    with pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == 2
+    load.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Error: not inside a repository (no .git or .fettle.toml found)\n"
+
+
+@pytest.mark.parametrize("contract,approval,proposal,message", [
+    (None, None, "proposal.json", "--proposal requires a separately approved --contract"),
+    (None, "digest", None, "--contract and --approve-contract are required together for capture"),
+    ("contract.json", None, None, "--contract and --approve-contract are required together for capture"),
+])
+def test_uat_capture_requires_paired_approval(
+    uat_cli_context, capsys, contract, approval, proposal, message,
+):
+    from fettle.cli import cmd_uat
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.contract, arguments.approve_contract, arguments.proposal = contract, approval, proposal
+    with patch("fettle.uat.session.run_session") as run, \
+            patch("fettle.uat.controller.run_contract_session") as capture, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == 2
+    run.assert_not_called()
+    capture.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == f"Error: {message}\n"
+
+
+@pytest.mark.parametrize("contract,status,worktree,error,checkpoint,rec_error,exit_code,reconciled", [
+    (False, "completed", "tree", "", {"acceptance_complete": True}, "", 0, True),
+    (False, "completed", "tree", "", {}, "", 1, True),
+    (False, "completed", "tree", "runner failed", {"acceptance_complete": True}, "", 1, True),
+    (False, "completed", "tree", "", {"acceptance_complete": True}, "invalid evidence", 1, True),
+    (False, "error", "tree", "runner failed", {}, "", 1, False),
+    (True, "completed", "tree", "", {"acceptance_complete": True,
+     "session_error": "retained diagnostic", "judgment": {"status": "completed", "findings": []}}, "", 0, True),
+    (True, "error", "tree", "capture failed", {}, "", 1, True),
+    (True, "error", "", "capture failed", {}, "", 1, False),
+])
+def test_uat_run_preserves_evidence_and_acceptance_status(
+    uat_cli_context, tmp_path, capsys, contract, status, worktree, error,
+    checkpoint, rec_error, exit_code, reconciled,
+):
+    from fettle.cli import cmd_uat
+    from fettle.uat.reconcile import Verdict
+    from fettle.uat.session import SessionResult
+
+    arguments, config, _, load = uat_cli_context
+    if contract:
+        arguments.contract, arguments.approve_contract = "contract.json", "approved-digest"
+        arguments.proposal, arguments.yes = "proposal.json", True
+    result = SessionResult("session-1", "cli", worktree=worktree,
+                           transcript_path="transcript.txt", scenario_ids=["feature/S1"],
+                           status=status, error=error)
+    verdict = Verdict("feature/S1", "CONFIRMED", "actual observation", "retained note")
+    with patch("fettle.uat.session.run_session", return_value=result) as run, \
+            patch("fettle.uat.controller.run_contract_session", return_value=result) as capture, \
+            patch("fettle.uat.reconcile.reconcile_session", return_value=([verdict], checkpoint, rec_error)) as reconcile, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == exit_code
+    load.assert_called_once_with(str(tmp_path), strict=True)
+    if contract:
+        capture.assert_called_once_with(str(tmp_path), config, "contract.json", "approved-digest",
+                                        True, "cli", proposal_path="proposal.json")
+        run.assert_not_called()
+    else:
+        run.assert_called_once_with(str(tmp_path), config, "cli", consent=False)
+        capture.assert_not_called()
+    if reconciled:
+        reconcile.assert_called_once_with(str(tmp_path), worktree)
+    else:
+        reconcile.assert_not_called()
+    expected = {
+        "session_id": "session-1", "surface": "cli", "worktree": worktree,
+        "transcript": "transcript.txt", "scenarios": ["feature/S1"], "status": status,
+        "error": rec_error or error,
+        "acceptance_complete": checkpoint.get("acceptance_complete", False),
+        "session_error": checkpoint.get("session_error", ""),
+        "judgment": checkpoint.get("judgment", {"status": "NOT_APPLICABLE", "findings": []}),
+        "verdicts": [{"scenario_id": "feature/S1", "verdict": "CONFIRMED",
+                      "observed": "actual observation", "note": "retained note"}] if reconciled else [],
+    }
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert output.out == json.dumps(expected, indent=2) + "\n"
+
+
+@pytest.mark.parametrize("checkpoint,error,exit_code", [
+    ({}, "", 1),
+    ({"session_id": "session-1", "acceptance_complete": True,
+      "session_error": "", "judgment": {"status": "completed", "findings": []}}, "", 0),
+    ({"session_id": "session-1", "acceptance_complete": False,
+      "session_error": "incomplete evidence"}, "", 1),
+    ({}, "missing evidence", 2),
+])
+@pytest.mark.parametrize("json_output", [True, False])
+def test_uat_report_preserves_verdict_and_failure(
+    uat_cli_context, tmp_path, capsys, checkpoint, error, exit_code, json_output,
+):
+    from fettle.cli import cmd_uat
+    from fettle.uat.reconcile import Verdict
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.uat_action, arguments.worktree, arguments.json = "report", "session-tree", json_output
+    verdict = Verdict("feature/S1", "BLOCKED", "permission denied", "needs approval")
+    with patch("fettle.uat.reconcile.reconcile_session", return_value=([verdict], checkpoint, error)) as reconcile, \
+            patch("fettle.uat.reconcile.format_verdicts", return_value="formatted verdict") as render, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    reconcile.assert_called_once_with(str(tmp_path), "session-tree")
+    assert exit_info.value.code == exit_code
+    output = capsys.readouterr()
+    if error:
+        assert output.out == ""
+        assert output.err == "Error: missing evidence\n"
+        render.assert_not_called()
+    elif json_output:
+        expected = {
+            "session_id": checkpoint.get("session_id", ""),
+            "acceptance_complete": checkpoint.get("acceptance_complete", False),
+            "session_error": checkpoint.get("session_error", ""),
+            "judgment": checkpoint.get("judgment", {"status": "NOT_APPLICABLE", "findings": []}),
+            "verdicts": [{"scenario_id": "feature/S1", "verdict": "BLOCKED",
+                          "observed": "permission denied", "note": "needs approval"}],
+        }
+        assert output.out == json.dumps(expected, indent=2) + "\n"
+        assert output.err == ""
+        render.assert_not_called()
+    else:
+        expected = "formatted verdict\n"
+        if checkpoint.get("session_error"):
+            expected += "  session: incomplete evidence\n"
+        assert output.out == expected
+        assert output.err == ""
+        render.assert_called_once_with([verdict])
+
+
+@pytest.mark.parametrize("judgment,diagnostic", [
+    ({}, ""),
+    ({"status": "NOT_APPLICABLE"}, ""),
+    ({"status": "completed"}, ""),
+    ({"status": "tool_error", "error": "judge unavailable"}, "  judgment: tool_error: judge unavailable\n"),
+    ({"status": "tool_error"}, "  judgment: tool_error: \n"),
+    ({"status": "completed", "findings": [{"id": "finding-1"}]},
+     "  judgment: 1 finding(s); operator attestation required\n"),
+])
+def test_uat_human_run_preserves_diagnostics(uat_cli_context, capsys, judgment, diagnostic):
+    from fettle.cli import cmd_uat
+    from fettle.uat.reconcile import Verdict
+    from fettle.uat.session import SessionResult
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.json = False
+    result = SessionResult("session-1", "api", worktree="session-tree",
+                           transcript_path="session-transcript", status="completed", error="runner failed")
+    verdicts = [Verdict("feature/S1", "BLOCKED")]
+    with patch("fettle.uat.session.run_session", return_value=result), \
+            patch("fettle.uat.reconcile.reconcile_session", return_value=(verdicts, {"judgment": judgment}, "")), \
+            patch("fettle.uat.reconcile.format_verdicts", return_value="formatted verdict") as render, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == 1
+    render.assert_called_once_with(verdicts)
+    output = capsys.readouterr()
+    assert output.out == ("UAT session session-1 on 'api': completed\n"
+                          "  worktree:   session-tree\n"
+                          "  transcript: session-transcript\n"
+                          "formatted verdict\n" + diagnostic)
+    assert output.err == "  error: runner failed\n"
+
+
+@pytest.mark.parametrize("action", ["manual", "attest"])
+@pytest.mark.parametrize("failure", [None, "exception", "returned"])
+@pytest.mark.parametrize("operator", ["operator-1", None])
+def test_uat_manual_actions_preserve_operator_evidence(
+    uat_cli_context, tmp_path, capsys, monkeypatch, action, failure, operator,
+):
+    from fettle.cli import cmd_uat
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.uat_action = action
+    arguments.scenario_id, arguments.outcome, arguments.observed = "feature/S1", "matches", "actual output"
+    if operator is None:
+        monkeypatch.delenv("USER", raising=False)
+    else:
+        monkeypatch.setenv("USER", operator)
+    scenarios = [{"id": "feature/S1"}]
+    entry = {"scenario_id": "feature/S1", "outcome": "matches"}
+    with patch("fettle.uat.session.collect_scenarios", return_value=scenarios) as collect, \
+            patch("fettle.uat.manual.format_manual_guide", return_value="manual guide") as render, \
+            patch("fettle.uat.manual.record_attestation", return_value=(entry, "invalid evidence" if failure == "returned" else "")) as record:
+        if failure == "exception":
+            (collect if action == "manual" else record).side_effect = ValueError("invalid evidence")
+        with pytest.raises(SystemExit) as exit_info:
+            cmd_uat(arguments)
+    failed = failure == "exception" or action == "attest" and failure == "returned"
+    assert exit_info.value.code == (2 if failed else 0)
+    output = capsys.readouterr()
+    assert output.err == ("Error: invalid evidence\n" if failed else "")
+    if failed:
+        assert output.out == ""
+    elif action == "manual":
+        assert output.out == "manual guide\n"
+        render.assert_called_once_with(scenarios)
+    else:
+        assert output.out == "Recorded operator attestation for feature/S1: matches (source: operator)\n"
+    if action == "manual":
+        collect.assert_called_once_with(str(tmp_path))
+        record.assert_not_called()
+    else:
+        record.assert_called_once_with(str(tmp_path), "feature/S1", "matches", "actual output", operator=operator or "")
+        collect.assert_not_called()
+
+
+@pytest.mark.parametrize("status,ready,exit_code", [("invalid", True, 2), ("scored", False, 1), ("scored", True, 0)])
+@pytest.mark.parametrize("json_output", [True, False])
+def test_uat_benchmark_requires_valid_graduation(uat_cli_context, capsys, status, ready, exit_code, json_output):
+    from fettle.cli import cmd_uat
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.uat_action, arguments.evidence, arguments.manifest = "benchmark", "evidence.json", "manifest.json"
+    arguments.json = json_output
+    scored = {"status": status, "metrics": {"agent": {"discovery_rate": 0.75, "false_verdicts": 2,
+                                                    "coverage_rate": 0.5}},
+              "errors": ["invalid provenance"], "graduation": {"ready": ready, "blockers": ["human parity unproven"]}}
+    with patch("fettle.uat.benchmark.score_benchmark", return_value=scored) as score, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    score.assert_called_once_with("evidence.json", manifest_path="manifest.json")
+    assert exit_info.value.code == exit_code
+    output = capsys.readouterr()
+    if json_output:
+        assert output.out == json.dumps(scored, indent=2) + "\n"
+        assert output.err == ""
+    else:
+        assert output.out == (f"UAT parity benchmark: {status}\n"
+                              "  agent: discovery=0.75 false-verdicts=2 coverage=0.5\n"
+                              "  blocked: human parity unproven\n")
+        assert output.err == "  error: invalid provenance\n"
+
+
+@pytest.mark.parametrize("contract,approval,surface", [
+    (None, None, "cli"), ("contract.json", "digest", "cli"),
+    ("contract.json", None, "api"), (None, "digest", "web"),
+])
+@pytest.mark.parametrize("ready", [True, False])
+@pytest.mark.parametrize("json_output", [True, False])
+def test_uat_doctor_reports_capabilities(
+    uat_cli_context, tmp_path, capsys, contract, approval, surface, ready, json_output,
+):
+    from fettle.cli import cmd_uat
+    from fettle.uat.doctor import Capability
+
+    arguments, config, _, _ = uat_cli_context
+    del arguments.uat_action
+    arguments.contract, arguments.approve_contract, arguments.json = contract, approval, json_output
+    capabilities = [Capability(surface, ready, "runtime detail", "missing capability", "install runtime", ["manual step"])]
+    surfaces = [{"name": surface, "evidence": "repository detection"}]
+    with patch("fettle.uat.surfaces.resolve_surfaces", return_value=(surfaces, "")) as resolve, \
+            patch("fettle.uat.doctor.probe", return_value=(capabilities, "")) as probe, \
+            patch("fettle.uat.doctor.probe_contract", return_value=capabilities[0]) as capture, \
+            patch("fettle.uat.doctor.format_report", return_value="capability report") as render, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == (0 if ready else 1)
+    if contract or approval:
+        capture.assert_called_once_with(str(tmp_path), config, contract or "", approval or "")
+        resolve.assert_not_called()
+        probe.assert_not_called()
+        surfaces = [{"name": surface, "evidence": "approved read-only contract" if surface == "cli"
+                     else "approved isolated controller contract"}]
+    else:
+        resolve.assert_called_once_with(str(tmp_path), config)
+        probe.assert_called_once_with(str(tmp_path), config)
+        capture.assert_not_called()
+    output = capsys.readouterr()
+    assert output.err == ""
+    if json_output:
+        expected = {"surfaces": surfaces, "capabilities": [{"surface": surface, "ready": ready,
+                    "detail": "runtime detail", "why": "missing capability", "fix": "install runtime",
+                    "manual": ["manual step"]}]}
+        assert output.out == json.dumps(expected, indent=2) + "\n"
+        render.assert_not_called()
+    else:
+        assert output.out == "capability report\n"
+        render.assert_called_once_with(surfaces, capabilities)
+
+
+@pytest.mark.parametrize("phase", ["resolve", "probe"])
+def test_uat_doctor_errors_are_not_readiness(uat_cli_context, capsys, phase):
+    from fettle.cli import cmd_uat
+
+    arguments, _, _, _ = uat_cli_context
+    arguments.uat_action = "doctor"
+    with patch("fettle.uat.surfaces.resolve_surfaces", return_value=([], "unavailable" if phase == "resolve" else "")), \
+            patch("fettle.uat.doctor.probe", return_value=([], "unavailable")) as probe, \
+            pytest.raises(SystemExit) as exit_info:
+        cmd_uat(arguments)
+    assert exit_info.value.code == 2
+    if phase == "resolve":
+        probe.assert_not_called()
+    else:
+        probe.assert_called_once()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Error: unavailable\n"
+
+
 def test_cli_help(capsys):
     from fettle.cli import main
     with pytest.raises(SystemExit) as exc_info, patch("sys.argv", ["fettle", "-h"]):

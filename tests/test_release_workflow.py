@@ -3,6 +3,8 @@
 from pathlib import Path
 import zipfile
 
+import yaml
+
 
 WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "release.yml"
 CI_WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
@@ -147,14 +149,83 @@ def test_ci_exposes_one_stable_required_check():
 
     assert "  required:\n" in workflow
     assert "name: CI required" in workflow
-    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel]" in workflow
+    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]" in workflow
     assert "if: always()" in workflow
     assert "LINT_RESULT: ${{ needs.lint.result }}" in workflow
     assert "TEST_RESULT: ${{ needs.test.result }}" in workflow
     assert "COVERAGE_RESULT: ${{ needs.coverage.result }}" in workflow
     assert "WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}" in workflow
     assert "LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}" in workflow
-    assert workflow.count('!= "success"') == 5
+    assert "COMPLETION_RESULT: ${{ needs.completion-strict.result }}" in workflow
+    assert workflow.count('!= "success"') == 6
+
+
+def test_ci_pushes_delivery_branch_and_verifies_every_checkout_identity():
+    workflow = CI_WORKFLOW.read_text()
+    parsed = yaml.load(workflow, Loader=yaml.BaseLoader)
+    checkout = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    identity_script = """actual_head="$(git rev-parse HEAD)"
+if [ "$actual_head" != "$GITHUB_SHA" ]; then
+  echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+  exit 1
+fi
+"""
+    checkout_jobs = {
+        "lint", "typecheck", "test", "coverage", "windows-bridge", "linux-wheel",
+        "completion-strict",
+    }
+
+    assert parsed["on"]["push"]["branches"] == [
+        "main", "audit/hardening-integration-20261005",
+    ]
+    assert "pull_request" in parsed["on"]
+    for job_name in checkout_jobs:
+        steps = parsed["jobs"][job_name]["steps"]
+        checkout_index = next(i for i, step in enumerate(steps) if step.get("uses") == checkout)
+        identity_index = next(
+            i for i, step in enumerate(steps)
+            if step.get("name") == "Verify exact event commit"
+        )
+        assert identity_index == checkout_index + 1
+        assert steps[identity_index]["shell"] == "bash"
+        assert steps[identity_index]["run"] == identity_script
+
+    linux_steps = parsed["jobs"]["linux-wheel"]["steps"]
+    install_index = next(
+        i for i, step in enumerate(linux_steps)
+        if step.get("name") == "Install checkout prerequisite"
+    )
+    checkout_index = next(i for i, step in enumerate(linux_steps) if step.get("uses") == checkout)
+    assert install_index < checkout_index
+    assert "apt-get install -yq --no-install-recommends git" in linux_steps[install_index]["run"]
+
+
+def test_ci_runs_acceptance_jobs_before_strict_completion_can_pass():
+    workflow = CI_WORKFLOW.read_text()
+    test_job = workflow[workflow.index("  test:"):workflow.index("  coverage:")]
+    strict_job = workflow[
+        workflow.index("  completion-strict:"):workflow.index("  required:")
+    ]
+
+    assert "fettle completion validate --checkpoint" in test_job
+    assert "fettle completion validate\n" in strict_job
+    assert "--checkpoint" not in strict_job
+    assert "needs:" not in strict_job
+    assert "needs:" not in workflow[
+        workflow.index("  windows-bridge:"):workflow.index("  linux-wheel:")
+    ]
+    assert "needs:" not in workflow[
+        workflow.index("  linux-wheel:"):workflow.index("  completion-strict:")
+    ]
+
+
+def test_precommit_uses_checkpoint_but_release_remains_strict():
+    precommit = (ROOT / ".pre-commit-config.yaml").read_text()
+    release = WORKFLOW.read_text()
+
+    assert "completion validate --checkpoint" in precommit
+    assert "fettle completion validate\n" in release
+    assert "completion validate --checkpoint" not in release
 
 
 def test_ci_runs_blocking_windows_bridge_publication_uat():

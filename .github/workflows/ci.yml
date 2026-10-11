@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, audit/hardening-integration-20261005]
   pull_request:
 
 # WP-B4: third-party actions pinned by commit SHA (tag in trailing comment);
@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -29,6 +38,11 @@ jobs:
       - name: Require provenance for every rule asset
         run: python scripts/check_rule_provenance.py
 
+      - name: Typecheck hardened trust boundaries
+        run: |
+          python -m pip install --quiet mypy==2.3.0
+          mypy --follow-imports=silent --ignore-missing-imports fettle/evidence_ledger.py fettle/dispatcher.py fettle/dispatcher_types.py fettle/dispatcher_registry.py fettle/action_entrypoint.py fettle/quality_scan.py fettle/config.py
+
   # WP-B5: honesty for the `Typing :: Typed` classifier — mypy runs on every
   # push but does not block yet. Promote to blocking once the baseline is 0.
   typecheck:
@@ -37,6 +51,15 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -77,6 +100,15 @@ jobs:
     name: test (${{ matrix.os }}, py${{ matrix.python }}, semgrep ${{ matrix.semgrep }}${{ matrix.canary && ', canary' || '' }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -122,7 +154,7 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Validate completion evidence
-        run: fettle completion validate
+        run: fettle completion validate --checkpoint
 
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null
@@ -136,6 +168,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -166,6 +207,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -184,6 +234,11 @@ jobs:
           python -m venv $venv
           $python = Join-Path $venv "Scripts\python.exe"
           & $python -m pip install --quiet $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { throw "package installation failed" }
+          & $python -m pytest tests/test_evidence_ledger.py -q -k "concurrent_append or independent_processes or lock_timeout or interrupted_writer"
+          if ($LASTEXITCODE -ne 0) { throw "ledger concurrency and interruption tests failed" }
+          & $python -m pytest tests/test_mutation_test.py -q -k "mutmut_process_timeout_restores or mutmut_process_stops_descendants_after_leader_exits or windows_ or unconfirmed_tree_termination"
+          if ($LASTEXITCODE -ne 0) { throw "mutation worker lifecycle tests failed" }
           & $python -m fettle demo
           if ($LASTEXITCODE -ne 0) { throw "offline demo failed" }
           $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"
@@ -220,18 +275,32 @@ jobs:
     runs-on: ubuntu-latest
     container: python:3.12-slim
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build and install exact wheel
+      - name: Install checkout prerequisite
         run: |
           apt-get update -q
           apt-get install -yq --no-install-recommends git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
+
+      - name: Build and install exact wheel
+        run: |
           python -m pip install --quiet build==1.5.0 pipx==1.7.1
           python -m build --wheel
           export PIPX_HOME=/tmp/pipx
           export PIPX_BIN_DIR=/tmp/bin
           pipx install dist/*.whl
           /tmp/bin/fettle demo || exit 1
+          cd /tmp
+          /tmp/pipx/venvs/finefettle/bin/python -I -c "from fettle.providers import default_providers; import fettle.graph_cli; assert len(default_providers()) == 5"
 
       - name: Configure detected OpenCode host without a clone
         run: |
@@ -243,10 +312,35 @@ jobs:
           /tmp/bin/fettle init --json > /tmp/init.json
           /tmp/pipx/venvs/finefettle/bin/python -c "import json; from pathlib import Path; from fettle.bridge import validate_bridge; data=json.loads(Path('/tmp/init.json').read_text()); steps={item['name']: item for item in data}; assert steps['bridge']['status'] == 'created'; assert steps['opencode']['status'] == 'created'; assert validate_bridge().ok"
 
+  completion-strict:
+    name: Completion evidence (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install fettle (editable)
+        run: python -m pip install --quiet -e .
+
+      - name: Require complete milestone evidence
+        run: fettle completion validate
+
   required:
     name: CI required
     if: always()
-    needs: [lint, test, coverage, windows-bridge, linux-wheel]
+    needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking CI job
@@ -256,12 +350,14 @@ jobs:
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}
           LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}
+          COMPLETION_RESULT: ${{ needs.completion-strict.result }}
         run: |
           if [ "$LINT_RESULT" != "success" ] || \
              [ "$TEST_RESULT" != "success" ] || \
              [ "$COVERAGE_RESULT" != "success" ] || \
              [ "$WINDOWS_BRIDGE_RESULT" != "success" ] || \
-             [ "$LINUX_WHEEL_RESULT" != "success" ]; then
-            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT"
+             [ "$LINUX_WHEEL_RESULT" != "success" ] || \
+             [ "$COMPLETION_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT completion=$COMPLETION_RESULT"
             exit 1
           fi

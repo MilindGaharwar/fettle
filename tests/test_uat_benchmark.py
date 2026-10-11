@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from fettle.uat.benchmark import load_seed_manifest, score_benchmark
 
 
@@ -42,6 +44,31 @@ def test_canonical_manifest_has_ten_unique_seeds():
     assert manifest["discovery_threshold"] is None
     documented = Path("docs/uat/parity-seeds.json")
     assert manifest == load_seed_manifest(documented)
+
+
+@pytest.mark.parametrize("manifest", [[], {}, {"seeds": []},
+    {"seeds": [{"id": "same"}] * 10},
+    {"seeds": [{"id": str(index)} for index in range(10)], "discovery_threshold": True},
+])
+def test_invalid_manifest_is_controlled_nonpass(tmp_path, manifest):
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"runs": []}')
+    result = score_benchmark(evidence, manifest_path=path)
+    assert result["status"] == "invalid"
+    assert not result["graduation"]["ready"]
+
+
+def test_threshold_cannot_promote_asserted_metric_rows(tmp_path):
+    manifest = load_seed_manifest()
+    manifest["discovery_threshold"] = 1.0
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    evidence = _write_evidence(tmp_path, [seed["id"] for seed in manifest["seeds"]])
+    result = score_benchmark(evidence, manifest_path=path)
+    assert not result["graduation"]["ready"]
+    assert any("independently captured" in reason for reason in result["graduation"]["blockers"])
 
 
 def test_complete_evidence_reproduces_metrics_but_unset_threshold_blocks(tmp_path):
@@ -112,3 +139,27 @@ def test_cli_rejects_malformed_evidence(tmp_path):
     )
     assert result.returncode == 2
     assert json.loads(result.stdout)["status"] == "invalid"
+
+
+@pytest.mark.parametrize("change", ["missing-report", "manifest-drift", "asserted-metrics", "duplicate-seed"])
+def test_controller_calibration_rejects_unverified_evidence(tmp_path, change):
+    from fettle.uat.benchmark import _canonical_digest
+
+    manifest = {"seeds": [{"id": f"case-{index}", "expected_state": "violation"}
+                          for index in range(10)], "discovery_threshold": None}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    run = {"seed_id": "case-0", "product_root": str(tmp_path), "report_digest": "sha256:" + "0" * 64}
+    payload = {"schema_version": 2, "manifest_digest": _canonical_digest(manifest), "runs": [run]}
+    if change == "manifest-drift":
+        payload["manifest_digest"] = "sha256:" + "0" * 64
+    if change == "asserted-metrics":
+        run["discovered"] = True
+    if change == "duplicate-seed":
+        payload["runs"].append(run.copy())
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(json.dumps(payload))
+    result = score_benchmark(evidence, manifest_path=manifest_path)
+    assert result["status"] == "invalid"
+    assert result["errors"]
+    assert not result["graduation"]["ready"]

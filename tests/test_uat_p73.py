@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fettle.uat.reconcile import parse_candidates, reconcile
 from fettle.uat.session import build_prompt
 
@@ -56,10 +58,25 @@ def test_charters_instruct_candidate_blocks_not_verdicts():
 def test_candidates_parsed_with_fields(tmp_path):
     parsed = parse_candidates(CHARTER_TRANSCRIPT)
 
-    ids = [c["candidate_id"] for c in parsed]
-    assert ids == ["huge-amount", "unicode-name"]
-    assert "99999999999999" in parsed[0]["observed"]
-    assert parsed[1]["why_interesting"].startswith("encoding")
+    assert parsed == [
+        {"candidate_id": "huge-amount", "observed": "transferring 99999999999999 cents succeeded silently",
+         "why_interesting": "no upper bound on transfer size"},
+        {"candidate_id": "unicode-name", "observed": "name with emoji corrupted the audit line",
+         "why_interesting": "encoding assumption in the audit path"},
+    ]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("", []), ("OBSERVED: stray observation\nWHY-INTERESTING: stray reason\n", []),
+    ("CANDIDATE: blank\n\nignored text\n", [{"candidate_id": "blank", "observed": "", "why_interesting": ""}]),
+    ("  CANDIDATE: spaced id  \n  ObSeRvEd: first line  \n\nsecond line\n WhY-InTeReStInG: reason  \n",
+     [{"candidate_id": "spaced id", "observed": "first line second line", "why_interesting": "reason"}]),
+    ("CANDIDATE: first\nCANDIDATE: second\nOBSERVED:\nWHY-INTERESTING:reason\n",
+     [{"candidate_id": "first", "observed": "", "why_interesting": ""},
+      {"candidate_id": "second", "observed": "", "why_interesting": "reason"}]),
+])
+def test_candidate_fields_preserve_exact_content(text, expected):
+    assert parse_candidates(text) == expected
 
 
 def test_scenario_blocks_are_never_mistaken_for_candidates():
@@ -68,9 +85,26 @@ def test_scenario_blocks_are_never_mistaken_for_candidates():
     verdicts = reconcile(SCENARIOS, transcript)
     candidates = parse_candidates(transcript)
 
-    assert [v.verdict for v in verdicts] == ["CONFIRMED"]
+    assert [v.verdict for v in verdicts] == ["INDETERMINATE"]
     assert len(candidates) == 2
     assert all("SCENARIO" not in c["candidate_id"] for c in candidates)
+
+
+@pytest.mark.parametrize("section", ["SCENARIO: demo/S1", "RESTART_PROBE:"])
+@pytest.mark.parametrize("following_candidate", [False, True])
+def test_verdict_sections_do_not_overwrite_candidate_evidence(section, following_candidate):
+    transcript = (
+        "CANDIDATE: retained-finding\nOBSERVED: original observation\n"
+        "WHY-INTERESTING: original reason\n"
+        f"{section}\nOBSERVED: unrelated verdict observation\n"
+        "OUTCOME: matches\nNOTES: verdict notes\n"
+    )
+    expected = [{"candidate_id": "retained-finding", "observed": "original observation",
+                 "why_interesting": "original reason"}]
+    if following_candidate:
+        transcript += "CANDIDATE: next-finding\nOBSERVED: next observation\n"
+        expected.append({"candidate_id": "next-finding", "observed": "next observation", "why_interesting": ""})
+    assert parse_candidates(transcript) == expected
 
 
 def test_candidates_never_become_verdicts(tmp_path):
