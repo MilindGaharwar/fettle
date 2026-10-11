@@ -1781,6 +1781,183 @@ def retain_historical_accounting_floor(accounting: dict, historical_paths: list[
     }
 
 
+def build_calibration_launch_accounting(
+    current: dict,
+    *,
+    stage: str,
+    calibration_id: str,
+    ceiling: int,
+    resume_run_id: str,
+    prior_stage_run_id: str,
+    predecessor: dict | None,
+) -> dict:
+    """Bind current launch usage to exactly one validated cumulative predecessor floor."""
+    if (
+        stage not in {"1", "2", "3"}
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
+        or not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1
+        or not isinstance(resume_run_id, str)
+        or not isinstance(prior_stage_run_id, str)
+    ):
+        raise ValueError("calibration launch identity is malformed")
+    def numeric(value: str) -> bool:
+        return bool(re.fullmatch(r"[1-9][0-9]*", value))
+    if resume_run_id and not numeric(resume_run_id):
+        raise ValueError("calibration resume run identity is malformed")
+    if prior_stage_run_id and not numeric(prior_stage_run_id):
+        raise ValueError("calibration prior-stage run identity is malformed")
+
+    def source_run_ids(report: dict) -> list[str]:
+        if not isinstance(report, dict):
+            raise ValueError("calibration predecessor source identity is malformed")
+        sources = report.get("sources")
+        if sources is None:
+            run_id = report.get("expected_run_id")
+            attempt = report.get("expected_run_attempt")
+            if not isinstance(run_id, str) or not isinstance(attempt, str):
+                raise ValueError("calibration predecessor source identity is malformed")
+            return [run_id]
+        if not isinstance(sources, list) or not sources:
+            raise ValueError("calibration predecessor sources are malformed")
+        return [run_id for source in sources for run_id in source_run_ids(source)]
+
+    if stage == "1" and not resume_run_id:
+        if prior_stage_run_id or predecessor is not None:
+            raise ValueError("fresh stage 1 calibration has contradictory predecessor accounting")
+        prior = 0.0
+        predecessor_mode = "fresh-stage-1"
+        predecessor_run_id = None
+    else:
+        if stage == "1":
+            if prior_stage_run_id:
+                raise ValueError("stage 1 continuation cannot declare prior-stage accounting")
+        elif not prior_stage_run_id:
+            raise ValueError("later calibration stage is missing prior-stage identity")
+        if predecessor is None:
+            raise ValueError("required calibration predecessor accounting is missing")
+        expected_stage = stage if resume_run_id else str(int(stage) - 1)
+        predecessor_run_id = resume_run_id or prior_stage_run_id
+        sources = predecessor.get("sources")
+        terminal_source = (
+            predecessor if sources is None
+            else sources[-1] if isinstance(sources, list) and sources
+            else None
+        )
+        values = (
+            predecessor.get("charged_runner_minutes"),
+            predecessor.get("estimated_runner_minutes"),
+        )
+        valid = (
+            predecessor.get("schema_version") == "1"
+            and predecessor.get("billing_authority") is False
+            and predecessor.get("calibration_id") == calibration_id
+            and predecessor.get("stage") == expected_stage
+            and predecessor.get("ceiling") == ceiling
+            and predecessor.get("passed") is True
+            and isinstance(terminal_source, dict)
+            and terminal_source.get("expected_run_id") == predecessor_run_id
+            and all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and value >= 0
+                for value in values
+            )
+        )
+        if not valid:
+            raise ValueError("calibration predecessor accounting is incompatible")
+        lineage = source_run_ids(predecessor)
+        if resume_run_id and stage != "1" and prior_stage_run_id not in lineage:
+            raise ValueError("calibration resume accounting conflicts with prior-stage lineage")
+        prior = float(max(values))
+        predecessor_mode = "same-stage-resume" if resume_run_id else "prior-stage"
+
+    observed = current.get("estimated_runner_minutes")
+    if (
+        current.get("schema_version") != "1"
+        or current.get("kind") != "operational_runner_time_estimate"
+        or current.get("billing_authority") is not False
+        or not isinstance(observed, (int, float)) or isinstance(observed, bool)
+        or not math.isfinite(observed) or observed < 0
+        or not isinstance(current.get("included_jobs"), list)
+    ):
+        raise ValueError("current calibration launch accounting is malformed")
+    return {
+        **current,
+        "stage": stage,
+        "calibration_id": calibration_id,
+        "ceiling": ceiling,
+        "prior_runner_minutes": prior,
+        "calibration_predecessor": {
+            "mode": predecessor_mode,
+            "resume_run_id": resume_run_id or None,
+            "prior_stage_run_id": prior_stage_run_id or None,
+            "accounting_run_id": predecessor_run_id,
+        },
+        "estimated_runner_minutes": round(observed + prior, 2),
+    }
+
+
+def combine_calibration_monitor_accounting(
+    usage: dict,
+    launch: dict,
+    *,
+    stage: str,
+    calibration_id: str,
+    ceiling: int,
+) -> dict:
+    """Apply a validated launch predecessor floor to one current monitor observation."""
+    prior = launch.get("prior_runner_minutes")
+    predecessor = launch.get("calibration_predecessor")
+    predecessor_mode = predecessor.get("mode") if isinstance(predecessor, dict) else None
+    resume_run_id = predecessor.get("resume_run_id") if isinstance(predecessor, dict) else None
+    prior_stage_run_id = (
+        predecessor.get("prior_stage_run_id") if isinstance(predecessor, dict) else None
+    )
+    accounting_run_id = (
+        predecessor.get("accounting_run_id") if isinstance(predecessor, dict) else None
+    )
+    if (
+        launch.get("stage") != stage
+        or launch.get("calibration_id") != calibration_id
+        or launch.get("ceiling") != ceiling
+        or not isinstance(prior, (int, float)) or isinstance(prior, bool)
+        or not math.isfinite(prior) or prior < 0
+        or not isinstance(predecessor, dict)
+        or predecessor_mode not in {
+            "fresh-stage-1", "same-stage-resume", "prior-stage",
+        }
+        or (predecessor_mode == "fresh-stage-1" and (
+            stage != "1" or prior != 0
+            or resume_run_id is not None or prior_stage_run_id is not None
+            or accounting_run_id is not None
+        ))
+        or (predecessor_mode == "same-stage-resume" and (
+            not isinstance(resume_run_id, str) or prior_stage_run_id is not None
+            or accounting_run_id != resume_run_id
+        ))
+        or (predecessor_mode == "prior-stage" and (
+            stage == "1" or resume_run_id is not None
+            or not isinstance(prior_stage_run_id, str)
+            or accounting_run_id != prior_stage_run_id
+        ))
+    ):
+        raise ValueError("calibration launch accounting contract is incompatible")
+    observed = usage.get("estimated_runner_minutes")
+    if (
+        not isinstance(observed, (int, float)) or isinstance(observed, bool)
+        or not math.isfinite(observed) or observed < 0
+    ):
+        raise ValueError("calibration monitor usage is malformed")
+    return {
+        **usage,
+        "stage": stage,
+        "calibration_id": calibration_id,
+        "ceiling": ceiling,
+        "prior_runner_minutes": float(prior),
+        "calibration_predecessor": predecessor,
+        "estimated_runner_minutes": round(observed + prior, 2),
+    }
+
+
 def evaluate_calibration_budget(
     accounting: dict,
     *,

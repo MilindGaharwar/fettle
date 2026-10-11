@@ -41,6 +41,8 @@ from scripts.staged_preflight import (
     build_recovery_plan,
     build_recovery_record,
     combine_accounting_sources,
+    build_calibration_launch_accounting,
+    combine_calibration_monitor_accounting,
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
@@ -1385,6 +1387,121 @@ def test_calibration_budget_reserves_cancellation_lag_and_rejects_unknown_usage(
         evaluate_calibration_budget(
             {"estimated_runner_minutes": 1}, ceiling=12000, cancellation_reserve=1200,
         )
+
+
+def _launch_current(minutes=10):
+    return {
+        "schema_version": "1", "kind": "operational_runner_time_estimate",
+        "billing_authority": False, "estimated_runner_minutes": minutes,
+        "included_jobs": [],
+    }
+
+
+def _launch_predecessor(*, stage, run_ids, estimated, charged):
+    return {
+        "schema_version": "1", "kind": "calibration_budget_decision",
+        "billing_authority": False, "stage": stage, "calibration_id": "cal-test",
+        "ceiling": 3600, "estimated_runner_minutes": estimated,
+        "charged_runner_minutes": charged, "passed": True,
+        "sources": [{
+            "schema_version": "1", "kind": "operational_runner_time_estimate",
+            "billing_authority": False, "expected_run_id": run_id,
+            "expected_run_attempt": "1", "estimated_runner_minutes": estimated,
+            "included_jobs": [],
+        } for run_id in run_ids],
+    }
+
+
+def test_launch_contract_allows_zero_only_for_explicit_fresh_stage_1():
+    launch = build_calibration_launch_accounting(
+        _launch_current(), stage="1", calibration_id="cal-test", ceiling=3600,
+        resume_run_id="", prior_stage_run_id="", predecessor=None,
+    )
+    assert launch["prior_runner_minutes"] == 0
+    assert launch["estimated_runner_minutes"] == 10
+
+    with pytest.raises(ValueError, match="missing prior-stage identity"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="", predecessor=None,
+        )
+
+
+def test_launch_contract_uses_effective_predecessor_charge_and_monitor_adds_it_once():
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    launch = build_calibration_launch_accounting(
+        _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+        resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+    )
+    monitored = combine_calibration_monitor_accounting(
+        _launch_current(8), launch, stage="2", calibration_id="cal-test", ceiling=3600,
+    )
+
+    assert launch["prior_runner_minutes"] == 125
+    assert monitored["estimated_runner_minutes"] == 133
+
+
+def test_launch_contract_rejects_predecessor_that_did_not_pass():
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    predecessor["passed"] = False
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.pop("prior_runner_minutes"),
+        lambda value: value.update(prior_runner_minutes=-1),
+        lambda value: value.update(stage="3"),
+        lambda value: value["calibration_predecessor"].update(mode="prior-stage"),
+        lambda value: value["calibration_predecessor"].update(
+            mode="same-stage-resume", resume_run_id="381", accounting_run_id="999",
+        ),
+    ],
+)
+def test_monitor_contract_rejects_missing_malformed_or_conflicting_launch_accounting(mutation):
+    launch = build_calibration_launch_accounting(
+        _launch_current(), stage="1", calibration_id="cal-test", ceiling=3600,
+        resume_run_id="", prior_stage_run_id="", predecessor=None,
+    )
+    mutation(launch)
+
+    with pytest.raises(ValueError, match="launch accounting contract"):
+        combine_calibration_monitor_accounting(
+            _launch_current(), launch, stage="1", calibration_id="cal-test", ceiling=3600,
+        )
+
+
+def test_monitor_contract_preserves_lower_later_observation_floor_and_support_reservation(tmp_path):
+    usage = _launch_current(80)
+    history = tmp_path / "history.json"
+    history.write_text(json.dumps({
+        **usage, "expected_run_id": "700", "expected_run_attempt": "1",
+        "estimated_runner_minutes": 100, "charged_runner_minutes": 105,
+    }))
+    usage.update(expected_run_id="700", expected_run_attempt="1")
+    retained = retain_historical_accounting_floor(usage, [history])
+    reserved = reserve_bounded_support_minutes(retained, {"support": 10})
+    launch = build_calibration_launch_accounting(
+        _launch_current(), stage="1", calibration_id="cal-test", ceiling=3600,
+        resume_run_id="", prior_stage_run_id="", predecessor=None,
+    )
+    monitored = combine_calibration_monitor_accounting(
+        reserved, launch, stage="1", calibration_id="cal-test", ceiling=3600,
+    )
+
+    assert retained["estimated_runner_minutes"] == 105
+    assert monitored["estimated_runner_minutes"] == 115
+    assert monitored["bounded_support_reserve_minutes"] == 10
 
 
 @pytest.mark.parametrize("status", [None, True, 2, "queued", "unknown"])

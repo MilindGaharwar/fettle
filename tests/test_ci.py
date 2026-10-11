@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
+import pytest
 
 PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(PLUGIN_DIR))
@@ -33,6 +34,99 @@ def _run_actions_bash(script, *, cwd, env):
 def _python_heredoc(script):
     marker = "python - <<'PY'\n"
     return script.split(marker, 1)[1].split("\nPY", 1)[0]
+
+
+def _workflow_step_script(job_name, step_name):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    return next(
+        step["run"] for step in workflow["jobs"][job_name]["steps"]
+        if step.get("name") == step_name
+    )
+
+
+def _calibration_jobs(run_id="700", attempt="1", shards=(8, 27, 28, 37, 48, 50, 51, 53)):
+    started = "2026-10-10T01:00:00Z"
+    completed = "2026-10-10T01:01:00Z"
+    jobs = []
+    for job_id, shard in enumerate(shards, 1):
+        jobs.append({
+            "id": job_id,
+            "run_id": int(run_id),
+            "run_attempt": int(attempt),
+            "name": f"mutation (full shard {shard}, advisory)",
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": started,
+            "started_at": started,
+            "completed_at": completed,
+            "runner_id": 1000 + job_id,
+            "runner_name": f"runner-{job_id}",
+            "runner_group_id": 1,
+            "runner_group_name": "GitHub Actions",
+            "steps": [{"name": "worker", "status": "completed", "conclusion": "success"}],
+        })
+    return [{"total_count": len(jobs), "jobs": jobs}]
+
+
+def _write_gh_jobs_stub(workspace, jobs, predecessor=None):
+    workspace.mkdir(parents=True, exist_ok=True)
+    jobs_path = workspace / "provider-jobs.json"
+    jobs_path.write_text(json.dumps(jobs))
+    bin_dir = workspace / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    predecessor_path = workspace / "provider-accounting.json"
+    if predecessor is not None:
+        predecessor_path.write_text(json.dumps(predecessor))
+    gh.write_text(
+        "#!/bin/sh\n"
+        f"jobs={jobs_path}\n"
+        f"accounting={predecessor_path}\n"
+        "if [ \"$1\" = api ]; then cat \"$jobs\"; exit 0; fi\n"
+        "if [ \"$1 $2\" = 'run download' ]; then\n"
+        "  shift 2; dest=\n"
+        "  while [ $# -gt 0 ]; do\n"
+        "    if [ \"$1\" = --dir ]; then dest=$2; shift 2; else shift; fi\n"
+        "  done\n"
+        "  test -n \"$dest\" && test -f \"$accounting\" || exit 1\n"
+        "  mkdir -p \"$dest\"\n"
+        "  cp \"$accounting\" \"$dest/calibration-accounting.json\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n"
+    )
+    gh.chmod(0o755)
+    return bin_dir
+
+
+def _operational_source(run_id, minutes):
+    return {
+        "schema_version": "1",
+        "kind": "operational_runner_time_estimate",
+        "billing_authority": False,
+        "expected_run_id": str(run_id),
+        "expected_run_attempt": "1",
+        "estimated_runner_minutes": minutes,
+        "charged_runner_minutes": minutes,
+        "included_jobs": [],
+    }
+
+
+def _cumulative_accounting(*, stage, run_ids, estimated, charged=None):
+    return {
+        "schema_version": "1",
+        "kind": "calibration_budget_decision",
+        "billing_authority": False,
+        "stage": str(stage),
+        "calibration_id": "cal-test",
+        "ceiling": 3600,
+        "estimated_runner_minutes": estimated,
+        "charged_runner_minutes": estimated if charged is None else charged,
+        "sources": [_operational_source(run_id, estimated / len(run_ids)) for run_id in run_ids],
+        "passed": True,
+    }
 
 
 def _git_repo(files: dict) -> str:
@@ -1285,9 +1379,13 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert "job_timeout_minutes=35" in workflow
     assert '"calibration_id": os.environ["CALIBRATION_ID"]' in workflow
     assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" in workflow
-    assert "print(max(values))" in workflow
+    assert "build_calibration_launch_accounting" in workflow
+    assert "combine_calibration_monitor_accounting" in workflow
     assert 'retained["charged_runner_minutes"]' in workflow
-    assert 'sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"]' in workflow
+    accounting_contract = (
+        Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
+    ).read_text()
+    assert 'terminal_source.get("expected_run_id") == predecessor_run_id' in accounting_contract
     assert 'accounting.get("calibration_id")==os.environ["CALIBRATION_ID"]' in workflow
     assert "needs: [prepare, calibration-launch-gate]" in workflow
     assert "fail-fast: false" in workflow
@@ -1298,6 +1396,333 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert "job_timeout_minutes=35" in accounting
     assert "Download stage 3 admission accounting floors" in accounting
     assert "retain_historical_accounting_floor(current, admission_floors)" in accounting
+
+
+def test_fresh_stage_1_launch_output_is_consumed_by_actual_monitor_script(tmp_path):
+    launch = _workflow_step_script(
+        "calibration-launch-gate", "Reconcile usage before shard launch",
+    )
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    bin_dir = _write_gh_jobs_stub(tmp_path, _calibration_jobs())
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle",
+        "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "RESUME_RUN_ID": "",
+        "PRIOR_RUN_ID": "",
+        "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "1",
+        "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
+    }
+
+    produced = _run_actions_bash(launch, cwd=tmp_path, env=env)
+    assert produced.returncode == 0, produced.stderr
+    launch_accounting = json.loads((tmp_path / "launch-accounting.json").read_text())
+    assert launch_accounting["prior_runner_minutes"] == 0
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+
+    consumed = _run_actions_bash(monitor, cwd=tmp_path, env=env)
+
+    assert consumed.returncode == 0, consumed.stderr
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    assert budget["prior_runner_minutes"] == 0
+    assert budget["passed"] is True
+    lifecycle = json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())
+    assert lifecycle["action"] == "complete"
+
+
+def _run_launch_script(tmp_path, *, stage, resume="", prior="", predecessor=None):
+    launch = _workflow_step_script(
+        "calibration-launch-gate", "Reconcile usage before shard launch",
+    )
+    bin_dir = _write_gh_jobs_stub(tmp_path, _calibration_jobs(), predecessor)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle",
+        "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "RESUME_RUN_ID": resume,
+        "PRIOR_RUN_ID": prior,
+        "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": str(stage),
+        "RUNNER_MINUTE_CEILING": "3600",
+    }
+    return _run_actions_bash(launch, cwd=tmp_path, env=env)
+
+
+def test_actual_launch_producer_carries_same_stage_resume_floor_once(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=1, run_ids=("381",), estimated=120, charged=125,
+    )
+
+    result = _run_launch_script(
+        tmp_path, stage=1, resume="381", predecessor=predecessor,
+    )
+
+    assert result.returncode == 0, result.stderr
+    launch = json.loads((tmp_path / "launch-accounting.json").read_text())
+    assert launch["prior_runner_minutes"] == 125
+    assert launch["estimated_runner_minutes"] == 133
+    assert launch["calibration_predecessor"]["mode"] == "same-stage-resume"
+
+
+@pytest.mark.parametrize(("stage", "prior_stage"), [(2, "1"), (3, "2")])
+def test_actual_launch_producer_carries_prior_stage_floor_once(tmp_path, stage, prior_stage):
+    predecessor = _cumulative_accounting(
+        stage=prior_stage, run_ids=("381",), estimated=120, charged=125,
+    )
+
+    result = _run_launch_script(
+        tmp_path, stage=stage, prior="381", predecessor=predecessor,
+    )
+
+    assert result.returncode == 0, result.stderr
+    launch = json.loads((tmp_path / "launch-accounting.json").read_text())
+    assert launch["prior_runner_minutes"] == 125
+    assert launch["estimated_runner_minutes"] == 133
+    assert launch["calibration_predecessor"]["mode"] == "prior-stage"
+
+
+@pytest.mark.parametrize(
+    ("stage", "prior", "resume", "run_ids"),
+    [(2, "381", "482", ("381", "482")), (3, "482", "583", ("381", "482", "583"))],
+)
+def test_actual_launch_producer_validates_resumed_later_stage_lineage_without_double_counting(
+    tmp_path, stage, prior, resume, run_ids,
+):
+    predecessor = _cumulative_accounting(
+        stage=stage, run_ids=run_ids, estimated=240, charged=245,
+    )
+
+    result = _run_launch_script(
+        tmp_path, stage=stage, resume=resume, prior=prior, predecessor=predecessor,
+    )
+
+    assert result.returncode == 0, result.stderr
+    launch = json.loads((tmp_path / "launch-accounting.json").read_text())
+    assert launch["prior_runner_minutes"] == 245
+    assert launch["estimated_runner_minutes"] == 253
+
+
+def test_actual_launch_producer_rejects_conflicting_resumed_later_stage_lineage(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=3, run_ids=("999", "583"), estimated=300,
+    )
+
+    result = _run_launch_script(
+        tmp_path, stage=3, resume="583", prior="482", predecessor=predecessor,
+    )
+
+    assert result.returncode != 0
+    assert "conflicts with prior-stage lineage" in result.stderr
+
+
+def test_actual_launch_producer_rejects_missing_or_contradictory_predecessor(tmp_path):
+    missing = _run_launch_script(tmp_path, stage=2, prior="381")
+    assert missing.returncode != 0
+
+    contradictory_dir = tmp_path / "contradictory"
+    contradictory_dir.mkdir()
+    contradictory = _run_launch_script(
+        contradictory_dir,
+        stage=1,
+        prior="381",
+        predecessor=_cumulative_accounting(stage=0, run_ids=("381",), estimated=1),
+    )
+    assert contradictory.returncode != 0
+    assert "contradictory predecessor" in contradictory.stderr
+
+
+def test_actual_launch_producer_rejects_malformed_predecessor_source(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=1, run_ids=("381",), estimated=120,
+    )
+    predecessor["sources"] = [None]
+
+    result = _run_launch_script(
+        tmp_path, stage=2, prior="381", predecessor=predecessor,
+    )
+
+    assert result.returncode != 0
+    assert "predecessor accounting is incompatible" in result.stderr
+
+
+def test_actual_sparse_monitor_route_preserves_historical_floor(tmp_path):
+    launch_result = _run_launch_script(tmp_path, stage=1)
+    assert launch_result.returncode == 0, launch_result.stderr
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    history = tmp_path / "monitor-history"
+    history.mkdir()
+    historical = _operational_source("700", 20)
+    (history / "0000.json").write_text(json.dumps(historical))
+    bin_dir = _write_gh_jobs_stub(tmp_path / "monitor-provider", _calibration_jobs(shards=(8, 48)))
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": [8, 48]}),
+    }
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    result = _run_actions_bash(monitor, cwd=tmp_path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    assert budget["estimated_runner_minutes"] == 20
+    assert budget["historical_floor_applied"] is True
+
+
+def test_monitor_initialization_failure_retains_diagnostic_cancels_and_blocks_terminal_accounting(
+    tmp_path,
+):
+    launch_result = _run_launch_script(tmp_path, stage=1)
+    assert launch_result.returncode == 0, launch_result.stderr
+    launch = json.loads((tmp_path / "launch-accounting.json").read_text())
+    launch.pop("prior_runner_minutes")
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    (calibration_launch / "launch-accounting.json").write_text(json.dumps(launch))
+    bin_dir = _write_gh_jobs_stub(tmp_path / "monitor-provider", _calibration_jobs())
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
+    }
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    failed = _run_actions_bash(monitor, cwd=tmp_path, env=env)
+    assert failed.returncode != 0
+    assert "launch accounting contract is incompatible" in failed.stderr
+    diagnostic_log = (tmp_path / "calibration-monitor-error.log").read_text()
+    assert "launch accounting contract is incompatible" in diagnostic_log
+    assert not (tmp_path / "calibration-monitor-lifecycle.json").exists()
+
+    cancellation = _workflow_step_script(
+        "calibration-monitor", "Request run cancellation at cutoff",
+    ).replace("${{ steps.monitor.outcome }}", "failure").replace(
+        "${{ steps.retain-monitor.outcome }}", "success",
+    )
+    cancelled = _run_actions_bash(cancellation, cwd=tmp_path, env=env)
+    assert cancelled.returncode != 0
+    diagnostic = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    assert diagnostic["passed"] is False
+    assert diagnostic["kind"] == "calibration_monitor_containment"
+    assert "launch accounting contract is incompatible" in diagnostic_log
+    assert not (tmp_path / "calibration-monitor-lifecycle.json").exists()
+
+    terminal_observer = tmp_path / "terminal-observer"
+    terminal_observer.mkdir()
+    shutil.copy(tmp_path / "calibration-monitor-budget.json", terminal_observer)
+    accounting = _workflow_step_script(
+        "calibration-accounting", "Collect cumulative job accounting",
+    )
+    blocked = _run_actions_bash(accounting, cwd=tmp_path, env={
+        **env, "RESUME_RUN_ID": "", "PRIOR_RUN_ID": "",
+    })
+    assert blocked.returncode != 0
+    assert "calibration-monitor-lifecycle.json" in blocked.stderr
+    assert not (tmp_path / "calibration-accounting.json").exists()
+
+
+def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch(tmp_path):
+    launch_result = _run_launch_script(tmp_path, stage=1)
+    assert launch_result.returncode == 0, launch_result.stderr
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    bin_dir = _write_gh_jobs_stub(tmp_path / "monitor-provider", _calibration_jobs())
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
+    }
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    monitored = _run_actions_bash(monitor, cwd=tmp_path, env=env)
+    assert monitored.returncode == 0, monitored.stderr
+    terminal_observer = tmp_path / "terminal-observer"
+    terminal_observer.mkdir()
+    shutil.copy(tmp_path / "calibration-monitor-budget.json", terminal_observer)
+    shutil.copy(tmp_path / "calibration-monitor-lifecycle.json", terminal_observer)
+    accounting = _workflow_step_script(
+        "calibration-accounting", "Collect cumulative job accounting",
+    )
+    reconciled = _run_actions_bash(accounting, cwd=tmp_path, env={
+        **env, "RESUME_RUN_ID": "", "PRIOR_RUN_ID": "",
+    })
+    assert reconciled.returncode == 0, reconciled.stderr
+    terminal = json.loads((tmp_path / "calibration-accounting.json").read_text())
+    assert terminal["stage"] == "1"
+    assert terminal["calibration_id"] == "cal-test"
+    assert terminal["ceiling"] == 3600
+    assert terminal["passed"] is True
+    assert terminal["charged_runner_minutes"] >= terminal["estimated_runner_minutes"]
+
+    next_stage = tmp_path / "next-stage"
+    next_stage.mkdir()
+    next_launch = _run_launch_script(
+        next_stage, stage=2, prior="700", predecessor=terminal,
+    )
+    assert next_launch.returncode == 0, next_launch.stderr
+    successor = json.loads((next_stage / "launch-accounting.json").read_text())
+    effective = max(
+        terminal["charged_runner_minutes"], terminal["estimated_runner_minutes"],
+    )
+    assert successor["prior_runner_minutes"] == effective
+    assert successor["estimated_runner_minutes"] == effective + 8
+
+
+def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):
+    terminal_observer = tmp_path / "terminal-observer"
+    terminal_observer.mkdir()
+    monitor = {
+        **_operational_source("700", 8),
+        "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+    (terminal_observer / "calibration-monitor-budget.json").write_text(json.dumps(monitor))
+    (terminal_observer / "calibration-monitor-lifecycle.json").write_text(json.dumps({
+        "action": "complete", "passed": True,
+        "terminal_shards": [8], "expected_shards": [8],
+    }))
+    prior = _cumulative_accounting(stage=1, run_ids=("381",), estimated=20)
+    prior["passed"] = False
+    bin_dir = _write_gh_jobs_stub(tmp_path / "provider", _calibration_jobs(shards=(8,)), prior)
+    accounting = _workflow_step_script(
+        "calibration-accounting", "Collect cumulative job accounting",
+    )
+    result = _run_actions_bash(accounting, cwd=tmp_path, env={
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "3600",
+        "RESUME_RUN_ID": "", "PRIOR_RUN_ID": "381",
+    })
+
+    assert result.returncode != 0
+    assert "prior cumulative accounting is incompatible" in result.stderr
+    assert not (tmp_path / "calibration-accounting.json").exists()
 
 
 def test_calibration_monitor_uses_derived_lifecycle_and_leaves_shutdown_room():
@@ -1422,7 +1847,9 @@ def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound(
     assert "read_calibration_representation_inventory" in workflow
     assert "--aggregate validated-calibration-reports" in workflow
     assert "representation-inventory.json" in workflow
-    assert "max(values)" in workflow
+    assert 'predecessor.get("charged_runner_minutes")' in (
+        Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
+    ).read_text()
 
 
 def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():

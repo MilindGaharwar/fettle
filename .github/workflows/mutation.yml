@@ -982,24 +982,30 @@ jobs:
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-current.json
           base_run_id="${RESUME_RUN_ID:-$PRIOR_RUN_ID}"
-          base=0
           if [[ -n "$base_run_id" ]]; then
             gh run download "$base_run_id" --name "mutation-calibration-accounting-$base_run_id" --dir prior-accounting || {
               gh run download "$base_run_id" --name "mutation-calibration-monitor-$base_run_id" --dir prior-accounting
               cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json
             }
-            export BASE_RUN_ID="$base_run_id"
-            base=$(python -c 'import json,os,sys; report=json.load(open("prior-accounting/calibration-accounting.json")); sources=report.get("sources",[report]); expected_stage=os.environ["CALIBRATION_STAGE"] if os.environ["RESUME_RUN_ID"] else str(int(os.environ["CALIBRATION_STAGE"])-1); values=(report.get("charged_runner_minutes"),report.get("estimated_runner_minutes")); valid=report.get("calibration_id")==os.environ["CALIBRATION_ID"] and report.get("stage")==expected_stage and report.get("ceiling")==int(os.environ["RUNNER_MINUTE_CEILING"]) and sources and sources[-1].get("expected_run_id")==os.environ["BASE_RUN_ID"] and all(isinstance(value,(int,float)) and not isinstance(value,bool) for value in values); sys.exit(2) if not valid else None; print(max(values))')
           fi
-          export BASE_USAGE="$base"
           python - <<'PY'
           import json, os
           from pathlib import Path
-          from fettle.staged_preflight import account_runner_minutes
+          from fettle.staged_preflight import (
+              account_runner_minutes, build_calibration_launch_accounting,
+          )
           current = account_runner_minutes(Path("jobs-current.json"), expected_run_id=os.environ["GITHUB_RUN_ID"], expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"])
-          current["prior_runner_minutes"] = float(os.environ["BASE_USAGE"])
-          current["estimated_runner_minutes"] = round(current["estimated_runner_minutes"] + current["prior_runner_minutes"], 2)
-          Path("launch-accounting.json").write_text(json.dumps(current, indent=2) + "\n")
+          predecessor_path = Path("prior-accounting/calibration-accounting.json")
+          predecessor = json.loads(predecessor_path.read_text()) if predecessor_path.is_file() else None
+          launch = build_calibration_launch_accounting(
+              current, stage=os.environ["CALIBRATION_STAGE"],
+              calibration_id=os.environ["CALIBRATION_ID"],
+              ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),
+              resume_run_id=os.environ["RESUME_RUN_ID"],
+              prior_stage_run_id=os.environ["PRIOR_RUN_ID"],
+              predecessor=predecessor,
+          )
+          Path("launch-accounting.json").write_text(json.dumps(launch, indent=2) + "\n")
           PY
       - name: Enforce launch cutoff and cancellation reserve
         if: github.event.inputs.mode == 'calibration'
@@ -1411,12 +1417,13 @@ jobs:
               rm -rf admission-accounting/*
               gh run download "$GITHUB_RUN_ID" --pattern "mutation-calibration-admission-$GITHUB_RUN_ID-*" --dir admission-accounting || true
             fi
-            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python - <<'PY'
+            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python - 2> >(tee -a calibration-monitor-error.log >&2) <<'PY'
           import json, os
           from datetime import datetime
           from pathlib import Path
           from fettle.staged_preflight import (
-              account_runner_minutes, evaluate_calibration_budget,
+              account_runner_minutes, combine_calibration_monitor_accounting,
+              evaluate_calibration_budget,
               reserve_bounded_support_minutes, retain_historical_accounting_floor,
           )
           usage = account_runner_minutes(
@@ -1444,13 +1451,10 @@ jobs:
           launch = json.load(open("calibration-launch/launch-accounting.json"))
           snapshot = Path("monitor-history") / f'{len(history):04d}.json'
           snapshot.write_text(json.dumps(usage, indent=2) + "\n")
-          combined = {**usage,
-              "stage": os.environ["CALIBRATION_STAGE"],
-              "calibration_id": os.environ["CALIBRATION_ID"],
-              "prior_runner_minutes": launch["prior_runner_minutes"],
-          }
-          combined["estimated_runner_minutes"] = round(
-              usage["estimated_runner_minutes"] + usage["prior_runner_minutes"], 2,
+          combined = combine_calibration_monitor_accounting(
+              usage, launch, stage=os.environ["CALIBRATION_STAGE"],
+              calibration_id=os.environ["CALIBRATION_ID"],
+              ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),
           )
           result = evaluate_calibration_budget(
               combined, ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),
@@ -1514,6 +1518,7 @@ jobs:
              calibration-monitor-budget.json
              calibration-observer-contract.json
              calibration-monitor-lifecycle.json
+             calibration-monitor-error.log
              monitor-history
              admission-accounting
           if-no-files-found: error
@@ -1669,7 +1674,7 @@ jobs:
           from datetime import datetime, timezone
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_calibration_budget,
-              retain_historical_accounting_floor,
+              reserve_bounded_support_minutes, retain_historical_accounting_floor,
           )
           current = account_runner_minutes(
               pathlib.Path("jobs-current.json"), datetime.now(timezone.utc),
@@ -1721,6 +1726,7 @@ jobs:
               if (retained.get("calibration_id") != os.environ["CALIBRATION_ID"]
                       or retained.get("stage") != expected_stage
                       or retained.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])
+                      or retained.get("passed") is not True
                       or not sources or sources[-1].get("expected_run_id") != base_run_id
                       or not isinstance(retained.get("charged_runner_minutes"), (int, float))):
                   raise ValueError("prior cumulative accounting is incompatible")
