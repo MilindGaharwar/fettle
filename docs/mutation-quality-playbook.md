@@ -51,6 +51,13 @@ polyglot adapters do not imply polyglot mutation support.
   exact-once shard origins, and cumulative original-budget accounting all validate.
   Never rewrite the source run as successful or describe recovery as one uninterrupted
   run.
+- A failed or timed-out calibration shard remains non-pass. Its incomplete checkpoint
+  may seed one sparse continuation only when the terminal producer job has the exact
+  reviewed producer/checkpoint-upload/report-upload outcomes, the checkpoint has
+  positive unfinished work, and provider run, attempt, artifact, candidate, manifest,
+  calibration, preflight, corpus, and environment provenance all validate. A locally
+  calculated extracted-file hash does not establish artifact origin, and the exception
+  never replaces a successfully published canonical report.
 - Keep retained JSON bounded and secret-free. Do not add absolute paths,
   credentials, environment values, or raw unbounded process output.
 

@@ -17,6 +17,7 @@ from fettle.mutation_test import (
 from scripts.staged_preflight import (
     ARTIFACT_RETENTION_DAYS,
     BUDGET,
+    CALIBRATION_SUPPORT_BOUNDS,
     FROZEN_CANDIDATE,
     RECOVERY_ORCHESTRATION_SHA,
     RECOVERY_RUN_ID,
@@ -42,6 +43,8 @@ from scripts.staged_preflight import (
     build_recovery_record,
     combine_accounting_sources,
     build_calibration_launch_accounting,
+    bind_calibration_observer_evidence,
+    build_calibration_terminal_accounting,
     combine_calibration_monitor_accounting,
     observed_runner_minutes,
     plan_calibration_continuation,
@@ -55,6 +58,8 @@ from scripts.staged_preflight import (
     validate_continuation_batch,
     validate_source_handoff,
 )
+
+INCIDENT_ROOT = Path(__file__).parent / "fixtures/calibration-terminal-incident"
 
 
 def test_stage_2_observer_contract_covers_two_worker_waves_and_shutdown():
@@ -862,6 +867,44 @@ def _jobs_file(tmp_path, pages, name="jobs.json"):
     return path
 
 
+def _checkpoint_artifacts_file(
+    tmp_path, indexes, *, calibration_id="calibration-a", run_id="37",
+    revision="f" * 40,
+):
+    artifacts = [{
+        "id": index + 1,
+        "name": f"mutation-checkpoint-{calibration_id}-{index}",
+        "size_in_bytes": 100,
+        "digest": f"sha256:{index + 1:064x}",
+        "expired": False,
+        "workflow_run": {"id": int(run_id), "head_sha": revision},
+    } for index in indexes]
+    path = tmp_path / "artifacts.json"
+    path.write_text(json.dumps([{"total_count": len(artifacts), "artifacts": artifacts}]))
+    return path
+
+
+def _source_workflow_run_file(
+    tmp_path, *, run_id="37", run_attempt="1", revision="f" * 40,
+):
+    path = tmp_path / "source-workflow-run.json"
+    path.write_text(json.dumps({
+        "id": int(run_id), "run_attempt": int(run_attempt), "status": "completed",
+        "head_sha": revision,
+    }))
+    return path
+
+
+def _failed_checkpoint_steps():
+    return [
+        {"name": "Resumable calibration shard evidence", "status": "completed",
+         "conclusion": "failure"},
+        {"name": "Retain resumable execution checkpoint", "status": "completed",
+         "conclusion": "success"},
+        {"name": "Retain mutation shard", "status": "completed", "conclusion": "failure"},
+    ]
+
+
 def test_accounting_preserves_observed_acquisition_exposure_and_terminal_revision(tmp_path):
     fixture = json.loads((Path(__file__).parent / "fixtures/staged_preflight_accounting_revision.json").read_text())
     responses = Path(__file__).parent / "fixtures/staged_preflight_accounting_revision"
@@ -1357,6 +1400,14 @@ def test_accounting_rejects_boolean_integer_fields(tmp_path, field):
         account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
 
 
+@pytest.mark.parametrize("job_id", [0, -1])
+def test_accounting_rejects_nonpositive_provider_job_ids(tmp_path, job_id):
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [_job(job_id)]}])
+
+    with pytest.raises(ValueError, match="malformed job ID"):
+        account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
+
+
 @pytest.mark.parametrize(
     ("used", "next_wave", "passed"),
     [(32, "wave-2", True), (32.01, "wave-2", False),
@@ -1397,19 +1448,59 @@ def _launch_current(minutes=10):
     }
 
 
-def _launch_predecessor(*, stage, run_ids, estimated, charged):
+def _complete_lifecycle(stage, expected_shards):
+    contract = (
+        calibration_stage_3_observer_contract(expected_shards)
+        if stage == "3"
+        else calibration_observer_contract(
+            len(expected_shards), 8 if stage == "1" else 16,
+            expected_shards=expected_shards,
+        )
+    )
     return {
-        "schema_version": "1", "kind": "calibration_budget_decision",
-        "billing_authority": False, "stage": stage, "calibration_id": "cal-test",
-        "ceiling": 3600, "estimated_runner_minutes": estimated,
-        "charged_runner_minutes": charged, "passed": True,
-        "sources": [{
-            "schema_version": "1", "kind": "operational_runner_time_estimate",
-            "billing_authority": False, "expected_run_id": run_id,
-            "expected_run_attempt": "1", "estimated_runner_minutes": estimated,
-            "included_jobs": [],
-        } for run_id in run_ids],
+        "schema_version": "1", "kind": "calibration_observer_sample",
+        "passed": True, "billing_authority": False, "completion_guaranteed": False,
+        "elapsed_seconds": 1, "expected_workers": len(expected_shards),
+        "expected_shards": list(expected_shards), "admitted_shards": list(expected_shards),
+        "observed_worker_jobs": len(expected_shards),
+        "terminal_workers": len(expected_shards), "terminal_shards": list(expected_shards),
+        "missing_terminal_shards": [], "pending_admission_shards": [],
+        "completed_admissions": contract["admission_dependencies"],
+        "expected_admissions": contract["admission_dependencies"],
+        "route_complete": True, "action": "complete",
+        "reason": "all admitted workers are terminal", "contract": contract,
     }
+
+
+def _launch_predecessor(*, stage, run_ids, estimated, charged):
+    assert len(run_ids) == 1
+    active_jobs = int((charged - estimated) / 5)
+    included_jobs = [
+        {"name": name, "status": "completed", "minutes": bound}
+        for name, bound in CALIBRATION_SUPPORT_BOUNDS.items()
+    ] + [
+        {
+            "name": f"active-{index}", "status": "in_progress", "minutes": 1,
+            "basis": "elapsed through observation time", "execution_evidence": "confirmed",
+        }
+        for index in range(active_jobs)
+    ]
+    current = {
+        **_launch_current(estimated),
+        "included_jobs": included_jobs, "expected_run_id": run_ids[0],
+        "expected_run_attempt": "1",
+    }
+    monitor = {
+        **current, "stage": stage, "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": estimated, "passed": True,
+    }
+    expected_shards = [WAVES[f"wave-{stage}"][0]]
+    lifecycle = _complete_lifecycle(stage, expected_shards)
+    result = build_calibration_terminal_accounting(
+        current, monitor, lifecycle, stage=stage, calibration_id="cal-test", ceiling=3600,
+        support_bounds=CALIBRATION_SUPPORT_BOUNDS,
+    )
+    return bind_calibration_observer_evidence(result, lifecycle)
 
 
 def test_launch_contract_allows_zero_only_for_explicit_fresh_stage_1():
@@ -1443,11 +1534,393 @@ def test_launch_contract_uses_effective_predecessor_charge_and_monitor_adds_it_o
     assert monitored["estimated_runner_minutes"] == 133
 
 
+def test_incident_terminal_files_admit_exact_sparse_continuation_without_enrichment(tmp_path):
+    assert INCIDENT_ROOT.is_dir()
+    legacy = json.loads((INCIDENT_ROOT / "accounting/calibration-accounting.json").read_text())
+    current = legacy["sources"][0]
+    monitor = json.loads((INCIDENT_ROOT / "monitor/calibration-monitor-budget.json").read_text())
+    lifecycle = json.loads((INCIDENT_ROOT / "monitor/calibration-monitor-lifecycle.json").read_text())
+
+    terminal = build_calibration_terminal_accounting(
+        current, monitor, lifecycle, stage="1",
+        calibration_id="cal-1d5bb2cd-s1-20261011-fresh", ceiling=3600,
+        support_bounds={
+            "mutation (calibration accounting)": 15,
+            "mutation (assemble evidence)": 30,
+            "mutation evidence": 10,
+        },
+    )
+    terminal = bind_calibration_observer_evidence(
+        terminal, lifecycle, budget_sha256=legacy["observer_evidence"]["budget_sha256"],
+    )
+    accounting = tmp_path / "calibration-accounting.json"
+    accounting.write_text(json.dumps(terminal))
+    manifests = [
+        json.loads((INCIDENT_ROOT / f"manifests/partition-{index}.json").read_text())
+        for index in WAVES["wave-1"]
+    ]
+
+    result = plan_calibration_continuation(
+        INCIDENT_ROOT / "manifests/calibration-source-provenance.json",
+        INCIDENT_ROOT / "jobs.json", INCIDENT_ROOT / "checkpoints",
+        INCIDENT_ROOT / "reports", manifests, WAVES["wave-1"],
+        "cal-1d5bb2cd-s1-20261011-fresh", "38148783107", "1",
+        "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286", "1", [accounting],
+        INCIDENT_ROOT / "artifacts.json",
+        INCIDENT_ROOT / "run.json",
+    )
+
+    assert terminal["estimated_runner_minutes"] == 286.99
+    assert terminal["charged_runner_minutes"] == 291.99
+    assert result["matrix"] == {"shard": [27, 28, 51, 53]}
+    assert [result["shards"][str(index)]["pending"] for index in [27, 28, 51, 53]] == [
+        12, 1, 4, 4,
+    ]
+    assert sum(
+        len(json.loads(path.read_text())["outcomes"])
+        for path in (INCIDENT_ROOT / "checkpoints").rglob("mutation-checkpoint.json")
+    ) == 651
+
+
 def test_launch_contract_rejects_predecessor_that_did_not_pass():
     predecessor = _launch_predecessor(
         stage="1", run_ids=("381",), estimated=120, charged=125,
     )
     predecessor["passed"] = False
+
+    with pytest.raises(ValueError, match="calibration (?:launch|predecessor accounting)"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize(
+    "fault", ["kind", "lineage", "lifecycle", "reservation", "reservation-entry"],
+)
+def test_launch_contract_rejects_malformed_terminal_contract(fault):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    if fault == "kind":
+        predecessor["kind"] = "combined_operational_runner_time_estimate"
+    elif fault == "lineage":
+        predecessor["source_lineage"][0]["run_id"] = "999"
+    elif fault == "lifecycle":
+        predecessor["observer_evidence"].pop("lifecycle")
+    elif fault == "reservation-entry":
+        predecessor["bounded_support_reservations"].append(None)
+    else:
+        predecessor["bounded_support_reservations"][0]["reserved_minutes"] = 4
+
+    with pytest.raises(ValueError, match="calibration predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing-shards", "empty-shards", "substituted-shard", "contract-shards"],
+)
+def test_launch_contract_rejects_incomplete_or_substituted_lifecycle(fault):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    lifecycle = predecessor["observer_evidence"]["lifecycle"]
+    if fault == "missing-shards":
+        lifecycle.pop("terminal_shards")
+    elif fault == "empty-shards":
+        lifecycle["terminal_shards"] = []
+        lifecycle["expected_shards"] = []
+        lifecycle["admitted_shards"] = []
+    elif fault == "substituted-shard":
+        lifecycle["terminal_shards"] = [0]
+        lifecycle["expected_shards"] = [0]
+        lifecycle["admitted_shards"] = [0]
+        lifecycle["contract"]["expected_shards"] = [0]
+    else:
+        lifecycle["contract"]["expected_shards"] = [0]
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize(
+    "field", [
+        "max_parallel", "worker_timeout_minutes", "worker_waves",
+        "admission_dependencies", "components", "observer_deadline_seconds",
+    ],
+)
+def test_launch_contract_rejects_forged_observer_contract(field):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    contract = predecessor["observer_evidence"]["lifecycle"]["contract"]
+    if field == "components":
+        contract[field]["polling_minutes"] += 1
+    else:
+        contract[field] += 1
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize(
+    "field", [
+        "schema_version", "billing_authority", "completion_guaranteed",
+        "expected_workers", "observed_worker_jobs", "terminal_workers",
+        "missing_terminal_shards", "pending_admission_shards",
+        "completed_admissions", "expected_admissions", "route_complete", "reason",
+    ],
+)
+def test_launch_contract_rejects_incomplete_or_forged_lifecycle_metadata(field):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    lifecycle = predecessor["observer_evidence"]["lifecycle"]
+    lifecycle.pop(field)
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+def test_terminal_contract_rejects_noncanonical_support_policy():
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+
+    with pytest.raises(ValueError, match="support bounds differ"):
+        build_calibration_terminal_accounting(
+            current, monitor, _complete_lifecycle("2", [2]), stage="2",
+            calibration_id="cal-test", ceiling=3600, support_bounds={"support": 5},
+        )
+
+
+@pytest.mark.parametrize("ceiling", [3599, 3601, 12000])
+def test_terminal_contract_rejects_noncanonical_calibration_ceiling(ceiling):
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": ceiling,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+
+    with pytest.raises(ValueError, match="terminal observer evidence"):
+        build_calibration_terminal_accounting(
+            current, monitor, _complete_lifecycle("2", [2]), stage="2",
+            calibration_id="cal-test", ceiling=ceiling,
+            support_bounds=CALIBRATION_SUPPORT_BOUNDS,
+        )
+
+
+@pytest.mark.parametrize("field", ["terminal_shards", "admitted_shards"])
+def test_launch_contract_rejects_reordered_lifecycle_shards(field):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    lifecycle = predecessor["observer_evidence"]["lifecycle"]
+    extra = WAVES["wave-1"][1]
+    lifecycle["expected_shards"].append(extra)
+    lifecycle["terminal_shards"].append(extra)
+    lifecycle["admitted_shards"].append(extra)
+    lifecycle["contract"] = calibration_observer_contract(
+        2, 8, expected_shards=lifecycle["expected_shards"],
+    )
+    lifecycle["expected_workers"] = 2
+    lifecycle["observed_worker_jobs"] = 2
+    lifecycle["terminal_workers"] = 2
+    lifecycle[field] = list(reversed(lifecycle[field]))
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize("attempt", ["", "0", "2", "x"])
+def test_launch_contract_rejects_malformed_or_wrong_predecessor_attempt(attempt):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    predecessor["sources"][0]["expected_run_attempt"] = attempt
+    predecessor["source_lineage"][0]["run_attempt"] = attempt
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+def test_launch_contract_rejects_wrong_attempt_in_earlier_cumulative_origin():
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=100, charged=105,
+    )
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    lifecycle = _complete_lifecycle("2", [2])
+    monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+    cumulative = build_calibration_terminal_accounting(
+        current, monitor, lifecycle, stage="2", calibration_id="cal-test", ceiling=3600,
+        support_bounds=CALIBRATION_SUPPORT_BOUNDS, predecessor=predecessor,
+        predecessor_run_id="381", predecessor_stage="1",
+    )
+    cumulative = bind_calibration_observer_evidence(cumulative, lifecycle)
+    cumulative["sources"][0]["sources"][0]["expected_run_attempt"] = "2"
+    cumulative["sources"][0]["source_lineage"][0]["run_attempt"] = "2"
+    cumulative["source_lineage"][0]["run_attempt"] = "2"
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="3", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="482", predecessor=cumulative,
+        )
+
+
+def test_terminal_contract_imports_cumulative_predecessor_charge_once():
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+    lifecycle = _complete_lifecycle("2", [2])
+
+    result = build_calibration_terminal_accounting(
+        current, monitor, lifecycle, stage="2", calibration_id="cal-test", ceiling=3600,
+        support_bounds=CALIBRATION_SUPPORT_BOUNDS, predecessor=predecessor,
+        predecessor_run_id="381", predecessor_stage="1",
+    )
+    result = bind_calibration_observer_evidence(result, lifecycle)
+
+    assert result["source_lineage"] == [
+        {"run_id": "381", "run_attempt": "1"},
+        {"run_id": "482", "run_attempt": "1"},
+    ]
+    assert result["estimated_runner_minutes"] == 188
+    assert result["charged_runner_minutes"] == 188
+
+
+def test_launch_and_terminal_reject_monitor_snapshot_as_cumulative_predecessor():
+    monitor_snapshot = {
+        **_launch_current(125), "expected_run_id": "381", "expected_run_attempt": "1",
+        "stage": "1", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 125, "passed": True,
+    }
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=monitor_snapshot,
+        )
+
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    lifecycle = _complete_lifecycle("2", [2])
+    current_monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+    with pytest.raises(ValueError, match="prior cumulative accounting is incompatible"):
+        build_calibration_terminal_accounting(
+            current, current_monitor, lifecycle, stage="2", calibration_id="cal-test",
+            ceiling=3600, support_bounds=CALIBRATION_SUPPORT_BOUNDS,
+            predecessor=monitor_snapshot,
+            predecessor_run_id="381", predecessor_stage="1",
+        )
+
+
+def test_terminal_decision_rejects_forged_budget_pass():
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    predecessor["ceiling"] = 10
+    predecessor["launch_cutoff"] = 5
+
+    with pytest.raises(ValueError, match="calibration launch identity is malformed"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=10,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+def test_terminal_decision_rejects_coordinated_reservation_and_lag_forgery():
+    for fault in ("reservation", "lag"):
+        predecessor = _launch_predecessor(
+            stage="1", run_ids=("381",), estimated=120, charged=125,
+        )
+        if fault == "reservation":
+            predecessor["bounded_support_reservations"][0]["reserved_minutes"] = 4
+            predecessor["bounded_support_reserve_minutes"] = 4
+            predecessor["estimated_runner_minutes"] = 124
+            predecessor["charged_runner_minutes"] = 129
+        else:
+            predecessor["cancellation_lag_charge"] = 10
+            predecessor["charged_runner_minutes"] = predecessor["estimated_runner_minutes"] + 10
+
+        with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+            build_calibration_launch_accounting(
+                _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+                resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+            )
+
+
+@pytest.mark.parametrize("fault", ["active-jobs", "reservation-observed", "included-jobs"])
+def test_terminal_decision_recomputes_lag_and_reservations_from_source_jobs(fault):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    if fault == "active-jobs":
+        predecessor["active_jobs"] = 1
+        predecessor["cancellation_lag_charge"] = 5
+        predecessor["charged_runner_minutes"] += 5
+    elif fault == "reservation-observed":
+        reservation = predecessor["bounded_support_reservations"][0]
+        reservation["already_observed_minutes"] = reservation["bound_minutes"]
+        reservation["reserved_minutes"] = 0
+        predecessor["bounded_support_reserve_minutes"] = 0
+        predecessor["estimated_runner_minutes"] -= 5
+        predecessor["charged_runner_minutes"] -= 5
+    else:
+        predecessor["included_jobs"] = [{"name": "forged", "status": "completed"}]
+
+    with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
+        build_calibration_launch_accounting(
+            _launch_current(), stage="2", calibration_id="cal-test", ceiling=3600,
+            resume_run_id="", prior_stage_run_id="381", predecessor=predecessor,
+        )
+
+
+@pytest.mark.parametrize("field", ["terminal_shards", "admitted_shards"])
+def test_launch_contract_rejects_numeric_alias_lifecycle_shards(field):
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=120, charged=125,
+    )
+    predecessor["observer_evidence"]["lifecycle"][field] = [8.0]
 
     with pytest.raises(ValueError, match="predecessor accounting is incompatible"):
         build_calibration_launch_accounting(
@@ -1502,6 +1975,33 @@ def test_monitor_contract_preserves_lower_later_observation_floor_and_support_re
     assert retained["estimated_runner_minutes"] == 105
     assert monitored["estimated_runner_minutes"] == 115
     assert monitored["bounded_support_reserve_minutes"] == 10
+
+
+def test_historical_floor_accepts_cumulative_lineage_ending_in_current_origin(tmp_path):
+    current = {
+        **_launch_current(8), "expected_run_id": "482", "expected_run_attempt": "1",
+    }
+    lifecycle = _complete_lifecycle("2", [2])
+    monitor = {
+        **current, "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "charged_runner_minutes": 8, "passed": True,
+    }
+    predecessor = _launch_predecessor(
+        stage="1", run_ids=("381",), estimated=100, charged=105,
+    )
+    cumulative = build_calibration_terminal_accounting(
+        current, monitor, lifecycle, stage="2", calibration_id="cal-test", ceiling=3600,
+        support_bounds=CALIBRATION_SUPPORT_BOUNDS, predecessor=predecessor,
+        predecessor_run_id="381", predecessor_stage="1",
+    )
+    cumulative = bind_calibration_observer_evidence(cumulative, lifecycle)
+    historical = tmp_path / "cumulative.json"
+    historical.write_text(json.dumps(cumulative))
+
+    retained = retain_historical_accounting_floor(current, [historical])
+
+    assert retained["estimated_runner_minutes"] == cumulative["charged_runner_minutes"]
+    assert retained["historical_floor_applied"] is True
 
 
 @pytest.mark.parametrize("status", [None, True, 2, "queued", "unknown"])
@@ -1637,6 +2137,26 @@ def test_sparse_continuation_never_infers_missing_checkpoint(tmp_path):
         )
 
 
+def test_sparse_continuation_rejects_duplicate_provider_job_identity_across_shards(tmp_path):
+    manifests = [
+        {"shard_index": 0, "digest": "a" * 64},
+        {"shard_index": 1, "digest": "b" * 64},
+    ]
+    jobs = [
+        {**_job(1, run_id=37, conclusion="skipped", runner_id=None, steps=[]),
+         "name": f"mutation (full shard {index}, advisory)"}
+        for index in range(2)
+    ]
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 2, "jobs": jobs}])
+
+    with pytest.raises(ValueError, match="duplicate job IDs|job identity is malformed or duplicated"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+            tmp_path / "reports", manifests, [0, 1], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
 def test_sparse_continuation_proves_skipped_shard_never_acquired_runner(tmp_path):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
     job = _job(1, run_id=37, conclusion="skipped", runner_id=None, steps=[])
@@ -1731,9 +2251,9 @@ def test_sparse_continuation_rejects_conflicting_shared_checkpoint_identity(tmp_
         )
 
 
-def test_sparse_continuation_associates_partial_report_by_exact_checkpoint_identity(tmp_path):
+def test_sparse_continuation_associates_cancelled_partial_report_by_exact_identity(tmp_path):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
-    job = _job(1, run_id=37, conclusion="failure")
+    job = _job(1, run_id=37, conclusion="cancelled")
     job["name"] = "mutation (full shard 0, advisory)"
     jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
     checkpoint = {
@@ -1763,6 +2283,50 @@ def test_sparse_continuation_associates_partial_report_by_exact_checkpoint_ident
     assert result["matrix"] == {"shard": [0]}
     assert result["shards"]["0"]["state"] == "started_partial"
     assert result["shards"]["0"]["pending"] == 1
+
+
+@pytest.mark.parametrize("fault", ["missing", "incorrect", "duplicate"])
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out"])
+def test_sparse_continuation_rejects_failed_partial_report_without_exact_steps(
+    tmp_path, fault, conclusion,
+):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    steps = _failed_checkpoint_steps()
+    if fault == "missing":
+        steps = steps[1:]
+    elif fault == "incorrect":
+        steps[0]["conclusion"] = "success"
+    else:
+        steps.append(dict(steps[0]))
+    job = _job(1, run_id=37, conclusion=conclusion, steps=steps)
+    job["name"] = "mutation (full shard 0, advisory)"
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        },
+        "outcomes": {"1" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [{"fingerprint": "2" * 64, "status": "execution_error"}],
+        "status": "incomplete", "pending": 1,
+    }
+    artifact_name = "mutation-checkpoint-calibration-a-0"
+    checkpoint_dir = tmp_path / "checkpoints" / artifact_name
+    report_dir = tmp_path / "reports" / artifact_name
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    report_dir.joinpath("mutation-report.json").write_text(json.dumps(checkpoint))
+
+    with pytest.raises(ValueError, match="step evidence"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1", artifact_inventory_path=_checkpoint_artifacts_file(tmp_path, [0]),
+            source_run_path=_source_workflow_run_file(tmp_path),
+        )
 
 
 def test_sparse_continuation_accepts_cancelled_checkpoint_and_quarantines_zero_byte_report(tmp_path):
@@ -1831,14 +2395,14 @@ def test_sparse_continuation_rejects_checkpoint_only_for_uncancelled_producer(tm
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "timed_out"])
-def test_sparse_continuation_rejects_checkpoint_only_for_non_cancelled_failure(
+def test_sparse_continuation_accepts_provenance_bound_failed_checkpoint_only(
     tmp_path, conclusion,
 ):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
-    job = _job(1, run_id=37, conclusion=conclusion)
+    job = _job(1, run_id=37, conclusion=conclusion, steps=_failed_checkpoint_steps())
     job["name"] = "mutation (full shard 0, advisory)"
     jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
-    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    checkpoint_dir = tmp_path / "checkpoints" / "mutation-checkpoint-calibration-a-0"
     checkpoint_dir.mkdir(parents=True)
     checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps({
         "schema_version": "1", "calibration_id": "calibration-a",
@@ -1849,11 +2413,105 @@ def test_sparse_continuation_rejects_checkpoint_only_for_non_cancelled_failure(
         }, "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
     }))
 
-    with pytest.raises(ValueError, match="matching retained report"):
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1", artifact_inventory_path=_checkpoint_artifacts_file(tmp_path, [0]),
+        source_run_path=_source_workflow_run_file(tmp_path),
+    )
+
+    assert result["matrix"] == {"shard": [0]}
+    representation = result["shards"]["0"]["representation"]
+    assert representation["kind"] == "checkpoint"
+    assert representation["source_artifact"]["producer_job_id"] == 1
+    assert representation["source_artifact"]["source_run_attempt"] == "1"
+
+
+@pytest.mark.parametrize(
+    "fault", [
+        "status", "conclusion", "producer", "checkpoint-upload", "report-upload",
+        "duplicate-step", "missing-artifacts", "artifact-name", "artifact-run",
+        "artifact-revision", "artifact-expired", "artifact-size", "artifact-digest",
+        "source-run-id", "source-run-attempt", "source-run-status", "source-run-revision",
+        "completed-checkpoint", "zero-pending", "completed-report",
+    ],
+)
+def test_sparse_continuation_rejects_failed_checkpoint_outside_amendment(tmp_path, fault):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="failure", steps=_failed_checkpoint_steps())
+    job["name"] = "mutation (full shard 0, advisory)"
+    checkpoint = {
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        }, "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }
+    checkpoint_dir = tmp_path / "checkpoints" / "mutation-checkpoint-calibration-a-0"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    artifacts_path = _checkpoint_artifacts_file(tmp_path, [0])
+    source_run_path = _source_workflow_run_file(tmp_path)
+    artifacts = json.loads(artifacts_path.read_text())
+    source_run = json.loads(source_run_path.read_text())
+    if fault == "status":
+        job["status"] = "in_progress"
+    elif fault == "conclusion":
+        job["conclusion"] = "action_required"
+    elif fault in {"producer", "checkpoint-upload", "report-upload"}:
+        name = {
+            "producer": "Resumable calibration shard evidence",
+            "checkpoint-upload": "Retain resumable execution checkpoint",
+            "report-upload": "Retain mutation shard",
+        }[fault]
+        step = next(step for step in job["steps"] if step["name"] == name)
+        step["conclusion"] = "failure" if fault == "checkpoint-upload" else "success"
+    elif fault == "duplicate-step":
+        job["steps"].append(dict(job["steps"][0]))
+    elif fault == "missing-artifacts":
+        artifacts_path = None
+    elif fault == "artifact-name":
+        artifacts[0]["artifacts"][0]["name"] = "mutation-checkpoint-calibration-a-1"
+    elif fault == "artifact-run":
+        artifacts[0]["artifacts"][0]["workflow_run"]["id"] = 38
+    elif fault == "artifact-revision":
+        artifacts[0]["artifacts"][0]["workflow_run"]["head_sha"] = "0" * 40
+    elif fault == "artifact-expired":
+        artifacts[0]["artifacts"][0]["expired"] = True
+    elif fault == "artifact-size":
+        artifacts[0]["artifacts"][0]["size_in_bytes"] = 0
+    elif fault == "artifact-digest":
+        artifacts[0]["artifacts"][0]["digest"] = None
+    elif fault == "source-run-id":
+        source_run["id"] = 38
+    elif fault == "source-run-attempt":
+        source_run["run_attempt"] = 2
+    elif fault == "source-run-status":
+        source_run["status"] = "in_progress"
+    elif fault == "source-run-revision":
+        source_run["head_sha"] = "0" * 40
+    elif fault in {"completed-checkpoint", "zero-pending"}:
+        checkpoint["status"] = "completed" if fault == "completed-checkpoint" else "incomplete"
+        checkpoint["pending"] = 0
+        checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps(checkpoint))
+    else:
+        report_dir = tmp_path / "reports" / "artifact"
+        report_dir.mkdir(parents=True)
+        report_dir.joinpath("mutation-report.json").write_text(json.dumps({
+            "status": "completed", "shard_index": 0,
+        }))
+    if artifacts_path is not None:
+        artifacts_path.write_text(json.dumps(artifacts))
+    source_run_path.write_text(json.dumps(source_run))
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError):
         plan_calibration_continuation(
             _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
             tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
-            "f" * 40, "1",
+            "f" * 40, "1", artifact_inventory_path=artifacts_path,
+            source_run_path=source_run_path,
         )
 
 
@@ -1984,7 +2642,10 @@ def test_sparse_continuation_rejects_wrong_source_run_inputs(tmp_path):
 
 def test_calibration_continuation_and_budget_cli_delivery_path(tmp_path):
     manifests = tmp_path / "manifests"
-    checkpoints = tmp_path / "checkpoints" / "completed"
+    completed = WAVES["wave-1"][0]
+    checkpoints = (
+        tmp_path / "checkpoints" / f"mutation-checkpoint-calibration-a-{completed}"
+    )
     reports = tmp_path / "reports" / "completed"
     manifests.mkdir()
     checkpoints.mkdir(parents=True)
@@ -1993,7 +2654,6 @@ def test_calibration_continuation_and_budget_cli_delivery_path(tmp_path):
         (manifests / f"partition-{index}.json").write_text(json.dumps({
             "shard_index": index, "digest": f"{index + 1:064x}",
         }))
-    completed = WAVES["wave-1"][0]
     identity = {
         "revision": "f" * 40, "preflight_digest": "e" * 64,
         "manifest_digest": f"{completed + 1:064x}", "corpus_digest": "d" * 64,
@@ -2019,6 +2679,8 @@ def test_calibration_continuation_and_budget_cli_delivery_path(tmp_path):
         job["name"] = f"mutation (full shard {index}, advisory)"
         jobs.append(job)
     jobs_path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
+    artifacts_path = _checkpoint_artifacts_file(tmp_path, [completed])
+    source_run_path = _source_workflow_run_file(tmp_path)
     run_path = _calibration_run_file(tmp_path)
     continuation = tmp_path / "continuation.json"
     script = Path(__file__).parents[1] / "scripts" / "staged_preflight.py"
@@ -2026,6 +2688,8 @@ def test_calibration_continuation_and_budget_cli_delivery_path(tmp_path):
     subprocess.run([
         sys.executable, str(script), "plan-calibration-continuation",
         "--provenance", str(run_path), "--jobs", str(jobs_path),
+        "--artifacts", str(artifacts_path),
+        "--source-run", str(source_run_path),
         "--checkpoints", str(tmp_path / "checkpoints"),
         "--reports", str(tmp_path / "reports"), "--manifests", str(manifests),
         "--stage", "1", "--calibration-id", "calibration-a",

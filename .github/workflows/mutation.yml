@@ -47,7 +47,7 @@ on:
         required: false
         type: string
       runner_minute_ceiling:
-        description: "Separately approved cumulative calibration ceiling"
+        description: "Fixed cumulative calibration ceiling (must be 3600)"
         required: false
         type: string
       resume_run_id:
@@ -136,13 +136,12 @@ jobs:
           valid=(stage=="1" and not one and not two) or (stage=="2" and numeric(one) and not two)
           or (stage=="3" and numeric(one) and numeric(two) and one!=two);
           sys.exit(0 if valid else 1)'
-      - name: Require separately approved calibration ceiling
+      - name: Require fixed approved calibration ceiling
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
         env:
           RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
         run: >-
-          python -c 'import os,re,sys; value=os.environ["RUNNER_MINUTE_CEILING"];
-          sys.exit(0 if re.fullmatch(r"[1-9][0-9]{0,4}",value) and int(value)<=12000 else 2)'
+          python -c 'import os,sys; sys.exit(0 if os.environ["RUNNER_MINUTE_CEILING"]=="3600" else 2)'
       - name: Download retained partition manifests
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -192,12 +191,11 @@ jobs:
         run: |
           mkdir -p resume-checkpoints resume-accounting resume-reports
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID/attempts/1/jobs?per_page=100" > resume-jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID" > resume-run.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID/artifacts?per_page=100" > resume-artifacts.json
           gh run download "$RESUME_RUN_ID" --name "mutation-manifests-$RESUME_RUN_ID" --dir resume-source
           gh run download "$RESUME_RUN_ID" --pattern "mutation-checkpoint-$CALIBRATION_ID-*" --dir resume-checkpoints || true
-          gh run download "$RESUME_RUN_ID" --name "mutation-calibration-accounting-$RESUME_RUN_ID" --dir resume-accounting || {
-            gh run download "$RESUME_RUN_ID" --name "mutation-calibration-monitor-$RESUME_RUN_ID" --dir resume-accounting
-            cp resume-accounting/calibration-monitor-budget.json resume-accounting/calibration-accounting.json
-          }
+          gh run download "$RESUME_RUN_ID" --name "mutation-calibration-accounting-$RESUME_RUN_ID" --dir resume-accounting
           gh run download "$RESUME_RUN_ID" --name "mutation-calibration-stage-$RESUME_RUN_ID" --dir resume-reports || \
             gh run download "$RESUME_RUN_ID" --pattern "mutation-shard-$RESUME_RUN_ID-*" --dir resume-reports || true
       - name: Validate prior calibration stages before fan-out
@@ -321,6 +319,8 @@ jobs:
           uv run --no-sync python -m fettle.staged_preflight plan-calibration-continuation \
             --provenance resume-source/calibration-source-provenance.json \
             --jobs resume-jobs.json \
+            --artifacts resume-artifacts.json \
+            --source-run resume-run.json \
             --checkpoints resume-checkpoints --reports resume-reports \
             --manifests mutation-manifests --stage "$CALIBRATION_STAGE" \
             --calibration-id "$CALIBRATION_ID" --run-id "$RESUME_RUN_ID" \
@@ -387,6 +387,8 @@ jobs:
             resume-reports
             resume-source/calibration-source-provenance.json
             resume-jobs.json
+            resume-run.json
+            resume-artifacts.json
             calibration-continuation.json
           if-no-files-found: error
           retention-days: 90
@@ -983,10 +985,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-current.json
           base_run_id="${RESUME_RUN_ID:-$PRIOR_RUN_ID}"
           if [[ -n "$base_run_id" ]]; then
-            gh run download "$base_run_id" --name "mutation-calibration-accounting-$base_run_id" --dir prior-accounting || {
-              gh run download "$base_run_id" --name "mutation-calibration-monitor-$base_run_id" --dir prior-accounting
-              cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json
-            }
+            gh run download "$base_run_id" --name "mutation-calibration-accounting-$base_run_id" --dir prior-accounting
           fi
           python - <<'PY'
           import json, os
@@ -1664,17 +1663,15 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-current.json
           base_run_id="${RESUME_RUN_ID:-$PRIOR_RUN_ID}"
           if [[ -n "$base_run_id" ]]; then
-            gh run download "$base_run_id" --name "mutation-calibration-accounting-$base_run_id" --dir prior-accounting || {
-              gh run download "$base_run_id" --name "mutation-calibration-monitor-$base_run_id" --dir prior-accounting
-              cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json
-            }
+            gh run download "$base_run_id" --name "mutation-calibration-accounting-$base_run_id" --dir prior-accounting
           fi
           python - <<'PY'
           import json, os, pathlib, sys
           from datetime import datetime, timezone
           from fettle.staged_preflight import (
-              account_runner_minutes, evaluate_calibration_budget,
-              reserve_bounded_support_minutes, retain_historical_accounting_floor,
+              account_runner_minutes, bind_calibration_observer_evidence,
+              build_calibration_terminal_accounting,
+              retain_historical_accounting_floor,
           )
           current = account_runner_minutes(
               pathlib.Path("jobs-current.json"), datetime.now(timezone.utc),
@@ -1714,51 +1711,30 @@ jobs:
               if sorted(admitted_batches) != list(range(1, 7)):
                   raise ValueError("stage 3 admission accounting sequence is incomplete")
               current = retain_historical_accounting_floor(current, admission_floors)
-          records = [current]
-          total = current["estimated_runner_minutes"]
           prior = pathlib.Path("prior-accounting/calibration-accounting.json")
+          retained = None
+          base_run_id = ""
+          expected_stage = ""
           if prior.exists():
               retained = json.loads(prior.read_text())
               base_run_id = os.environ["RESUME_RUN_ID"] or os.environ["PRIOR_RUN_ID"]
               expected_stage = (os.environ["CALIBRATION_STAGE"] if os.environ["RESUME_RUN_ID"]
                                 else str(int(os.environ["CALIBRATION_STAGE"]) - 1))
-              sources = retained.get("sources", [retained])
-              if (retained.get("calibration_id") != os.environ["CALIBRATION_ID"]
-                      or retained.get("stage") != expected_stage
-                      or retained.get("ceiling") != int(os.environ["RUNNER_MINUTE_CEILING"])
-                      or retained.get("passed") is not True
-                      or not sources or sources[-1].get("expected_run_id") != base_run_id
-                      or not isinstance(retained.get("charged_runner_minutes"), (int, float))):
-                  raise ValueError("prior cumulative accounting is incompatible")
-              retained_floor = max(
-                  retained["charged_runner_minutes"],
-                  retained.get("estimated_runner_minutes", retained["charged_runner_minutes"]),
-              )
-              total = round(total + retained_floor, 2)
-              records.insert(0, retained)
-          cumulative = {"schema_version": "1", "stage": os.environ["CALIBRATION_STAGE"],
-               "calibration_id": os.environ.get("CALIBRATION_ID"),
-               "estimated_runner_minutes": max(
-                   total, monitor["estimated_runner_minutes"], monitor["charged_runner_minutes"],
-               ), "included_jobs": current["included_jobs"], "sources": records,
-               "monitor_floor_runner_minutes": max(
-                   monitor["estimated_runner_minutes"], monitor["charged_runner_minutes"],
-               )}
-          cumulative = reserve_bounded_support_minutes(cumulative, {
+          result = build_calibration_terminal_accounting(
+              current, monitor, lifecycle, stage=os.environ["CALIBRATION_STAGE"],
+              calibration_id=os.environ["CALIBRATION_ID"],
+              ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]), support_bounds={
               "mutation (calibration accounting)": 15,
               "mutation (assemble evidence)": 30,
               "mutation evidence": 10,
-          })
-          result = evaluate_calibration_budget(
-              cumulative,
-              ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]), cancellation_reserve=1200,
+              }, predecessor=retained, predecessor_run_id=base_run_id,
+              predecessor_stage=expected_stage,
           )
-          result["observer_evidence"] = {
-              "lifecycle": lifecycle,
-              "budget_sha256": __import__("hashlib").sha256(
+          result = bind_calibration_observer_evidence(
+              result, lifecycle, budget_sha256=__import__("hashlib").sha256(
                   pathlib.Path("terminal-observer/calibration-monitor-budget.json").read_bytes()
               ).hexdigest(),
-          }
+          )
           assert result["billing_authority"] is False
           pathlib.Path("calibration-accounting.json").write_text(json.dumps(result, indent=2)+"\n")
           sys.exit(0 if result["passed"] else 2)

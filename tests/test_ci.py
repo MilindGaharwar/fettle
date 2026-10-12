@@ -19,7 +19,11 @@ sys.path.insert(0, os.path.join(PLUGIN_DIR))
 from fettle import ci  # noqa: E402
 from fettle.quality_scan import ToolScanResult  # noqa: E402
 from fettle.result import ResultStatus  # noqa: E402
-from scripts.staged_preflight import combine_accounting  # noqa: E402
+from scripts.staged_preflight import (  # noqa: E402
+    WAVES,
+    calibration_observer_contract,
+    combine_accounting,
+)
 
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
@@ -114,7 +118,52 @@ def _operational_source(run_id, minutes):
     }
 
 
+def _complete_calibration_lifecycle(stage, expected_shards):
+    contract = (
+        __import__("fettle.staged_preflight", fromlist=["calibration_stage_3_observer_contract"])
+        .calibration_stage_3_observer_contract(expected_shards)
+        if str(stage) == "3"
+        else calibration_observer_contract(
+            len(expected_shards), 8 if str(stage) == "1" else 16,
+            expected_shards=expected_shards,
+        )
+    )
+    return {
+        "schema_version": "1", "kind": "calibration_observer_sample",
+        "passed": True, "billing_authority": False, "completion_guaranteed": False,
+        "elapsed_seconds": 1, "expected_workers": len(expected_shards),
+        "expected_shards": list(expected_shards), "admitted_shards": list(expected_shards),
+        "observed_worker_jobs": len(expected_shards),
+        "terminal_workers": len(expected_shards), "terminal_shards": list(expected_shards),
+        "missing_terminal_shards": [], "pending_admission_shards": [],
+        "completed_admissions": contract["admission_dependencies"],
+        "expected_admissions": contract["admission_dependencies"],
+        "route_complete": True, "action": "complete",
+        "reason": "all admitted workers are terminal", "contract": contract,
+    }
+
+
 def _cumulative_accounting(*, stage, run_ids, estimated, charged=None):
+    charged = estimated if charged is None else charged
+    support_bounds = {
+        "mutation (calibration accounting)": 15,
+        "mutation (assemble evidence)": 30,
+        "mutation evidence": 10,
+    }
+    expected_shards = [WAVES.get(f"wave-{stage}", [8])[0]]
+    included_jobs = [
+        *[
+            {"name": name, "status": "completed", "minutes": bound}
+            for name, bound in support_bounds.items()
+        ],
+        *([{
+        "name": "worker", "status": "in_progress", "minutes": 1,
+        "basis": "elapsed through observation time", "execution_evidence": "confirmed",
+    }] if charged > estimated else []),
+    ]
+    sources = [_operational_source(run_id, estimated / len(run_ids)) for run_id in run_ids]
+    sources[-1]["included_jobs"] = included_jobs
+    lifecycle = _complete_calibration_lifecycle(stage, expected_shards)
     return {
         "schema_version": "1",
         "kind": "calibration_budget_decision",
@@ -123,8 +172,25 @@ def _cumulative_accounting(*, stage, run_ids, estimated, charged=None):
         "calibration_id": "cal-test",
         "ceiling": 3600,
         "estimated_runner_minutes": estimated,
-        "charged_runner_minutes": estimated if charged is None else charged,
-        "sources": [_operational_source(run_id, estimated / len(run_ids)) for run_id in run_ids],
+        "charged_runner_minutes": charged,
+        "sources": sources,
+        "included_jobs": included_jobs,
+        "source_lineage": [
+            {"run_id": str(run_id), "run_attempt": "1"} for run_id in run_ids
+        ],
+        "monitor_floor_runner_minutes": estimated,
+        "bounded_support_reserve_minutes": 0,
+        "bounded_support_reservations": [
+            {"name": name, "bound_minutes": bound,
+             "already_observed_minutes": float(bound), "reserved_minutes": 0.0}
+            for name, bound in support_bounds.items()
+        ],
+        "cancellation_reserve": 1200,
+        "launch_cutoff": 2400,
+        "active_jobs": int((charged - estimated) / 5),
+        "cancellation_lag_minutes_per_active_job": 5,
+        "cancellation_lag_charge": charged - estimated,
+        "observer_evidence": {"lifecycle": lifecycle},
         "passed": True,
     }
 
@@ -449,7 +515,8 @@ def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
     assert "name: mutation (read back detail corpus)" in workflow
     assert "name: mutation (calibration accounting)" in workflow
     assert "runner_minute_ceiling:" in workflow
-    assert "int(value)<=12000" in workflow
+    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="3600"' in workflow
+    assert "int(value)<=12000" not in workflow
     assert "fail-fast: false" in workflow
     readback = workflow.split("\n  evidence-readback:", 1)[1]
     assert "github.event.inputs.calibration_stage != '3'" in readback
@@ -883,7 +950,7 @@ def test_staged_monitor_lifecycle_resamples_and_retains_each_snapshot(tmp_path):
     for sample, state in enumerate(states, 1):
         jobs = [
             {
-                "id": index, "run_id": 37, "run_attempt": 1,
+                    "id": index + 1, "run_id": 37, "run_attempt": 1,
                 "name": f"mutation (staged preflight wave 2 shard {index})",
                 **state,
             }
@@ -1114,7 +1181,7 @@ def test_staged_monitor_budget_crossing_requests_cancellation(tmp_path):
     (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
     started = (datetime.now(UTC) - timedelta(minutes=36)).isoformat().replace("+00:00", "Z")
     jobs = [{
-        "id": index, "run_id": 37, "run_attempt": 1,
+            "id": index + 1, "run_id": 37, "run_attempt": 1,
         "name": f"mutation (staged preflight wave 2 shard {index})",
         "status": "in_progress", "conclusion": None,
         "started_at": started, "completed_at": None,
@@ -1364,6 +1431,9 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
     assert "plan-calibration-continuation" in workflow
+    assert 'actions/runs/$RESUME_RUN_ID/artifacts?per_page=100' in workflow
+    assert "--artifacts resume-artifacts.json" in workflow
+    assert "--source-run resume-run.json" in workflow
     assert "calibration-source-provenance.json" in workflow
     assert "calibration-resume-bundle-${{ github.run_id }}" in workflow
     assert "name: mutation (calibration launch gate)" in workflow
@@ -1378,14 +1448,15 @@ def test_calibration_has_sparse_provenance_budget_monitor_and_terminal_accountin
     assert "steps.retain-monitor.outcome" in workflow
     assert "job_timeout_minutes=35" in workflow
     assert '"calibration_id": os.environ["CALIBRATION_ID"]' in workflow
-    assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" in workflow
+    assert "cp prior-accounting/calibration-monitor-budget.json prior-accounting/calibration-accounting.json" not in workflow
+    assert "cp resume-accounting/calibration-monitor-budget.json resume-accounting/calibration-accounting.json" not in workflow
     assert "build_calibration_launch_accounting" in workflow
     assert "combine_calibration_monitor_accounting" in workflow
-    assert 'retained["charged_runner_minutes"]' in workflow
+    assert "build_calibration_terminal_accounting" in workflow
     accounting_contract = (
         Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
     ).read_text()
-    assert 'terminal_source.get("expected_run_id") == predecessor_run_id' in accounting_contract
+    assert 'identities[-1] == (predecessor_run_id, "1")' in accounting_contract
     assert 'accounting.get("calibration_id")==os.environ["CALIBRATION_ID"]' in workflow
     assert "needs: [prepare, calibration-launch-gate]" in workflow
     assert "fail-fast: false" in workflow
@@ -1694,6 +1765,7 @@ def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch
 
 
 def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):
+    stage_shard = WAVES["wave-2"][0]
     terminal_observer = tmp_path / "terminal-observer"
     terminal_observer.mkdir()
     monitor = {
@@ -1702,13 +1774,14 @@ def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):
         "charged_runner_minutes": 8, "passed": True,
     }
     (terminal_observer / "calibration-monitor-budget.json").write_text(json.dumps(monitor))
-    (terminal_observer / "calibration-monitor-lifecycle.json").write_text(json.dumps({
-        "action": "complete", "passed": True,
-        "terminal_shards": [8], "expected_shards": [8],
-    }))
+    (terminal_observer / "calibration-monitor-lifecycle.json").write_text(json.dumps(
+        _complete_calibration_lifecycle("2", [stage_shard])
+    ))
     prior = _cumulative_accounting(stage=1, run_ids=("381",), estimated=20)
     prior["passed"] = False
-    bin_dir = _write_gh_jobs_stub(tmp_path / "provider", _calibration_jobs(shards=(8,)), prior)
+    bin_dir = _write_gh_jobs_stub(
+        tmp_path / "provider", _calibration_jobs(shards=(stage_shard,)), prior,
+    )
     accounting = _workflow_step_script(
         "calibration-accounting", "Collect cumulative job accounting",
     )
@@ -1816,7 +1889,7 @@ def test_terminal_accounting_and_aggregate_require_observer_package():
     assert 'lifecycle.get("action") != "complete"' in accounting_source
     assert 'len(admission_floors) != 6' in accounting_source
     assert 'sorted(admitted_batches) != list(range(1, 7))' in accounting_source
-    assert 'reserve_bounded_support_minutes(cumulative' in accounting_source
+    assert 'support_bounds={' in accounting_source
     assert '"mutation (calibration accounting)": 15' in accounting_source
     assert '"mutation (assemble evidence)": 30' in accounting_source
     assert '"mutation evidence": 10' in accounting_source
@@ -1847,9 +1920,16 @@ def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound(
     assert "read_calibration_representation_inventory" in workflow
     assert "--aggregate validated-calibration-reports" in workflow
     assert "representation-inventory.json" in workflow
-    assert 'predecessor.get("charged_runner_minutes")' in (
+    assert "validate_calibration_accounting(predecessor)" in (
         Path(PLUGIN_DIR) / "fettle/staged_preflight.py"
     ).read_text()
+
+
+def test_calibration_workflow_requires_fixed_3600_minute_ceiling():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+
+    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="3600"' in workflow
+    assert "int(value)<=12000" not in workflow
 
 
 def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():

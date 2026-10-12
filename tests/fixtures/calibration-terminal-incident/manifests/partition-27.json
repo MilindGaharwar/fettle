@@ -1,0 +1,34 @@
+{
+  "digest": "fe51f70178fb89536eab411c2c7b7a3548f3f39e0f1e2cbb9bf6f9db657cebc1",
+  "files": [
+    "fettle/cli.py",
+    "fettle/mutation_test.py",
+    "fettle/quality_scan.py"
+  ],
+  "ranges": [
+    {
+      "end": 1200,
+      "file": "fettle/cli.py",
+      "start": 1141
+    },
+    {
+      "end": 1140,
+      "file": "fettle/mutation_test.py",
+      "start": 1136
+    },
+    {
+      "end": 2420,
+      "file": "fettle/mutation_test.py",
+      "start": 2416
+    },
+    {
+      "end": 456,
+      "file": "fettle/quality_scan.py",
+      "start": 455
+    }
+  ],
+  "revision": "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286",
+  "schema_version": "1",
+  "shard_count": 256,
+  "shard_index": 27
+}

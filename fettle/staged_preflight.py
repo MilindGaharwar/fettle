@@ -113,6 +113,11 @@ CALIBRATION_OBSERVER_ALLOWANCES = {
     "reconciliation_minutes": 5,
     "shutdown_minutes": 9,
 }
+CALIBRATION_SUPPORT_BOUNDS = {
+    "mutation (calibration accounting)": 15,
+    "mutation (assemble evidence)": 30,
+    "mutation evidence": 10,
+}
 
 _CALIBRATION_JOB = re.compile(
     r"^(?:[^/]+ / )?mutation \(full shard (\d+), advisory\)$"
@@ -1436,7 +1441,8 @@ def account_runner_minutes(
         raise ValueError("jobs response has missing or inconsistent total_count")
     ids = [job.get("id") for job in jobs if isinstance(job, dict)]
     if len(ids) != len(jobs) or any(
-        not isinstance(job_id, int) or isinstance(job_id, bool) for job_id in ids
+        not isinstance(job_id, int) or isinstance(job_id, bool) or job_id < 1
+        for job_id in ids
     ):
         raise ValueError("jobs response has a missing or malformed job ID")
     if len(ids) != len(set(ids)):
@@ -1702,37 +1708,45 @@ def combine_accounting_sources(
     }
 
 
-def retain_historical_accounting_floor(accounting: dict, historical_paths: list[Path]) -> dict:
-    """Keep later reconciliation from reducing previously observed exposure."""
-    def validate(report: dict) -> tuple[list[tuple[str, str]], float]:
-        observed = report.get("estimated_runner_minutes")
+def validate_calibration_accounting(report: dict) -> tuple[list[tuple[str, str]], float]:
+    """Validate one typed accounting record and return its origins and effective floor."""
+    if not isinstance(report, dict):
+        raise ValueError("accounting report is malformed")
+    observed = report.get("estimated_runner_minutes")
+    if (
+        report.get("schema_version") != "1"
+        or report.get("billing_authority") is not False
+        or not isinstance(observed, (int, float)) or isinstance(observed, bool)
+        or not math.isfinite(observed) or observed < 0
+    ):
+        raise ValueError("accounting report is malformed")
+    kind = report.get("kind")
+    if kind == "operational_runner_time_estimate":
+        run_id = report.get("expected_run_id")
+        attempt = report.get("expected_run_attempt")
+        charged = report.get("charged_runner_minutes", observed)
         if (
-            report.get("schema_version") != "1"
-            or report.get("billing_authority") is not False
-            or not isinstance(observed, (int, float)) or isinstance(observed, bool)
-            or not math.isfinite(observed) or observed < 0
+            not isinstance(run_id, str) or not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or attempt != "1"
         ):
-            raise ValueError("accounting report is malformed")
-        if report.get("kind") == "operational_runner_time_estimate":
-            run_id = report.get("expected_run_id")
-            attempt = report.get("expected_run_attempt")
-            if not isinstance(run_id, str) or not isinstance(attempt, str):
-                raise ValueError("historical accounting source identity is malformed")
-            charged = report.get("charged_runner_minutes", observed)
-            if (
-                not isinstance(charged, (int, float)) or isinstance(charged, bool)
-                or not math.isfinite(charged) or charged < observed
-            ):
-                raise ValueError("historical accounting effective charge is malformed")
-            return [(run_id, attempt)], charged
-        sources = report.get("sources")
+            raise ValueError("historical accounting source identity is malformed")
         if (
-            report.get("kind") != "combined_operational_runner_time_estimate"
-            or not isinstance(sources, list) or not sources
+            not isinstance(charged, (int, float)) or isinstance(charged, bool)
+            or not math.isfinite(charged) or charged < observed
         ):
-            raise ValueError("historical accounting kind or sources are malformed")
-        validated = [validate(source) for source in sources]
-        source_total = round(sum(value for _identities, value in validated), 2)
+            raise ValueError("historical accounting effective charge is malformed")
+        return [(run_id, attempt)], float(charged)
+
+    sources = report.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("historical accounting kind or sources are malformed")
+    validated = [validate_calibration_accounting(source) for source in sources]
+    identities = [identity for source_ids, _value in validated for identity in source_ids]
+    if len(identities) != len(set(identities)):
+        raise ValueError("accounting source lineage contains a duplicate origin")
+    source_total = round(sum(value for _identities, value in validated), 2)
+
+    if kind == "combined_operational_runner_time_estimate":
         reconciled = report.get("terminal_reconciled_runner_minutes", observed)
         if (
             not isinstance(reconciled, (int, float)) or isinstance(reconciled, bool)
@@ -1751,19 +1765,190 @@ def retain_historical_accounting_floor(accounting: dict, historical_paths: list[
                 or applied is not (floor > reconciled)
             ):
                 raise ValueError("historical accounting floor is malformed")
-        return (
-            [identity for source_identities, _value in validated for identity in source_identities],
-            observed,
-        )
+        return identities, float(observed)
 
-    expected_identities, terminal = validate(accounting)
+    if kind != "calibration_budget_decision":
+        raise ValueError("historical accounting kind or sources are malformed")
+    charged = report.get("charged_runner_minutes")
+    monitor_floor = report.get("monitor_floor_runner_minutes")
+    reserve = report.get("bounded_support_reserve_minutes")
+    reservations = report.get("bounded_support_reservations")
+    lag = report.get("cancellation_lag_charge")
+    active_jobs = report.get("active_jobs")
+    cancellation_reserve = report.get("cancellation_reserve")
+    launch_cutoff = report.get("launch_cutoff")
+    lifecycle = report.get("observer_evidence", {}).get("lifecycle")
+    lineage = report.get("source_lineage")
+    expected_lineage = [
+        {"run_id": run_id, "run_attempt": attempt} for run_id, attempt in identities
+    ]
+    numeric = (charged, monitor_floor, reserve, lag)
+    included = report.get("included_jobs")
+    terminal_source = sources[-1]
+    while terminal_source.get("kind") == "calibration_budget_decision":
+        nested = terminal_source.get("sources")
+        if not isinstance(nested, list) or not nested:
+            raise ValueError("calibration budget decision is malformed or contradictory")
+        terminal_source = nested[-1]
+    source_included = terminal_source.get("included_jobs")
+    active_statuses = {"in_progress", "queued", "requested", "pending", "waiting"}
+    canonical_active_jobs = (
+        sum(job.get("status") in active_statuses for job in included)
+        if isinstance(included, list) and all(isinstance(job, dict) for job in included)
+        else None
+    )
+    support_bounds = CALIBRATION_SUPPORT_BOUNDS
+    canonical_reservations = None
+    if (
+        isinstance(reserve, (int, float)) and not isinstance(reserve, bool)
+        and isinstance(included, list) and support_bounds
+        and len(support_bounds) == len(reservations)
+    ):
+        try:
+            canonical_reservations = reserve_bounded_support_minutes({
+                "estimated_runner_minutes": observed - reserve,
+                "included_jobs": included,
+            }, support_bounds)
+        except ValueError:
+            canonical_reservations = None
+    if (
+        report.get("passed") is not True
+        or report.get("stage") not in {"1", "2", "3"}
+        or not isinstance(report.get("calibration_id"), str)
+        or report.get("ceiling") != 3600
+        or cancellation_reserve != 1200
+        or launch_cutoff != 2400
+        or not isinstance(active_jobs, int) or isinstance(active_jobs, bool) or active_jobs < 0
+        or included != source_included
+        or active_jobs != canonical_active_jobs
+        or report.get("cancellation_lag_minutes_per_active_job") != 5
+        or lag != active_jobs * 5
+        or any(not isinstance(value, (int, float)) or isinstance(value, bool)
+               or not math.isfinite(value) or value < 0 for value in numeric)
+        or charged < observed
+        or not isinstance(reservations, list) or not reservations
+        or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str) or not item["name"]
+            or not isinstance(item.get("bound_minutes"), int)
+            or isinstance(item.get("bound_minutes"), bool) or item["bound_minutes"] < 1
+            or not isinstance(item.get("already_observed_minutes"), (int, float))
+            or isinstance(item.get("already_observed_minutes"), bool)
+            or not math.isfinite(item["already_observed_minutes"])
+            or item["already_observed_minutes"] < 0
+            or item["already_observed_minutes"] > item["bound_minutes"]
+            or not isinstance(item.get("reserved_minutes"), (int, float))
+            or isinstance(item.get("reserved_minutes"), bool)
+            or not math.isfinite(item["reserved_minutes"])
+            or item["reserved_minutes"] < 0
+            or not math.isclose(
+                item["reserved_minutes"],
+                item["bound_minutes"] - item["already_observed_minutes"],
+                rel_tol=0, abs_tol=0.01,
+            )
+            for item in reservations
+        )
+        or not math.isclose(
+            reserve,
+            sum(item["reserved_minutes"] for item in reservations),
+            rel_tol=0, abs_tol=0.01,
+        )
+        or canonical_reservations is None
+        or reservations != canonical_reservations["bounded_support_reservations"]
+        or reserve != canonical_reservations["bounded_support_reserve_minutes"]
+        or not math.isclose(observed, max(source_total, monitor_floor) + reserve,
+                            rel_tol=0, abs_tol=0.01)
+        or not math.isclose(charged, observed + lag, rel_tol=0, abs_tol=0.01)
+        or charged > launch_cutoff
+        or lineage != expected_lineage
+        or not _complete_calibration_lifecycle(lifecycle, report.get("stage"))
+    ):
+        raise ValueError("calibration budget decision is malformed or contradictory")
+    return identities, float(charged)
+
+
+def _complete_calibration_lifecycle(lifecycle: object, stage: object) -> bool:
+    """Require a nonempty, stage-bound observer lifecycle and its embedded contract."""
+    if not isinstance(lifecycle, dict) or stage not in {"1", "2", "3"}:
+        return False
+    expected = lifecycle.get("expected_shards")
+    terminal = lifecycle.get("terminal_shards")
+    admitted = lifecycle.get("admitted_shards")
+    contract = lifecycle.get("contract")
+    if (
+        lifecycle.get("kind") != "calibration_observer_sample"
+        or lifecycle.get("action") != "complete" or lifecycle.get("passed") is not True
+        or not isinstance(expected, list) or not expected
+        or len(expected) != len(set(expected))
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            or index not in WAVES[f"wave-{stage}"] for index in expected
+        )
+        or not isinstance(terminal, list) or terminal != expected
+        or not isinstance(admitted, list) or admitted != expected
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            for indexes in (terminal, admitted) for index in indexes
+        )
+        or not isinstance(contract, dict)
+    ):
+        return False
+    try:
+        canonical = (
+            calibration_stage_3_observer_contract(expected)
+            if stage == "3"
+            else calibration_observer_contract(
+                len(expected), 8 if stage == "1" else 16,
+                expected_shards=expected,
+            )
+        )
+    except (TypeError, ValueError):
+        return False
+    return (
+        contract == canonical
+        and lifecycle.get("schema_version") == "1"
+        and lifecycle.get("billing_authority") is False
+        and lifecycle.get("completion_guaranteed") is False
+        and isinstance(lifecycle.get("elapsed_seconds"), int)
+        and not isinstance(lifecycle.get("elapsed_seconds"), bool)
+        and 0 <= lifecycle["elapsed_seconds"] <= canonical["observer_deadline_seconds"]
+        and lifecycle.get("expected_workers") == len(expected)
+        and lifecycle.get("observed_worker_jobs") == len(expected)
+        and lifecycle.get("terminal_workers") == len(expected)
+        and lifecycle.get("missing_terminal_shards") == []
+        and lifecycle.get("pending_admission_shards") == []
+        and lifecycle.get("completed_admissions") == canonical["admission_dependencies"]
+        and lifecycle.get("expected_admissions") == canonical["admission_dependencies"]
+        and lifecycle.get("route_complete") is True
+        and lifecycle.get("reason") == "all admitted workers are terminal"
+    )
+
+
+def calibration_accounting_lineage(records: list[dict]) -> list[dict[str, str]]:
+    """Flatten validated accounting origins in their single-import order."""
+    identities = [
+        identity
+        for record in records
+        for identity in validate_calibration_accounting(record)[0]
+    ]
+    if len(identities) != len(set(identities)):
+        raise ValueError("accounting source lineage contains a duplicate origin")
+    return [{"run_id": run_id, "run_attempt": attempt} for run_id, attempt in identities]
+
+
+def retain_historical_accounting_floor(accounting: dict, historical_paths: list[Path]) -> dict:
+    """Keep later reconciliation from reducing previously observed exposure."""
+    expected_identities, terminal = validate_calibration_accounting(accounting)
     if not historical_paths:
         return accounting
     historical = []
     for path in historical_paths:
         report = _load_json(path)
-        report_identities, observed = validate(report)
-        if report_identities != expected_identities:
+        report_identities, observed = validate_calibration_accounting(report)
+        if (
+            len(report_identities) < len(expected_identities)
+            or report_identities[-len(expected_identities):] != expected_identities
+        ):
             raise ValueError("historical accounting has incompatible origin")
         historical.append({
             "path": str(path),
@@ -1795,7 +1980,7 @@ def build_calibration_launch_accounting(
     if (
         stage not in {"1", "2", "3"}
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
-        or not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1
+        or ceiling != 3600
         or not isinstance(resume_run_id, str)
         or not isinstance(prior_stage_run_id, str)
     ):
@@ -1806,20 +1991,6 @@ def build_calibration_launch_accounting(
         raise ValueError("calibration resume run identity is malformed")
     if prior_stage_run_id and not numeric(prior_stage_run_id):
         raise ValueError("calibration prior-stage run identity is malformed")
-
-    def source_run_ids(report: dict) -> list[str]:
-        if not isinstance(report, dict):
-            raise ValueError("calibration predecessor source identity is malformed")
-        sources = report.get("sources")
-        if sources is None:
-            run_id = report.get("expected_run_id")
-            attempt = report.get("expected_run_attempt")
-            if not isinstance(run_id, str) or not isinstance(attempt, str):
-                raise ValueError("calibration predecessor source identity is malformed")
-            return [run_id]
-        if not isinstance(sources, list) or not sources:
-            raise ValueError("calibration predecessor sources are malformed")
-        return [run_id for source in sources for run_id in source_run_ids(source)]
 
     if stage == "1" and not resume_run_id:
         if prior_stage_run_id or predecessor is not None:
@@ -1835,39 +2006,25 @@ def build_calibration_launch_accounting(
             raise ValueError("later calibration stage is missing prior-stage identity")
         if predecessor is None:
             raise ValueError("required calibration predecessor accounting is missing")
+        if predecessor.get("kind") != "calibration_budget_decision":
+            raise ValueError("calibration predecessor accounting is incompatible")
         expected_stage = stage if resume_run_id else str(int(stage) - 1)
         predecessor_run_id = resume_run_id or prior_stage_run_id
-        sources = predecessor.get("sources")
-        terminal_source = (
-            predecessor if sources is None
-            else sources[-1] if isinstance(sources, list) and sources
-            else None
-        )
-        values = (
-            predecessor.get("charged_runner_minutes"),
-            predecessor.get("estimated_runner_minutes"),
-        )
+        try:
+            identities, prior = validate_calibration_accounting(predecessor)
+        except ValueError as exc:
+            raise ValueError("calibration predecessor accounting is incompatible") from exc
         valid = (
-            predecessor.get("schema_version") == "1"
-            and predecessor.get("billing_authority") is False
-            and predecessor.get("calibration_id") == calibration_id
+            predecessor.get("calibration_id") == calibration_id
             and predecessor.get("stage") == expected_stage
             and predecessor.get("ceiling") == ceiling
-            and predecessor.get("passed") is True
-            and isinstance(terminal_source, dict)
-            and terminal_source.get("expected_run_id") == predecessor_run_id
-            and all(
-                isinstance(value, (int, float)) and not isinstance(value, bool)
-                and math.isfinite(value) and value >= 0
-                for value in values
-            )
+            and identities[-1] == (predecessor_run_id, "1")
         )
         if not valid:
             raise ValueError("calibration predecessor accounting is incompatible")
-        lineage = source_run_ids(predecessor)
+        lineage = [run_id for run_id, _attempt in identities]
         if resume_run_id and stage != "1" and prior_stage_run_id not in lineage:
             raise ValueError("calibration resume accounting conflicts with prior-stage lineage")
-        prior = float(max(values))
         predecessor_mode = "same-stage-resume" if resume_run_id else "prior-stage"
 
     observed = current.get("estimated_runner_minutes")
@@ -2072,6 +2229,98 @@ def reserve_bounded_support_minutes(
     }
 
 
+def build_calibration_terminal_accounting(
+    current: dict,
+    monitor: dict,
+    lifecycle: dict,
+    *,
+    stage: str,
+    calibration_id: str,
+    ceiling: int,
+    support_bounds: dict[str, int],
+    predecessor: dict | None = None,
+    predecessor_run_id: str = "",
+    predecessor_stage: str = "",
+) -> dict:
+    """Build the typed terminal decision consumed by recovery and later stages."""
+    if support_bounds != CALIBRATION_SUPPORT_BOUNDS:
+        raise ValueError("terminal support bounds differ from the calibration policy")
+    current_ids, current_floor = validate_calibration_accounting(current)
+    if len(current_ids) != 1:
+        raise ValueError("current terminal accounting origin is malformed")
+    monitor_ids, _monitor_effective = validate_calibration_accounting(monitor)
+    monitor_floor = max(
+        monitor["estimated_runner_minutes"], monitor.get("charged_runner_minutes", 0),
+    )
+    if (
+        stage not in {"1", "2", "3"}
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
+        or ceiling != 3600
+        or monitor_ids != current_ids
+        or monitor.get("stage") != stage
+        or monitor.get("calibration_id") != calibration_id
+        or monitor.get("ceiling") != ceiling
+        or monitor.get("passed") is not True
+        or not _complete_calibration_lifecycle(lifecycle, stage)
+    ):
+        raise ValueError("terminal observer evidence is incomplete or incompatible")
+    records = [current]
+    total = current_floor
+    if predecessor is not None:
+        if predecessor.get("kind") != "calibration_budget_decision":
+            raise ValueError("prior cumulative accounting is incompatible")
+        try:
+            identities, predecessor_floor = validate_calibration_accounting(predecessor)
+        except ValueError as exc:
+            raise ValueError("prior cumulative accounting is incompatible") from exc
+        if (
+            not predecessor_run_id
+            or predecessor_stage not in {"1", "2", "3"}
+            or identities[-1] != (predecessor_run_id, "1")
+            or predecessor.get("stage") != predecessor_stage
+            or predecessor.get("calibration_id") != calibration_id
+            or predecessor.get("ceiling") != ceiling
+        ):
+            raise ValueError("prior cumulative accounting is incompatible")
+        records.insert(0, predecessor)
+        total = round(total + predecessor_floor, 2)
+    cumulative = {
+        "schema_version": "1",
+        "kind": "calibration_budget_decision",
+        "billing_authority": False,
+        "stage": stage,
+        "calibration_id": calibration_id,
+        "estimated_runner_minutes": max(total, monitor_floor),
+        "included_jobs": current["included_jobs"],
+        "sources": records,
+        "source_lineage": calibration_accounting_lineage(records),
+        "monitor_floor_runner_minutes": monitor_floor,
+    }
+    reserved = reserve_bounded_support_minutes(cumulative, support_bounds)
+    result = evaluate_calibration_budget(
+        reserved, ceiling=ceiling, cancellation_reserve=1200,
+    )
+    result["observer_evidence"] = {"lifecycle": lifecycle}
+    return result
+
+
+def bind_calibration_observer_evidence(
+    accounting: dict, lifecycle: dict, *, budget_sha256: str | None = None,
+) -> dict:
+    """Bind complete lifecycle evidence after the terminal budget decision is built."""
+    if (
+        accounting.get("kind") != "calibration_budget_decision"
+        or not _complete_calibration_lifecycle(lifecycle, accounting.get("stage"))
+        or budget_sha256 is not None
+        and not re.fullmatch(r"[0-9a-f]{64}", budget_sha256)
+    ):
+        raise ValueError("terminal observer evidence is incomplete or incompatible")
+    evidence = {"lifecycle": lifecycle}
+    if budget_sha256 is not None:
+        evidence["budget_sha256"] = budget_sha256
+    return {**accounting, "observer_evidence": evidence}
+
+
 def plan_calibration_continuation(
     provenance_path: Path,
     jobs_path: Path,
@@ -2085,6 +2334,8 @@ def plan_calibration_continuation(
     expected_revision: str,
     expected_stage: str,
     historical_accounting_paths: list[Path] | None = None,
+    artifact_inventory_path: Path | None = None,
+    source_run_path: Path | None = None,
 ) -> dict:
     """Select sparse continuation shards from checkpoints plus execution provenance."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id):
@@ -2125,6 +2376,7 @@ def plan_calibration_continuation(
     raw = json.loads(jobs_path.read_text(encoding="utf-8"))
     pages = raw if isinstance(raw, list) else [raw]
     jobs_by_shard: dict[int, dict] = {}
+    producer_job_ids: set[int] = set()
     for job in (job for page in pages for job in page["jobs"]):
         match = _CALIBRATION_JOB.fullmatch(str(job.get("name", "")))
         if not match:
@@ -2132,9 +2384,52 @@ def plan_calibration_continuation(
         index = int(match.group(1))
         if index in jobs_by_shard:
             raise ValueError(f"shard {index} has conflicting execution provenance")
+        job_id = job.get("id")
+        if (
+            not isinstance(job_id, int) or isinstance(job_id, bool) or job_id < 1
+            or job_id in producer_job_ids
+        ):
+            raise ValueError("calibration producer job identity is malformed or duplicated")
+        producer_job_ids.add(job_id)
         jobs_by_shard[index] = job
     if set(jobs_by_shard) != set(selected_shards):
         raise ValueError("calibration job provenance is incomplete or contains extra shards")
+    checkpoint_artifacts: dict[int, dict] = {}
+    source_run = _load_json(source_run_path) if source_run_path is not None else None
+    if source_run is not None and (
+        str(source_run.get("id", "")) != expected_run_id
+        or str(source_run.get("run_attempt", "")) != expected_run_attempt
+        or source_run.get("status") != "completed"
+        or source_run.get("head_sha") != expected_revision
+    ):
+        raise ValueError("calibration source workflow run provenance differs")
+    if artifact_inventory_path is not None:
+        artifact_prefix = f"mutation-checkpoint-{calibration_id}-"
+        for artifact in _load_api_pages(artifact_inventory_path, "artifacts"):
+            name = str(artifact.get("name", ""))
+            if not name.startswith(artifact_prefix):
+                continue
+            suffix = name.removeprefix(artifact_prefix)
+            if not suffix.isdigit():
+                raise ValueError("checkpoint artifact has a malformed shard identity")
+            index = int(suffix)
+            if index not in selected_shards:
+                raise ValueError("checkpoint artifact is outside the selected calibration stage")
+            origin = artifact.get("workflow_run")
+            if (
+                index in checkpoint_artifacts
+                or not isinstance(artifact.get("id"), int)
+                or isinstance(artifact.get("id"), bool)
+                or not isinstance(artifact.get("size_in_bytes"), int)
+                or artifact["size_in_bytes"] <= 0
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", "")))
+                or artifact.get("expired") is not False
+                or not isinstance(origin, dict)
+                or str(origin.get("id", "")) != expected_run_id
+                or origin.get("head_sha") != expected_revision
+            ):
+                raise ValueError("checkpoint artifact provenance is malformed or incompatible")
+            checkpoint_artifacts[index] = artifact
     checkpoint_by_shard: dict[int, tuple[Path, dict]] = {}
     shared_identity: tuple[str, str, str] | None = None
     for path in sorted(checkpoints_dir.rglob("mutation-checkpoint.json")) if checkpoints_dir.exists() else []:
@@ -2226,7 +2521,16 @@ def plan_calibration_continuation(
             and job.get("conclusion") == "skipped"))
         if checkpoint_entry is not None:
             path, checkpoint = checkpoint_entry
+            artifact = checkpoint_artifacts.get(index)
+            if artifact_inventory_path is not None and (
+                artifact is None or path.parent.name != artifact["name"]
+            ):
+                raise ValueError(f"shard {index} checkpoint lacks source artifact provenance")
             if checkpoint["status"] == "completed" and checkpoint["pending"] == 0:
+                if job.get("status") != "completed" or job.get("conclusion") != "success":
+                    raise ValueError(
+                        f"completed shard {index} has incompatible producer status"
+                    )
                 if any(report.get("status") != "completed" for report in reports_by_shard[index]):
                     raise ValueError(f"completed shard {index} has contradictory retained reports")
                 completed_reports = [report for report in reports_by_shard[index]
@@ -2268,7 +2572,49 @@ def plan_calibration_continuation(
                     and job.get("conclusion") == "cancelled"
                     and (has_runner or job.get("steps"))
                 )
-                checkpoint_only = not partial_reports and cancelled_producer
+                required_steps = {
+                    "Resumable calibration shard evidence": ("completed", "failure"),
+                    "Retain resumable execution checkpoint": ("completed", "success"),
+                    "Retain mutation shard": ("completed", "failure"),
+                }
+                matching_steps = {
+                    name: [step for step in job.get("steps", [])
+                           if isinstance(step, dict) and step.get("name") == name]
+                    for name in required_steps
+                }
+                failed_producer = (
+                    job.get("status") == "completed"
+                    and job.get("conclusion") in {"failure", "timed_out"}
+                    and all(
+                        len(matching_steps[name]) == 1
+                        and (matching_steps[name][0].get("status"),
+                             matching_steps[name][0].get("conclusion")) == outcome
+                        for name, outcome in required_steps.items()
+                    )
+                )
+                if job.get("conclusion") in {"failure", "timed_out"} and any(
+                    len(steps) > 1 for steps in matching_steps.values()
+                ):
+                    raise ValueError(f"shard {index} has ambiguous producer step evidence")
+                if job.get("conclusion") in {"failure", "timed_out"} and not failed_producer:
+                    raise ValueError(
+                        f"shard {index} lacks exact failed-producer step evidence"
+                    )
+                completed_reports = [report for report in reports_by_shard[index]
+                                     if report.get("status") == "completed"]
+                if completed_reports:
+                    raise ValueError(
+                        f"partial shard {index} has an unexpected completed report"
+                    )
+                if failed_producer:
+                    if (
+                        source_run is None or artifact is None
+                        or path.parent.name != artifact["name"]
+                    ):
+                        raise ValueError(
+                            f"shard {index} checkpoint lacks source artifact provenance"
+                        )
+                checkpoint_only = not partial_reports and (cancelled_producer or failed_producer)
                 if not checkpoint_only and (
                     len(partial_reports) != 1 or partial_reports[0] != checkpoint
                 ):
@@ -2277,6 +2623,15 @@ def plan_calibration_continuation(
                     )
                 state = "started_partial_checkpoint_only" if checkpoint_only else "started_partial"
                 representation = {"kind": "checkpoint", "path": path.as_posix()}
+                if artifact is not None:
+                    representation["source_artifact"] = {
+                        "id": artifact["id"], "name": artifact["name"],
+                        "archive_digest": artifact["digest"],
+                        "size_in_bytes": artifact["size_in_bytes"],
+                        "source_run_id": expected_run_id,
+                        "source_run_attempt": expected_run_attempt,
+                        "producer_job_id": job["id"],
+                    }
                 retry.append(index)
             states[str(index)] = {"state": state, "job_id": job["id"],
                                   "checkpoint": path.as_posix(), "pending": checkpoint["pending"],
@@ -2407,6 +2762,8 @@ def main() -> int:
         required=True,
     )
     calibration_continuation.add_argument("--jobs", type=Path, required=True)
+    calibration_continuation.add_argument("--artifacts", type=Path, required=True)
+    calibration_continuation.add_argument("--source-run", type=Path, required=True)
     calibration_continuation.add_argument("--provenance", type=Path, required=True)
     calibration_continuation.add_argument("--checkpoints", type=Path, required=True)
     calibration_continuation.add_argument("--reports", type=Path, required=True)
@@ -2487,6 +2844,8 @@ def main() -> int:
                 args.provenance, args.jobs, args.checkpoints, args.reports, manifests,
                 WAVES[f"wave-{args.stage}"], args.calibration_id, args.run_id,
                 args.run_attempt, args.revision, args.stage, args.historical_accounting,
+                args.artifacts,
+                args.source_run,
             )
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             return 0
