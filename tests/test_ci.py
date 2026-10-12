@@ -40,6 +40,10 @@ def _python_heredoc(script):
     return script.split(marker, 1)[1].split("\nPY", 1)[0]
 
 
+def _first_python_heredoc(script):
+    return script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+
+
 def _workflow_step_script(job_name, step_name):
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -1531,6 +1535,30 @@ def _run_launch_script(tmp_path, *, stage, resume="", prior="", predecessor=None
     return _run_actions_bash(launch, cwd=tmp_path, env=env)
 
 
+def _consume_launch_with_monitor_script(tmp_path, *, stage, jobs=None):
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir(exist_ok=True)
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    (tmp_path / "monitor-history").mkdir(exist_ok=True)
+    (tmp_path / "admission-accounting").mkdir(exist_ok=True)
+    (tmp_path / "jobs-monitor.json").write_text(json.dumps(
+        jobs or _calibration_jobs(shards=(WAVES[f"wave-{stage}"][0],))
+    ))
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    env = {
+        **os.environ, "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_RUN_ID": "700", "GITHUB_RUN_ATTEMPT": "1",
+        "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": str(stage),
+        "RUNNER_MINUTE_CEILING": "3600", "OBSERVED_AT": "2026-10-10T01:02:00Z",
+    }
+    return subprocess.run(
+        [sys.executable, "-c", _first_python_heredoc(monitor)], cwd=tmp_path, env=env,
+        capture_output=True, text=True,
+    )
+
+
 def test_actual_launch_producer_carries_same_stage_resume_floor_once(tmp_path):
     predecessor = _cumulative_accounting(
         stage=1, run_ids=("381",), estimated=120, charged=125,
@@ -1585,6 +1613,92 @@ def test_actual_launch_producer_validates_resumed_later_stage_lineage_without_do
     assert launch["estimated_runner_minutes"] == 253
 
 
+@pytest.mark.parametrize(
+    ("stage", "prior", "resume", "run_ids"),
+    [(2, "381", "482", ("381", "482")), (3, "482", "583", ("381", "482", "583"))],
+)
+def test_actual_launch_output_is_consumed_unchanged_by_monitor_for_later_stage_resume(
+    tmp_path, stage, prior, resume, run_ids,
+):
+    predecessor = _cumulative_accounting(
+        stage=stage, run_ids=run_ids, estimated=240, charged=245,
+    )
+    produced = _run_launch_script(
+        tmp_path, stage=stage, resume=resume, prior=prior, predecessor=predecessor,
+    )
+    assert produced.returncode == 0, produced.stderr
+    emitted = (tmp_path / "launch-accounting.json").read_bytes()
+
+    consumed = _consume_launch_with_monitor_script(tmp_path, stage=stage)
+
+    assert consumed.returncode == 0, consumed.stderr
+    assert (tmp_path / "calibration-launch/launch-accounting.json").read_bytes() == emitted
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    assert budget["prior_runner_minutes"] == 245
+    assert budget["estimated_runner_minutes"] == 246
+    assert budget["charged_runner_minutes"] == 246
+    assert budget["calibration_predecessor"]["source_lineage"] == [
+        {"run_id": run_id, "run_attempt": "1"} for run_id in run_ids
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda record: record["calibration_predecessor"].pop("source_lineage"),
+         "launch accounting contract"),
+        (lambda record: record["calibration_predecessor"].update(prior_stage_run_id="999"),
+         "launch accounting contract"),
+        (lambda record: record["calibration_predecessor"]["source_lineage"][-1].update(
+            run_id="999"), "launch accounting contract"),
+        (lambda record: record["calibration_predecessor"]["source_lineage"][-1].update(
+            run_attempt="2"), "launch accounting contract"),
+        (lambda record: record["calibration_predecessor"]["source_lineage"][-1].update(
+            calibration_id="foreign"), "launch accounting contract"),
+    ],
+)
+def test_actual_monitor_rejects_missing_conflicting_or_foreign_resume_lineage(
+    tmp_path, mutation, message,
+):
+    predecessor = _cumulative_accounting(
+        stage=2, run_ids=("381", "482"), estimated=240, charged=245,
+    )
+    produced = _run_launch_script(
+        tmp_path, stage=2, resume="482", prior="381", predecessor=predecessor,
+    )
+    assert produced.returncode == 0, produced.stderr
+    launch = json.loads((tmp_path / "launch-accounting.json").read_text())
+    mutation(launch)
+    (tmp_path / "launch-accounting.json").write_text(json.dumps(launch))
+
+    consumed = _consume_launch_with_monitor_script(tmp_path, stage=2)
+
+    assert consumed.returncode != 0
+    assert message in consumed.stderr
+
+
+def test_resumed_monitor_preserves_lower_later_observation_floor_before_single_import(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=2, run_ids=("381", "482"), estimated=240, charged=245,
+    )
+    produced = _run_launch_script(
+        tmp_path, stage=2, resume="482", prior="381", predecessor=predecessor,
+    )
+    assert produced.returncode == 0, produced.stderr
+    history = tmp_path / "monitor-history"
+    history.mkdir()
+    (history / "0000.json").write_text(json.dumps(_operational_source("700", 20)))
+
+    consumed = _consume_launch_with_monitor_script(tmp_path, stage=2)
+
+    assert consumed.returncode == 0, consumed.stderr
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    assert budget["historical_floor_applied"] is True
+    assert budget["prior_runner_minutes"] == 245
+    assert budget["estimated_runner_minutes"] == 265
+    assert budget["charged_runner_minutes"] == 265
+
+
 def test_actual_launch_producer_rejects_conflicting_resumed_later_stage_lineage(tmp_path):
     predecessor = _cumulative_accounting(
         stage=3, run_ids=("999", "583"), estimated=300,
@@ -1592,6 +1706,19 @@ def test_actual_launch_producer_rejects_conflicting_resumed_later_stage_lineage(
 
     result = _run_launch_script(
         tmp_path, stage=3, resume="583", prior="482", predecessor=predecessor,
+    )
+
+    assert result.returncode != 0
+    assert "conflicts with prior-stage lineage" in result.stderr
+
+
+def test_actual_launch_producer_rejects_nonadjacent_prior_stage_ancestor(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=3, run_ids=("381", "482", "583"), estimated=300,
+    )
+
+    result = _run_launch_script(
+        tmp_path, stage=3, resume="583", prior="381", predecessor=predecessor,
     )
 
     assert result.returncode != 0
@@ -1762,6 +1889,56 @@ def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch
     )
     assert successor["prior_runner_minutes"] == effective
     assert successor["estimated_runner_minutes"] == effective + 8
+
+
+def test_resumed_stage_monitor_lifecycle_reaches_terminal_accounting_once(tmp_path):
+    predecessor = _cumulative_accounting(
+        stage=2, run_ids=("381", "482"), estimated=240, charged=245,
+    )
+    launched = _run_launch_script(
+        tmp_path, stage=2, resume="482", prior="381", predecessor=predecessor,
+    )
+    assert launched.returncode == 0, launched.stderr
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    shard = WAVES["wave-2"][0]
+    bin_dir = _write_gh_jobs_stub(
+        tmp_path / "provider", _calibration_jobs(shards=(shard,)), predecessor,
+    )
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": [shard]}),
+    }
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    monitored = _run_actions_bash(monitor, cwd=tmp_path, env=env)
+    assert monitored.returncode == 0, monitored.stderr
+    terminal_observer = tmp_path / "terminal-observer"
+    terminal_observer.mkdir()
+    shutil.copy(tmp_path / "calibration-monitor-budget.json", terminal_observer)
+    shutil.copy(tmp_path / "calibration-monitor-lifecycle.json", terminal_observer)
+    accounting = _workflow_step_script(
+        "calibration-accounting", "Collect cumulative job accounting",
+    )
+
+    reconciled = _run_actions_bash(accounting, cwd=tmp_path, env={
+        **env, "RESUME_RUN_ID": "482", "PRIOR_RUN_ID": "381",
+    })
+
+    assert reconciled.returncode == 0, reconciled.stderr
+    terminal = json.loads((tmp_path / "calibration-accounting.json").read_text())
+    assert terminal["source_lineage"] == [
+        {"run_id": "381", "run_attempt": "1"},
+        {"run_id": "482", "run_attempt": "1"},
+        {"run_id": "700", "run_attempt": "1"},
+    ]
+    assert terminal["estimated_runner_minutes"] == 301
+    assert terminal["charged_runner_minutes"] == 301
 
 
 def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):

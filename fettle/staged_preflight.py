@@ -1998,6 +1998,7 @@ def build_calibration_launch_accounting(
         prior = 0.0
         predecessor_mode = "fresh-stage-1"
         predecessor_run_id = None
+        predecessor_lineage: list[dict[str, str]] = []
     else:
         if stage == "1":
             if prior_stage_run_id:
@@ -2022,10 +2023,15 @@ def build_calibration_launch_accounting(
         )
         if not valid:
             raise ValueError("calibration predecessor accounting is incompatible")
-        lineage = [run_id for run_id, _attempt in identities]
-        if resume_run_id and stage != "1" and prior_stage_run_id not in lineage:
+        if (
+            resume_run_id and stage != "1"
+            and (len(identities) < 2 or identities[-2] != (prior_stage_run_id, "1"))
+        ):
             raise ValueError("calibration resume accounting conflicts with prior-stage lineage")
         predecessor_mode = "same-stage-resume" if resume_run_id else "prior-stage"
+        predecessor_lineage = [
+            {"run_id": run_id, "run_attempt": attempt} for run_id, attempt in identities
+        ]
 
     observed = current.get("estimated_runner_minutes")
     if (
@@ -2048,6 +2054,7 @@ def build_calibration_launch_accounting(
             "resume_run_id": resume_run_id or None,
             "prior_stage_run_id": prior_stage_run_id or None,
             "accounting_run_id": predecessor_run_id,
+            "source_lineage": predecessor_lineage,
         },
         "estimated_runner_minutes": round(observed + prior, 2),
     }
@@ -2072,6 +2079,28 @@ def combine_calibration_monitor_accounting(
     accounting_run_id = (
         predecessor.get("accounting_run_id") if isinstance(predecessor, dict) else None
     )
+    source_lineage = predecessor.get("source_lineage") if isinstance(predecessor, dict) else None
+    lineage_identities = (
+        [
+            (item.get("run_id"), item.get("run_attempt"))
+            for item in source_lineage
+        ]
+        if isinstance(source_lineage, list)
+        and all(
+            isinstance(item, dict) and set(item) == {"run_id", "run_attempt"}
+            for item in source_lineage
+        )
+        else None
+    )
+    valid_lineage = (
+        lineage_identities is not None
+        and len(lineage_identities) == len(set(lineage_identities))
+        and all(
+            isinstance(run_id, str) and re.fullmatch(r"[1-9][0-9]*", run_id)
+            and attempt == "1"
+            for run_id, attempt in lineage_identities
+        )
+    )
     if (
         launch.get("stage") != stage
         or launch.get("calibration_id") != calibration_id
@@ -2079,6 +2108,7 @@ def combine_calibration_monitor_accounting(
         or not isinstance(prior, (int, float)) or isinstance(prior, bool)
         or not math.isfinite(prior) or prior < 0
         or not isinstance(predecessor, dict)
+        or not valid_lineage
         or predecessor_mode not in {
             "fresh-stage-1", "same-stage-resume", "prior-stage",
         }
@@ -2086,15 +2116,26 @@ def combine_calibration_monitor_accounting(
             stage != "1" or prior != 0
             or resume_run_id is not None or prior_stage_run_id is not None
             or accounting_run_id is not None
+            or lineage_identities != []
         ))
         or (predecessor_mode == "same-stage-resume" and (
-            not isinstance(resume_run_id, str) or prior_stage_run_id is not None
+            not isinstance(resume_run_id, str)
             or accounting_run_id != resume_run_id
+            or not lineage_identities
+            or lineage_identities[-1] != (resume_run_id, "1")
+            or (stage == "1" and prior_stage_run_id is not None)
+            or (stage != "1" and (
+                not isinstance(prior_stage_run_id, str)
+                or len(lineage_identities) < 2
+                or lineage_identities[-2] != (prior_stage_run_id, "1")
+            ))
         ))
         or (predecessor_mode == "prior-stage" and (
             stage == "1" or resume_run_id is not None
             or not isinstance(prior_stage_run_id, str)
             or accounting_run_id != prior_stage_run_id
+            or not lineage_identities
+            or lineage_identities[-1] != (prior_stage_run_id, "1")
         ))
     ):
         raise ValueError("calibration launch accounting contract is incompatible")
