@@ -296,17 +296,17 @@ def evaluate_calibration_observer(
         if not isinstance(job, dict) or not isinstance(job.get("name"), str):
             continue
         name = job["name"]
+        if (
+            job.get("status") == "completed" and job.get("conclusion") == "skipped"
+            and not job.get("runner_id") and not job.get("steps")
+        ):
+            continue
         match = _CALIBRATION_JOB.fullmatch(name)
         if match is None:
             if "mutation (full shard " in name:
                 raise ValueError("calibration observer saw a malformed worker identity")
             continue
         index = int(match.group(1))
-        if (
-            job.get("status") == "completed" and job.get("conclusion") == "skipped"
-            and not job.get("runner_id") and not job.get("steps")
-        ):
-            continue
         if index not in expected_shards:
             raise ValueError("calibration observer saw an unexpected worker identity")
         if index not in admitted:

@@ -163,13 +163,10 @@ jobs:
             calibration-admission-current.json
           if-no-files-found: warn
           retention-days: 90
-      - name: Contain failed admission
+      - name: Contain failed admission and preserve terminal accounting
         if: always() && (steps.validate.outcome != 'success' || steps.retain.outcome != 'success')
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! -f calibration-admission.json ]]; then
             printf '%s\n' '{"schema_version":"1","kind":"calibration_admission_containment","passed":false,"billing_authority":false,"containment_reason":"admission setup, polling, deadline, or retention failed before a complete decision"}' > calibration-admission.json
           fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
           exit 2

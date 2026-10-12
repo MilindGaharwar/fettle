@@ -187,6 +187,40 @@ def test_stage_3_admission_distinguishes_future_from_missing_terminal_workers():
     assert result["action"] == "continue"
 
 
+def test_stage_3_observer_ignores_uninstantiated_skipped_matrix_placeholder():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [{
+        "name": "mutation (full shard ${{ matrix.shard }}, advisory)",
+        "status": "completed", "conclusion": "skipped", "runner_id": None, "steps": [],
+    }]
+
+    result = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=1, budget_passed=True,
+        admitted_shards=selected,
+    )
+
+    assert result["action"] == "continue"
+    assert result["observed_worker_jobs"] == 0
+    assert result["missing_terminal_shards"] == selected
+
+
+def test_stage_3_observer_still_rejects_executed_malformed_worker_identity():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [{
+        "name": "mutation (full shard ${{ matrix.shard }}, advisory)",
+        "status": "in_progress", "conclusion": None, "runner_id": 7,
+        "steps": [{"name": "worker", "status": "in_progress", "conclusion": None}],
+    }]
+
+    with pytest.raises(ValueError, match="malformed worker identity"):
+        evaluate_calibration_observer(
+            contract, jobs, elapsed_seconds=1, budget_passed=True,
+            admitted_shards=selected,
+        )
+
+
 def test_stage_3_successful_admission_extends_exact_observer_identity_set():
     selected = [WAVE_3_BATCHES[0][0], WAVE_3_BATCHES[1][0]]
     jobs = [{

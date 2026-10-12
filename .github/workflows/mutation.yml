@@ -1137,7 +1137,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-2:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-1.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-1]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1166,7 +1166,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-3:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-2.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-2]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1195,7 +1195,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-4:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-3.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-3]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1224,7 +1224,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-5:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-4.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-4]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1253,7 +1253,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-6:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-5.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-5]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1282,7 +1282,7 @@ jobs:
       execute: ${{ matrix.execute }}
 
   calibration-stage-3-admit-7:
-    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3' && needs.calibration-stage-3-batch-6.result != 'skipped'
     needs: [prepare, calibration-stage-3-batch-6]
     uses: ./.github/workflows/mutation-calibration-admission.yml
     permissions:
@@ -1350,7 +1350,6 @@ jobs:
             [[ "$state" == "completed" || "$state" == "invalid" ]] && break
             sleep 15
           done
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
           exit 2
 
   calibration-monitor:
@@ -1522,17 +1521,14 @@ jobs:
              admission-accounting
           if-no-files-found: error
           retention-days: 90
-      - name: Request run cancellation at cutoff
+      - name: Contain monitor failure and preserve terminal accounting
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! -f calibration-monitor-budget.json ]]; then
             printf '%s\n' '{"schema_version":"1","kind":"calibration_monitor_containment","passed":false,"billing_authority":false,"containment_reason":"monitor setup, polling, observer deadline, or diagnostics failed before a complete decision"}' > calibration-monitor-budget.json
           fi
           passed=$(jq -r '.passed' calibration-monitor-budget.json 2>/dev/null || printf false)
           if [[ "$passed" != "true" || "${{ steps.monitor.outcome }}" != "success" || "${{ steps.retain-monitor.outcome }}" != "success" ]]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
             exit 2
           fi
 
@@ -1552,7 +1548,6 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-live-jobs.json
           state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-live-jobs.json)
           if [[ "$state" != "in_progress" ]]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
             exit 2
           fi
 
@@ -1585,7 +1580,6 @@ jobs:
               fi
               (( SECONDS < terminal_deadline )) && { sleep 15; continue; }
             fi
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true
             exit 2
           done
 
@@ -1642,11 +1636,13 @@ jobs:
           python-version: "3.12.13"
       - name: Download stage 3 admission accounting floors
         if: github.event.inputs.calibration_stage == '3'
+        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: mutation-calibration-admission-${{ github.run_id }}-*
           path: admission-accounting
       - name: Download terminal observer evidence
+        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-calibration-monitor-${{ github.run_id }}
@@ -1738,6 +1734,71 @@ jobs:
           assert result["billing_authority"] is False
           pathlib.Path("calibration-accounting.json").write_text(json.dumps(result, indent=2)+"\n")
           sys.exit(0 if result["passed"] else 2)
+          PY
+      - name: Preserve typed terminal accounting on containment
+        if: always()
+        env:
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          output = Path("calibration-accounting.json")
+          if output.is_file():
+              raise SystemExit(0)
+          evidence = {
+              "jobs_current": Path("jobs-current.json"),
+              "monitor_budget": Path("terminal-observer/calibration-monitor-budget.json"),
+              "monitor_lifecycle": Path("terminal-observer/calibration-monitor-lifecycle.json"),
+          }
+          if os.environ["CALIBRATION_STAGE"] != "1":
+              evidence["prior_accounting"] = Path("prior-accounting/calibration-accounting.json")
+          digests = {
+              name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for name, path in evidence.items() if path.is_file()
+          }
+          floor = None
+          historical_floor = None
+          reason = "terminal accounting prerequisites were incomplete or incompatible"
+          if evidence["jobs_current"].is_file():
+              try:
+                  from fettle.staged_preflight import account_runner_minutes
+                  current = account_runner_minutes(
+                      evidence["jobs_current"], datetime.now(timezone.utc),
+                      expected_run_id=os.environ["GITHUB_RUN_ID"],
+                      expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                      job_timeout_minutes=35,
+                  )
+                  floor = current["estimated_runner_minutes"]
+              except Exception as exc:
+                  reason = f"{type(exc).__name__}: {exc}"
+          if evidence.get("prior_accounting", Path()).is_file():
+              try:
+                  from fettle.staged_preflight import validate_calibration_accounting
+                  prior = json.loads(evidence["prior_accounting"].read_text())
+                  _lineage, historical_floor = validate_calibration_accounting(prior)
+              except Exception as exc:
+                  reason = f"{type(exc).__name__}: {exc}"
+          result = {
+              "schema_version": "1", "kind": "calibration_budget_decision",
+              "billing_authority": False, "passed": False,
+              "terminal_accounting_status": "indeterminate",
+              "stage": os.environ["CALIBRATION_STAGE"],
+              "calibration_id": os.environ["CALIBRATION_ID"],
+              "ceiling": int(os.environ["RUNNER_MINUTE_CEILING"]),
+              "expected_run_id": os.environ["GITHUB_RUN_ID"],
+              "expected_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "observed_runner_minutes_floor": floor,
+              "historical_charged_runner_minutes_floor": historical_floor,
+              "containment_reason": reason,
+              "evidence_sha256": digests,
+              "missing_evidence": sorted(set(evidence) - set(digests)),
+          }
+          output.write_text(json.dumps(result, indent=2) + "\n")
           PY
       - name: Retain calibration accounting
         if: always()

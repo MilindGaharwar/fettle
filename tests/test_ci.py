@@ -1785,7 +1785,7 @@ def test_actual_sparse_monitor_route_preserves_historical_floor(tmp_path):
     assert budget["historical_floor_applied"] is True
 
 
-def test_monitor_initialization_failure_retains_diagnostic_cancels_and_blocks_terminal_accounting(
+def test_monitor_initialization_failure_retains_typed_nonpass_terminal_accounting(
     tmp_path,
 ):
     launch_result = _run_launch_script(tmp_path, stage=1)
@@ -1814,7 +1814,7 @@ def test_monitor_initialization_failure_retains_diagnostic_cancels_and_blocks_te
     assert not (tmp_path / "calibration-monitor-lifecycle.json").exists()
 
     cancellation = _workflow_step_script(
-        "calibration-monitor", "Request run cancellation at cutoff",
+        "calibration-monitor", "Contain monitor failure and preserve terminal accounting",
     ).replace("${{ steps.monitor.outcome }}", "failure").replace(
         "${{ steps.retain-monitor.outcome }}", "success",
     )
@@ -1838,6 +1838,46 @@ def test_monitor_initialization_failure_retains_diagnostic_cancels_and_blocks_te
     assert blocked.returncode != 0
     assert "calibration-monitor-lifecycle.json" in blocked.stderr
     assert not (tmp_path / "calibration-accounting.json").exists()
+
+    fallback = _workflow_step_script(
+        "calibration-accounting", "Preserve typed terminal accounting on containment",
+    )
+    preserved = _run_actions_bash(fallback, cwd=tmp_path, env={
+        **env, "RESUME_RUN_ID": "", "PRIOR_RUN_ID": "",
+    })
+    assert preserved.returncode == 0, preserved.stderr
+    terminal = json.loads((tmp_path / "calibration-accounting.json").read_text())
+    assert terminal["kind"] == "calibration_budget_decision"
+    assert terminal["passed"] is False
+    assert terminal["terminal_accounting_status"] == "indeterminate"
+    assert terminal["observed_runner_minutes_floor"] == 8
+    assert terminal["historical_charged_runner_minutes_floor"] is None
+    assert terminal["missing_evidence"] == ["monitor_lifecycle"]
+
+
+def test_terminal_accounting_fallback_survives_accounting_import_failure(tmp_path):
+    jobs = tmp_path / "jobs-current.json"
+    jobs.write_text(json.dumps(_calibration_jobs()))
+    script = _workflow_step_script(
+        "calibration-accounting", "Preserve typed terminal accounting on containment",
+    ).replace("from fettle.staged_preflight import account_runner_minutes", "raise ImportError('missing')")
+
+    preserved = _run_actions_bash(script, cwd=tmp_path, env={
+        **os.environ, "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_RUN_ID": "700", "GITHUB_RUN_ATTEMPT": "1",
+        "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": "1",
+        "RUNNER_MINUTE_CEILING": "3600",
+    })
+
+    assert preserved.returncode == 0, preserved.stderr
+    terminal = json.loads((tmp_path / "calibration-accounting.json").read_text())
+    assert terminal["passed"] is False
+    assert terminal["terminal_accounting_status"] == "indeterminate"
+    assert terminal["observed_runner_minutes_floor"] is None
+    assert terminal["containment_reason"] == "ImportError: missing"
+    assert terminal["evidence_sha256"]["jobs_current"] == hashlib.sha256(
+        jobs.read_bytes()
+    ).hexdigest()
 
 
 def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch(tmp_path):
@@ -1992,7 +2032,7 @@ def test_calibration_monitor_uses_derived_lifecycle_and_leaves_shutdown_room():
     assert "deadline=$((SECONDS + 2100))" not in source
 
 
-def test_stage_3_observer_readiness_loss_and_cancellation_are_fail_closed():
+def test_stage_3_observer_readiness_loss_is_fail_closed_without_cancelling_accounting():
     workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
     jobs = workflow["jobs"]
     ready = jobs["calibration-stage-3-observer-ready"]
@@ -2010,7 +2050,7 @@ def test_stage_3_observer_readiness_loss_and_cancellation_are_fail_closed():
     assert watchdog["timeout-minutes"] == 335
     watchdog_script = watchdog["steps"][0]["run"]
     assert "calibration-monitor-lifecycle.json" in watchdog_script
-    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" || true' in watchdog_script
+    assert "/actions/runs/$GITHUB_RUN_ID/cancel" not in watchdog_script
     for number in range(2, 8):
         live = jobs[f"calibration-stage-3-observer-live-{number}"]
         batch = jobs[f"calibration-stage-3-batch-{number}"]
@@ -2035,7 +2075,7 @@ def test_stage_3_monitor_accounts_support_costs_and_validates_floor_provenance()
     assert 'final_batch_jobs = [' in monitor
     assert 'route_complete=route_complete' in monitor
     assert 'steps.retain-monitor.outcome' in monitor
-    assert 'cancel" || true' in monitor
+    assert "/actions/runs/$GITHUB_RUN_ID/cancel" not in monitor
     workflow = yaml.safe_load(source)
     retain = next(
         step for step in workflow["jobs"]["calibration-monitor"]["steps"]
@@ -2044,7 +2084,7 @@ def test_stage_3_monitor_accounts_support_costs_and_validates_floor_provenance()
     assert retain["timeout-minutes"] == 5
     cancel = next(
         step for step in workflow["jobs"]["calibration-monitor"]["steps"]
-        if step.get("name") == "Request run cancellation at cutoff"
+        if step.get("name") == "Contain monitor failure and preserve terminal accounting"
     )
     assert cancel["if"] == "always()"
 
@@ -2072,6 +2112,9 @@ def test_terminal_accounting_and_aggregate_require_observer_package():
     assert '"mutation evidence": 10' in accounting_source
     assert 'monitor.get("expected_run_id") != os.environ["GITHUB_RUN_ID"]' in accounting_source
     assert 'monitor.get("expected_run_attempt") != os.environ["GITHUB_RUN_ATTEMPT"]' in accounting_source
+    assert "Preserve typed terminal accounting on containment" in accounting_source
+    assert '"terminal_accounting_status": "indeterminate"' in accounting_source
+    assert '"kind": "calibration_budget_decision"' in accounting_source
     assert any(
         step.get("name") == "Require successful bounded accounting before publication"
         for step in aggregate["steps"]
@@ -2120,7 +2163,11 @@ def test_stage_3_calibration_uses_seven_output_gated_fixed_batches():
     for number in range(2, 8):
         batch = jobs[f"calibration-stage-3-batch-{number}"]
         admission = jobs[f"calibration-stage-3-admit-{number}"]
-        assert admission["if"].startswith("always()")
+        assert admission["if"] == (
+            "always() && github.event.inputs.mode == 'calibration' && "
+            "github.event.inputs.calibration_stage == '3' && "
+            f"needs.calibration-stage-3-batch-{number - 1}.result != 'skipped'"
+        )
         assert admission["needs"] == ["prepare", f"calibration-stage-3-batch-{number - 1}"]
         assert batch["needs"] == [
             "prepare", f"calibration-stage-3-admit-{number}",
@@ -2148,7 +2195,7 @@ def test_calibration_reusable_workflows_preserve_worker_and_containment_contract
     assert "a later batch report exists before admission" in admission
     assert "select_shard_subset_attempts(reports, 256, completed_prefix)" in admission
     assert "steps.validate.outcome != 'success' || steps.retain.outcome != 'success'" in admission
-    assert 'cancel" || true' in admission
+    assert "/actions/runs/$GITHUB_RUN_ID/cancel" not in admission
 
 
 def test_staged_preflight_publishes_consumer_aliases_with_provenance():
