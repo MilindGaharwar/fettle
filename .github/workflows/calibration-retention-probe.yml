@@ -1,0 +1,239 @@
+name: Calibration retention provider probe
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: "Exact candidate/workflow SHA to probe"
+        required: true
+        type: string
+      probe_id:
+        description: "Unique synthetic probe identifier"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  producer:
+    name: retention probe (intentional primary failure)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Validate exact probe identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROBE_ID: ${{ inputs.probe_id }}
+        run: |
+          python - <<'PY'
+          import os, re
+          if os.environ["GITHUB_SHA"] != os.environ["CANDIDATE_SHA"]:
+              raise SystemExit("dispatch SHA differs from candidate_sha")
+          if not re.fullmatch(r"probe-[A-Za-z0-9_-]{1,57}", os.environ["PROBE_ID"]):
+              raise SystemExit("probe_id is malformed")
+          PY
+      - name: Generate bounded synthetic accounting bytes
+        env:
+          PROBE_ID: ${{ inputs.probe_id }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          payload = {
+              "billing_authority": False,
+              "calibration_id": os.environ["PROBE_ID"],
+              "expected_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "expected_run_id": os.environ["GITHUB_RUN_ID"],
+              "kind": "calibration_budget_decision",
+              "padding": "p" * (245 * 1024),
+              "passed": False,
+              "probe_only": True,
+              "schema_version": "1",
+              "source_lineage": [],
+              "stage": "1",
+              "terminal_accounting_status": "indeterminate",
+          }
+          exact = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+          Path("synthetic-accounting.json").write_bytes(exact)
+          print(json.dumps({
+              "kind": "retention_probe_payload", "payload_size": len(exact),
+              "payload_sha256": hashlib.sha256(exact).hexdigest(),
+          }, sort_keys=True))
+          PY
+      - name: Deliberately fail primary artifact publication
+        id: primary-publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: must-not-exist-retention-probe-${{ github.run_id }}
+          path: deliberately-absent-primary-publication
+          if-no-files-found: error
+          retention-days: 1
+      - name: Emit exact diagnostic fallback records
+        id: emit-fallback
+        if: always() && steps.primary-publication.outcome == 'failure'
+        env:
+          PRIMARY_UPLOAD_OUTCOME: ${{ steps.primary-publication.outcome }}
+          PROBE_ID: ${{ inputs.probe_id }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              build_calibration_accounting_log_envelope,
+              calibration_accounting_log_records,
+          )
+          payload = Path("synthetic-accounting.json").read_bytes()
+          envelope = build_calibration_accounting_log_envelope(
+              payload, repository=os.environ["GITHUB_REPOSITORY"],
+              candidate_sha=os.environ["GITHUB_SHA"],
+              workflow_ref=os.environ["GITHUB_WORKFLOW_REF"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+              run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              calibration_id=os.environ["PROBE_ID"], stage="1",
+              primary_upload_outcome=os.environ["PRIMARY_UPLOAD_OUTCOME"],
+          )
+          for record in calibration_accounting_log_records(envelope):
+              print(record)
+          PY
+      - name: Preserve deliberate primary failure
+        if: always()
+        env:
+          PRIMARY_OUTCOME: ${{ steps.primary-publication.outcome }}
+          FALLBACK_OUTCOME: ${{ steps.emit-fallback.outcome }}
+        run: |
+          test "$PRIMARY_OUTCOME" = failure
+          test "$FALLBACK_OUTCOME" = success
+          echo "Expected probe outcome: primary publication failed; diagnostic fallback emitted."
+          exit 2
+
+  reader:
+    name: retention probe (exact-attempt diagnostic readback)
+    if: always()
+    needs: producer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Read and validate exact producer log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROBE_ID: ${{ inputs.probe_id }}
+          PRODUCER_RESULT: ${{ needs.producer.result }}
+        run: |
+          set -u
+          test "$PRODUCER_RESULT" = failure
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            > probe-jobs.json
+          python - <<'PY' > producer-job-id.txt
+          import json, os
+          pages = json.load(open("probe-jobs.json"))
+          expected_name = "retention probe (intentional primary failure)"
+          jobs = [job for page in pages for job in page["jobs"]
+                  if job.get("name") == expected_name
+                  or job.get("name", "").endswith(" / " + expected_name)]
+          if len(jobs) != 1:
+              raise SystemExit("expected one exact producer job")
+          job = jobs[0]
+          step_list = job.get("steps", [])
+          steps = {step.get("name"): step for step in step_list}
+          if len(steps) != len(step_list):
+              raise SystemExit("producer step names are not unique")
+          valid = (
+              str(job.get("run_id")) == os.environ["GITHUB_RUN_ID"]
+              and str(job.get("run_attempt")) == os.environ["GITHUB_RUN_ATTEMPT"]
+              and job.get("head_sha") == os.environ["CANDIDATE_SHA"]
+              and job.get("status") == "completed" and job.get("conclusion") == "failure"
+              and steps.get("Validate exact probe identity", {}).get("conclusion") == "success"
+              and steps.get("Generate bounded synthetic accounting bytes", {}).get("conclusion") == "success"
+              and steps.get("Deliberately fail primary artifact publication", {}).get("conclusion") == "failure"
+              and steps.get("Emit exact diagnostic fallback records", {}).get("conclusion") == "success"
+              and steps.get("Preserve deliberate primary failure", {}).get("conclusion") == "failure"
+          )
+          if not valid or not isinstance(job.get("id"), int):
+              raise SystemExit("producer provenance or outcomes differ")
+          print(job["id"])
+          PY
+          export GH_HTTP_TIMEOUT=30
+          job_id=$(cat producer-job-id.txt)
+          downloaded=false
+          for attempt in 1 2 3; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id/logs" > producer-job.log; then
+              downloaded=true
+              break
+            fi
+            sleep "$attempt"
+          done
+          test "$downloaded" = true
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from fettle.staged_preflight import recover_calibration_accounting_log_envelope
+          expected = {
+              "billing_authority": False,
+              "calibration_id": os.environ["PROBE_ID"],
+              "expected_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "expected_run_id": os.environ["GITHUB_RUN_ID"],
+              "kind": "calibration_budget_decision",
+              "padding": "p" * (245 * 1024),
+              "passed": False,
+              "probe_only": True,
+              "schema_version": "1",
+              "source_lineage": [],
+              "stage": "1",
+              "terminal_accounting_status": "indeterminate",
+          }
+          exact = (json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n").encode()
+          recovered = recover_calibration_accounting_log_envelope(
+              Path("producer-job.log").read_bytes(),
+              repository=os.environ["GITHUB_REPOSITORY"],
+              candidate_sha=os.environ["CANDIDATE_SHA"],
+              workflow_ref=os.environ["GITHUB_WORKFLOW_REF"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+              run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              calibration_id=os.environ["PROBE_ID"], stage="1",
+          )
+          if recovered != exact:
+              raise SystemExit("recovered bytes differ from the frozen synthetic payload")
+          decision = {
+              "authoritative_predecessor": False,
+              "available": True,
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "channel": "job_log",
+              "kind": "calibration_retention_provider_probe",
+              "passed": False,
+              "payload_sha256": hashlib.sha256(recovered).hexdigest(),
+              "payload_size": len(recovered),
+              "probe_id": os.environ["PROBE_ID"],
+              "provider_path_verified": True,
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "schema_version": "1",
+          }
+          Path("probe-readback.json").write_text(json.dumps(decision, sort_keys=True) + "\n")
+          print(json.dumps(decision, sort_keys=True))
+          PY
+      - name: Retain diagnostic probe result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calibration-retention-probe-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.probe_id }}
+          path: probe-readback.json
+          if-no-files-found: error
+          retention-days: 90

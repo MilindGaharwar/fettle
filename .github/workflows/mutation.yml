@@ -12,6 +12,7 @@ on:
         type: choice
         options:
           - binding-probe
+          - retention-probe
           - diagnostic-canary
           - staged-preflight
           - preflight
@@ -62,6 +63,10 @@ on:
         description: "Single shard index for diagnostic-canary mode"
         required: false
         type: string
+      probe_id:
+        description: "Unique synthetic identifier for retention-probe mode"
+        required: false
+        type: string
 
 concurrency:
   group: mutation-authoritative-${{ github.repository }}
@@ -73,7 +78,7 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize')
+    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize')
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
@@ -468,6 +473,16 @@ jobs:
           name: mutation-preflight-diagnostic-${{ github.run_id }}
           path: mutation-preflight-diagnostic.json
           if-no-files-found: error
+
+  retention-provider-probe:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'retention-probe'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/calibration-retention-probe.yml
+    with:
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      probe_id: ${{ github.event.inputs.probe_id }}
 
   preflight-aggregate:
     if: (github.event_name == 'schedule' || github.event.inputs.mode == 'preflight') && always()
@@ -963,7 +978,7 @@ jobs:
           if-no-files-found: error
 
   calibration-launch-gate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize'
     needs: prepare
     name: mutation (calibration launch gate)
     runs-on: ubuntu-latest
@@ -1025,7 +1040,7 @@ jobs:
           retention-days: 90
 
   full-shard:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')
     needs: [prepare, calibration-launch-gate]
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest
@@ -1855,7 +1870,7 @@ jobs:
           fi
 
   aggregate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && always()
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'staged-preflight' && always()
     name: mutation (assemble evidence)
     needs: [prepare, full-shard, calibration-stage-3-batch-7, calibration-accounting]
     runs-on: ubuntu-latest
@@ -2287,6 +2302,7 @@ jobs:
       always() && github.event_name == 'workflow_dispatch'
       && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage != '3')
       && github.event.inputs.mode != 'staged-preflight'
+      && github.event.inputs.mode != 'retention-probe'
     needs: aggregate
     name: mutation evidence
     runs-on: ubuntu-latest

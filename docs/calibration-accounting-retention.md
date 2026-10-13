@@ -83,3 +83,18 @@ separate claims:
 
 Cancellation does not remove the job timeouts. Missing terminal accounting is
 not zero consumption and does not reset current or historical floors.
+
+## Live provider probe
+
+`.github/workflows/calibration-retention-probe.yml` is a dispatch-only,
+synthetic transport probe. Its producer deliberately fails primary artifact
+publication and remains failed after emitting a near-limit, non-sensitive
+payload through the fallback records. Its exact-attempt reader reconstructs and
+compares the bytes through the real GitHub job-log API. The two jobs have
+10-minute timeouts, use existing read permissions, and run no mutation workers.
+
+Even when readback succeeds, the retained probe decision is `passed: false` and
+`authoritative_predecessor: false`. It proves only immediate fidelity and access
+for that provider path and time. It does not prove long-term retention, future
+availability, accounting validity, continuation eligibility, mutation
+qualification, or milestone completion.

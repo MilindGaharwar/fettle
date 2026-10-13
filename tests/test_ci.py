@@ -65,6 +65,16 @@ def _workflow_step(job_name, step_name):
     )
 
 
+def _retention_probe_step_script(job_name, step_name):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    )
+    return next(
+        step["run"] for step in workflow["jobs"][job_name]["steps"]
+        if step.get("name") == step_name
+    )
+
+
 def _calibration_jobs(run_id="700", attempt="1", shards=(8, 27, 28, 37, 48, 50, 51, 53)):
     started = "2026-10-10T01:00:00Z"
     completed = "2026-10-10T01:01:00Z"
@@ -1385,8 +1395,9 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert (
         "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
         " && github.event.inputs.mode != 'preflight'"
-            " && github.event.inputs.mode != 'diagnostic-canary'"
-            " && github.event.inputs.mode != 'staged-preflight'"
+        " && github.event.inputs.mode != 'diagnostic-canary'"
+        " && github.event.inputs.mode != 'retention-probe'"
+        " && github.event.inputs.mode != 'staged-preflight'"
         " && github.event.inputs.mode != 'finalize'"
         " && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')"
         "\n    needs: [prepare, calibration-launch-gate]"
@@ -2287,6 +2298,138 @@ def test_accounting_retention_workflow_keeps_failure_visible_and_tail_bounded():
     assert recovery["timeout-minutes"] == 5
     assert "for attempt in 1 2 3" in recovery["run"]
     assert workflow["permissions"] == {"actions": "read", "contents": "read"}
+
+
+def test_live_retention_probe_is_synthetic_bounded_and_non_authoritative():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    )
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
+    assert set(workflow["jobs"]) == {"producer", "reader"}
+    assert sum(job["timeout-minutes"] for job in workflow["jobs"].values()) == 20
+    assert workflow["jobs"]["reader"]["if"] == "always()"
+    assert workflow["jobs"]["reader"]["needs"] == "producer"
+    text = (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    assert "245 * 1024" in text
+    assert "for attempt in 1 2 3" in text
+    assert '"authoritative_predecessor": False' in text
+    assert '"passed": False' in text
+    assert '"provider_path_verified": True' in text
+    assert "mutation" not in " ".join(workflow["jobs"])
+
+
+def test_live_retention_probe_preserves_primary_failure_after_fallback():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    )
+    producer = workflow["jobs"]["producer"]["steps"]
+    primary = next(step for step in producer if step.get("id") == "primary-publication")
+    emit = next(step for step in producer if step.get("id") == "emit-fallback")
+    visible = next(
+        step for step in producer if step.get("name") == "Preserve deliberate primary failure"
+    )
+    assert "continue-on-error" not in primary
+    assert primary["with"]["if-no-files-found"] == "error"
+    assert primary["with"]["retention-days"] == 1
+    assert emit["if"] == "always() && steps.primary-publication.outcome == 'failure'"
+    assert visible["if"] == "always()"
+    assert "exit 2" in visible["run"]
+
+
+def test_live_retention_probe_is_called_only_by_existing_dispatch_workflow():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    modes = workflow[True]["workflow_dispatch"]["inputs"]["mode"]["options"]
+    call = workflow["jobs"]["retention-provider-probe"]
+    assert "retention-probe" in modes
+    assert call["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "github.event.inputs.mode == 'retention-probe'"
+    )
+    assert call["uses"] == "./.github/workflows/calibration-retention-probe.yml"
+    assert call["permissions"] == {"actions": "read", "contents": "read"}
+    for job_name in ("prepare", "calibration-launch-gate", "full-shard", "aggregate"):
+        assert "retention-probe" in workflow["jobs"][job_name]["if"]
+
+
+def test_live_retention_probe_reader_requires_exact_provider_outcomes():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    )
+    reader = next(
+        step for step in workflow["jobs"]["reader"]["steps"]
+        if step.get("name") == "Read and validate exact producer log"
+    )["run"]
+    for required in (
+        'job.get("head_sha") == os.environ["CANDIDATE_SHA"]',
+        'job.get("conclusion") == "failure"',
+        '"Deliberately fail primary artifact publication"',
+        '"Emit exact diagnostic fallback records"',
+        '"Preserve deliberate primary failure"',
+        "recovered != exact",
+    ):
+        assert required in reader
+
+
+def test_live_retention_probe_actual_producer_scripts_reconstruct_exact_bytes(tmp_path):
+    env = {
+        **os.environ, "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_SHA": "a" * 40,
+        "GITHUB_WORKFLOW_REF": "example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        "GITHUB_WORKFLOW_SHA": "a" * 40, "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "PROBE_ID": "probe-local",
+        "PRIMARY_UPLOAD_OUTCOME": "failure",
+    }
+    generate = _run_actions_bash(
+        _retention_probe_step_script("producer", "Generate bounded synthetic accounting bytes"),
+        cwd=tmp_path, env=env,
+    )
+    emit = _run_actions_bash(
+        _retention_probe_step_script("producer", "Emit exact diagnostic fallback records"),
+        cwd=tmp_path, env=env,
+    )
+
+    assert generate.returncode == 0, generate.stderr
+    assert emit.returncode == 0, emit.stderr
+    exact = (tmp_path / "synthetic-accounting.json").read_bytes()
+    assert 245 * 1024 < len(exact) <= 256 * 1024
+    from fettle.staged_preflight import recover_calibration_accounting_log_envelope
+    recovered = recover_calibration_accounting_log_envelope(
+        emit.stdout.encode(), repository="example/fettle", candidate_sha="a" * 40,
+        workflow_ref=env["GITHUB_WORKFLOW_REF"], workflow_sha="a" * 40,
+        run_id="700", run_attempt="1", calibration_id="probe-local", stage="1",
+    )
+    assert recovered == exact
+    assert len(emit.stdout.splitlines()) <= 32
+    assert max(map(len, emit.stdout.splitlines())) < 13 * 1024
+
+
+def test_live_retention_probe_rejects_missing_or_mismatched_identity(tmp_path):
+    script = _retention_probe_step_script("producer", "Validate exact probe identity")
+    base = {**os.environ, "GITHUB_SHA": "a" * 40, "CANDIDATE_SHA": "a" * 40}
+    missing = _run_actions_bash(script, cwd=tmp_path, env={**base, "PROBE_ID": ""})
+    mismatch = _run_actions_bash(
+        script, cwd=tmp_path,
+        env={**base, "CANDIDATE_SHA": "b" * 40, "PROBE_ID": "probe-local"},
+    )
+    assert missing.returncode != 0
+    assert "probe_id is malformed" in missing.stderr
+    assert mismatch.returncode != 0
+    assert "dispatch SHA differs from candidate_sha" in mismatch.stderr
+
+
+def test_live_retention_probe_contains_no_mutation_execution_command():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
+    )
+    scripts = "\n".join(
+        step.get("run", "") for job in workflow["jobs"].values()
+        for step in job["steps"]
+    )
+    assert "fettle mutation" not in scripts
+    assert "fettle.mutation_test" not in scripts
+    assert "mutmut" not in scripts
 
 
 def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound():
