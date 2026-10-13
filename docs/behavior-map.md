@@ -14,6 +14,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Add an end-of-session verdict | Check with `events={"Stop"}`; bind evidence via `fettle.trace` / `EvidenceArtifact` |
 | Add or change a quality rule | Rule implementation + registration, then exercise it through `fettle check`, `fettle rules`, and `fettle verification` |
 | Change cumulative calibration accounting or sparse recovery admission | Emit and validate the typed `calibration_budget_decision` in `fettle/staged_preflight.py`; bind ordered run/attempt lineage, observer lifecycle, monitor floor, support reservations, and cancellation charge; replay real emitted files through same-stage continuation and forward-stage launch |
+| Preserve terminal calibration accounting when primary artifact publication fails | Retain the primary artifact failure, emit one bounded digest-bound exact-byte envelope to the accounting job log, and recover it only as non-authoritative evidence from authenticated exact-attempt job metadata; see `docs/calibration-accounting-retention.md` |
 | Add a policy control or exception | Extend the config schema and policy merge path; expose decisions through `fettle config`, `fettle policy`, `fettle overrides`, or `fettle suppressions` as appropriate |
 | Change enforcement maturity | Keep the rule advisory until evidence supports `fettle ratchet`; retain the decision in `fettle ledger` |
 

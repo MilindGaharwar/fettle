@@ -29,6 +29,7 @@ SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
 
 def _run_actions_bash(script, *, cwd, env):
+    env = {key: value for key, value in env.items() if value is not None}
     return subprocess.run(
         ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
         cwd=cwd, env=env, capture_output=True, text=True,
@@ -50,6 +51,16 @@ def _workflow_step_script(job_name, step_name):
     )
     return next(
         step["run"] for step in workflow["jobs"][job_name]["steps"]
+        if step.get("name") == step_name
+    )
+
+
+def _workflow_step(job_name, step_name):
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    return next(
+        step for step in workflow["jobs"][job_name]["steps"]
         if step.get("name") == step_name
     )
 
@@ -2126,6 +2137,156 @@ def test_terminal_accounting_and_aggregate_require_observer_package():
     assert 'report["accounting_sha256"]' in source
     assert 'name: mutation-calibration-accounting-${{ github.run_id }}' in source
     assert 'report.get("accounting_sha256")' in source
+
+
+def test_primary_accounting_publication_failure_emits_exact_log_fallback(tmp_path):
+    payload = {
+        "schema_version": "1", "kind": "calibration_budget_decision",
+        "passed": False, "billing_authority": False,
+        "terminal_accounting_status": "indeterminate", "stage": "3",
+        "calibration_id": "cal-test", "expected_run_id": "700",
+        "expected_run_attempt": "1", "observed_runner_minutes_floor": 8,
+        "historical_charged_runner_minutes_floor": 291.99,
+    }
+    exact = json.dumps(payload, indent=2).encode() + b"\n"
+    (tmp_path / "calibration-accounting.json").write_bytes(exact)
+    script = _workflow_step_script(
+        "calibration-accounting", "Preserve exact accounting bytes in the job log",
+    )
+    env = {
+        **os.environ, "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_SHA": "a" * 40,
+        "GITHUB_WORKFLOW_REF": "example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        "GITHUB_WORKFLOW_SHA": "a" * 40, "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "3", "PRIMARY_UPLOAD_OUTCOME": "failure",
+    }
+
+    result = _run_actions_bash(script, cwd=tmp_path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    from fettle.staged_preflight import recover_calibration_accounting_log_envelope
+    recovered = recover_calibration_accounting_log_envelope(
+        result.stdout.encode(), repository="example/fettle", candidate_sha="a" * 40,
+        workflow_ref=env["GITHUB_WORKFLOW_REF"], workflow_sha="a" * 40,
+        run_id="700", run_attempt="1", calibration_id="cal-test", stage="3",
+    )
+    assert recovered == exact
+
+
+def test_accounting_log_recovery_script_preserves_bytes_but_remains_non_authoritative(tmp_path):
+    from fettle.staged_preflight import (
+        build_calibration_accounting_log_envelope,
+        calibration_accounting_log_records,
+    )
+    payload = json.dumps({
+        "schema_version": "1", "kind": "calibration_budget_decision",
+        "passed": True, "billing_authority": False, "stage": "3",
+        "calibration_id": "cal-test", "expected_run_id": "700",
+        "expected_run_attempt": "1", "source_lineage": [],
+    }, indent=2).encode() + b"\n"
+    envelope = build_calibration_accounting_log_envelope(
+        payload, repository="example/fettle", candidate_sha="a" * 40,
+        workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        workflow_sha="a" * 40, run_id="700", run_attempt="1",
+        calibration_id="cal-test", stage="3", primary_upload_outcome="failure",
+    )
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    jobs = [{"total_count": 1, "jobs": [{
+        "id": 77, "run_id": 700, "run_attempt": 1,
+        "head_sha": "a" * 40, "name": "mutation (calibration accounting)",
+        "status": "completed", "conclusion": "failure", "steps": [
+            {"name": "Collect cumulative job accounting", "conclusion": "success"},
+            {"name": "Preserve typed terminal accounting on containment", "conclusion": "skipped"},
+            {"name": "Preserve exact accounting bytes in the job log", "conclusion": "success"},
+            {"name": "Keep primary accounting publication failure visible", "conclusion": "failure"},
+        ],
+    }]}]
+    (provider / "jobs.json").write_text(json.dumps(jobs))
+    (provider / "log.txt").write_text("\n".join(calibration_accounting_log_records(envelope)) + "\n")
+    bin_dir = provider / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f"jobs='{provider / 'jobs.json'}'\n"
+        f"log='{provider / 'log.txt'}'\n"
+        "case \"$*\" in *'/jobs?per_page=100'*) cat \"$jobs\";; *'/logs'*) cat \"$log\";; *) exit 2;; esac\n"
+    )
+    gh.chmod(0o755)
+    script = _workflow_step_script(
+        "aggregate", "Recover failed primary accounting publication from exact job log",
+    )
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_SHA": "a" * 40,
+        "GITHUB_WORKFLOW_REF": "example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        "GITHUB_WORKFLOW_SHA": "a" * 40, "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": "3",
+        "GH_TOKEN": "test",
+    }
+
+    result = _run_actions_bash(script, cwd=tmp_path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "retained-accounting/calibration-accounting.json").read_bytes() == payload
+    readback = json.loads((tmp_path / "accounting-readback.json").read_text())
+    assert readback["available"] is True
+    assert readback["passed"] is False
+    assert readback["authoritative_predecessor"] is False
+
+
+def test_both_accounting_channels_unavailable_is_explicit_nonpass(tmp_path):
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    bin_dir = provider / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nexit 1\n")
+    gh.chmod(0o755)
+    script = _workflow_step_script(
+        "aggregate", "Recover failed primary accounting publication from exact job log",
+    )
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_SHA": "a" * 40,
+        "GITHUB_WORKFLOW_REF": "example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        "GITHUB_WORKFLOW_SHA": "a" * 40, "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": "3",
+        "GH_TOKEN": "test",
+    }
+
+    result = _run_actions_bash(script, cwd=tmp_path, env=env)
+
+    assert result.returncode != 0
+    readback = json.loads((tmp_path / "accounting-readback.json").read_text())
+    assert readback == {
+        "schema_version": "1", "kind": "calibration_accounting_readback",
+        "passed": False, "available": False, "authoritative_predecessor": False,
+        "reason": "exact-attempt accounting job metadata is unavailable",
+    }
+
+
+def test_accounting_retention_workflow_keeps_failure_visible_and_tail_bounded():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    accounting = workflow["jobs"]["calibration-accounting"]
+    aggregate = workflow["jobs"]["aggregate"]
+    retain = _workflow_step("calibration-accounting", "Retain calibration accounting")
+    visible = _workflow_step(
+        "calibration-accounting", "Keep primary accounting publication failure visible",
+    )
+    recovery = _workflow_step(
+        "aggregate", "Recover failed primary accounting publication from exact job log",
+    )
+
+    assert accounting["timeout-minutes"] == 15
+    assert aggregate["timeout-minutes"] == 30
+    assert retain["continue-on-error"] is True
+    assert visible["if"] == "always()"
+    assert recovery["timeout-minutes"] == 5
+    assert "for attempt in 1 2 3" in recovery["run"]
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
 
 
 def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound():

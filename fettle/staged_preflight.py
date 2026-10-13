@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -118,6 +119,10 @@ CALIBRATION_SUPPORT_BOUNDS = {
     "mutation (assemble evidence)": 30,
     "mutation evidence": 10,
 }
+CALIBRATION_ACCOUNTING_LOG_MARKER = "FETTLE_CALIBRATION_ACCOUNTING_LOG_V1 "
+CALIBRATION_ACCOUNTING_LOG_PAYLOAD_LIMIT = 256 * 1024
+CALIBRATION_ACCOUNTING_LOG_CHUNK_SIZE = 12 * 1024
+CALIBRATION_ACCOUNTING_LOG_CHUNK_LIMIT = 32
 
 _CALIBRATION_JOB = re.compile(
     r"^(?:[^/]+ / )?mutation \(full shard (\d+), advisory\)$"
@@ -125,6 +130,216 @@ _CALIBRATION_JOB = re.compile(
 _CALIBRATION_ADMISSION_JOB = re.compile(
     r"^(?:[^/]+ / )?mutation \(validate calibration batch (\d+)\)$"
 )
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _valid_accounting_lineage(lineage: object) -> bool:
+    return (
+        isinstance(lineage, list)
+        and len(lineage) <= 16
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"run_id", "run_attempt"}
+            and re.fullmatch(r"[1-9][0-9]*", str(item["run_id"]))
+            and re.fullmatch(r"[1-9][0-9]*", str(item["run_attempt"]))
+            for item in lineage
+        )
+    )
+
+
+def build_calibration_accounting_log_envelope(
+    payload: bytes,
+    *,
+    repository: str,
+    candidate_sha: str,
+    workflow_ref: str,
+    workflow_sha: str,
+    run_id: str,
+    run_attempt: str,
+    calibration_id: str,
+    stage: str,
+    primary_upload_outcome: str,
+) -> str:
+    """Wrap exact terminal-accounting bytes for bounded job-log retention."""
+    if len(payload) > CALIBRATION_ACCOUNTING_LOG_PAYLOAD_LIMIT:
+        raise ValueError("terminal accounting exceeds the 256 KiB log fallback limit")
+    try:
+        accounting = json.loads(payload)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("terminal accounting payload is malformed") from exc
+    lineage = accounting.get("source_lineage", [])
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
+        or not workflow_ref.startswith(repository + "/.github/workflows/")
+        or not re.fullmatch(r"[0-9a-f]{40}", workflow_sha)
+        or not re.fullmatch(r"[1-9][0-9]*", run_id)
+        or not re.fullmatch(r"[1-9][0-9]*", run_attempt)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
+        or stage not in {"1", "2", "3"}
+        or primary_upload_outcome != "failure"
+        or accounting.get("schema_version") != "1"
+        or accounting.get("kind") != "calibration_budget_decision"
+        or accounting.get("calibration_id") != calibration_id
+        or accounting.get("stage") != stage
+        or accounting.get("expected_run_id") != run_id
+        or accounting.get("expected_run_attempt") != run_attempt
+        or not _valid_accounting_lineage(lineage)
+    ):
+        raise ValueError("terminal accounting log identity is incomplete or incompatible")
+    envelope = {
+        "schema_version": "1",
+        "kind": "calibration_accounting_log_envelope",
+        "repository": repository,
+        "candidate_sha": candidate_sha,
+        "workflow_ref": workflow_ref,
+        "workflow_sha": workflow_sha,
+        "run_id": run_id,
+        "run_attempt": run_attempt,
+        "calibration_id": calibration_id,
+        "stage": stage,
+        "accounting_schema_version": accounting["schema_version"],
+        "accounting_kind": accounting["kind"],
+        "source_lineage": lineage,
+        "primary_upload_outcome": primary_upload_outcome,
+        "payload_size": len(payload),
+        "payload_sha256": hashlib.sha256(payload).hexdigest(),
+        "payload_base64": base64.b64encode(payload).decode("ascii"),
+    }
+    return json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+
+
+def recover_calibration_accounting_log_envelope(
+    log_bytes: bytes,
+    *,
+    repository: str,
+    candidate_sha: str,
+    workflow_ref: str,
+    workflow_sha: str,
+    run_id: str,
+    run_attempt: str,
+    calibration_id: str,
+    stage: str,
+) -> bytes:
+    """Recover one exact, applicable accounting payload from a completed job log."""
+    if len(log_bytes) > 4 * 1024 * 1024:
+        raise ValueError("calibration accounting job log is oversized")
+    try:
+        lines = log_bytes.decode("utf-8").splitlines()
+    except UnicodeError as exc:
+        raise ValueError("calibration accounting job log is malformed") from exc
+    records = [
+        line.split(CALIBRATION_ACCOUNTING_LOG_MARKER, 1)[1]
+        for line in lines if CALIBRATION_ACCOUNTING_LOG_MARKER in line
+    ]
+    if not records:
+        raise ValueError("calibration accounting log fallback is unavailable")
+    if len(records) > CALIBRATION_ACCOUNTING_LOG_CHUNK_LIMIT * 3:
+        raise ValueError("calibration accounting log contains excessive records")
+    try:
+        chunks = [json.loads(item, object_pairs_hook=_reject_duplicate_json_keys) for item in records]
+        totals = {item.get("total") for item in chunks}
+        digests = {item.get("envelope_sha256") for item in chunks}
+        if len(totals) != 1 or len(digests) != 1:
+            raise ValueError("chunk metadata conflicts")
+        total = totals.pop()
+        digest = digests.pop()
+        if (
+            not isinstance(total, int) or isinstance(total, bool)
+            or total < 1 or total > CALIBRATION_ACCOUNTING_LOG_CHUNK_LIMIT
+            or not re.fullmatch(r"[0-9a-f]{64}", str(digest))
+        ):
+            raise ValueError("chunk metadata is malformed")
+        by_index: dict[int, str] = {}
+        for item in chunks:
+            if set(item) != {"schema_version", "kind", "index", "total", "envelope_sha256", "chunk"}:
+                raise ValueError("chunk shape is malformed")
+            index = item["index"]
+            chunk = item["chunk"]
+            if (
+                item["schema_version"] != "1"
+                or item["kind"] != "calibration_accounting_log_chunk"
+                or not isinstance(index, int) or isinstance(index, bool)
+                or index < 0 or index >= total
+                or not isinstance(chunk, str) or len(chunk) > CALIBRATION_ACCOUNTING_LOG_CHUNK_SIZE
+            ):
+                raise ValueError("chunk is malformed")
+            if index in by_index and by_index[index] != chunk:
+                raise ValueError("duplicate chunk conflicts")
+            by_index[index] = chunk
+        if set(by_index) != set(range(total)):
+            raise ValueError("chunk sequence is incomplete")
+        encoded = "".join(by_index[index] for index in range(total))
+        if hashlib.sha256(encoded.encode("ascii")).hexdigest() != digest:
+            raise ValueError("envelope digest differs")
+        envelope = json.loads(encoded, object_pairs_hook=_reject_duplicate_json_keys)
+        payload = base64.b64decode(envelope["payload_base64"], validate=True)
+    except (KeyError, TypeError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("calibration accounting log envelope is malformed") from exc
+    expected = {
+        "schema_version": "1", "kind": "calibration_accounting_log_envelope",
+        "repository": repository, "candidate_sha": candidate_sha,
+        "workflow_ref": workflow_ref, "workflow_sha": workflow_sha,
+        "run_id": run_id, "run_attempt": run_attempt,
+        "calibration_id": calibration_id, "stage": stage,
+        "accounting_schema_version": "1", "accounting_kind": "calibration_budget_decision",
+        "primary_upload_outcome": "failure",
+    }
+    if any(envelope.get(key) != value for key, value in expected.items()):
+        raise ValueError("calibration accounting log provenance differs")
+    if (
+        len(payload) > CALIBRATION_ACCOUNTING_LOG_PAYLOAD_LIMIT
+        or envelope.get("payload_size") != len(payload)
+        or envelope.get("payload_sha256") != hashlib.sha256(payload).hexdigest()
+    ):
+        raise ValueError("calibration accounting log payload digest or size differs")
+    try:
+        accounting = json.loads(payload, object_pairs_hook=_reject_duplicate_json_keys)
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("recovered terminal accounting is malformed") from exc
+    if (
+        accounting.get("schema_version") != "1"
+        or accounting.get("kind") != "calibration_budget_decision"
+        or accounting.get("calibration_id") != calibration_id
+        or accounting.get("stage") != stage
+        or accounting.get("expected_run_id") != run_id
+        or accounting.get("expected_run_attempt") != run_attempt
+        or not _valid_accounting_lineage(accounting.get("source_lineage", []))
+        or envelope.get("source_lineage") != accounting.get("source_lineage", [])
+    ):
+        raise ValueError("recovered terminal accounting applicability differs")
+    return payload
+
+
+def calibration_accounting_log_records(envelope: str) -> list[str]:
+    """Split one envelope into bounded, ordered, digest-bound log records."""
+    try:
+        envelope.encode("ascii")
+    except UnicodeError as exc:
+        raise ValueError("calibration accounting log envelope is not ASCII") from exc
+    chunks = [
+        envelope[offset:offset + CALIBRATION_ACCOUNTING_LOG_CHUNK_SIZE]
+        for offset in range(0, len(envelope), CALIBRATION_ACCOUNTING_LOG_CHUNK_SIZE)
+    ]
+    if not chunks or len(chunks) > CALIBRATION_ACCOUNTING_LOG_CHUNK_LIMIT:
+        raise ValueError("calibration accounting log envelope exceeds the chunk limit")
+    digest = hashlib.sha256(envelope.encode("ascii")).hexdigest()
+    return [
+        CALIBRATION_ACCOUNTING_LOG_MARKER + json.dumps({
+            "schema_version": "1", "kind": "calibration_accounting_log_chunk",
+            "index": index, "total": len(chunks), "envelope_sha256": digest,
+            "chunk": chunk,
+        }, sort_keys=True, separators=(",", ":"))
+        for index, chunk in enumerate(chunks)
+    ]
 
 
 def calibration_observer_contract(

@@ -1801,7 +1801,9 @@ jobs:
           output.write_text(json.dumps(result, indent=2) + "\n")
           PY
       - name: Retain calibration accounting
+        id: retain-accounting
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-calibration-accounting-${{ github.run_id }}
@@ -1811,6 +1813,46 @@ jobs:
             terminal-observer
           retention-days: 90
           if-no-files-found: error
+      - name: Preserve exact accounting bytes in the job log
+        id: retain-accounting-log
+        if: always() && steps.retain-accounting.outcome != 'success'
+        env:
+          PRIMARY_UPLOAD_OUTCOME: ${{ steps.retain-accounting.outcome }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              build_calibration_accounting_log_envelope,
+              calibration_accounting_log_records,
+          )
+          payload = Path("calibration-accounting.json").read_bytes()
+          envelope = build_calibration_accounting_log_envelope(
+              payload, repository=os.environ["GITHUB_REPOSITORY"],
+              candidate_sha=os.environ["GITHUB_SHA"],
+              workflow_ref=os.environ["GITHUB_WORKFLOW_REF"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+              run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              calibration_id=os.environ["CALIBRATION_ID"],
+              stage=os.environ["CALIBRATION_STAGE"],
+              primary_upload_outcome=os.environ["PRIMARY_UPLOAD_OUTCOME"],
+          )
+          for record in calibration_accounting_log_records(envelope):
+              print(record)
+          PY
+      - name: Keep primary accounting publication failure visible
+        if: always()
+        env:
+          PRIMARY_UPLOAD_OUTCOME: ${{ steps.retain-accounting.outcome }}
+          LOG_FALLBACK_OUTCOME: ${{ steps.retain-accounting-log.outcome }}
+        run: |
+          if [[ "$PRIMARY_UPLOAD_OUTCOME" != success ]]; then
+            printf 'primary accounting publication failed; log fallback=%s\n' "$LOG_FALLBACK_OUTCOME"
+            exit 2
+          fi
 
   aggregate:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'staged-preflight' && always()
@@ -1832,16 +1874,128 @@ jobs:
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
           uv run --no-sync python -c 'import platform,sys; sys.exit(0 if platform.python_implementation()=="CPython" and platform.python_version()=="3.12.13" else 2)'
+      - name: Download primary calibration accounting
+        id: download-accounting
+        if: github.event.inputs.mode == 'calibration'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-accounting-${{ github.run_id }}
+          path: retained-accounting
+      - name: Recover failed primary accounting publication from exact job log
+        if: github.event.inputs.mode == 'calibration' && steps.download-accounting.outcome != 'success'
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+        run: |
+          set -u
+          status=accounting-readback.json
+          unavailable() {
+            python - "$1" <<'PY'
+          import json, sys
+          from pathlib import Path
+          Path("accounting-readback.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "calibration_accounting_readback",
+              "passed": False, "available": False, "authoritative_predecessor": False,
+              "reason": sys.argv[1],
+          }, sort_keys=True) + "\n")
+          PY
+            cat "$status"
+            exit 2
+          }
+          if ! gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            > accounting-attempt-jobs.json; then
+            unavailable "exact-attempt accounting job metadata is unavailable"
+          fi
+          if ! python - <<'PY' > accounting-job-id.txt
+          import json, os, sys
+          pages = json.load(open("accounting-attempt-jobs.json"))
+          jobs = [job for page in pages for job in page["jobs"]
+                  if job.get("name") == "mutation (calibration accounting)"]
+          if len(jobs) != 1:
+              raise SystemExit(2)
+          job = jobs[0]
+          step_list = job.get("steps", [])
+          steps = {step.get("name"): step for step in step_list}
+          if len(steps) != len(step_list):
+              raise SystemExit(2)
+          generated = any(
+              steps.get(name, {}).get("conclusion") == "success"
+              for name in (
+                  "Collect cumulative job accounting",
+                  "Preserve typed terminal accounting on containment",
+              )
+          )
+          valid = (
+              str(job.get("run_id")) == os.environ["GITHUB_RUN_ID"]
+              and str(job.get("run_attempt")) == os.environ["GITHUB_RUN_ATTEMPT"]
+              and job.get("head_sha") == os.environ["GITHUB_SHA"]
+              and job.get("status") == "completed" and job.get("conclusion") == "failure"
+              and generated
+              and steps.get("Preserve exact accounting bytes in the job log", {}).get("conclusion") == "success"
+              and steps.get("Keep primary accounting publication failure visible", {}).get("conclusion") == "failure"
+          )
+          if not valid or not isinstance(job.get("id"), int):
+              raise SystemExit(2)
+          print(job["id"])
+          PY
+          then
+            unavailable "exact accounting job provenance or step outcomes are incompatible"
+          fi
+          job_id=$(cat accounting-job-id.txt)
+          downloaded=false
+          export GH_HTTP_TIMEOUT=30
+          for attempt in 1 2 3; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id/logs" > accounting-job.log; then
+              downloaded=true
+              break
+            fi
+            sleep "$attempt"
+          done
+          [[ "$downloaded" == true ]] || unavailable "accounting job log is unavailable after bounded retries"
+          if ! python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.staged_preflight import recover_calibration_accounting_log_envelope
+          payload = recover_calibration_accounting_log_envelope(
+              Path("accounting-job.log").read_bytes(),
+              repository=os.environ["GITHUB_REPOSITORY"],
+              candidate_sha=os.environ["GITHUB_SHA"],
+              workflow_ref=os.environ["GITHUB_WORKFLOW_REF"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+              run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              calibration_id=os.environ["CALIBRATION_ID"],
+              stage=os.environ["CALIBRATION_STAGE"],
+          )
+          retained = Path("retained-accounting")
+          retained.mkdir()
+          retained.joinpath("calibration-accounting.json").write_bytes(payload)
+          Path("accounting-readback.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "calibration_accounting_readback",
+              "passed": False, "available": True, "channel": "job_log",
+              "authoritative_predecessor": False,
+              "payload_sha256": __import__("hashlib").sha256(payload).hexdigest(),
+          }, sort_keys=True) + "\n")
+          PY
+          then
+            unavailable "accounting job log record is malformed, conflicting, or inapplicable"
+          fi
+          cat "$status"
+      - name: Record primary accounting readback
+        if: github.event.inputs.mode == 'calibration' && steps.download-accounting.outcome == 'success'
+        run: >-
+          printf '%s\n' '{"schema_version":"1","kind":"calibration_accounting_readback","passed":true,"available":true,"channel":"artifact","authoritative_predecessor":true}'
+          > accounting-readback.json
       - name: Require successful bounded accounting before publication
         if: github.event.inputs.mode == 'calibration'
         env:
           ACCOUNTING_RESULT: ${{ needs.calibration-accounting.result }}
-        run: test "$ACCOUNTING_RESULT" = success
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: github.event.inputs.mode == 'calibration'
-        with:
-          name: mutation-calibration-accounting-${{ github.run_id }}
-          path: retained-accounting
+          PRIMARY_READBACK: ${{ steps.download-accounting.outcome }}
+        run: test "$ACCOUNTING_RESULT" = success && test "$PRIMARY_READBACK" = success
       - name: Bind authoritative check to exact candidate
         if: github.event.inputs.mode != 'finalize'
         env:

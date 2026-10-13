@@ -58,8 +58,174 @@ from scripts.staged_preflight import (
     validate_continuation_batch,
     validate_source_handoff,
 )
+from fettle.staged_preflight import (
+    build_calibration_accounting_log_envelope,
+    calibration_accounting_log_records,
+    recover_calibration_accounting_log_envelope,
+)
 
 INCIDENT_ROOT = Path(__file__).parent / "fixtures/calibration-terminal-incident"
+
+
+def _log_envelope_payload():
+    return json.dumps({
+        "schema_version": "1", "kind": "calibration_budget_decision",
+        "passed": False, "billing_authority": False, "stage": "3",
+        "calibration_id": "cal-test", "expected_run_id": "700",
+        "expected_run_attempt": "1",
+        "source_lineage": [{"run_id": "600", "run_attempt": "1"}],
+        "terminal_accounting_status": "indeterminate",
+    }, indent=2).encode()
+
+
+def _log_envelope(**overrides):
+    values = {
+        "repository": "example/fettle", "candidate_sha": "a" * 40,
+        "workflow_ref": "example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        "workflow_sha": "a" * 40, "run_id": "700", "run_attempt": "1",
+        "calibration_id": "cal-test", "stage": "3",
+        "primary_upload_outcome": "failure",
+    }
+    values.update(overrides)
+    return build_calibration_accounting_log_envelope(_log_envelope_payload(), **values)
+
+
+def _recover_log(text):
+    return recover_calibration_accounting_log_envelope(
+        text.encode(), repository="example/fettle", candidate_sha="a" * 40,
+        workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        workflow_sha="a" * 40, run_id="700", run_attempt="1",
+        calibration_id="cal-test", stage="3",
+    )
+
+
+def _log_records(envelope):
+    return "\n".join(calibration_accounting_log_records(envelope)) + "\n"
+
+
+def test_accounting_log_envelope_recovers_exact_bytes_and_identical_retry():
+    envelope = _log_envelope()
+    records = _log_records(envelope)
+
+    recovered = _recover_log(records + records)
+
+    assert recovered == _log_envelope_payload()
+
+
+@pytest.mark.parametrize("mutation", ["truncate", "alter", "foreign", "missing"])
+def test_accounting_log_envelope_rejects_unavailable_or_inapplicable_records(mutation):
+    envelope = _log_envelope()
+    records = calibration_accounting_log_records(envelope)
+    if mutation == "truncate":
+        text = "\n".join(records[:-1]) + "\n"
+    elif mutation == "alter":
+        record = json.loads(records[0].split(" ", 1)[1])
+        record["chunk"] = "x" + record["chunk"][1:]
+        text = "FETTLE_CALIBRATION_ACCOUNTING_LOG_V1 " + json.dumps(record) + "\n"
+        text += "\n".join(records[1:]) + "\n"
+    elif mutation == "foreign":
+        record = json.loads(envelope)
+        record["repository"] = "other/fettle"
+        text = _log_records(json.dumps(record, sort_keys=True, separators=(",", ":")))
+    else:
+        text = "ordinary log output\n"
+
+    with pytest.raises(ValueError, match="unavailable|malformed|differs|digest"):
+        _recover_log(text)
+
+
+def test_accounting_log_envelope_rejects_conflicting_duplicates():
+    records = calibration_accounting_log_records(_log_envelope())
+    conflict = json.loads(records[0].split(" ", 1)[1])
+    conflict["chunk"] = "x" + conflict["chunk"][1:]
+    text = "\n".join(records + [
+        "FETTLE_CALIBRATION_ACCOUNTING_LOG_V1 " + json.dumps(conflict),
+    ])
+
+    with pytest.raises(ValueError, match="conflicting|malformed"):
+        _recover_log(text)
+
+
+def test_accounting_log_records_bound_each_line_for_maximum_payload():
+    payload = json.loads(_log_envelope_payload())
+    payload["padding"] = "x" * (250 * 1024)
+    envelope = build_calibration_accounting_log_envelope(
+        json.dumps(payload).encode(), repository="example/fettle",
+        candidate_sha="a" * 40,
+        workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+        workflow_sha="a" * 40, run_id="700", run_attempt="1",
+        calibration_id="cal-test", stage="3", primary_upload_outcome="failure",
+    )
+
+    records = calibration_accounting_log_records(envelope)
+
+    assert len(records) <= 32
+    assert max(map(len, records)) < 13 * 1024
+    assert _recover_log("\n".join(records) + "\n") == json.dumps(payload).encode()
+
+
+def test_accounting_log_envelope_rejects_oversized_payload():
+    with pytest.raises(ValueError, match="256 KiB"):
+        build_calibration_accounting_log_envelope(
+            b"x" * (256 * 1024 + 1), repository="example/fettle",
+            candidate_sha="a" * 40,
+            workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+            workflow_sha="a" * 40, run_id="700", run_attempt="1",
+            calibration_id="cal-test", stage="3", primary_upload_outcome="failure",
+        )
+
+
+@pytest.mark.parametrize("lineage", [
+    [{"run_id": "1"}],
+    [{"run_id": "1", "run_attempt": "1", "extra": "x"}],
+    [{"run_id": "1", "run_attempt": "1"}] * 17,
+])
+def test_accounting_log_envelope_rejects_malformed_or_unbounded_lineage(lineage):
+    payload = json.loads(_log_envelope_payload())
+    payload["source_lineage"] = lineage
+
+    with pytest.raises(ValueError, match="identity"):
+        build_calibration_accounting_log_envelope(
+            json.dumps(payload).encode(), repository="example/fettle",
+            candidate_sha="a" * 40,
+            workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+            workflow_sha="a" * 40, run_id="700", run_attempt="1",
+            calibration_id="cal-test", stage="3", primary_upload_outcome="failure",
+        )
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("expected_run_id", None),
+    ("expected_run_id", "701"),
+    ("expected_run_attempt", None),
+    ("expected_run_attempt", "2"),
+])
+def test_accounting_log_envelope_requires_explicit_exact_attempt_identity(field, value):
+    payload = json.loads(_log_envelope_payload())
+    if value is None:
+        payload.pop(field)
+    else:
+        payload[field] = value
+
+    with pytest.raises(ValueError, match="identity"):
+        build_calibration_accounting_log_envelope(
+            json.dumps(payload).encode(), repository="example/fettle",
+            candidate_sha="a" * 40,
+            workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+            workflow_sha="a" * 40, run_id="700", run_attempt="1",
+            calibration_id="cal-test", stage="3", primary_upload_outcome="failure",
+        )
+
+
+def test_accounting_log_recovery_rejects_whole_log_over_four_mibibytes():
+    with pytest.raises(ValueError, match="oversized"):
+        recover_calibration_accounting_log_envelope(
+            b"x" * (4 * 1024 * 1024 + 1), repository="example/fettle",
+            candidate_sha="a" * 40,
+            workflow_ref="example/fettle/.github/workflows/mutation.yml@refs/heads/audit",
+            workflow_sha="a" * 40, run_id="700", run_attempt="1",
+            calibration_id="cal-test", stage="3",
+        )
 
 
 def test_stage_2_observer_contract_covers_two_worker_waves_and_shutdown():
