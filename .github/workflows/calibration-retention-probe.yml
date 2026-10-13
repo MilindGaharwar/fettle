@@ -173,7 +173,8 @@ jobs:
           job_id=$(cat producer-job-id.txt)
           downloaded=false
           for attempt in 1 2 3; do
-            if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id/logs" > producer-job.log; then
+            if gh api --allow-escape-sequences \
+              "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id/logs" > producer-job.log; then
               downloaded=true
               break
             fi

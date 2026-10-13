@@ -2312,6 +2312,12 @@ def test_live_retention_probe_is_synthetic_bounded_and_non_authoritative():
     text = (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
     assert "245 * 1024" in text
     assert "for attempt in 1 2 3" in text
+    reader = next(
+        step["run"] for step in workflow["jobs"]["reader"]["steps"]
+        if step.get("name") == "Read and validate exact producer log"
+    )
+    assert "gh api --allow-escape-sequences" in reader
+    assert '"repos/$GITHUB_REPOSITORY/actions/jobs/$job_id/logs"' in reader
     assert '"authoritative_predecessor": False' in text
     assert '"passed": False' in text
     assert '"provider_path_verified": True' in text
