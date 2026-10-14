@@ -37,6 +37,7 @@ from scripts.staged_preflight import (
     load_api_jobs_pages,
     load_api_workflow_run_pages,
     validate_calibration_observer_readiness,
+    validate_readback_probe_admission,
     calibration_stage_3_batches,
     account_runner_minutes,
     combine_accounting,
@@ -626,6 +627,10 @@ def test_observer_readiness_probe_profile_is_explicit_and_exact():
     )
 
     assert record["probe_only"] is True
+    assert record["billing_authority"] is False
+    assert record["passed"] is False
+    assert record["authoritative_predecessor"] is False
+    assert record["qualification_eligible"] is False
     assert validate_calibration_observer_readiness(
         record, repository="example/fettle", run_id="700", run_attempt="2",
         candidate_sha="a" * 40, workflow_sha="a" * 40,
@@ -659,6 +664,71 @@ def test_observer_readiness_rejects_unknown_or_contradictory_fields(
     with pytest.raises(ValueError, match="schema differs"):
         validate_calibration_observer_readiness(
             record, **expected, observed_at="2026-10-14T10:01:00Z",
+        )
+
+
+def test_readback_probe_admission_requires_exact_non_authoritative_schema():
+    record = {
+        "schema_version": "1", "kind": "calibration_readback_probe_admission",
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "1",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "probe-readback", "stage": "3",
+        "artifact_name": "mutation-readback-probe-ready-700-1",
+        "monitor_job_id": 91, "observed_at": "2026-10-14T10:00:00Z",
+        "provider_error_class": "none", "artifact_download_attempt": 1,
+        "provider_attempts": [{
+            "attempt": 1, "attempted_at": "2026-10-14T10:00:00Z", "outcome": "success",
+        }],
+        "passed": False, "billing_authority": False, "probe_only": True,
+        "authoritative_predecessor": False, "qualification_eligible": False,
+        "provider_validation_passed": True,
+    }
+    arguments = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "1",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "probe_id": "probe-readback", "scenario": "success",
+        "artifact_name": "mutation-readback-probe-ready-700-1", "monitor_job_id": 91,
+    }
+
+    assert validate_readback_probe_admission(record, **arguments) == record
+    for malformed in (
+        {**record, "passed": True},
+        {**record, "monitor_job_id": 91.0},
+        {**record, "unknown": "field"},
+        {**record, "provider_attempts": []},
+    ):
+        with pytest.raises(ValueError):
+            validate_readback_probe_admission(malformed, **arguments)
+
+
+def test_readback_failed_probe_admission_requires_exact_containment():
+    record = {
+        "schema_version": "1", "kind": "calibration_readback_probe_admission",
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "1",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "probe-readback", "stage": "3",
+        "artifact_name": "mutation-readback-probe-ready-700-1",
+        "monitor_job_id": 91, "observed_at": "2026-10-14T10:00:00Z",
+        "provider_error_class": "none", "artifact_download_attempt": 1,
+        "provider_attempts": [{
+            "attempt": 1, "attempted_at": "2026-10-14T10:00:00Z", "outcome": "success",
+        }],
+        "passed": False, "billing_authority": False, "probe_only": True,
+        "authoritative_predecessor": False, "qualification_eligible": False,
+        "provider_validation_passed": True,
+        "failure_code": "forced_calibration_identity_mismatch", "failure_class": "ValueError",
+    }
+    arguments = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "1",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "probe_id": "probe-readback", "scenario": "failed-initial-admission",
+        "artifact_name": "mutation-readback-probe-ready-700-1", "monitor_job_id": 91,
+    }
+
+    assert validate_readback_probe_admission(record, **arguments) == record
+    with pytest.raises(ValueError, match="expected containment"):
+        validate_readback_probe_admission(
+            {**record, "failure_code": "other"}, **arguments,
         )
 
 

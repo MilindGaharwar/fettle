@@ -1396,9 +1396,10 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
     assert (
         "full-shard:\n    if: github.event_name == 'workflow_dispatch'"
         " && github.event.inputs.mode != 'preflight'"
-        " && github.event.inputs.mode != 'diagnostic-canary'"
-        " && github.event.inputs.mode != 'retention-probe'"
-        " && github.event.inputs.mode != 'staged-preflight'"
+            " && github.event.inputs.mode != 'diagnostic-canary'"
+            " && github.event.inputs.mode != 'retention-probe'"
+            " && github.event.inputs.mode != 'readback-probe'"
+            " && github.event.inputs.mode != 'staged-preflight'"
         " && github.event.inputs.mode != 'finalize'"
         " && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')"
         "\n    needs: [prepare, calibration-launch-gate]"
@@ -2110,7 +2111,11 @@ def test_initial_observer_admission_uses_current_run_action_and_retains_visible_
 
     assert len(downloads) == 3
     assert all(step["uses"] == "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" for step in downloads)
-    assert all(step["with"]["name"] == "mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}" for step in downloads)
+    assert all(
+        "mutation-readback-probe-ready-{0}-{1}" in step["with"]["name"]
+        and "mutation-calibration-observer-ready-{0}-{1}" in step["with"]["name"]
+        for step in downloads
+    )
     assert downloads[1]["if"] == "always() && steps.readiness-download-1.outcome != 'success'"
     assert "steps.readiness-download-2.outcome != 'success'" in downloads[2]["if"]
     assert retain["if"] == "always()"
@@ -2613,64 +2618,260 @@ def test_live_retention_probe_contains_no_mutation_execution_command():
     assert "mutmut" not in scripts
 
 
-def test_readback_probe_is_synthetic_bounded_and_uses_production_readiness_contract():
-    workflow = yaml.safe_load(
-        (Path(PLUGIN_DIR) / ".github/workflows/calibration-readback-probe.yml").read_text()
+def test_readback_probe_reuses_registered_production_path_and_is_zero_worker():
+    workflow_path = Path(PLUGIN_DIR) / ".github/workflows/mutation.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    jobs = workflow["jobs"]
+    modes = workflow[True]["workflow_dispatch"]["inputs"]["mode"]["options"]
+
+    assert "readback-probe" in modes
+    assert not (Path(PLUGIN_DIR) / ".github/workflows/calibration-readback-probe.yml").exists()
+    assert "readback-probe" in jobs["calibration-stage-3-observer-readiness"]["if"]
+    assert "readback-probe" in jobs["calibration-stage-3-observer-ready"]["if"]
+    assert jobs["calibration-stage-3-observer-ready"]["needs"] == [
+        "prepare", "calibration-launch-gate", "calibration-stage-3-observer-readiness",
+    ]
+    finalizer = jobs["readback-probe-finalizer"]
+    assert finalizer["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "github.event.inputs.mode == 'readback-probe'"
     )
-    scripts = "\n".join(
-        step.get("run", "") for job in workflow["jobs"].values()
-        for step in job["steps"]
+    assert finalizer["timeout-minutes"] == 10
+    assert finalizer["permissions"] == {"actions": "read", "contents": "read"}
+    finalizer_source = "\n".join(step.get("run", "") for step in finalizer["steps"])
+    assert "mutation_workers_started\": 0" in finalizer_source
+    assert '"passed": False' in finalizer_source
+    assert '"billing_authority": False' in finalizer_source
+    assert '"authoritative_predecessor": False' in finalizer_source
+    assert '"qualification_eligible": False' in finalizer_source
+    assert "probe_id is reused or its provider identity is indeterminate" in finalizer_source
+    assert "load_api_jobs_pages" in finalizer_source
+    assert "load_api_workflow_run_pages" in finalizer_source
+    assert "provider_error_class=access_denied" in finalizer_source
+    assert "provider_error_class=transient_provider_error" in finalizer_source
+    assert "provider_error_class=provider_resource_unavailable" in finalizer_source
+    assert finalizer_source.count("rm -f provider-error.tmp") >= 2
+    observe_source = _workflow_step_script(
+        "readback-probe-finalizer", "Validate probe identity and zero-worker finalization",
+    )
+    assert "readback-probe-result.json" not in observe_source
+    finalize_source = _workflow_step_script(
+        "readback-probe-finalizer", "Validate retained probe admission and finalize",
+    )
+    assert "retained-probe-admission/initial-admission.json" in finalize_source
+    assert "validate_readback_probe_admission" in finalize_source
+    assert "probe admission contains duplicate keys" in finalize_source
+    assert "fettle mutation" not in finalizer_source
+    assert "fettle.mutation_test" not in finalizer_source
+    assert "mutmut" not in finalizer_source
+
+    worker_jobs = [
+        "prepare", "calibration-launch-gate", "full-shard", "calibration-monitor",
+        "calibration-accounting", "aggregate", "evidence-readback",
+        *[f"calibration-stage-3-batch-{number}" for number in range(1, 8)],
+        *[f"calibration-stage-3-admit-{number}" for number in range(2, 8)],
+    ]
+    for job_name in worker_jobs:
+        assert "readback-probe" not in jobs[job_name]["if"] or "!= 'readback-probe'" in jobs[job_name]["if"]
+
+
+def test_readback_probe_and_normal_calibration_conditions_are_disjoint():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+
+    for number in range(1, 8):
+        condition = jobs[f"calibration-stage-3-batch-{number}"]["if"]
+        assert "mode == 'calibration'" in condition
+        assert "calibration_stage == '3'" in condition
+        assert "readback-probe" not in condition
+    for number in range(2, 8):
+        condition = jobs[f"calibration-stage-3-admit-{number}"]["if"]
+        assert "mode == 'calibration'" in condition
+        assert "readback-probe" not in condition
+    assert jobs["calibration-monitor"]["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "github.event.inputs.mode == 'calibration'"
+    )
+    assert "readback-probe" not in jobs["calibration-accounting"]["if"]
+    assert "!= 'readback-probe'" in jobs["aggregate"]["if"]
+    assert "!= 'readback-probe'" in jobs["evidence-readback"]["if"]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "admission_conclusion", "contained"),
+    [("success", "success", False), ("failed-initial-admission", "failure", True)],
+)
+def test_actual_readback_probe_finalizer_is_non_authoritative_and_zero_worker(
+    tmp_path, scenario, admission_conclusion, contained,
+):
+    observe_script = _workflow_step_script(
+        "readback-probe-finalizer", "Validate probe identity and zero-worker finalization",
+    )
+    producer_script = _workflow_step_script(
+        "calibration-stage-3-observer-readiness", "Establish observer readiness",
+    )
+    consumer_script = _workflow_step_script(
+        "calibration-stage-3-observer-ready", "Validate exact observer readiness",
+    )
+    candidate = "a" * 40
+    probe_id = f"probe-{scenario}"
+    run_id = 700
+    jobs = [
+        {
+            "id": 91, "name": "mutation (readback probe zero-worker finalizer)",
+            "status": "in_progress", "conclusion": None,
+        },
+        {
+            "id": 92, "name": "mutation (publish stage 3 observer readiness)",
+            "status": "completed", "conclusion": "success",
+        },
+        {
+            "id": 93, "name": "mutation (require stage 3 observer readiness)",
+            "status": "completed", "conclusion": admission_conclusion,
+        },
+        {
+            "id": 94, "name": "calibration-stage-3-batch-1",
+            "status": "completed", "conclusion": "skipped",
+        },
+        {
+            "id": 95, "name": "mutation (full shard 0, advisory)",
+            "status": "completed", "conclusion": "skipped",
+        },
+    ]
+    runs = [{
+        "id": run_id, "display_title": f"Mutation readback probe {probe_id}",
+        "event": "workflow_dispatch",
+    }]
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    (provider / "jobs.json").write_text(json.dumps([{
+        "total_count": len(jobs), "jobs": jobs,
+    }]))
+    (provider / "runs.json").write_text(json.dumps([{
+        "total_count": len(runs), "workflow_runs": runs,
+    }]))
+    gh = provider / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f"case \"$*\" in *'/actions/workflows/mutation.yml/runs?'*) cat '{provider / 'runs.json'}';; "
+        f"*'/attempts/1/jobs?'*) cat '{provider / 'jobs.json'}';; *) exit 2;; esac\n"
+    )
+    gh.chmod(0o755)
+
+    probe_env = {
+        **os.environ, "PATH": f"{provider}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": str(run_id),
+        "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": candidate,
+        "GITHUB_WORKFLOW_SHA": candidate, "CANDIDATE_SHA": candidate,
+        "PROBE_ID": probe_id, "PROBE_SCENARIO": scenario, "GH_TOKEN": "test",
+        "PROBE_MODE": "true", "CALIBRATION_ID": probe_id,
+        "OBSERVER_JOB_NAME": "mutation (readback probe zero-worker finalizer)",
+        "ARTIFACT_NAME": f"mutation-readback-probe-ready-{run_id}-1",
+    }
+
+    produced = _run_actions_bash(producer_script, cwd=tmp_path, env=probe_env)
+    assert produced.returncode == 0, produced.stderr
+    observer_ready = tmp_path / "observer-ready-1"
+    observer_ready.mkdir()
+    shutil.copy(tmp_path / "observer-readiness.json", observer_ready)
+    shutil.copy(tmp_path / "observer-ready-jobs.json", observer_ready)
+    admitted = _run_actions_bash(consumer_script, cwd=tmp_path, env={
+        **probe_env, "DOWNLOAD_OUTCOME_1": "success",
+        "DOWNLOAD_OUTCOME_2": "skipped", "DOWNLOAD_OUTCOME_3": "skipped",
+    })
+    assert (admitted.returncode != 0) is contained, admitted.stderr
+    actual_admission = json.loads((tmp_path / "initial-admission.json").read_text())
+    assert actual_admission["monitor_job_id"] == 91
+    assert actual_admission["provider_validation_passed"] is True
+    assert actual_admission["passed"] is False
+    if contained:
+        assert actual_admission["failure_code"] == "forced_calibration_identity_mismatch"
+
+    result = _run_actions_bash(observe_script, cwd=tmp_path, env=probe_env)
+
+    assert result.returncode == 0, result.stderr
+    retained = tmp_path / "retained-probe-admission"
+    retained.mkdir()
+    shutil.copy(tmp_path / "initial-admission.json", retained)
+    finalized = _run_actions_bash(
+        _workflow_step_script(
+            "readback-probe-finalizer", "Validate retained probe admission and finalize",
+        ),
+        cwd=tmp_path, env={
+            **os.environ, "PYTHONPATH": PLUGIN_DIR,
+            "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": str(run_id),
+            "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": candidate,
+            "GITHUB_WORKFLOW_SHA": candidate, "CANDIDATE_SHA": candidate,
+            "PROBE_ID": probe_id, "PROBE_SCENARIO": scenario,
+        },
+    )
+    assert finalized.returncode == 0, finalized.stderr
+    record = json.loads((tmp_path / "readback-probe-result.json").read_text())
+    assert record["probe_only"] is True
+    assert record["billing_authority"] is False
+    assert record["passed"] is False
+    assert record["authoritative_predecessor"] is False
+    assert record["qualification_eligible"] is False
+    assert record["mutation_workers_started"] == 0
+    assert record["containment_demonstrated"] is contained
+    assert record["provider_path_verified"] is True
+
+
+def test_actual_readback_probe_finalizer_rejects_invalid_mode_values(tmp_path):
+    script = _workflow_step_script(
+        "readback-probe-finalizer", "Validate probe identity and zero-worker finalization",
+    )
+    candidate = "a" * 40
+    base = {
+        **os.environ, "PYTHONPATH": PLUGIN_DIR, "GITHUB_SHA": candidate,
+        "GITHUB_WORKFLOW_SHA": candidate, "CANDIDATE_SHA": candidate,
+        "PROBE_ID": "probe-invalid", "PROBE_SCENARIO": "", "GH_TOKEN": "test",
+    }
+
+    missing = _run_actions_bash(script, cwd=tmp_path, env=base)
+    unknown = _run_actions_bash(
+        script, cwd=tmp_path, env={**base, "PROBE_SCENARIO": "calibration"},
     )
 
-    assert set(workflow["jobs"]) == {"monitor", "producer", "admission"}
-    assert workflow["run-name"] == "Calibration readback probe ${{ inputs.probe_id }}"
-    assert workflow["concurrency"] == {
-        "group": "calibration-readback-probe-${{ inputs.probe_id }}",
-        "cancel-in-progress": False,
-    }
-    assert all(job["timeout-minutes"] == 10 for job in workflow["jobs"].values())
-    assert "build_calibration_observer_readiness" in scripts
-    assert "validate_calibration_observer_readiness" in scripts
-    assert scripts.count("load_api_jobs_pages") >= 3
-    assert scripts.count("from fettle.staged_preflight import load_api_workflow_run_pages") == 2
-    assert scripts.count("probe_id is reused or its provider identity is indeterminate") == 2
-    assert "?event=workflow_dispatch" not in scripts
-    assert scripts.count('run.get("event") == "workflow_dispatch"') == 2
-    assert scripts.count("probe_only=True") >= 3
-    assert "current-jobs.json" in scripts
-    assert "synthetic readiness contains duplicate keys" in scripts
-    assert 'current_monitors[0].get("status") != "in_progress"' in scripts
-    assert "forced_calibration_identity_mismatch" in scripts
-    assert "forced calibration identity mismatch unexpectedly passed" in scripts
-    assert "failed-initial-admission" in scripts
-    assert "probe_only" in scripts
-    assert "billing_authority" in scripts
-    assert scripts.count('GITHUB_WORKFLOW_SHA" != "$CANDIDATE_SHA') == 2
-    assert scripts.count("2> provider-error.tmp") >= 2
-    assert scripts.count("rm -f provider-error.tmp") >= 2
-    assert "fettle mutation" not in scripts
-    assert "fettle.mutation_test" not in scripts
-    assert "mutmut" not in scripts
+    assert missing.returncode != 0
+    assert unknown.returncode != 0
+    assert "probe_scenario is malformed" in missing.stderr
+    assert "probe_scenario is malformed" in unknown.stderr
+    assert not (tmp_path / "readback-probe-result.json").exists()
+
+
+def test_probe_producer_and_consumer_validate_inputs_before_artifacts():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    for job_name in (
+        "calibration-stage-3-observer-readiness", "calibration-stage-3-observer-ready",
+    ):
+        steps = workflow["jobs"][job_name]["steps"]
+        validation_index = next(
+            index for index, step in enumerate(steps)
+            if step.get("name") == "Validate exact readback probe dispatch"
+        )
+        artifact_index = next(
+            index for index, step in enumerate(steps)
+            if "observer readiness" in step.get("name", "").lower()
+            and step.get("name") != "Validate exact readback probe dispatch"
+        )
+        validation = steps[validation_index]
+        assert validation_index < artifact_index
+        assert validation["if"] == "github.event.inputs.mode == 'readback-probe'"
+        assert "probe_id is malformed" in validation["run"]
+        assert "probe_scenario is malformed" in validation["run"]
+        assert "dispatch SHA differs from candidate_sha" in validation["run"]
 
 
 def test_readiness_producers_classify_provider_errors_without_raw_stderr_retention():
     production = _workflow_step_script(
         "calibration-stage-3-observer-readiness", "Establish observer readiness",
     )
-    probe = yaml.safe_load(
-        (Path(PLUGIN_DIR) / ".github/workflows/calibration-readback-probe.yml").read_text()
-    )
-    probe_producer = next(
-        step["run"] for step in probe["jobs"]["producer"]["steps"]
-        if step.get("name") == "Establish synthetic observer readiness"
-    )
-
-    for source in (production, probe_producer):
-        assert "2> provider-error.tmp" in source
-        assert "provider_error_class=access_denied" in source
-        assert "provider_error_class=transient_provider_error" in source
-        assert "provider_error_class=provider_resource_unavailable" in source
-        assert "rm -f provider-error.tmp" in source
+    assert "2> provider-error.tmp" in production
+    assert "provider_error_class=access_denied" in production
+    assert "provider_error_class=transient_provider_error" in production
+    assert "provider_error_class=provider_resource_unavailable" in production
+    assert "rm -f provider-error.tmp" in production
 
 
 def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound():

@@ -544,7 +544,10 @@ def build_calibration_observer_readiness(
         "produced_at": produced_at, "ready": True,
     }
     if probe_only:
-        record["probe_only"] = True
+        record.update({
+            "probe_only": True, "billing_authority": False, "passed": False,
+            "authoritative_predecessor": False, "qualification_eligible": False,
+        })
     return validate_calibration_observer_readiness(
         record, repository=repository, run_id=run_id, run_attempt=run_attempt,
         candidate_sha=candidate_sha, workflow_sha=workflow_sha,
@@ -594,9 +597,20 @@ def validate_calibration_observer_readiness(
         "artifact_name", "monitor_job_id", "produced_at", "ready",
     }
     if probe_only:
-        expected_keys.add("probe_only")
+        expected_keys.update({
+            "probe_only", "billing_authority", "passed",
+            "authoritative_predecessor", "qualification_eligible",
+        })
     if set(record) != expected_keys or record.get("probe_only", False) is not probe_only:
         raise ValueError("observer readiness schema differs from the expected profile")
+    if probe_only and any(
+        record.get(field) is not False
+        for field in (
+            "billing_authority", "passed", "authoritative_predecessor",
+            "qualification_eligible",
+        )
+    ):
+        raise ValueError("observer readiness probe authority is malformed")
     if (
         record.get("schema_version") != "1"
         or record.get("kind") != "calibration_observer_readiness"
@@ -614,6 +628,101 @@ def validate_calibration_observer_readiness(
     age = (observed - produced).total_seconds()
     if age < -60 or age > 600:
         raise ValueError("observer readiness timestamp is stale or outside clock tolerance")
+    return record
+
+
+def validate_readback_probe_admission(
+    record: dict, *, repository: str, run_id: str, run_attempt: str,
+    candidate_sha: str, workflow_sha: str, probe_id: str, scenario: str,
+    artifact_name: str, monitor_job_id: int,
+) -> dict:
+    """Validate exact retained probe admission without granting authority."""
+    expected_keys = {
+        "schema_version", "kind", "repository", "run_id", "run_attempt",
+        "candidate_sha", "workflow_sha", "calibration_id", "stage",
+        "artifact_name", "observed_at", "provider_error_class",
+        "artifact_download_attempt", "provider_attempts", "passed",
+        "billing_authority", "probe_only", "authoritative_predecessor",
+        "qualification_eligible", "provider_validation_passed", "monitor_job_id",
+    }
+    failed = scenario == "failed-initial-admission"
+    if failed:
+        expected_keys.update({"failure_code", "failure_class"})
+    elif scenario != "success":
+        raise ValueError("probe scenario is malformed")
+    if not isinstance(record, dict) or set(record) != expected_keys:
+        raise ValueError("probe admission schema differs from the expected scenario")
+    if (
+        not isinstance(monitor_job_id, int) or isinstance(monitor_job_id, bool)
+        or monitor_job_id <= 0
+        or not isinstance(record.get("monitor_job_id"), int)
+        or isinstance(record.get("monitor_job_id"), bool)
+        or record.get("monitor_job_id", 0) <= 0
+    ):
+        raise ValueError("probe admission monitor identity is malformed")
+    expected = {
+        "schema_version": "1", "kind": "calibration_readback_probe_admission",
+        "repository": repository, "run_id": run_id, "run_attempt": run_attempt,
+        "candidate_sha": candidate_sha, "workflow_sha": workflow_sha,
+        "calibration_id": probe_id, "stage": "3", "artifact_name": artifact_name,
+        "monitor_job_id": monitor_job_id, "passed": False,
+        "billing_authority": False, "probe_only": True,
+        "authoritative_predecessor": False, "qualification_eligible": False,
+        "provider_validation_passed": True,
+    }
+    if any(record.get(key) != value for key, value in expected.items()):
+        raise ValueError("probe admission identity or authority is malformed")
+    try:
+        observed_at = datetime.fromisoformat(str(record["observed_at"]).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("probe admission observation time is malformed") from exc
+    if observed_at.tzinfo is None:
+        raise ValueError("probe admission observation time is malformed")
+    attempts = record["provider_attempts"]
+    download_attempt = record["artifact_download_attempt"]
+    if (
+        not isinstance(download_attempt, int) or isinstance(download_attempt, bool)
+        or download_attempt not in {1, 2, 3}
+        or not isinstance(attempts, list) or not attempts
+        or any(
+            not isinstance(attempt, dict)
+            or set(attempt) not in (
+                {"attempt", "attempted_at", "outcome"},
+                {"attempt", "attempted_at", "outcome", "error_class"},
+            )
+            or attempt.get("attempt") != index
+            or attempt.get("outcome") not in {"success", "failure"}
+            for index, attempt in enumerate(attempts, 1)
+        )
+        or len(attempts) > 3 or attempts[-1].get("outcome") != "success"
+    ):
+        raise ValueError("probe admission provider attempts are malformed")
+    for attempt in attempts:
+        try:
+            attempted_at = datetime.fromisoformat(
+                str(attempt["attempted_at"]).replace("Z", "+00:00")
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("probe admission provider attempt time is malformed") from exc
+        if attempted_at.tzinfo is None:
+            raise ValueError("probe admission provider attempt time is malformed")
+        if (
+            attempt["outcome"] == "success" and "error_class" in attempt
+            or attempt["outcome"] == "failure" and not isinstance(attempt.get("error_class"), str)
+        ):
+            raise ValueError("probe admission provider attempt outcome is malformed")
+    if record["provider_error_class"] not in {
+        "none", "access_denied", "transient_provider_error",
+        "provider_resource_unavailable", "unclassified_provider_error",
+        "artifact_download_retries_exhausted",
+    }:
+        raise ValueError("probe admission provider error class is malformed")
+    if failed:
+        if (
+            record["failure_code"] != "forced_calibration_identity_mismatch"
+            or record["failure_class"] != "ValueError"
+        ):
+            raise ValueError("probe admission failure is not the expected containment")
     return record
 
 
