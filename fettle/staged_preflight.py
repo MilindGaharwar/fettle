@@ -130,6 +130,8 @@ _CALIBRATION_JOB = re.compile(
 _CALIBRATION_ADMISSION_JOB = re.compile(
     r"^(?:[^/]+ / )?mutation \(validate calibration batch (\d+)\)$"
 )
+_CALIBRATION_INITIAL_ADMISSION_JOB = "mutation (require stage 3 observer readiness)"
+_CALIBRATION_READINESS_PRODUCER_JOB = "mutation (publish stage 3 observer readiness)"
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict:
@@ -468,6 +470,153 @@ def calibration_stage_3_completed_admissions(jobs: list[dict]) -> int:
     return prefix
 
 
+def calibration_stage_3_initial_admission_status(jobs: list[dict]) -> str:
+    """Return the exact first-admission state used for prompt zero-worker containment."""
+    producers = [
+        job for job in jobs
+        if isinstance(job, dict) and job.get("name") == _CALIBRATION_READINESS_PRODUCER_JOB
+    ]
+    if len(producers) > 1:
+        raise ValueError("stage 3 readiness producer identity is duplicate")
+    producer_state = "missing"
+    producer_conclusion = None
+    if producers:
+        producer_status = producers[0].get("status")
+        producer_conclusion = producers[0].get("conclusion")
+        if producer_status in {"queued", "in_progress", "waiting", "pending"}:
+            if producer_conclusion is not None:
+                raise ValueError("stage 3 readiness producer state is malformed")
+            producer_state = "pending"
+        elif producer_status == "completed" and producer_conclusion in {
+            "success", "failure", "cancelled", "timed_out", "action_required",
+            "neutral", "skipped", "stale", "startup_failure",
+        }:
+            producer_state = "success" if producer_conclusion == "success" else "failure"
+        else:
+            raise ValueError("stage 3 readiness producer state is malformed")
+    matches = [
+        job for job in jobs
+        if isinstance(job, dict) and job.get("name") == _CALIBRATION_INITIAL_ADMISSION_JOB
+    ]
+    if len(matches) > 1:
+        raise ValueError("stage 3 initial admission identity is duplicate")
+    if not matches:
+        return "failure" if producer_state in {"success", "failure"} else "pending"
+    if producer_state == "missing":
+        raise ValueError("stage 3 readiness producer identity is missing")
+    job = matches[0]
+    status = job.get("status")
+    conclusion = job.get("conclusion")
+    if status in {"queued", "in_progress", "waiting", "pending"} and conclusion is None:
+        return "failure" if producer_state == "failure" else "pending"
+    if status != "completed" or conclusion not in {
+        "success", "failure", "cancelled", "timed_out", "action_required",
+        "neutral", "skipped", "stale", "startup_failure",
+    }:
+        raise ValueError("stage 3 initial admission state is malformed")
+    if conclusion == "success":
+        if producer_state != "success" or producer_conclusion != "success":
+            raise ValueError("successful stage 3 admission conflicts with readiness producer")
+        return "success"
+    return "failure"
+
+
+def build_calibration_observer_readiness(
+    *, repository: str, run_id: str, run_attempt: str, candidate_sha: str,
+    workflow_sha: str, calibration_id: str, artifact_name: str,
+    monitor_job_id: int, produced_at: str, probe_only: bool = False,
+) -> dict:
+    """Build the exact typed readiness payload shared by production and probes."""
+    if (
+        not isinstance(monitor_job_id, int)
+        or isinstance(monitor_job_id, bool)
+        or monitor_job_id <= 0
+    ):
+        raise ValueError("observer readiness monitor job identity is malformed")
+    if not isinstance(probe_only, bool):
+        raise ValueError("observer readiness evidence profile is malformed")
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        "repository": repository, "run_id": run_id, "run_attempt": run_attempt,
+        "candidate_sha": candidate_sha, "workflow_sha": workflow_sha,
+        "calibration_id": calibration_id, "stage": "3",
+        "artifact_name": artifact_name, "monitor_job_id": monitor_job_id,
+        "produced_at": produced_at, "ready": True,
+    }
+    if probe_only:
+        record["probe_only"] = True
+    return validate_calibration_observer_readiness(
+        record, repository=repository, run_id=run_id, run_attempt=run_attempt,
+        candidate_sha=candidate_sha, workflow_sha=workflow_sha,
+        calibration_id=calibration_id, stage="3", artifact_name=artifact_name,
+        monitor_job_id=monitor_job_id, observed_at=produced_at,
+        probe_only=probe_only,
+    )
+
+
+def validate_calibration_observer_readiness(
+    record: dict,
+    *,
+    repository: str,
+    run_id: str,
+    run_attempt: str,
+    candidate_sha: str,
+    workflow_sha: str,
+    calibration_id: str,
+    stage: str,
+    artifact_name: str,
+    monitor_job_id: int,
+    observed_at: str,
+    probe_only: bool = False,
+) -> dict:
+    """Validate exact current-attempt observer readiness and bounded freshness."""
+    if not isinstance(probe_only, bool):
+        raise ValueError("observer readiness evidence profile is malformed")
+    if (
+        not isinstance(monitor_job_id, int)
+        or isinstance(monitor_job_id, bool)
+        or monitor_job_id <= 0
+        or not isinstance(record, dict)
+        or not isinstance(record.get("monitor_job_id"), int)
+        or isinstance(record.get("monitor_job_id"), bool)
+        or record.get("monitor_job_id", 0) <= 0
+    ):
+        raise ValueError("observer readiness monitor job identity is malformed")
+    expected = {
+        "repository": repository, "run_id": run_id, "run_attempt": run_attempt,
+        "candidate_sha": candidate_sha, "workflow_sha": workflow_sha,
+        "calibration_id": calibration_id, "stage": stage,
+        "artifact_name": artifact_name, "monitor_job_id": monitor_job_id,
+    }
+    expected_keys = {
+        "schema_version", "kind", "repository", "run_id", "run_attempt",
+        "candidate_sha", "workflow_sha", "calibration_id", "stage",
+        "artifact_name", "monitor_job_id", "produced_at", "ready",
+    }
+    if probe_only:
+        expected_keys.add("probe_only")
+    if set(record) != expected_keys or record.get("probe_only", False) is not probe_only:
+        raise ValueError("observer readiness schema differs from the expected profile")
+    if (
+        record.get("schema_version") != "1"
+        or record.get("kind") != "calibration_observer_readiness"
+        or record.get("ready") is not True
+        or any(record.get(key) != value for key, value in expected.items())
+    ):
+        raise ValueError("observer readiness identity differs from the current attempt")
+    try:
+        produced = datetime.fromisoformat(str(record["produced_at"]).replace("Z", "+00:00"))
+        observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("observer readiness timestamp is malformed") from exc
+    if produced.tzinfo is None or observed.tzinfo is None:
+        raise ValueError("observer readiness timestamp is malformed")
+    age = (observed - produced).total_seconds()
+    if age < -60 or age > 600:
+        raise ValueError("observer readiness timestamp is stale or outside clock tolerance")
+    return record
+
+
 def evaluate_calibration_observer(
     contract: dict,
     jobs: list[dict],
@@ -477,6 +626,7 @@ def evaluate_calibration_observer(
     admitted_shards: list[int] | None = None,
     completed_admissions: int = 0,
     route_complete: bool = True,
+    initial_admission_status: str = "not_applicable",
 ) -> dict:
     """Evaluate one controlled-clock observer sample without claiming completion."""
     if (
@@ -491,6 +641,7 @@ def evaluate_calibration_observer(
         or completed_admissions < 0
         or completed_admissions > contract.get("admission_dependencies", 0)
         or not isinstance(route_complete, bool)
+        or initial_admission_status not in {"not_applicable", "pending", "success", "failure"}
     ):
         raise ValueError("calibration observer sample is malformed")
     expected_shards = contract.get("expected_shards")
@@ -534,7 +685,10 @@ def evaluate_calibration_observer(
     )
     terminal = len(terminal_shards)
     expected = len(expected_shards)
-    if not budget_passed:
+    if initial_admission_status == "failure":
+        action = "cancel"
+        reason = "initial stage 3 admission failed"
+    elif not budget_passed:
         action = "cancel"
         reason = "budget cutoff or accounting validation did not pass"
     elif (
@@ -569,6 +723,7 @@ def evaluate_calibration_observer(
         "completed_admissions": completed_admissions,
         "expected_admissions": contract.get("admission_dependencies", 0),
         "route_complete": route_complete,
+        "initial_admission_status": initial_admission_status,
         "action": action,
         "reason": reason,
         "contract": contract,
@@ -602,7 +757,9 @@ def _load_json(path: Path) -> dict:
 
 
 def _load_api_pages(path: Path, collection: str) -> list[dict]:
-    pages = json.loads(path.read_text(encoding="utf-8"))
+    pages = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_json_keys,
+    )
     if not isinstance(pages, list):
         pages = [pages]
     if not pages or any(
@@ -613,10 +770,44 @@ def _load_api_pages(path: Path, collection: str) -> list[dict]:
     values = [value for page in pages for value in page[collection]]
     if any(not isinstance(value, dict) for value in values):
         raise ValueError(f"{collection} response contains a malformed item")
-    totals = {page.get("total_count") for page in pages}
+    page_totals = [page.get("total_count") for page in pages]
+    if any(
+        not isinstance(total, int) or isinstance(total, bool) or total < 0
+        for total in page_totals
+    ):
+        raise ValueError(f"{collection} response total_count is malformed")
+    totals = set(page_totals)
     if totals != {len(values)}:
         raise ValueError(f"{collection} response pagination is incomplete")
     return values
+
+
+def load_api_jobs_pages(path: Path) -> list[dict]:
+    """Load a complete paginated Jobs API snapshot or fail closed."""
+    jobs = _load_api_pages(path, "jobs")
+    job_ids = [job.get("id") for job in jobs]
+    if any(
+        not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0
+        for job_id in job_ids
+    ):
+        raise ValueError("jobs response contains a malformed job identity")
+    if len(set(job_ids)) != len(job_ids):
+        raise ValueError("jobs response contains duplicate job identities")
+    return jobs
+
+
+def load_api_workflow_run_pages(path: Path) -> list[dict]:
+    """Load a complete workflow-runs snapshot with unique positive run IDs."""
+    runs = _load_api_pages(path, "workflow_runs")
+    run_ids = [run.get("id") for run in runs]
+    if any(
+        not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0
+        for run_id in run_ids
+    ):
+        raise ValueError("workflow_runs response contains a malformed run identity")
+    if len(set(run_ids)) != len(run_ids):
+        raise ValueError("workflow_runs response contains duplicate run identities")
+    return runs
 
 
 def validate_continuation_dispatches(

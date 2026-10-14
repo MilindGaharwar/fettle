@@ -28,10 +28,15 @@ from scripts.staged_preflight import (
     WAVES,
     WAVE_3_BATCHES,
     calibration_observer_contract,
+    build_calibration_observer_readiness,
     calibration_stage_3_admitted_shards,
     calibration_stage_3_completed_admissions,
+    calibration_stage_3_initial_admission_status,
     calibration_stage_3_observer_contract,
     evaluate_calibration_observer,
+    load_api_jobs_pages,
+    load_api_workflow_run_pages,
+    validate_calibration_observer_readiness,
     calibration_stage_3_batches,
     account_runner_minutes,
     combine_accounting,
@@ -448,6 +453,369 @@ def test_stage_3_observer_rejects_impossible_admission_count():
         evaluate_calibration_observer(
             contract, [], elapsed_seconds=1, budget_passed=True,
             completed_admissions=7,
+        )
+
+
+def test_stage_3_initial_admission_failure_stops_zero_worker_observer_promptly():
+    selected = [WAVE_3_BATCHES[0][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [
+        {
+            "name": "mutation (publish stage 3 observer readiness)",
+            "status": "completed", "conclusion": "success",
+        },
+        {
+            "name": "mutation (require stage 3 observer readiness)",
+            "status": "completed", "conclusion": "failure",
+        },
+    ]
+
+    status = calibration_stage_3_initial_admission_status(jobs)
+    result = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=90, budget_passed=True,
+        admitted_shards=selected, initial_admission_status=status,
+    )
+
+    assert status == "failure"
+    assert result["action"] == "cancel"
+    assert result["observed_worker_jobs"] == 0
+    assert result["reason"] == "initial stage 3 admission failed"
+
+
+def test_stage_3_initial_admission_remains_pending_until_exact_job_is_terminal():
+    producer = {
+        "name": "mutation (publish stage 3 observer readiness)",
+        "status": "in_progress", "conclusion": None,
+    }
+    for jobs in ([], [producer], [producer, {
+        "name": "mutation (require stage 3 observer readiness)",
+        "status": "queued", "conclusion": None,
+    }]):
+        assert calibration_stage_3_initial_admission_status(jobs) == "pending"
+
+
+def test_stage_3_missing_initial_admission_fails_after_producer_is_terminal():
+    for conclusion in ("success", "failure", "cancelled", "timed_out", "skipped"):
+        jobs = [{
+            "name": "mutation (publish stage 3 observer readiness)",
+            "status": "completed", "conclusion": conclusion,
+        }]
+
+        assert calibration_stage_3_initial_admission_status(jobs) == "failure"
+
+
+def test_stage_3_missing_initial_admission_waits_while_producer_can_progress():
+    jobs = [{
+        "name": "mutation (publish stage 3 observer readiness)",
+        "status": "in_progress", "conclusion": None,
+    }]
+
+    assert calibration_stage_3_initial_admission_status(jobs) == "pending"
+
+
+def test_stage_3_missing_initial_admission_rejects_bad_producer_evidence():
+    producer = {
+        "name": "mutation (publish stage 3 observer readiness)",
+        "status": "completed", "conclusion": "success",
+    }
+    with pytest.raises(ValueError, match="producer identity is duplicate"):
+        calibration_stage_3_initial_admission_status([producer, producer])
+    with pytest.raises(ValueError, match="producer state is malformed"):
+        calibration_stage_3_initial_admission_status([
+            {**producer, "status": "mystery", "conclusion": None},
+        ])
+
+
+def test_stage_3_successful_initial_admission_requires_successful_producer():
+    admission = {
+        "name": "mutation (require stage 3 observer readiness)",
+        "status": "completed", "conclusion": "success",
+    }
+    with pytest.raises(ValueError, match="producer identity is missing"):
+        calibration_stage_3_initial_admission_status([admission])
+    for producer in (
+        {
+            "name": "mutation (publish stage 3 observer readiness)",
+            "status": "completed", "conclusion": "failure",
+        },
+        {
+            "name": "mutation (publish stage 3 observer readiness)",
+            "status": "in_progress", "conclusion": None,
+        },
+    ):
+        with pytest.raises(ValueError, match="conflicts with readiness producer"):
+            calibration_stage_3_initial_admission_status([producer, admission])
+
+
+def test_stage_3_successful_initial_admission_accepts_exact_successful_producer():
+    jobs = [
+        {
+            "name": "mutation (publish stage 3 observer readiness)",
+            "status": "completed", "conclusion": "success",
+        },
+        {
+            "name": "mutation (require stage 3 observer readiness)",
+            "status": "completed", "conclusion": "success",
+        },
+    ]
+
+    assert calibration_stage_3_initial_admission_status(jobs) == "success"
+
+
+def test_stage_3_initial_admission_rejects_conflicting_or_unknown_job_state():
+    producer = {
+        "name": "mutation (publish stage 3 observer readiness)",
+        "status": "completed", "conclusion": "success",
+    }
+    job = {
+        "name": "mutation (require stage 3 observer readiness)",
+        "status": "completed", "conclusion": "success",
+    }
+    with pytest.raises(ValueError, match="duplicate"):
+        calibration_stage_3_initial_admission_status([producer, job, job])
+    with pytest.raises(ValueError, match="state is malformed"):
+        calibration_stage_3_initial_admission_status([
+            producer, {**job, "status": "mystery"},
+        ])
+
+
+def test_observer_readiness_binds_exact_current_attempt_and_monitor_identity():
+    produced_at = "2026-10-14T10:00:00Z"
+    expected = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "2",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "cal-readback", "stage": "3",
+        "artifact_name": "mutation-calibration-observer-ready-700-2",
+        "monitor_job_id": 91,
+    }
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        **expected, "ready": True, "produced_at": produced_at,
+    }
+
+    validated = validate_calibration_observer_readiness(
+        record, **expected, observed_at="2026-10-14T10:01:00Z",
+    )
+
+    assert validated == record
+
+
+def test_observer_readiness_constructor_emits_production_shape():
+    record = build_calibration_observer_readiness(
+        repository="example/fettle", run_id="700", run_attempt="2",
+        candidate_sha="a" * 40, workflow_sha="a" * 40,
+        calibration_id="cal-readback",
+        artifact_name="mutation-calibration-observer-ready-700-2",
+        monitor_job_id=91, produced_at="2026-10-14T10:00:00Z",
+    )
+
+    assert record["kind"] == "calibration_observer_readiness"
+    assert record["monitor_job_id"] == 91
+    assert record["ready"] is True
+    assert "probe_only" not in record
+
+
+def test_observer_readiness_probe_profile_is_explicit_and_exact():
+    record = build_calibration_observer_readiness(
+        repository="example/fettle", run_id="700", run_attempt="2",
+        candidate_sha="a" * 40, workflow_sha="a" * 40,
+        calibration_id="probe-readback",
+        artifact_name="calibration-readback-probe-ready-700-2",
+        monitor_job_id=91, produced_at="2026-10-14T10:00:00Z",
+        probe_only=True,
+    )
+
+    assert record["probe_only"] is True
+    assert validate_calibration_observer_readiness(
+        record, repository="example/fettle", run_id="700", run_attempt="2",
+        candidate_sha="a" * 40, workflow_sha="a" * 40,
+        calibration_id="probe-readback", stage="3",
+        artifact_name="calibration-readback-probe-ready-700-2",
+        monitor_job_id=91, observed_at="2026-10-14T10:01:00Z",
+        probe_only=True,
+    ) == record
+
+
+@pytest.mark.parametrize(
+    ("extra_key", "extra_value"),
+    [("billing_authority", True), ("passed", True), ("unknown", "value")],
+)
+def test_observer_readiness_rejects_unknown_or_contradictory_fields(
+    extra_key, extra_value,
+):
+    expected = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "2",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "cal-readback", "stage": "3",
+        "artifact_name": "mutation-calibration-observer-ready-700-2",
+        "monitor_job_id": 91,
+    }
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        **expected, "ready": True, "produced_at": "2026-10-14T10:00:00Z",
+        extra_key: extra_value,
+    }
+
+    with pytest.raises(ValueError, match="schema differs"):
+        validate_calibration_observer_readiness(
+            record, **expected, observed_at="2026-10-14T10:01:00Z",
+        )
+
+
+@pytest.mark.parametrize("monitor_job_id", [91.0, True, 0, -1])
+def test_observer_readiness_constructor_rejects_non_positive_integer_monitor_id(
+    monitor_job_id,
+):
+    with pytest.raises(ValueError, match="monitor job identity is malformed"):
+        build_calibration_observer_readiness(
+            repository="example/fettle", run_id="700", run_attempt="2",
+            candidate_sha="a" * 40, workflow_sha="a" * 40,
+            calibration_id="cal-readback",
+            artifact_name="mutation-calibration-observer-ready-700-2",
+            monitor_job_id=monitor_job_id,
+            produced_at="2026-10-14T10:00:00Z",
+        )
+
+
+@pytest.mark.parametrize("monitor_job_id", [91.0, True, 0, -1])
+def test_observer_readiness_validator_rejects_malformed_record_monitor_id(
+    monitor_job_id,
+):
+    expected = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "2",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "cal-readback", "stage": "3",
+        "artifact_name": "mutation-calibration-observer-ready-700-2",
+        "monitor_job_id": 91,
+    }
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        **expected, "monitor_job_id": monitor_job_id,
+        "ready": True, "produced_at": "2026-10-14T10:00:00Z",
+    }
+
+    with pytest.raises(ValueError, match="monitor job identity is malformed"):
+        validate_calibration_observer_readiness(
+            record, **expected, observed_at="2026-10-14T10:01:00Z",
+        )
+
+
+def test_jobs_api_pages_require_complete_well_formed_pagination(tmp_path):
+    path = tmp_path / "jobs.json"
+    jobs = [{"id": 1, "name": "job", "status": "in_progress"}]
+    path.write_text(json.dumps([{"total_count": 1, "jobs": jobs}]))
+
+    assert load_api_jobs_pages(path) == jobs
+
+    for malformed in (
+        [{"total_count": 2, "jobs": jobs}],
+        [{"total_count": True, "jobs": jobs}],
+        [{"total_count": 1}],
+        [{"total_count": 1, "jobs": ["not-an-object"]}],
+        [{"total_count": 1, "jobs": [{"id": True}]}],
+        [{"total_count": 1, "jobs": [{"id": 0}]}],
+        [],
+    ):
+        path.write_text(json.dumps(malformed))
+        with pytest.raises(ValueError, match="jobs response"):
+            load_api_jobs_pages(path)
+
+
+def test_jobs_api_pages_reject_duplicate_ids_masking_an_omitted_job(tmp_path):
+    path = tmp_path / "jobs.json"
+    duplicated = {"id": 11, "name": "monitor", "status": "in_progress"}
+    path.write_text(json.dumps([
+        {"total_count": 2, "jobs": [duplicated]},
+        {"total_count": 2, "jobs": [duplicated]},
+    ]))
+
+    with pytest.raises(ValueError, match="duplicate job identities"):
+        load_api_jobs_pages(path)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '[{"total_count":1,"total_count":1,"jobs":[{"id":1}]}]',
+        '[{"total_count":1,"jobs":[],"jobs":[{"id":1}]}]',
+        '[{"total_count":1,"jobs":[{"id":1,"id":2}]}]',
+    ],
+)
+def test_jobs_api_pages_reject_duplicate_json_keys(tmp_path, payload):
+    path = tmp_path / "jobs.json"
+    path.write_text(payload)
+
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        load_api_jobs_pages(path)
+
+
+def test_workflow_run_pages_require_unique_positive_integer_run_ids(tmp_path):
+    path = tmp_path / "runs.json"
+    run = {"id": 700, "display_title": "Calibration readback probe probe-one"}
+    path.write_text(json.dumps([{"total_count": 1, "workflow_runs": [run]}]))
+
+    assert load_api_workflow_run_pages(path) == [run]
+
+    for malformed in (
+        [{"total_count": 1, "workflow_runs": [{"id": True}]}],
+        [{"total_count": 1, "workflow_runs": [{"id": 0}]}],
+        [{"total_count": 2, "workflow_runs": [run, run]}],
+    ):
+        path.write_text(json.dumps(malformed))
+        with pytest.raises(ValueError, match="workflow_runs response"):
+            load_api_workflow_run_pages(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "foreign"),
+    [
+        ("repository", "foreign/fettle"), ("run_id", "701"),
+        ("run_attempt", "1"), ("candidate_sha", "b" * 40),
+        ("workflow_sha", "b" * 40), ("calibration_id", "cal-foreign"),
+        ("stage", "2"), ("artifact_name", "foreign-artifact"),
+        ("monitor_job_id", 92),
+    ],
+)
+def test_observer_readiness_rejects_foreign_identity(field, foreign):
+    expected = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "2",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "cal-readback", "stage": "3",
+        "artifact_name": "mutation-calibration-observer-ready-700-2",
+        "monitor_job_id": 91,
+    }
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        **expected, "ready": True, "produced_at": "2026-10-14T10:00:00Z",
+    }
+    record[field] = foreign
+
+    with pytest.raises(ValueError, match="identity differs"):
+        validate_calibration_observer_readiness(
+            record, **expected, observed_at="2026-10-14T10:01:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "produced_at",
+    ["2026-10-14T09:49:59Z", "2026-10-14T10:02:01Z", "not-a-time"],
+)
+def test_observer_readiness_rejects_stale_future_or_malformed_time(produced_at):
+    expected = {
+        "repository": "example/fettle", "run_id": "700", "run_attempt": "2",
+        "candidate_sha": "a" * 40, "workflow_sha": "a" * 40,
+        "calibration_id": "cal-readback", "stage": "3",
+        "artifact_name": "mutation-calibration-observer-ready-700-2",
+        "monitor_job_id": 91,
+    }
+    record = {
+        "schema_version": "1", "kind": "calibration_observer_readiness",
+        **expected, "ready": True, "produced_at": produced_at,
+    }
+
+    with pytest.raises(ValueError, match="timestamp"):
+        validate_calibration_observer_readiness(
+            record, **expected, observed_at="2026-10-14T10:01:00Z",
         )
 
 

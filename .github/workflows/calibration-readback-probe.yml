@@ -1,0 +1,371 @@
+name: Calibration readback provider probe
+run-name: Calibration readback probe ${{ inputs.probe_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Exact candidate/workflow SHA to probe"
+        required: true
+        type: string
+      probe_id:
+        description: "Unique synthetic probe identifier"
+        required: true
+        type: string
+      scenario:
+        description: "Synthetic readiness outcome"
+        required: true
+        type: choice
+        options:
+          - success
+          - failed-initial-admission
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: calibration-readback-probe-${{ inputs.probe_id }}
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    name: readback probe (synthetic monitor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Observe bounded initial admission transition
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPECTED_SCENARIO: ${{ inputs.scenario }}
+          PROBE_ID: ${{ inputs.probe_id }}
+        run: |
+          python - <<'PY'
+          import os, re
+          if os.environ["GITHUB_SHA"] != os.environ["CANDIDATE_SHA"]:
+              raise SystemExit("dispatch SHA differs from candidate_sha")
+          if not re.fullmatch(r"probe-[A-Za-z0-9_-]{1,57}", os.environ["PROBE_ID"]):
+              raise SystemExit("probe_id is malformed")
+          PY
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/calibration-readback-probe.yml/runs?per_page=100" > probe-runs.json 2> provider-error.tmp
+          rm -f provider-error.tmp
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_workflow_run_pages
+          runs = load_api_workflow_run_pages(Path("probe-runs.json"))
+          title = f'Calibration readback probe {os.environ["PROBE_ID"]}'
+          matches = [
+              run for run in runs
+              if run.get("display_title") == title and run.get("event") == "workflow_dispatch"
+          ]
+          if len(matches) != 1 or str(matches[0].get("id")) != os.environ["GITHUB_RUN_ID"]:
+              raise SystemExit("probe_id is reused or its provider identity is indeterminate")
+          PY
+          deadline=$((SECONDS + 420))
+          while (( SECONDS < deadline )); do
+            observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > probe-monitor-jobs.json 2> provider-error.tmp; then
+              state=$(python - <<'PY'
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+          jobs = load_api_jobs_pages(Path("probe-monitor-jobs.json"))
+          matches = [job for job in jobs if job.get("name") == "readback probe (initial admission)"]
+          if len(matches) != 1 or not isinstance(matches[0].get("status"), str):
+              raise SystemExit("synthetic admission identity or state is malformed")
+          print(f'{matches[0]["status"]}\t{matches[0].get("conclusion") or ""}')
+          PY
+              )
+              status=${state%%$'\t'*}
+              conclusion=${state#*$'\t'}
+              if [[ "$status" == completed ]]; then
+                action=complete
+                passed=true
+                if [[ "$EXPECTED_SCENARIO" == failed-initial-admission ]]; then
+                  action=contain
+                  passed=false
+                fi
+                OBSERVED_AT="$observed_at" ACTION="$action" PASSED="$passed" CONCLUSION="$conclusion" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          expected = "success" if os.environ["PASSED"] == "true" else "failure"
+          if os.environ["CONCLUSION"] != expected:
+              raise SystemExit("initial admission conclusion differs from the scenario")
+          record = {
+              "schema_version": "1", "kind": "calibration_readback_probe_monitor",
+              "probe_only": True, "billing_authority": False,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "probe_id": os.environ["PROBE_ID"],
+              "observed_at": os.environ["OBSERVED_AT"],
+              "initial_admission_conclusion": os.environ["CONCLUSION"],
+              "action": os.environ["ACTION"], "passed": os.environ["PASSED"] == "true",
+          }
+          Path("probe-monitor.json").write_text(json.dumps(record, sort_keys=True) + "\n")
+          PY
+                rm -f provider-error.tmp
+                break
+              fi
+            else
+              rm -f provider-error.tmp
+            fi
+            sleep 10
+          done
+          test -f probe-monitor.json
+      - name: Retain synthetic monitor result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calibration-readback-probe-monitor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            probe-monitor.json
+            probe-monitor-jobs.json
+          if-no-files-found: error
+          retention-days: 90
+
+  producer:
+    name: readback probe (readiness producer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Establish synthetic observer readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROBE_ID: ${{ inputs.probe_id }}
+          ARTIFACT_NAME: calibration-readback-probe-ready-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" || "$GITHUB_WORKFLOW_SHA" != "$CANDIDATE_SHA" ]]; then
+            exit 2
+          fi
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/calibration-readback-probe.yml/runs?per_page=100" > probe-runs.json 2> provider-error.tmp
+          rm -f provider-error.tmp
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_workflow_run_pages
+          runs = load_api_workflow_run_pages(Path("probe-runs.json"))
+          title = f'Calibration readback probe {os.environ["PROBE_ID"]}'
+          matches = [
+              run for run in runs
+              if run.get("display_title") == title and run.get("event") == "workflow_dispatch"
+          ]
+          if len(matches) != 1 or str(matches[0].get("id")) != os.environ["GITHUB_RUN_ID"]:
+              raise SystemExit("probe_id is reused or its provider identity is indeterminate")
+          PY
+          deadline=$((SECONDS + 300))
+          while (( SECONDS < deadline )); do
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > producer-jobs.json 2> provider-error.tmp; then
+              rm -f provider-error.tmp
+              monitor_job_id=$(python - <<'PY'
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+          jobs = load_api_jobs_pages(Path("producer-jobs.json"))
+          matches = [
+              job for job in jobs
+              if job.get("name") == "readback probe (synthetic monitor)"
+              and job.get("status") == "in_progress"
+          ]
+          if len(matches) == 1 and isinstance(matches[0].get("id"), int):
+              print(matches[0]["id"])
+          PY
+              )
+              if [[ "$monitor_job_id" =~ ^[0-9]+$ ]]; then
+                MONITOR_JOB_ID="$monitor_job_id" PRODUCED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.staged_preflight import build_calibration_observer_readiness
+          record = build_calibration_observer_readiness(
+              repository=os.environ["GITHUB_REPOSITORY"], run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], candidate_sha=os.environ["CANDIDATE_SHA"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"], calibration_id=os.environ["PROBE_ID"],
+              artifact_name=os.environ["ARTIFACT_NAME"], monitor_job_id=int(os.environ["MONITOR_JOB_ID"]),
+              produced_at=os.environ["PRODUCED_AT"], probe_only=True,
+          )
+          Path("observer-readiness.json").write_text(json.dumps(record, sort_keys=True) + "\n")
+          PY
+                exit 0
+              fi
+            else
+              python - <<'PY'
+          from pathlib import Path
+          text = Path("provider-error.tmp").read_text(errors="replace").lower()
+          if any(value in text for value in ("401", "403", "forbidden", "resource not accessible")):
+              print("provider_error_class=access_denied")
+          elif any(value in text for value in ("429", "rate limit", "502", "503", "504", "timeout", "timed out")):
+              print("provider_error_class=transient_provider_error")
+          elif any(value in text for value in ("404", "not found")):
+              print("provider_error_class=provider_resource_unavailable")
+          else:
+              print("provider_error_class=unclassified_provider_error")
+          PY
+              rm -f provider-error.tmp
+            fi
+            sleep 10
+          done
+          exit 2
+      - name: Publish synthetic observer readiness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calibration-readback-probe-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            observer-readiness.json
+            producer-jobs.json
+          if-no-files-found: error
+          retention-days: 90
+
+  admission:
+    name: readback probe (initial admission)
+    needs: producer
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Download synthetic readiness
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: calibration-readback-probe-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: observer-ready
+      - name: Validate synthetic readiness
+        id: validate
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROBE_ID: ${{ inputs.probe_id }}
+          SCENARIO: ${{ inputs.scenario }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          ARTIFACT_NAME: calibration-readback-probe-ready-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" || "$GITHUB_WORKFLOW_SHA" != "$CANDIDATE_SHA" ]]; then
+            exit 2
+          fi
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > current-jobs.json 2> provider-error.tmp
+          rm -f provider-error.tmp
+          python - <<'PY'
+          import json, os
+          from datetime import UTC, datetime
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              load_api_jobs_pages, validate_calibration_observer_readiness,
+          )
+          def reject_duplicates(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise ValueError("synthetic readiness contains duplicate keys")
+                  value[key] = item
+              return value
+
+          record = json.loads(
+              Path("observer-ready/observer-readiness.json").read_text(),
+              object_pairs_hook=reject_duplicates,
+          )
+          producer_jobs = load_api_jobs_pages(Path("observer-ready/producer-jobs.json"))
+          current_jobs = load_api_jobs_pages(Path("current-jobs.json"))
+          producer_monitors = [
+              job for job in producer_jobs
+              if job.get("name") == "readback probe (synthetic monitor)"
+          ]
+          current_monitors = [
+              job for job in current_jobs
+              if job.get("name") == "readback probe (synthetic monitor)"
+          ]
+          if (
+              os.environ["DOWNLOAD_OUTCOME"] != "success"
+              or len(producer_monitors) != 1 or len(current_monitors) != 1
+              or producer_monitors[0].get("id") != current_monitors[0].get("id")
+              or current_monitors[0].get("status") != "in_progress"
+          ):
+              raise SystemExit("synthetic readiness retrieval or monitor identity did not pass")
+          result = {"schema_version": "1", "kind": "calibration_readback_provider_probe", "probe_only": True,
+                    "billing_authority": False, "passed": False, "scenario": os.environ["SCENARIO"],
+                    "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                    "candidate_sha": os.environ["CANDIDATE_SHA"], "probe_id": os.environ["PROBE_ID"],
+                    "validated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z")}
+          try:
+              validate_calibration_observer_readiness(
+                  record, repository=os.environ["GITHUB_REPOSITORY"], run_id=os.environ["GITHUB_RUN_ID"],
+                  run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], candidate_sha=os.environ["CANDIDATE_SHA"],
+                  workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"], calibration_id=os.environ["PROBE_ID"],
+                  stage="3", artifact_name=os.environ["ARTIFACT_NAME"], monitor_job_id=current_monitors[0]["id"],
+                  observed_at=result["validated_at"], probe_only=True,
+              )
+              if os.environ["SCENARIO"] == "failed-initial-admission":
+                  try:
+                      validate_calibration_observer_readiness(
+                          record, repository=os.environ["GITHUB_REPOSITORY"],
+                          run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                          candidate_sha=os.environ["CANDIDATE_SHA"], workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+                          calibration_id=os.environ["PROBE_ID"] + "-forced-mismatch", stage="3",
+                          artifact_name=os.environ["ARTIFACT_NAME"], monitor_job_id=current_monitors[0]["id"],
+                          observed_at=result["validated_at"], probe_only=True,
+                      )
+                  except ValueError as exc:
+                      if str(exc) != "observer readiness identity differs from the current attempt":
+                          raise
+                      result["failure_code"] = "forced_calibration_identity_mismatch"
+                  else:
+                      raise ValueError("forced calibration identity mismatch unexpectedly passed")
+              else:
+                  result["passed"] = True
+          except Exception as exc:
+              result["failure_class"] = type(exc).__name__
+          Path("probe-readback.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          if not result["passed"]:
+              raise SystemExit("synthetic initial admission did not pass")
+          PY
+      - name: Retain synthetic admission result
+        id: retain
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calibration-readback-probe-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: probe-readback.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve scenario outcome
+        if: always()
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
+          RETENTION_OUTCOME: ${{ steps.retain.outcome }}
+        run: |
+          test "$RETENTION_OUTCOME" = success
+          if [[ "$SCENARIO" == success ]]; then
+            test "$VALIDATION_OUTCOME" = success
+          else
+            test "$VALIDATION_OUTCOME" = failure
+            test "$(jq -r '.failure_code // ""' probe-readback.json)" = forced_calibration_identity_mismatch
+            exit 2
+          fi

@@ -1325,9 +1325,91 @@ jobs:
       resume_run_id: ${{ github.event.inputs.resume_run_id }}
       execute: ${{ matrix.execute }}
 
-  calibration-stage-3-observer-ready:
+  calibration-stage-3-observer-readiness:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
     needs: [prepare, calibration-launch-gate]
+    name: mutation (publish stage 3 observer readiness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Establish observer readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          ARTIFACT_NAME: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          deadline=$((SECONDS + 300))
+          while (( SECONDS < deadline )); do
+            observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-ready-jobs.json 2> provider-error.tmp; then
+              rm -f provider-error.tmp
+              monitor_job_id=$(python - <<'PY'
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+          jobs = load_api_jobs_pages(Path("observer-ready-jobs.json"))
+          matches = [
+              job for job in jobs
+              if job.get("name") == "mutation (monitor calibration budget)"
+              and job.get("status") == "in_progress"
+          ]
+          if len(matches) == 1 and isinstance(matches[0].get("id"), int):
+              print(matches[0]["id"])
+          PY
+              )
+              if [[ "$monitor_job_id" =~ ^[0-9]+$ ]]; then
+                MONITOR_JOB_ID="$monitor_job_id" PRODUCED_AT="$observed_at" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.staged_preflight import build_calibration_observer_readiness
+          record = build_calibration_observer_readiness(
+              repository=os.environ["GITHUB_REPOSITORY"], run_id=os.environ["GITHUB_RUN_ID"],
+              run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], candidate_sha=os.environ["GITHUB_SHA"],
+              workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"], calibration_id=os.environ["CALIBRATION_ID"],
+              artifact_name=os.environ["ARTIFACT_NAME"], monitor_job_id=int(os.environ["MONITOR_JOB_ID"]),
+              produced_at=os.environ["PRODUCED_AT"],
+          )
+          Path("observer-readiness.json").write_text(json.dumps(record, sort_keys=True) + "\n")
+          PY
+                exit 0
+              fi
+            else
+              python - <<'PY'
+          from pathlib import Path
+          text = Path("provider-error.tmp").read_text(errors="replace").lower()
+          if any(value in text for value in ("401", "403", "forbidden", "resource not accessible")):
+              print("provider_error_class=access_denied")
+          elif any(value in text for value in ("429", "rate limit", "502", "503", "504", "timeout", "timed out")):
+              print("provider_error_class=transient_provider_error")
+          elif any(value in text for value in ("404", "not found")):
+              print("provider_error_class=provider_resource_unavailable")
+          else:
+              print("provider_error_class=unclassified_provider_error")
+          PY
+              rm -f provider-error.tmp
+            fi
+            sleep 15
+          done
+          exit 2
+      - name: Publish observer readiness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            observer-readiness.json
+            observer-ready-jobs.json
+          if-no-files-found: error
+          retention-days: 90
+
+  calibration-stage-3-observer-ready:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
+    needs: [prepare, calibration-launch-gate, calibration-stage-3-observer-readiness]
     name: mutation (require stage 3 observer readiness)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1335,37 +1417,183 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Require active observer before first admission
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Download exact observer readiness attempt 1
+        id: readiness-download-1
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: observer-ready-1
+      - name: Download exact observer readiness attempt 2
+        id: readiness-download-2
+        if: always() && steps.readiness-download-1.outcome != 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: observer-ready-2
+      - name: Download exact observer readiness attempt 3
+        id: readiness-download-3
+        if: always() && steps.readiness-download-1.outcome != 'success' && steps.readiness-download-2.outcome != 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          path: observer-ready-3
+      - name: Validate exact observer readiness
+        id: validate-readiness
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          ARTIFACT_NAME: mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}
+          DOWNLOAD_OUTCOME_1: ${{ steps.readiness-download-1.outcome }}
+          DOWNLOAD_OUTCOME_2: ${{ steps.readiness-download-2.outcome }}
+          DOWNLOAD_OUTCOME_3: ${{ steps.readiness-download-3.outcome }}
         run: |
-          deadline=$((SECONDS + 300))
-          while (( SECONDS < deadline )); do
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-ready-jobs.json
-            state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-ready-jobs.json)
-            if [[ "$state" == "in_progress" ]] && gh run download "$GITHUB_RUN_ID" --name "mutation-calibration-observer-ready-$GITHUB_RUN_ID" --dir observer-ready 2>/dev/null; then
-              python - <<'PY'
-          import json, os, sys
-          record = json.load(open("observer-ready/observer-readiness.json"))
-          valid = (
-              record.get("schema_version") == "1"
-              and record.get("kind") == "calibration_observer_readiness"
-              and record.get("run_id") == os.environ["GITHUB_RUN_ID"]
-              and record.get("run_attempt") == os.environ["GITHUB_RUN_ATTEMPT"]
-              and record.get("calibration_id") == os.environ["CALIBRATION_ID"]
-              and record.get("stage") == "3"
-              and record.get("ready") is True
-          )
-          sys.exit(0 if valid else 2)
-          PY
-              exit 0
+          observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          download_attempt=0
+          [[ "$DOWNLOAD_OUTCOME_1" == "success" ]] && download_attempt=1
+          [[ "$download_attempt" == 0 && "$DOWNLOAD_OUTCOME_2" == "success" ]] && download_attempt=2
+          [[ "$download_attempt" == 0 && "$DOWNLOAD_OUTCOME_3" == "success" ]] && download_attempt=3
+          provider_error_class=$([[ "$download_attempt" == 0 ]] && printf artifact_download_retries_exhausted || printf none)
+          provider_state=unavailable
+          : > provider-attempts.jsonl
+          for attempt in 1 2 3; do
+            attempted_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-current-jobs.json 2> provider-error.tmp; then
+              provider_state=available
+              printf '{"attempt":%d,"attempted_at":"%s","outcome":"success"}\n' "$attempt" "$attempted_at" >> provider-attempts.jsonl
+              rm -f provider-error.tmp
+              break
             fi
-            rm -rf observer-ready
-            [[ "$state" == "completed" || "$state" == "invalid" ]] && break
-            sleep 15
+            error_class=$(python - <<'PY'
+          from pathlib import Path
+          text = Path("provider-error.tmp").read_text(errors="replace").lower()
+          if any(value in text for value in ("401", "403", "forbidden", "resource not accessible")):
+              print("access_denied")
+          elif any(value in text for value in ("429", "rate limit", "502", "503", "504", "timeout", "timed out")):
+              print("transient_provider_error")
+          elif any(value in text for value in ("404", "not found")):
+              print("provider_resource_unavailable")
+          else:
+              print("unclassified_provider_error")
+          PY
+            )
+            PROVIDER_ATTEMPT="$attempt" ATTEMPTED_AT="$attempted_at" ERROR_CLASS="$error_class" python - <<'PY' >> provider-attempts.jsonl
+          import json, os
+          print(json.dumps({
+              "attempt": int(os.environ["PROVIDER_ATTEMPT"]),
+              "attempted_at": os.environ["ATTEMPTED_AT"],
+              "error_class": os.environ["ERROR_CLASS"], "outcome": "failure",
+          }, sort_keys=True))
+          PY
+            rm -f provider-error.tmp
+            provider_error_class="$error_class"
+            sleep "$attempt"
           done
-          exit 2
+          if [[ "$provider_state" != "available" ]]; then
+            provider_error_class=provider_retries_exhausted
+          fi
+          OBSERVED_AT="$observed_at" PROVIDER_ERROR_CLASS="$provider_error_class" PROVIDER_STATE="$provider_state" DOWNLOAD_ATTEMPT="$download_attempt" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              load_api_jobs_pages, validate_calibration_observer_readiness,
+          )
+
+          def _reject_duplicates(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise ValueError("observer readiness contains duplicate keys")
+                  value[key] = item
+              return value
+
+          result = {
+              "schema_version": "1", "kind": "calibration_initial_admission",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "candidate_sha": os.environ["GITHUB_SHA"],
+              "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
+              "calibration_id": os.environ["CALIBRATION_ID"], "stage": "3",
+              "artifact_name": os.environ["ARTIFACT_NAME"],
+              "observed_at": os.environ["OBSERVED_AT"],
+              "provider_error_class": os.environ["PROVIDER_ERROR_CLASS"],
+              "artifact_download_attempt": int(os.environ["DOWNLOAD_ATTEMPT"]),
+              "provider_attempts": [
+                  json.loads(line) for line in Path("provider-attempts.jsonl").read_text().splitlines()
+              ],
+              "passed": False, "billing_authority": False,
+          }
+          try:
+              if os.environ["DOWNLOAD_ATTEMPT"] == "0":
+                  raise ValueError("observer readiness artifact download did not pass")
+              if os.environ["PROVIDER_STATE"] != "available":
+                  raise ValueError("exact current-attempt provider state is unavailable")
+              record = json.loads(
+                  Path(f'observer-ready-{os.environ["DOWNLOAD_ATTEMPT"]}/observer-readiness.json').read_text(),
+                  object_pairs_hook=lambda pairs: _reject_duplicates(pairs),
+              )
+              producer_jobs = load_api_jobs_pages(
+                  Path(f'observer-ready-{os.environ["DOWNLOAD_ATTEMPT"]}/observer-ready-jobs.json')
+              )
+              current_jobs = load_api_jobs_pages(Path("observer-current-jobs.json"))
+              producer_monitors = [job for job in producer_jobs if job.get("name") == "mutation (monitor calibration budget)"]
+              current_monitors = [job for job in current_jobs if job.get("name") == "mutation (monitor calibration budget)"]
+              if len(producer_monitors) != 1 or producer_monitors[0].get("status") != "in_progress":
+                  raise ValueError("readiness producer did not bind one live monitor")
+              if (
+                  len(current_monitors) != 1 or current_monitors[0].get("status") != "in_progress"
+                  or current_monitors[0].get("id") != producer_monitors[0].get("id")
+              ):
+                  raise ValueError("observer is not live at initial admission")
+              validate_calibration_observer_readiness(
+                  record, repository=os.environ["GITHUB_REPOSITORY"],
+                  run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                  candidate_sha=os.environ["GITHUB_SHA"], workflow_sha=os.environ["GITHUB_WORKFLOW_SHA"],
+                  calibration_id=os.environ["CALIBRATION_ID"], stage="3",
+                  artifact_name=os.environ["ARTIFACT_NAME"], monitor_job_id=current_monitors[0]["id"],
+                  observed_at=os.environ["OBSERVED_AT"],
+              )
+              result["monitor_job_id"] = current_monitors[0]["id"]
+              result["passed"] = True
+          except Exception as exc:
+              result["failure_class"] = type(exc).__name__
+          Path("initial-admission.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          if not result["passed"]:
+              raise SystemExit("initial observer admission did not pass")
+          PY
+      - name: Retain initial admission result
+        id: retain-initial-admission
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-initial-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            initial-admission.json
+            provider-attempts.jsonl
+            observer-current-jobs.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve failed initial admission
+        if: always()
+        env:
+          DOWNLOAD_OUTCOME_1: ${{ steps.readiness-download-1.outcome }}
+          DOWNLOAD_OUTCOME_2: ${{ steps.readiness-download-2.outcome }}
+          DOWNLOAD_OUTCOME_3: ${{ steps.readiness-download-3.outcome }}
+          VALIDATION_OUTCOME: ${{ steps.validate-readiness.outcome }}
+          RETENTION_OUTCOME: ${{ steps.retain-initial-admission.outcome }}
+        run: |
+          test "$DOWNLOAD_OUTCOME_1" = success || test "$DOWNLOAD_OUTCOME_2" = success || test "$DOWNLOAD_OUTCOME_3" = success
+          test "$VALIDATION_OUTCOME" = success
+          test "$RETENTION_OUTCOME" = success
 
   calibration-monitor:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'calibration'
@@ -1385,31 +1613,6 @@ jobs:
         with:
           name: mutation-calibration-launch-${{ github.run_id }}
           path: calibration-launch
-      - name: Establish observer readiness
-        if: github.event.inputs.calibration_stage == '3'
-        env:
-          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
-        run: |
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          record = {
-              "schema_version": "1", "kind": "calibration_observer_readiness",
-              "run_id": os.environ["GITHUB_RUN_ID"],
-              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-              "calibration_id": os.environ["CALIBRATION_ID"],
-              "stage": "3", "ready": True,
-          }
-          Path("observer-readiness.json").write_text(json.dumps(record, indent=2) + "\n")
-          PY
-      - name: Publish observer readiness
-        if: github.event.inputs.calibration_stage == '3'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mutation-calibration-observer-ready-${{ github.run_id }}
-          path: observer-readiness.json
-          if-no-files-found: error
-          retention-days: 90
       - name: Monitor active usage and request bounded cancellation
         id: monitor
         continue-on-error: true
@@ -1482,13 +1685,17 @@ jobs:
           from fettle.staged_preflight import (
               calibration_stage_3_admitted_shards,
               calibration_stage_3_completed_admissions,
-              evaluate_calibration_observer,
+              calibration_stage_3_initial_admission_status,
+              evaluate_calibration_observer, load_api_jobs_pages,
           )
-          pages = json.loads(Path("jobs-monitor.json").read_text())
-          jobs = [job for page in pages for job in page["jobs"]]
+          jobs = load_api_jobs_pages(Path("jobs-monitor.json"))
           contract = json.loads(Path("calibration-observer-contract.json").read_text())
+          initial_admission_status = "not_applicable"
+          if os.environ["CALIBRATION_STAGE"] == "3":
+              initial_admission_status = calibration_stage_3_initial_admission_status(jobs)
           admitted = (
               calibration_stage_3_admitted_shards(contract["expected_shards"], jobs)
+              if initial_admission_status == "success" else []
               if os.environ["CALIBRATION_STAGE"] == "3" else None
           )
           completed_admissions = (
@@ -1510,6 +1717,7 @@ jobs:
               admitted_shards=admitted,
               completed_admissions=completed_admissions,
               route_complete=route_complete,
+              initial_admission_status=initial_admission_status,
           )
           Path("calibration-monitor-lifecycle.json").write_text(json.dumps(result, indent=2) + "\n")
           PY
@@ -1556,12 +1764,25 @@ jobs:
       actions: write
       contents: read
     steps: &stage3_observer_liveness
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
       - name: Require live observer before next batch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-live-jobs.json
-          state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-live-jobs.json)
+          state=$(python - <<'PY'
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+          jobs = load_api_jobs_pages(Path("observer-live-jobs.json"))
+          matches = [job for job in jobs if job.get("name") == "mutation (monitor calibration budget)"]
+          if len(matches) != 1 or not isinstance(matches[0].get("status"), str):
+              raise SystemExit("monitor identity or state is malformed")
+          print(matches[0]["status"])
+          PY
+          )
           if [[ "$state" != "in_progress" ]]; then
             exit 2
           fi
@@ -1576,6 +1797,10 @@ jobs:
       actions: write
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
       - name: Cancel if observer is lost before valid completion
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1583,7 +1808,16 @@ jobs:
           terminal_deadline=0
           while true; do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > observer-watchdog-jobs.json
-            state=$(jq -r '[.[].jobs[] | select(.name == "mutation (monitor calibration budget)") | .status] | if length == 1 then .[0] else "invalid" end' observer-watchdog-jobs.json)
+            state=$(python - <<'PY'
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+          jobs = load_api_jobs_pages(Path("observer-watchdog-jobs.json"))
+          matches = [job for job in jobs if job.get("name") == "mutation (monitor calibration budget)"]
+          if len(matches) != 1 or not isinstance(matches[0].get("status"), str):
+              raise SystemExit("monitor identity or state is malformed")
+          print(matches[0]["status"])
+          PY
+            )
             [[ "$state" == "in_progress" ]] && { sleep 60; continue; }
             if [[ "$state" == "completed" ]]; then
               (( terminal_deadline == 0 )) && terminal_deadline=$((SECONDS + 300))

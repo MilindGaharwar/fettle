@@ -22,6 +22,7 @@ from fettle.result import ResultStatus  # noqa: E402
 from scripts.staged_preflight import (  # noqa: E402
     WAVES,
     calibration_observer_contract,
+    calibration_stage_3_observer_contract,
     combine_accounting,
 )
 
@@ -2061,24 +2062,198 @@ def test_stage_3_observer_readiness_loss_is_fail_closed_without_cancelling_accou
     monitor = jobs["calibration-monitor"]
     watchdog = jobs["calibration-stage-3-observer-watchdog"]
 
-    assert ready["needs"] == ["prepare", "calibration-launch-gate"]
+    producer = jobs["calibration-stage-3-observer-readiness"]
+    assert producer["needs"] == ["prepare", "calibration-launch-gate"]
+    assert ready["needs"] == [
+        "prepare", "calibration-launch-gate", "calibration-stage-3-observer-readiness",
+    ]
+    assert ready["if"].startswith("always() &&")
     assert ready["timeout-minutes"] == 10
     assert jobs["calibration-stage-3-batch-1"]["needs"] == [
         "prepare", "calibration-stage-3-observer-ready",
     ]
-    assert any(step.get("name") == "Establish observer readiness" for step in monitor["steps"])
-    assert any(step.get("name") == "Publish observer readiness" for step in monitor["steps"])
+    assert any(step.get("name") == "Establish observer readiness" for step in producer["steps"])
+    assert any(step.get("name") == "Publish observer readiness" for step in producer["steps"])
+    assert not any("observer readiness" in step.get("name", "").lower() for step in monitor["steps"])
     assert watchdog["needs"] == "calibration-stage-3-observer-ready"
     assert watchdog["timeout-minutes"] == 335
-    watchdog_script = watchdog["steps"][0]["run"]
+    watchdog_script = next(
+        step["run"] for step in watchdog["steps"]
+        if step.get("name") == "Cancel if observer is lost before valid completion"
+    )
     assert "calibration-monitor-lifecycle.json" in watchdog_script
+    assert "load_api_jobs_pages" in watchdog_script
     assert "/actions/runs/$GITHUB_RUN_ID/cancel" not in watchdog_script
+    liveness_script = next(
+        step["run"] for step in jobs["calibration-stage-3-observer-live-2"]["steps"]
+        if step.get("name") == "Require live observer before next batch"
+    )
+    assert "load_api_jobs_pages" in liveness_script
+    assert "observer-live-jobs.json" in liveness_script
     for number in range(2, 8):
         live = jobs[f"calibration-stage-3-observer-live-{number}"]
         batch = jobs[f"calibration-stage-3-batch-{number}"]
         assert live["needs"] == f"calibration-stage-3-admit-{number}"
         assert live["permissions"] == {"actions": "write", "contents": "read"}
         assert f"calibration-stage-3-observer-live-{number}" in batch["needs"]
+
+
+def test_initial_observer_admission_uses_current_run_action_and_retains_visible_failure():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+    ready = jobs["calibration-stage-3-observer-ready"]
+    steps = ready["steps"]
+    downloads = [step for step in steps if step.get("name", "").startswith("Download exact observer readiness attempt")]
+    retain = next(step for step in steps if step.get("name") == "Retain initial admission result")
+    contain = next(step for step in steps if step.get("name") == "Preserve failed initial admission")
+    source = "\n".join(step.get("run", "") for step in steps)
+
+    assert len(downloads) == 3
+    assert all(step["uses"] == "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" for step in downloads)
+    assert all(step["with"]["name"] == "mutation-calibration-observer-ready-${{ github.run_id }}-${{ github.run_attempt }}" for step in downloads)
+    assert downloads[1]["if"] == "always() && steps.readiness-download-1.outcome != 'success'"
+    assert "steps.readiness-download-2.outcome != 'success'" in downloads[2]["if"]
+    assert retain["if"] == "always()"
+    assert contain["if"] == "always()"
+    assert "gh run download" not in source
+    assert "2>/dev/null" not in source
+    assert "validate_calibration_observer_readiness" in source
+    assert "provider_error_class" in source
+    assert "provider_error_detail" not in source
+    assert "provider-attempts.jsonl" in source
+    assert "provider_retries_exhausted" in source
+    assert "access_denied" in source
+    assert "transient_provider_error" in source
+    assert "provider_resource_unavailable" in source
+    assert "artifact_download_retries_exhausted" in source
+    assert "observer-current-jobs.json" in source
+    assert "observer is not live at initial admission" in source
+    assert source.count("load_api_jobs_pages") >= 3
+
+
+def test_monitor_contains_failed_initial_admission_without_waiting_worker_deadline():
+    source = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    assert "calibration_stage_3_initial_admission_status" in source
+    assert "load_api_jobs_pages(Path(\"jobs-monitor.json\"))" in source
+    assert "initial_admission_status=initial_admission_status" in source
+    assert 'initial_admission_status = "not_applicable"' in source
+    assert 'initial_admission_status = calibration_stage_3_initial_admission_status(jobs)' in source
+
+
+def test_monitor_contains_terminal_readiness_route_without_initial_admission(tmp_path):
+    source = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    assert "calibration_stage_3_initial_admission_status(jobs)" in source
+    assert '[[ "$action" == "cancel" ]] && exit 2' in source
+
+    selected = [WAVES["wave-3"][0]]
+    contract = calibration_stage_3_observer_contract(selected)
+    jobs = [{
+        "name": "mutation (publish stage 3 observer readiness)",
+        "status": "completed", "conclusion": "success",
+    }]
+    from scripts.staged_preflight import (
+        calibration_stage_3_initial_admission_status,
+        evaluate_calibration_observer,
+    )
+
+    status = calibration_stage_3_initial_admission_status(jobs)
+    result = evaluate_calibration_observer(
+        contract, jobs, elapsed_seconds=60, budget_passed=True,
+        admitted_shards=[], initial_admission_status=status,
+    )
+
+    assert status == "failure"
+    assert result["action"] == "cancel"
+    assert result["reason"] == "initial stage 3 admission failed"
+
+
+def test_actual_readiness_scripts_emit_and_validate_current_attempt_payload(tmp_path):
+    producer = _workflow_step_script(
+        "calibration-stage-3-observer-readiness", "Establish observer readiness",
+    )
+    consumer = _workflow_step_script(
+        "calibration-stage-3-observer-ready", "Validate exact observer readiness",
+    )
+    monitor = {
+        "id": 91, "name": "mutation (monitor calibration budget)",
+        "status": "in_progress", "conclusion": None,
+    }
+    pages = [{"total_count": 1, "jobs": [monitor]}]
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    jobs_path = provider / "jobs.json"
+    jobs_path.write_text(json.dumps(pages))
+    gh = provider / "gh"
+    gh.write_text(f"#!/bin/sh\ncat '{jobs_path}'\n")
+    gh.chmod(0o755)
+    candidate = "a" * 40
+    env = {
+        **os.environ, "PATH": f"{provider}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": candidate,
+        "GITHUB_WORKFLOW_SHA": candidate, "CALIBRATION_ID": "cal-readback",
+        "ARTIFACT_NAME": "mutation-calibration-observer-ready-700-2",
+    }
+
+    produced = _run_actions_bash(producer, cwd=tmp_path, env=env)
+    assert produced.returncode == 0, produced.stderr
+    observer_ready = tmp_path / "observer-ready-1"
+    observer_ready.mkdir()
+    shutil.copy(tmp_path / "observer-readiness.json", observer_ready)
+    shutil.copy(tmp_path / "observer-ready-jobs.json", observer_ready)
+
+    validated = _run_actions_bash(consumer, cwd=tmp_path, env={
+        **env, "DOWNLOAD_OUTCOME_1": "success",
+        "DOWNLOAD_OUTCOME_2": "skipped", "DOWNLOAD_OUTCOME_3": "skipped",
+    })
+
+    assert validated.returncode == 0, validated.stderr
+    readiness = json.loads((tmp_path / "observer-readiness.json").read_text())
+    admission = json.loads((tmp_path / "initial-admission.json").read_text())
+    assert readiness["monitor_job_id"] == 91
+    assert readiness["artifact_name"] == env["ARTIFACT_NAME"]
+    assert admission["passed"] is True
+    assert admission["artifact_download_attempt"] == 1
+    assert admission["monitor_job_id"] == 91
+    assert admission["provider_attempts"][0]["outcome"] == "success"
+
+
+def test_actual_initial_admission_script_classifies_exhausted_provider_errors(tmp_path):
+    consumer = _workflow_step_script(
+        "calibration-stage-3-observer-ready", "Validate exact observer readiness",
+    )
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    gh = provider / "gh"
+    gh.write_text("#!/bin/sh\necho 'HTTP 503 signed_url=redacted' >&2\nexit 1\n")
+    gh.chmod(0o755)
+    candidate = "a" * 40
+    result = _run_actions_bash(consumer, cwd=tmp_path, env={
+        **os.environ, "PATH": f"{provider}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": candidate,
+        "GITHUB_WORKFLOW_SHA": candidate, "CALIBRATION_ID": "cal-readback",
+        "ARTIFACT_NAME": "mutation-calibration-observer-ready-700-2",
+        "DOWNLOAD_OUTCOME_1": "failure", "DOWNLOAD_OUTCOME_2": "failure",
+        "DOWNLOAD_OUTCOME_3": "failure",
+    })
+
+    assert result.returncode != 0
+    admission = json.loads((tmp_path / "initial-admission.json").read_text())
+    attempts = admission["provider_attempts"]
+    assert admission["passed"] is False
+    assert admission["provider_error_class"] == "provider_retries_exhausted"
+    assert admission["artifact_download_attempt"] == 0
+    assert [attempt["error_class"] for attempt in attempts] == [
+        "transient_provider_error", "transient_provider_error", "transient_provider_error",
+    ]
+    assert "signed_url" not in (tmp_path / "provider-attempts.jsonl").read_text()
+    assert not (tmp_path / "provider-error.tmp").exists()
 
 
 def test_stage_3_monitor_accounts_support_costs_and_validates_floor_provenance():
@@ -2436,6 +2611,66 @@ def test_live_retention_probe_contains_no_mutation_execution_command():
     assert "fettle mutation" not in scripts
     assert "fettle.mutation_test" not in scripts
     assert "mutmut" not in scripts
+
+
+def test_readback_probe_is_synthetic_bounded_and_uses_production_readiness_contract():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-readback-probe.yml").read_text()
+    )
+    scripts = "\n".join(
+        step.get("run", "") for job in workflow["jobs"].values()
+        for step in job["steps"]
+    )
+
+    assert set(workflow["jobs"]) == {"monitor", "producer", "admission"}
+    assert workflow["run-name"] == "Calibration readback probe ${{ inputs.probe_id }}"
+    assert workflow["concurrency"] == {
+        "group": "calibration-readback-probe-${{ inputs.probe_id }}",
+        "cancel-in-progress": False,
+    }
+    assert all(job["timeout-minutes"] == 10 for job in workflow["jobs"].values())
+    assert "build_calibration_observer_readiness" in scripts
+    assert "validate_calibration_observer_readiness" in scripts
+    assert scripts.count("load_api_jobs_pages") >= 3
+    assert scripts.count("from fettle.staged_preflight import load_api_workflow_run_pages") == 2
+    assert scripts.count("probe_id is reused or its provider identity is indeterminate") == 2
+    assert "?event=workflow_dispatch" not in scripts
+    assert scripts.count('run.get("event") == "workflow_dispatch"') == 2
+    assert scripts.count("probe_only=True") >= 3
+    assert "current-jobs.json" in scripts
+    assert "synthetic readiness contains duplicate keys" in scripts
+    assert 'current_monitors[0].get("status") != "in_progress"' in scripts
+    assert "forced_calibration_identity_mismatch" in scripts
+    assert "forced calibration identity mismatch unexpectedly passed" in scripts
+    assert "failed-initial-admission" in scripts
+    assert "probe_only" in scripts
+    assert "billing_authority" in scripts
+    assert scripts.count('GITHUB_WORKFLOW_SHA" != "$CANDIDATE_SHA') == 2
+    assert scripts.count("2> provider-error.tmp") >= 2
+    assert scripts.count("rm -f provider-error.tmp") >= 2
+    assert "fettle mutation" not in scripts
+    assert "fettle.mutation_test" not in scripts
+    assert "mutmut" not in scripts
+
+
+def test_readiness_producers_classify_provider_errors_without_raw_stderr_retention():
+    production = _workflow_step_script(
+        "calibration-stage-3-observer-readiness", "Establish observer readiness",
+    )
+    probe = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/calibration-readback-probe.yml").read_text()
+    )
+    probe_producer = next(
+        step["run"] for step in probe["jobs"]["producer"]["steps"]
+        if step.get("name") == "Establish synthetic observer readiness"
+    )
+
+    for source in (production, probe_producer):
+        assert "2> provider-error.tmp" in source
+        assert "provider_error_class=access_denied" in source
+        assert "provider_error_class=transient_provider_error" in source
+        assert "provider_error_class=provider_resource_unavailable" in source
+        assert "rm -f provider-error.tmp" in source
 
 
 def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound():
