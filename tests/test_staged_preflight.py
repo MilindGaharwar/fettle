@@ -1984,6 +1984,64 @@ def test_accounting_does_not_exclude_started_job_with_missing_execution_metadata
         account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
 
 
+def test_accounting_treats_provider_unassigned_runner_sentinels_as_acquisition(tmp_path):
+    job = _job(
+        1, status="queued", conclusion=None, start="2026-10-06T01:00:00Z",
+        end=None, runner_id=0, steps=[],
+    )
+    job.update({"runner_name": "", "runner_group_id": 0, "runner_group_name": ""})
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    accounting = account_runner_minutes(
+        path, datetime(2026, 10, 6, 1, 0, 36, tzinfo=UTC),
+        expected_run_id="7", expected_run_attempt="1", job_timeout_minutes=35,
+    )
+    result = evaluate_calibration_budget(
+        accounting, ceiling=3600, cancellation_reserve=1200,
+    )
+
+    assert accounting["estimated_runner_minutes"] == 0.6
+    assert accounting["included_jobs"][0]["runner_id"] is None
+    assert accounting["included_jobs"][0]["execution_evidence"] == "absent"
+    assert accounting["included_jobs"][0]["basis"] == (
+        "queued acquisition exposure bounded from dispatch through observation"
+    )
+    assert result["passed"] is True
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"runner_id": False, "runner_name": "", "runner_group_id": False,
+         "runner_group_name": ""},
+        {"runner_id": 0.0, "runner_name": "", "runner_group_id": 0.0,
+         "runner_group_name": ""},
+        {"runner_id": 0, "runner_name": "runner", "runner_group_id": 0,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": 10, "runner_name": "", "runner_group_id": 0,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": "10", "runner_name": "runner", "runner_group_id": 0,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": 10, "runner_name": "runner", "runner_group_id": True,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": 10, "runner_name": "runner", "runner_group_id": -1,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": 10, "runner_name": "runner", "runner_group_id": 0,
+         "runner_group_name": ""},
+    ],
+)
+def test_accounting_rejects_malformed_runner_sentinel_variants(tmp_path, identity):
+    job = _job(1, status="queued", conclusion=None, end=None, steps=[])
+    job.update(identity)
+    path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="runner identity is malformed"):
+        account_runner_minutes(
+            path, datetime(2026, 10, 6, 1, 3, tzinfo=UTC),
+            expected_run_id="7", expected_run_attempt="1",
+        )
+
+
 @pytest.mark.parametrize(
     "job",
     [
@@ -2811,6 +2869,24 @@ def test_sparse_continuation_proves_skipped_shard_never_acquired_runner(tmp_path
     assert result["shards"]["0"]["state"] == "never_started"
 
 
+def test_sparse_continuation_treats_exact_provider_sentinel_as_never_started(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="skipped", runner_id=0, steps=[])
+    job.update({
+        "name": "mutation (full shard 0, advisory)",
+        "runner_name": "", "runner_group_id": 0, "runner_group_name": "",
+    })
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    result = plan_calibration_continuation(
+        _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+        tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+        "f" * 40, "1",
+    )
+
+    assert result["shards"]["0"]["state"] == "never_started"
+
+
 def test_sparse_continuation_rejects_cancelled_no_runner_as_indeterminate(tmp_path):
     manifests = [{"shard_index": 0, "digest": "a" * 64}]
     job = _job(1, run_id=37, conclusion="cancelled", runner_id=None, steps=[])
@@ -2818,6 +2894,78 @@ def test_sparse_continuation_rejects_cancelled_no_runner_as_indeterminate(tmp_pa
     jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
 
     with pytest.raises(ValueError, match="indeterminate provenance"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_rejects_cancelled_provider_sentinel_as_indeterminate(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="cancelled", runner_id=0, steps=[])
+    job.update({
+        "name": "mutation (full shard 0, advisory)",
+        "runner_name": "", "runner_group_id": 0, "runner_group_name": "",
+    })
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="indeterminate provenance"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+def test_sparse_continuation_rejects_sentinel_as_checkpoint_only_authority(tmp_path):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="cancelled", runner_id=0, steps=[])
+    job.update({
+        "name": "mutation (full shard 0, advisory)",
+        "runner_name": "", "runner_group_id": 0, "runner_group_name": "",
+    })
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+    checkpoint_dir = tmp_path / "checkpoints" / "artifact"
+    report_dir = tmp_path / "reports" / "artifact"
+    checkpoint_dir.mkdir(parents=True)
+    report_dir.mkdir(parents=True)
+    checkpoint_dir.joinpath("mutation-checkpoint.json").write_text(json.dumps({
+        "schema_version": "1", "calibration_id": "calibration-a",
+        "identity": {
+            "revision": "f" * 40, "preflight_digest": "e" * 64,
+            "manifest_digest": "a" * 64, "corpus_digest": "d" * 64,
+            "environment_digest": "c" * 64,
+        }, "outcomes": {}, "attempts": [], "status": "incomplete", "pending": 1,
+    }))
+    report_dir.joinpath("mutation-report.json").write_bytes(b"")
+
+    with pytest.raises(ValueError, match="matching retained report"):
+        plan_calibration_continuation(
+            _calibration_run_file(tmp_path), jobs_path, tmp_path / "checkpoints",
+            tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",
+            "f" * 40, "1",
+        )
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"runner_id": False, "runner_name": "", "runner_group_id": False,
+         "runner_group_name": ""},
+        {"runner_id": 10, "runner_name": "runner", "runner_group_id": -1,
+         "runner_group_name": "GitHub Actions"},
+        {"runner_id": 10, "runner_name": "runner", "runner_group_id": 0,
+         "runner_group_name": ""},
+    ],
+)
+def test_sparse_continuation_rejects_malformed_runner_identity(tmp_path, identity):
+    manifests = [{"shard_index": 0, "digest": "a" * 64}]
+    job = _job(1, run_id=37, conclusion="skipped", runner_id=None, steps=[])
+    job.update({"name": "mutation (full shard 0, advisory)", **identity})
+    jobs_path = _jobs_file(tmp_path, [{"total_count": 1, "jobs": [job]}])
+
+    with pytest.raises(ValueError, match="runner identity is malformed"):
         plan_calibration_continuation(
             _calibration_run_file(tmp_path), jobs_path, tmp_path / "missing",
             tmp_path / "reports", manifests, [0], "calibration-a", "37", "1",

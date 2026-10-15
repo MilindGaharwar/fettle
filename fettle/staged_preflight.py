@@ -1929,6 +1929,47 @@ def _parse_time(value: object, field: str) -> datetime:
     return parsed
 
 
+_RUNNER_IDENTITY_FIELDS = (
+    "runner_id", "runner_name", "runner_group_id", "runner_group_name",
+)
+
+
+def _classify_runner_identity(job: dict) -> tuple[dict, str]:
+    """Return normalized provider runner identity and its evidence classification."""
+    if any(field not in job for field in _RUNNER_IDENTITY_FIELDS):
+        raise ValueError(f"job {job.get('id')} runner identity is incomplete")
+    identity = {field: job[field] for field in _RUNNER_IDENTITY_FIELDS}
+    if (
+        type(identity["runner_id"]) is int and identity["runner_id"] == 0
+        and type(identity["runner_name"]) is str and identity["runner_name"] == ""
+        and type(identity["runner_group_id"]) is int and identity["runner_group_id"] == 0
+        and type(identity["runner_group_name"]) is str
+        and identity["runner_group_name"] == ""
+    ):
+        return dict.fromkeys(_RUNNER_IDENTITY_FIELDS), "absent"
+    if all(value is None for value in identity.values()):
+        return identity, "absent"
+    runner_id = identity["runner_id"]
+    runner_name = identity["runner_name"]
+    group_id = identity["runner_group_id"]
+    group_name = identity["runner_group_name"]
+    if (
+        runner_id is not None and (type(runner_id) is not int or runner_id < 1)
+        or runner_name is not None and (type(runner_name) is not str or not runner_name)
+        or group_id is not None and (type(group_id) is not int or group_id < 0)
+        or group_name is not None and (type(group_name) is not str or not group_name)
+    ):
+        raise ValueError(f"job {job.get('id')} runner identity is malformed")
+    runner_pair = (runner_id is not None, runner_name is not None)
+    group_pair = (group_id is not None, group_name is not None)
+    classification = (
+        "partial"
+        if len(set(runner_pair)) != 1 or len(set(group_pair)) != 1 or not all(runner_pair)
+        else "assigned"
+    )
+    return identity, classification
+
+
 def account_runner_minutes(
     jobs_path: Path,
     now: datetime | None = None,
@@ -1989,19 +2030,12 @@ def account_runner_minutes(
         completed = job.get("completed_at")
         status = job.get("status")
         conclusion = job.get("conclusion")
-        runner_fields = ("runner_id", "runner_name", "runner_group_id", "runner_group_name")
-        if any(field not in job for field in runner_fields):
-            raise ValueError(f"job {job['id']} runner identity is incomplete")
-        runner_identity = {field: job[field] for field in runner_fields}
+        runner_identity, runner_classification = _classify_runner_identity(job)
         runner_id = runner_identity["runner_id"]
-        runner_pair = [runner_identity[field] is not None for field in ("runner_id", "runner_name")]
-        group_pair = [
-            runner_identity[field] is not None for field in ("runner_group_id", "runner_group_name")
-        ]
-        partial_runner_identity = len(set(runner_pair)) != 1 or len(set(group_pair)) != 1
+        partial_runner_identity = runner_classification == "partial"
         if partial_runner_identity and status == "completed":
             raise ValueError(f"job {job['id']} runner identity is partial")
-        has_runner_identity = any(runner_pair) or any(group_pair)
+        has_runner_identity = runner_classification != "absent"
         steps = job.get("steps")
         if not isinstance(steps, list):
             raise ValueError(f"job {job['id']} steps are missing or malformed")
@@ -3068,9 +3102,8 @@ def plan_calibration_continuation(
     for index in selected_shards:
         job = jobs_by_shard[index]
         checkpoint_entry = checkpoint_by_shard.get(index)
-        has_runner = any(job.get(field) is not None for field in (
-            "runner_id", "runner_name", "runner_group_id", "runner_group_name",
-        ))
+        _, runner_classification = _classify_runner_identity(job)
+        has_runner = runner_classification != "absent"
         never_started = (not has_runner and not job.get("steps") and (
             job.get("status") in {"queued", "requested", "pending", "waiting"}
             or job.get("status") == "completed"
