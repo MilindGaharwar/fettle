@@ -22,6 +22,7 @@ import threading
 import time
 import unicodedata
 import uuid
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -66,6 +67,8 @@ _MAX_SHOW_BYTES = 50 * 1024 * 1024
 _PARTITION_SCHEMA_VERSION = "1"
 _MUTATION_CACHE_SCHEMA_VERSION = "1"
 _CHECKPOINT_SCHEMA_VERSION = "1"
+_CAPACITY_PLAN_SCHEMA_VERSION = "1"
+_CAPACITY_RESULT_SCHEMA_VERSION = "1"
 _MUTATION_WATCH_NAMES = (
     ".fettle.toml", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini",
     "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "requirements-dev.txt",
@@ -1211,6 +1214,549 @@ def report_from_mutation_checkpoint(corpus: list[dict], checkpoint: dict) -> dic
     }
 
 
+def _capacity_unit_candidates(preflight: dict, manifests: list[dict]) -> list[dict]:
+    """Map a complete canonical corpus to nonempty executor-compatible ranges."""
+    corpus = preflight.get("corpus")
+    if not isinstance(corpus, list):
+        raise ValueError("capacity validation preflight corpus is malformed")
+    by_shard: dict[int, list[dict]] = {}
+    for record in corpus:
+        if not isinstance(record, dict) or not isinstance(record.get("shard_index"), int):
+            raise ValueError("capacity validation corpus record is malformed")
+        by_shard.setdefault(record["shard_index"], []).append(record)
+    candidates = []
+    seen: set[str] = set()
+    for manifest in manifests:
+        shard = manifest["shard_index"]
+        shard_records = by_shard.get(shard, [])
+        for line_range in manifest["ranges"]:
+            records = sorted(
+                (
+                    record for record in shard_records
+                    if record.get("file") == line_range["file"]
+                    and line_range["start"] <= record.get("line", 0) <= line_range["end"]
+                ),
+                key=lambda record: record["fingerprint"],
+            )
+            if not records:
+                continue
+            groups = {tuple(record.get("mapped_tests", [])) for record in records}
+            if len(groups) != 1 or not next(iter(groups)):
+                raise ValueError("capacity validation range has inconsistent mapped tests")
+            fingerprints = [record["fingerprint"] for record in records]
+            if any(not isinstance(item, str) or item in seen for item in fingerprints):
+                raise ValueError("capacity validation range fingerprints are duplicated or malformed")
+            seen.update(fingerprints)
+            mapped_tests = list(next(iter(groups)))
+            candidates.append({
+                "source_shard_index": shard,
+                "manifest_digest": manifest["digest"],
+                "range": dict(line_range),
+                "mapped_tests": mapped_tests,
+                "mapped_test_group_digest": _canonical_digest(mapped_tests),
+                "fingerprints": fingerprints,
+            })
+    declared = preflight.get("fingerprints")
+    if not isinstance(declared, list) or seen != set(declared):
+        raise ValueError("capacity validation ranges do not exactly cover the canonical corpus")
+    return candidates
+
+
+def build_capacity_validation_plan(
+    root: str,
+    cfg: dict,
+    preflight: dict,
+    manifests: list[dict],
+    *,
+    experiment_id: str,
+    revision: str,
+    observed_group_digests: set[str],
+    historical_source: dict,
+    prediction_seconds: dict[str, float],
+) -> dict:
+    """Freeze six mapped-test strata with deterministic low/high range units."""
+    if re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}", experiment_id) is None:
+        raise ValueError("capacity validation experiment ID is malformed")
+    if (
+        preflight.get("kind") != "capacity_validation_corpus"
+        or preflight.get("status") != "enumerated"
+        or preflight.get("passed") is not False
+        or any(preflight.get(field) is not False for field in (
+            "qualification_eligible", "billing_authority", "authoritative_predecessor",
+        ))
+    ):
+        raise ValueError("capacity validation requires a completed canonical enumeration")
+    if preflight.get("revision") != revision or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("capacity validation candidate revision differs")
+    manifests = sorted(manifests, key=lambda item: item.get("shard_index", -1))
+    if [item.get("shard_index") for item in manifests] != list(range(len(manifests))):
+        raise ValueError("capacity validation manifests are incomplete")
+    manifest_digests = [item["digest"] for item in manifests]
+    if preflight.get("manifest_digests") != manifest_digests:
+        raise ValueError("capacity validation enumeration is not bound to the manifests")
+    corpus = preflight.get("corpus")
+    fingerprints = preflight.get("fingerprints")
+    if (
+        preflight.get("shard_count") != len(manifests)
+        or not isinstance(corpus, list)
+        or not isinstance(fingerprints, list)
+        or fingerprints != sorted(fingerprints)
+        or len(fingerprints) != len(set(fingerprints))
+        or preflight.get("corpus_digest") != _canonical_digest(corpus)
+        or [record.get("fingerprint") for record in corpus if isinstance(record, dict)] != fingerprints
+    ):
+        raise ValueError("capacity validation canonical enumeration identity is malformed")
+    required_predictions = {"optimistic", "central", "conservative", "stress"}
+    if set(prediction_seconds) != required_predictions or any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 600
+        for value in prediction_seconds.values()
+    ):
+        raise ValueError("capacity validation prediction assumptions are malformed")
+    if any(re.fullmatch(r"[0-9a-f]{64}", item) is None for item in observed_group_digests):
+        raise ValueError("capacity validation observed group identity is malformed")
+    historical_required = {
+        "candidate_sha", "campaign_id", "environment_digest", "engine_version",
+        "evidence_role", "reusable_for_candidate",
+    }
+    if (
+        set(historical_source) != historical_required
+        or re.fullmatch(r"[0-9a-f]{40}", str(historical_source.get("candidate_sha", ""))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("environment_digest", ""))) is None
+        or historical_source.get("campaign_id") != "cal-92984b1-20261014"
+        or historical_source.get("engine_version") != MUTMUT_VERSION
+        or historical_source.get("evidence_role") != "modeling_only_terminal_non_pass"
+        or historical_source.get("reusable_for_candidate") is not False
+        or historical_source.get("candidate_sha") == revision
+    ):
+        raise ValueError("capacity validation historical source provenance is malformed")
+
+    candidates = _capacity_unit_candidates(preflight, manifests)
+    grouped: dict[str, list[dict]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate["mapped_test_group_digest"], []).append(candidate)
+    eligible = {digest: units for digest, units in grouped.items() if len(units) >= 2}
+    ordered_groups = sorted(eligible, key=lambda digest: (digest in observed_group_digests, digest))
+    if len(ordered_groups) < 6:
+        raise ValueError("capacity validation requires six mapped-test groups with two range units each")
+
+    selected = []
+    for digest in ordered_groups[:6]:
+        units = sorted(
+            eligible[digest],
+            key=lambda unit: (
+                len(unit["fingerprints"]), unit["range"]["file"],
+                unit["range"]["start"], unit["source_shard_index"],
+            ),
+        )
+        choices = [units[0], units[-1]]
+        if choices[0]["range"] == choices[1]["range"]:
+            raise ValueError("capacity validation low/high units are not distinct")
+        for cost_class, unit in zip(("low", "high"), choices, strict=True):
+            count = len(unit["fingerprints"])
+            mapping = _mapped_tests(root, [unit["range"]["file"]], cfg.get("test_mappings", {}))
+            if mapping != {unit["range"]["file"]: unit["mapped_tests"]}:
+                raise ValueError("capacity validation selection test mapping differs")
+            environment = _runtime_cache_identity(root, list(mapping), mapping, cfg)
+            if environment is None:
+                raise ValueError("capacity validation selection environment identity is incomplete")
+            selected.append({
+                "unit_index": len(selected),
+                "cost_class": cost_class,
+                "historically_observed_group": digest in observed_group_digests,
+                **unit,
+                "environment_digest": _checkpoint_environment_digest(environment),
+                "predicted_minutes": {
+                    name: round(count * seconds / 60, 6)
+                    for name, seconds in sorted(prediction_seconds.items())
+                },
+            })
+    selected_fingerprints = [item for unit in selected for item in unit["fingerprints"]]
+    if len(selected) != 12 or len(selected_fingerprints) != len(set(selected_fingerprints)):
+        raise ValueError("capacity validation selection is incomplete or duplicated")
+    plan = {
+        "schema_version": _CAPACITY_PLAN_SCHEMA_VERSION,
+        "kind": "capacity_validation_plan",
+        "status": "completed",
+        "passed": False,
+        "qualification_eligible": False,
+        "billing_authority": False,
+        "authoritative_predecessor": False,
+        "experiment_id": experiment_id,
+        "revision": revision,
+        "preflight_digest": _canonical_digest(preflight),
+        "preflight_corpus_digest": preflight["corpus_digest"],
+        "manifest_digests": manifest_digests,
+        "selection_policy": "six-groups-unobserved-first-low-high-fingerprint-count-v1",
+        "prediction_seconds_per_unobserved_fingerprint": dict(sorted(prediction_seconds.items())),
+        "historical_observed_group_digests": sorted(observed_group_digests),
+        "historical_source": historical_source,
+        "coverage": {
+            "canonical_fingerprints": len(preflight["fingerprints"]),
+            "mapped_test_groups": len(grouped),
+            "eligible_groups": len(eligible),
+            "selected_groups": 6,
+            "selected_units": 12,
+            "selected_fingerprints": len(selected_fingerprints),
+            "supports_corpus_wide_p95": False,
+        },
+        "units": selected,
+    }
+    plan["digest"] = _canonical_digest(plan)
+    return plan
+
+
+def load_capacity_validation_plan(path: Path) -> dict:
+    """Load a strict non-authoritative sample plan."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "schema_version", "kind", "status", "passed", "qualification_eligible",
+        "billing_authority", "authoritative_predecessor", "experiment_id", "revision",
+        "preflight_digest", "preflight_corpus_digest", "manifest_digests",
+        "selection_policy", "prediction_seconds_per_unobserved_fingerprint",
+        "historical_observed_group_digests", "coverage", "units", "digest",
+        "historical_source",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("capacity validation plan has an unsupported schema")
+    if (
+        value.get("schema_version") != _CAPACITY_PLAN_SCHEMA_VERSION
+        or value.get("kind") != "capacity_validation_plan"
+        or value.get("status") != "completed"
+        or value.get("passed") is not False
+        or any(value.get(field) is not False for field in (
+            "qualification_eligible", "billing_authority", "authoritative_predecessor",
+        ))
+        or len(value.get("units", [])) != 12
+    ):
+        raise ValueError("capacity validation plan is not non-authoritative and complete")
+    payload = {key: item for key, item in value.items() if key != "digest"}
+    if value["digest"] != _canonical_digest(payload):
+        raise ValueError("capacity validation plan digest differs")
+    indexes = [unit.get("unit_index") for unit in value["units"] if isinstance(unit, dict)]
+    fingerprints = [
+        fingerprint for unit in value["units"] if isinstance(unit, dict)
+        for fingerprint in unit.get("fingerprints", [])
+    ]
+    if indexes != list(range(12)) or len(fingerprints) != len(set(fingerprints)):
+        raise ValueError("capacity validation plan units are incomplete or duplicated")
+    return value
+
+
+def validate_capacity_validation_package(
+    root: str,
+    cfg: dict,
+    directory: Path,
+    *,
+    revision: str,
+    experiment_id: str,
+    plan_file_sha256: str,
+) -> dict:
+    """Validate every frozen preparation input before measurement fan-out."""
+    plan_path = directory / "capacity-validation-plan.json"
+    corpus_path = directory / "capacity-validation-corpus.json"
+    manifest_dir = directory / "capacity-manifests"
+    if hashlib.sha256(plan_path.read_bytes()).hexdigest() != plan_file_sha256:
+        raise ValueError("capacity validation plan file SHA-256 differs")
+    plan = load_capacity_validation_plan(plan_path)
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    manifests = [
+        load_partition_manifest(path)
+        for path in sorted(
+            manifest_dir.glob("partition-*.json"),
+            key=lambda path: int(path.stem.split("-")[1]),
+        )
+    ]
+    if plan["revision"] != revision or plan["experiment_id"] != experiment_id:
+        raise ValueError("capacity validation plan dispatch identity differs")
+    if _canonical_digest(corpus) != plan["preflight_digest"]:
+        raise ValueError("capacity validation corpus digest differs")
+    if corpus.get("revision") != revision or corpus.get("corpus_digest") != plan["preflight_corpus_digest"]:
+        raise ValueError("capacity validation corpus identity differs")
+    if [manifest["digest"] for manifest in manifests] != plan["manifest_digests"]:
+        raise ValueError("capacity validation manifest identity differs")
+    if len(manifests) != corpus.get("shard_count"):
+        raise ValueError("capacity validation manifests are incomplete")
+    rebuilt = build_capacity_validation_plan(
+        root, cfg, corpus, manifests,
+        experiment_id=experiment_id, revision=revision,
+        observed_group_digests=set(plan["historical_observed_group_digests"]),
+        historical_source=plan["historical_source"],
+        prediction_seconds=plan["prediction_seconds_per_unobserved_fingerprint"],
+    )
+    if rebuilt != plan:
+        raise ValueError("capacity validation plan does not reproduce from its frozen inputs")
+    return plan
+
+
+def validate_capacity_validation_results(
+    reports: list[dict],
+    expected_indexes: list[int],
+    *,
+    revision: str,
+    experiment_id: str,
+    plan_digest: str,
+) -> None:
+    """Require complete, distinct, digest-valid unit results before later admission."""
+    if len(reports) != len(expected_indexes):
+        raise ValueError("capacity validation result count differs")
+    if sorted(report.get("unit_index") for report in reports if isinstance(report, dict)) != expected_indexes:
+        raise ValueError("capacity validation result indexes differ")
+    required = {
+        "schema_version", "kind", "status", "passed", "qualification_eligible",
+        "billing_authority", "authoritative_predecessor", "experiment_id", "revision",
+        "plan_digest", "unit_index", "unit", "environment_digest", "outcomes",
+        "attempts", "pending", "elapsed_ms", "source_restoration", "digest",
+    }
+    for report in reports:
+        if (
+            set(report) != required
+            or report.get("schema_version") != _CAPACITY_RESULT_SCHEMA_VERSION
+            or report.get("kind") != "capacity_validation_unit_result"
+            or report.get("status") != "completed"
+            or report.get("pending") != 0
+            or any(report.get(field) is not False for field in (
+                "passed", "qualification_eligible", "billing_authority", "authoritative_predecessor",
+            ))
+            or report.get("revision") != revision
+            or report.get("experiment_id") != experiment_id
+            or report.get("plan_digest") != plan_digest
+            or report.get("source_restoration", {}).get("restored") is not True
+        ):
+            raise ValueError("capacity validation result is incomplete, stale, or authoritative")
+        payload = {key: value for key, value in report.items() if key != "digest"}
+        if report["digest"] != _canonical_digest(payload):
+            raise ValueError("capacity validation result digest differs")
+        fingerprints = report["unit"].get("fingerprints", [])
+        if set(report["outcomes"]) != set(fingerprints) or len(fingerprints) != len(set(fingerprints)):
+            raise ValueError("capacity validation result coverage differs")
+
+
+def reconcile_capacity_provider_accounting(
+    run: dict,
+    job_pages: list[dict],
+    source: dict,
+    *,
+    repository: str,
+    revision: str,
+    experiment_id: str,
+    execution_run_id: str,
+    preparation_run_id: str,
+    plan_file_sha256: str,
+) -> dict:
+    """Reconcile exact terminal provider records into separate non-authoritative ledgers."""
+    if (
+        not isinstance(run, dict) or not isinstance(source, dict)
+        or str(run.get("id")) != execution_run_id
+        or str(run.get("run_attempt")) != "1"
+        or run.get("head_sha") != revision
+        or run.get("event") != "workflow_dispatch"
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+        or run.get("path") != ".github/workflows/mutation.yml"
+        or source.get("kind") != "capacity_validation_execution_source"
+        or source.get("revision") != revision
+        or str(source.get("run_id")) != execution_run_id
+        or str(source.get("run_attempt")) != "1"
+        or source.get("experiment_id") != experiment_id
+        or str(source.get("preparation_run_id")) != preparation_run_id
+        or source.get("plan_file_sha256") != plan_file_sha256
+        or source.get("workflow_sha") != revision
+        or not str(source.get("workflow_ref", "")).startswith(
+            repository + "/.github/workflows/mutation.yml@"
+        )
+    ):
+        raise ValueError("capacity execution provider identity is nonterminal or stale")
+    if not job_pages or any(not isinstance(page, dict) for page in job_pages):
+        raise ValueError("capacity provider job pages are unavailable")
+    total_counts = {page.get("total_count") for page in job_pages}
+    jobs = [job for page in job_pages for job in page.get("jobs", [])]
+    job_ids = [job.get("id") for job in jobs if isinstance(job, dict)]
+    if (
+        len(total_counts) != 1 or not isinstance(next(iter(total_counts)), int)
+        or next(iter(total_counts)) != len(jobs)
+        or len(job_ids) != len(jobs) or len(job_ids) != len(set(job_ids))
+        or any(
+            not isinstance(job_id, int) or isinstance(job_id, bool) or job_id < 1
+            for job_id in job_ids
+        )
+    ):
+        raise ValueError("capacity provider job pagination is incomplete or duplicated")
+
+    def record(job: dict) -> dict:
+        started = job.get("started_at")
+        completed = job.get("completed_at")
+        if not isinstance(started, str) or not isinstance(completed, str):
+            raise ValueError("provider job timing is unavailable")
+        try:
+            seconds = round((
+                datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                - datetime.fromisoformat(started.replace("Z", "+00:00"))
+            ).total_seconds())
+        except ValueError as exc:
+            raise ValueError("provider job timing is malformed") from exc
+        if seconds < 0:
+            raise ValueError("provider job timing is contradictory")
+        return {
+            "job_id": job.get("id"), "name": job.get("name"),
+            "status": job.get("status"), "conclusion": job.get("conclusion"),
+            "started_at": started, "completed_at": completed,
+            "elapsed_seconds": seconds, "charged_minutes_ceiling": math.ceil(seconds / 60),
+        }
+
+    worker = []
+    support = []
+    for job in jobs:
+        name = str(job.get("name", ""))
+        if re.search(r"capacity validation unit [0-9]+$", name):
+            worker.append(record(job))
+        elif "capacity validation" in name:
+            support.append(record(job))
+    indexes = [int(re.search(r"([0-9]+)$", item["name"]).group(1)) for item in worker]
+    expected_support = {
+        "capacity validation (execution admission)",
+        "capacity validation (admit batch 2)",
+        "capacity validation (admit batch 3)",
+        "capacity validation (non-authoritative readback)",
+    }
+    support_names = [item["name"] for item in support]
+    worker_minutes = sum(item["charged_minutes_ceiling"] for item in worker)
+    support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
+    terminal_success = all(
+        item["status"] == "completed" and item["conclusion"] == "success"
+        for item in worker + support
+    )
+    passed = (
+        sorted(indexes) == list(range(12)) and len(indexes) == len(set(indexes))
+        and set(support_names) == expected_support and len(support_names) == len(expected_support)
+        and terminal_success and worker_minutes <= 240 and support_minutes <= 25
+    )
+    return {
+        "schema_version": "1", "kind": "capacity_validation_provider_accounting",
+        "status": "completed" if passed else "non_pass", "passed": False,
+        "qualification_eligible": False, "billing_authority": False,
+        "authoritative_predecessor": False, "experiment_id": experiment_id,
+        "revision": revision, "execution_run_id": execution_run_id,
+        "worker": {"ceiling_minutes": 240, "observed_minutes": worker_minutes,
+                   "transferable": False, "jobs": worker},
+        "routine_support": {"ceiling_minutes": 25, "observed_minutes": support_minutes,
+                            "transferable": False, "jobs": support},
+        "terminal_readback_support": {
+            "ceiling_minutes": 10, "charged_minutes": 10, "transferable": False,
+            "status": "conservative_ceiling_charged",
+            "measurement_basis": "The readback cannot observe its own terminal timestamp; charge the full independent ceiling.",
+        },
+        "cancellation_controller": {
+            "ceiling_minutes": 30, "observed_minutes": None, "transferable": False,
+            "status": "not_invoked" if terminal_success else "indeterminate_non_pass",
+            "note": "Any failed, timed-out, or cancelled job leaves cancellation latency indeterminate and non-pass.",
+        },
+    }
+
+
+def run_capacity_validation_unit(
+    root: str,
+    cfg: dict,
+    plan_path: Path,
+    preflight_path: Path,
+    unit_index: int,
+    timeout: int,
+    checkpoint_path: Path | None = None,
+) -> dict:
+    """Execute exactly one frozen sample unit as non-authoritative modeling evidence."""
+    try:
+        plan = load_capacity_validation_plan(plan_path)
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+        if _canonical_digest(preflight) != plan["preflight_digest"]:
+            raise ValueError("capacity validation preflight digest differs")
+        if preflight.get("revision") != plan["revision"]:
+            raise ValueError("capacity validation preflight revision differs")
+        if not 0 <= unit_index < len(plan["units"]):
+            raise ValueError("capacity validation unit index is outside the frozen plan")
+        if not 1 <= timeout <= 720:
+            raise ValueError("capacity validation execution timeout must be between 1 and 720 seconds")
+        unit = plan["units"][unit_index]
+        corpus_by_fingerprint = {
+            record.get("fingerprint"): record for record in preflight.get("corpus", [])
+            if isinstance(record, dict)
+        }
+        corpus = []
+        for fingerprint in unit["fingerprints"]:
+            record = corpus_by_fingerprint.get(fingerprint)
+            line_range = unit["range"]
+            if (
+                record is None or record.get("file") != line_range["file"]
+                or not line_range["start"] <= record.get("line", 0) <= line_range["end"]
+                or record.get("mapped_tests") != unit["mapped_tests"]
+            ):
+                raise ValueError("capacity validation unit differs from the canonical corpus")
+            corpus.append(record)
+        mapping = _mapped_tests(root, [unit["range"]["file"]], cfg.get("test_mappings", {}))
+        if mapping != {unit["range"]["file"]: unit["mapped_tests"]}:
+            raise ValueError("capacity validation test mapping differs")
+        environment = _runtime_cache_identity(root, list(mapping), mapping, cfg)
+        if environment is None:
+            raise ValueError("capacity validation environment identity is incomplete")
+        environment_digest = _checkpoint_environment_digest(environment)
+        if environment_digest != unit.get("environment_digest"):
+            raise ValueError("capacity validation environment identity differs")
+        source_path = Path(root) / unit["range"]["file"]
+        source_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        checkpoint = {
+            "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+            "calibration_id": f"{plan['experiment_id']}-unit-{unit_index}",
+            "identity": {
+                "revision": plan["revision"], "plan_digest": plan["digest"],
+                "unit_index": unit_index,
+                "environment_digest": environment_digest,
+            },
+            "outcomes": {}, "attempts": [],
+        }
+        checkpoint_path = checkpoint_path or plan_path.parent / f"capacity-validation-checkpoint-{unit_index}.json"
+        started = time.monotonic()
+        result = execute_pending_mutations(
+            root, corpus, mapping, [unit["range"]], checkpoint, timeout, checkpoint_path,
+        )
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        source_after = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        restored = source_before == source_after
+        pending = result["pending"]
+        capacity_result = {
+            "schema_version": _CAPACITY_RESULT_SCHEMA_VERSION,
+            "kind": "capacity_validation_unit_result",
+            "status": "completed" if pending == 0 and restored else "incomplete",
+            "passed": False,
+            "qualification_eligible": False,
+            "billing_authority": False,
+            "authoritative_predecessor": False,
+            "experiment_id": plan["experiment_id"],
+            "revision": plan["revision"],
+            "plan_digest": plan["digest"],
+            "unit_index": unit_index,
+            "unit": unit,
+            "environment_digest": environment_digest,
+            "outcomes": result["outcomes"],
+            "attempts": result["attempts"],
+            "pending": pending,
+            "elapsed_ms": elapsed_ms,
+            "source_restoration": {
+                "before_sha256": source_before,
+                "after_sha256": source_after,
+                "restored": restored,
+            },
+        }
+        capacity_result["digest"] = _canonical_digest(capacity_result)
+        return capacity_result
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "schema_version": _CAPACITY_RESULT_SCHEMA_VERSION,
+            "kind": "capacity_validation_unit_result",
+            "status": "unknown", "passed": False,
+            "qualification_eligible": False, "billing_authority": False,
+            "authoritative_predecessor": False,
+            "message": _safe_mutation_diagnostic(str(exc), root),
+        }
+
+
 def run_resumable_mutation_shard(
     root: str,
     cfg: dict,
@@ -1442,7 +1988,13 @@ def _source_tree_digest(root: Path) -> str:
         ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
         "__pycache__", ".mutmut-cache", "mutation-manifests", "mutation-preflight-shards",
         "mutation-shards", "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json",
-        "mutation-report.json",
+        "mutation-report.json", "capacity-manifests", "capacity-enumeration",
+        "capacity-preparation", "capacity-results", "capacity-validation-result.json",
+        "capacity-validation-command.json", "capacity-validation-checkpoint.json",
+        "capacity-validation-plan.json", "capacity-plan-command.json",
+        "capacity-manifest-summary.json", "capacity-observed-groups.json",
+        "capacity-predictions.json", "capacity-validation-plan.sha256",
+        "capacity-validation-corpus.json",
     }
     files = sorted(
         path for path in root.rglob("*")
@@ -2963,6 +3515,50 @@ def aggregate_preflight_shards(
     }
 
 
+def aggregate_capacity_validation_shards(
+    root: str,
+    reports: list[dict],
+    paths: list[str],
+    excluded: list[str],
+    shard_count: int,
+) -> dict:
+    """Validate isolated enumeration shards without publishing qualification input."""
+    canonical = []
+    for report in reports:
+        if (
+            not isinstance(report, dict)
+            or report.get("kind") != "capacity_validation_enumeration_shard"
+            or report.get("status") != "enumerated"
+            or report.get("passed") is not False
+            or report.get("qualification_eligible") is not False
+            or report.get("billing_authority") is not False
+            or report.get("authoritative_predecessor") is not False
+        ):
+            return _error("unknown", "Capacity enumeration shard is authoritative, malformed, or incomplete")
+        converted = {
+            key: value for key, value in report.items()
+            if key not in {
+                "kind", "qualification_eligible", "billing_authority",
+                "authoritative_predecessor",
+            }
+        }
+        converted["status"] = "completed"
+        converted["passed"] = True
+        canonical.append(converted)
+    aggregate = aggregate_preflight_shards(root, canonical, paths, excluded, shard_count)
+    if aggregate.get("status") != "completed" or aggregate.get("passed") is not True:
+        return aggregate
+    return {
+        **aggregate,
+        "kind": "capacity_validation_corpus",
+        "status": "enumerated",
+        "passed": False,
+        "qualification_eligible": False,
+        "billing_authority": False,
+        "authoritative_predecessor": False,
+    }
+
+
 def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) -> dict:
     """Accept only three equivalent, successful full-run mutation reports."""
     if len(reports) != 3:
@@ -3252,11 +3848,20 @@ def main() -> int:
     parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
+    parser.add_argument("--aggregate-capacity-enumeration", metavar="DIRECTORY", help="Aggregate isolated capacity enumeration")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
     parser.add_argument("--retained-preflight", help="Complete retained preflight aggregate")
     parser.add_argument("--calibration-id", help="Logical calibration identity")
     parser.add_argument("--checkpoint-output", help="Atomic resumable checkpoint output")
     parser.add_argument("--resume-checkpoints", help="Directory containing same-calibration checkpoints")
+    parser.add_argument("--capacity-plan", metavar="PATH", help="Write a non-authoritative capacity-validation plan")
+    parser.add_argument("--capacity-unit", type=int, help="Execute one frozen capacity-validation unit")
+    parser.add_argument("--capacity-experiment-id")
+    parser.add_argument("--capacity-observed-groups", help="JSON file containing historically observed group digests")
+    parser.add_argument("--capacity-predictions", help="JSON file containing frozen prediction seconds")
+    parser.add_argument("--capacity-manifests", help="Complete manifest directory for capacity preparation")
+    parser.add_argument("--capacity-result", help="Atomic capacity-validation result output")
+    parser.add_argument("--capacity-checkpoint", help="Atomic capacity-validation partial checkpoint output")
     parser.add_argument("--initialize-timeout-report", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--github-summary", metavar="REPORT", help=argparse.SUPPRESS)
     parser.add_argument("--artifact-name", help=argparse.SUPPRESS)
@@ -3319,7 +3924,49 @@ def main() -> int:
         mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
     )
     base = args.base or mutation["base"]
-    if args.resume_manifest:
+    if args.capacity_plan and args.capacity_unit is None:
+        try:
+            if not all((args.retained_preflight, args.capacity_experiment_id, args.capacity_observed_groups, args.capacity_predictions, args.capacity_manifests)):
+                raise ValueError("capacity plan requires retained preflight, experiment ID, observed groups, predictions, and manifests")
+            preflight = json.loads(Path(args.retained_preflight).read_text(encoding="utf-8"))
+            manifests = [
+                load_partition_manifest(path)
+                for path in sorted(
+                    Path(args.capacity_manifests).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            observed = json.loads(Path(args.capacity_observed_groups).read_text(encoding="utf-8"))
+            predictions = json.loads(Path(args.capacity_predictions).read_text(encoding="utf-8"))
+            if (
+                not isinstance(observed, dict)
+                or not isinstance(observed.get("group_digests"), list)
+                or not isinstance(observed.get("source"), dict)
+                or not isinstance(predictions, dict)
+            ):
+                raise ValueError("capacity plan assumptions are malformed")
+            report = build_capacity_validation_plan(
+                args.root, mutation, preflight, manifests,
+                experiment_id=args.capacity_experiment_id,
+                revision=_revision(args.root),
+                observed_group_digests=set(observed["group_digests"]),
+                historical_source=observed["source"],
+                prediction_seconds=predictions,
+            )
+            _write_json_atomic(Path(args.capacity_plan), report)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot prepare capacity validation: {exc}")
+    elif args.capacity_unit is not None:
+        if not args.capacity_plan or not args.retained_preflight or not args.capacity_result:
+            report = _error("unknown", "capacity unit requires plan, retained preflight, and result output")
+        else:
+            report = run_capacity_validation_unit(
+                args.root, mutation, Path(args.capacity_plan), Path(args.retained_preflight),
+                args.capacity_unit, timeout,
+                Path(args.capacity_checkpoint) if args.capacity_checkpoint else None,
+            )
+            _write_json_atomic(Path(args.capacity_result), report)
+    elif args.resume_manifest:
         missing = [
             name for name, value in (
                 ("--retained-preflight", args.retained_preflight),
@@ -3340,6 +3987,21 @@ def main() -> int:
             )
     elif args.preflight_manifest:
         report = run_mutation_preflight(args.root, {**mutation, "manifest": args.preflight_manifest})
+    elif args.aggregate_capacity_enumeration:
+        if args.shard_count is None or args.shard_count < 1:
+            report = _error("unknown", "--aggregate-capacity-enumeration requires a positive --shard-count")
+        else:
+            report_paths = sorted(
+                Path(args.aggregate_capacity_enumeration).rglob("capacity-validation-enumeration.json")
+            )
+            try:
+                reports = [json.loads(path.read_text()) for path in report_paths]
+            except (OSError, json.JSONDecodeError) as exc:
+                report = _error("unknown", f"Cannot read capacity enumeration shards: {exc}")
+            else:
+                report = aggregate_capacity_validation_shards(
+                    args.root, reports, paths, excluded, args.shard_count,
+                )
     elif args.aggregate_preflight:
         if args.shard_count is None or args.shard_count < 1:
             report = _error("unknown", "--aggregate-preflight requires a positive --shard-count")
@@ -3437,8 +4099,13 @@ def main() -> int:
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
-    if report["status"] not in {"completed", "not_applicable"}:
+    if report["status"] not in {"completed", "not_applicable", "enumerated"}:
         return 2
+    if report.get("kind") in {
+        "capacity_validation_corpus", "capacity_validation_plan",
+        "capacity_validation_unit_result",
+    }:
+        return 0
     return 0 if report.get("passed", True) else 1
 
 

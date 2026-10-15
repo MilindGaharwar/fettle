@@ -66,6 +66,127 @@ def _workflow_step(job_name, step_name):
     )
 
 
+def test_capacity_validation_route_is_registered_dormant_and_isolated():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    dispatch = workflow[True]["workflow_dispatch"]["inputs"]
+    jobs = workflow["jobs"]
+
+    assert "capacity-validation" in dispatch["mode"]["options"]
+    assert dispatch["capacity_stage"]["options"] == ["prepare", "execute", "readback"]
+    capacity_jobs = {name: job for name, job in jobs.items() if name.startswith("capacity-")}
+    assert capacity_jobs
+    for job in capacity_jobs.values():
+        assert "capacity-validation" in job["if"]
+    for name in ("prepare", "calibration-launch-gate", "full-shard", "aggregate"):
+        assert "mode != 'capacity-validation'" in jobs[name]["if"]
+    assert "mode != 'capacity-validation'" in jobs["evidence-readback"]["if"]
+
+
+def test_capacity_validation_measurement_batches_are_exact_once_and_bounded():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    jobs = workflow["jobs"]
+    expected = {
+        "capacity-batch-1": [0, 1, 2, 3],
+        "capacity-batch-2": [4, 5, 6, 7],
+        "capacity-batch-3": [8, 9, 10, 11],
+    }
+    selected = []
+    for name, indexes in expected.items():
+        job = jobs[name]
+        assert job["strategy"]["fail-fast"] is False
+        assert job["strategy"]["max-parallel"] == 4
+        assert job["strategy"]["matrix"]["unit"] == indexes
+        assert job["uses"] == "./.github/workflows/mutation-capacity-validation-unit.yml"
+        assert job["with"]["unit"] == "${{ matrix.unit }}"
+        selected.extend(indexes)
+    assert selected == list(range(12))
+    assert jobs["capacity-batch-1"]["needs"] == "capacity-execute-admission"
+    assert jobs["capacity-batch-2"]["needs"] == "capacity-admit-2"
+    assert jobs["capacity-batch-3"]["needs"] == "capacity-admit-3"
+
+
+def test_capacity_validation_worker_has_containment_and_non_authoritative_namespace():
+    path = Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-validation-unit.yml"
+    workflow = yaml.safe_load(path.read_text())
+    job = workflow["jobs"]["execute"]
+    steps = {step.get("name", step.get("uses")): step for step in job["steps"]}
+
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
+    assert job["timeout-minutes"] == 20
+    assert steps["Execute bounded capacity unit"]["timeout-minutes"] == 14
+    command = steps["Execute bounded capacity unit"]["run"]
+    assert "--timeout 720" in command
+    assert "--capacity-unit ${{ inputs.unit }}" in command
+    assert "--capacity-checkpoint capacity-validation-checkpoint.json" in command
+    admission = steps["Reject reruns and bind candidate"]["run"]
+    assert 'os.environ["RUN_ATTEMPT"]=="1"' in admission
+    upload = steps["Retain non-authoritative capacity result"]
+    assert upload["with"]["name"].startswith("capacity-validation-unit-")
+    assert "mutation-checkpoint" not in path.read_text()
+    assert "mutation-report" not in path.read_text()
+    assert "calibration" not in upload["with"]["name"]
+    isolate = steps["Isolate partial checkpoint from authoritative consumers"]["run"]
+    assert '"kind": "capacity_validation_partial_checkpoint"' in isolate
+    assert '"qualification_eligible": False' in isolate
+    assert '"calibration_id"' not in isolate
+    route = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    capacity_section = route.split("\n  capacity-prepare:", 1)[1].split(
+        "\n  preflight-aggregate:", 1,
+    )[0]
+    assert "mutation-preflight.json" not in capacity_section
+    assert "capacity-validation-corpus.json" in capacity_section
+    assert '"qualification_eligible": False' in capacity_section
+
+
+def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path):
+    script = _workflow_step_script(
+        "capacity-execute-admission", "Validate immutable execution inputs",
+    )
+    valid = {
+        "PATH": os.environ["PATH"],
+        "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
+        "CANDIDATE_SHA": "a" * 40, "EXPERIMENT_ID": "capval-local",
+        "PREPARATION_RUN_ID": "123", "PLAN_SHA256": "b" * 64,
+    }
+    assert _run_actions_bash(script, cwd=tmp_path, env=valid).returncode == 0
+    assert _run_actions_bash(
+        script, cwd=tmp_path, env={**valid, "GITHUB_RUN_ATTEMPT": "2"},
+    ).returncode == 2
+    assert _run_actions_bash(
+        script, cwd=tmp_path, env={**valid, "PLAN_SHA256": "bad"},
+    ).returncode == 2
+
+
+def test_capacity_validation_readback_keeps_ledgers_separate_and_non_passing():
+    script = _workflow_step_script(
+        "capacity-readback", "Preserve exact visible state and separate accounting authorities",
+    )
+    assert '"passed": False' in script
+    assert '"qualification_eligible": False' in script
+    assert '"worker"' in script and '"routine_support"' in script
+    assert '"cancellation_controller"' in script
+    assert script.count('"authority": "not_granted"') == 4
+    assert script.count('"transferable": False') == 4
+
+
+def test_capacity_validation_provider_readback_uses_terminal_exact_attempt_records():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    job = workflow["jobs"]["capacity-provider-readback"]
+    scripts = "\n".join(step.get("run", "") for step in job["steps"])
+
+    assert "capacity_stage == 'readback'" in job["if"]
+    assert "attempts/1/jobs" in scripts
+    assert "capacity-validation-execution-source-$EXECUTION_RUN_ID" in scripts
+    assert "reconcile_capacity_provider_accounting" in scripts
+    assert 'ledger["status"] != "completed"' in scripts
+
+
 def _retention_probe_step_script(job_name, step_name):
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/calibration-retention-probe.yml").read_text()
@@ -585,7 +706,7 @@ def test_mutation_workflow_has_bounded_non_qualifying_diagnostic_canary():
     prepare_job = workflow.split("\n  prepare:", 1)[1].split("\n  preflight:", 1)[0]
     preflight_job = workflow.split("\n  preflight:", 1)[1].split("\n  diagnostic-canary:", 1)[0]
     canary_job = workflow.split("\n  diagnostic-canary:", 1)[1].split(
-        "\n  preflight-aggregate:", 1,
+        "\n  retention-provider-probe:", 1,
     )[0]
     preflight_aggregate_job = workflow.split("\n  preflight-aggregate:", 1)[1].split(
         "\n  full-shard:", 1,
@@ -1360,7 +1481,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 12
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 13
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow
@@ -1400,8 +1521,9 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
             " && github.event.inputs.mode != 'retention-probe'"
             " && github.event.inputs.mode != 'readback-probe'"
             " && github.event.inputs.mode != 'staged-preflight'"
-        " && github.event.inputs.mode != 'finalize'"
-        " && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')"
+            " && github.event.inputs.mode != 'finalize'"
+            " && github.event.inputs.mode != 'capacity-validation'"
+            " && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')"
         "\n    needs: [prepare, calibration-launch-gate]"
     ) in workflow
     assert workflow.index("Verify retained SHA-bound preflight") < workflow.index("full-shard:")

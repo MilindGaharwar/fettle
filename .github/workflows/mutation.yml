@@ -21,6 +21,31 @@ on:
           - replay
           - calibration
           - finalize
+          - capacity-validation
+      capacity_stage:
+        description: "Capacity-validation stage: prepare, execute, or readback"
+        required: false
+        type: choice
+        options:
+          - prepare
+          - execute
+          - readback
+      capacity_experiment_id:
+        description: "Unique capval-* model-validation identity"
+        required: false
+        type: string
+      capacity_preparation_run_id:
+        description: "Successful capacity preparation run (execute/readback)"
+        required: false
+        type: string
+      capacity_plan_sha256:
+        description: "Exact frozen capacity plan file SHA-256 (execute/readback)"
+        required: false
+        type: string
+      capacity_execution_run_id:
+        description: "Terminal capacity execution run (readback only)"
+        required: false
+        type: string
       preflight_run_id:
         description: "Successful preflight run on this commit (required for replay/calibration)"
         required: false
@@ -87,7 +112,7 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize')
+    if: github.event_name == 'schedule' || (github.event.inputs.mode != 'binding-probe' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && github.event.inputs.mode != 'capacity-validation')
     name: mutation (prepare partitions)
     runs-on: ubuntu-latest
     outputs:
@@ -492,6 +517,514 @@ jobs:
     with:
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
       probe_id: ${{ github.event.inputs.probe_id }}
+
+  capacity-prepare:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    name: capacity validation (prepare manifests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.manifests.outputs.matrix }}
+      shard_count: ${{ steps.manifests.outputs.shard_count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
+      - name: Validate preparation identity and single attempt
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+        run: >-
+          python -c 'import os,re,sys; sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
+          and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
+          else 2)'
+      - name: Prepare canonical partition manifests
+        id: manifests
+        run: |
+          uv run --no-sync python -m fettle.mutation_test --root . --prepare-manifests capacity-manifests --json > capacity-manifest-summary.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          report = json.load(open("capacity-manifest-summary.json"))
+          assert report.get("status") == "completed" and report.get("shard_count") == 256
+          print("matrix=" + json.dumps(report["matrix"], separators=(",", ":")))
+          print("shard_count=256")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-manifests-${{ github.run_id }}
+          path: capacity-manifests
+          if-no-files-found: error
+          retention-days: 90
+
+  capacity-enumerate:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-prepare
+    name: capacity validation (enumerate ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 32
+      matrix: ${{ fromJSON(needs.capacity-prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-manifests-${{ github.run_id }}
+          path: capacity-manifests
+      - name: Enumerate canonical identities without mutation tests
+        run: |
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --preflight-manifest capacity-manifests/partition-${{ matrix.shard }}.json \
+            --json > transient-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("transient-preflight.json").read_text())
+          assert report.get("status") == "completed" and report.get("passed") is True
+          report.update({
+              "kind": "capacity_validation_enumeration_shard",
+              "status": "enumerated", "passed": False,
+              "qualification_eligible": False, "billing_authority": False,
+              "authoritative_predecessor": False,
+          })
+          Path("capacity-validation-enumeration.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-enumeration-${{ github.run_id }}-${{ matrix.shard }}
+          path: capacity-validation-enumeration.json
+          if-no-files-found: error
+          retention-days: 90
+
+  capacity-freeze-plan:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: [capacity-prepare, capacity-enumerate]
+    name: capacity validation (freeze sample)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-manifests-${{ github.run_id }}
+          path: capacity-manifests
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: capacity-validation-enumeration-${{ github.run_id }}-*
+          path: capacity-enumeration
+      - name: Aggregate candidate-bound corpus
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --aggregate-capacity-enumeration capacity-enumeration
+          --shard-count ${{ needs.capacity-prepare.outputs.shard_count }}
+          --json > capacity-validation-corpus.json
+      - name: Freeze selection assumptions and exact sample
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+        run: |
+          cat > capacity-observed-groups.json <<'JSON'
+          {"group_digests":["2251a0e5de5c30728a16ac4dd6057ecb566830138c5d4b7cadb0345e60411300","2d9f54ac6785245007d73261370afc973437d71f042a116508cb015b9077a0b5","473591ec1a4cf079fbfadb6015367d9b527186214d093195a70a82336903dc2c","58a8a68b62cecd9cc7328b0ac38f8db5f80993807eeb14128aaca77c799b9a4e","71f3cab353b16b41b17dd2192b9ff8cec0f1b63e8fb41414122509d7916082e3","9e1cfec74ccd27748279d5646c55fefda0de148e32815cd7f55d5cda934054f0","bdc06009168e8da737b9ff1246ec5428680c9310201fa46dba7576047639339a"],"source":{"candidate_sha":"92984b1e89fd3ecbeaf13825c882ac5bc138adf5","campaign_id":"cal-92984b1-20261014","environment_digest":"d997f7de5807ef3d857d78aac9b9b59ea7c48fa43e7e681a1cd378078aec6d8e","engine_version":"2.5.1","evidence_role":"modeling_only_terminal_non_pass","reusable_for_candidate":false}}
+          JSON
+          cat > capacity-predictions.json <<'JSON'
+          {"optimistic":14.46102,"central":25.56324,"conservative":47.3115,"stress":67.74336}
+          JSON
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --capacity-plan capacity-validation-plan.json \
+            --capacity-experiment-id "$EXPERIMENT_ID" \
+            --capacity-observed-groups capacity-observed-groups.json \
+            --capacity-predictions capacity-predictions.json \
+            --capacity-manifests capacity-manifests \
+            --retained-preflight capacity-validation-corpus.json --json > capacity-plan-command.json
+          shasum -a 256 capacity-validation-plan.json > capacity-validation-plan.sha256
+      - name: Retain isolated preparation package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-preparation-${{ github.run_id }}
+          path: |
+            capacity-manifests
+            capacity-validation-corpus.json
+            capacity-validation-plan.json
+            capacity-validation-plan.sha256
+            capacity-observed-groups.json
+            capacity-predictions.json
+            capacity-plan-command.json
+          if-no-files-found: error
+          retention-days: 90
+
+  capacity-execute-admission:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    name: capacity validation (execution admission)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate immutable execution inputs
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
+          PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+        run: >-
+          python -c 'import os,re,sys; sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
+          and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
+          and re.fullmatch(r"[1-9][0-9]*",os.environ["PREPARATION_RUN_ID"])
+          and re.fullmatch(r"[0-9a-f]{64}",os.environ["PLAN_SHA256"]) else 2)'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}
+          path: capacity-preparation
+          run-id: ${{ github.event.inputs.capacity_preparation_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate frozen preparation before fan-out
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fettle.config import load_config
+          from fettle.mutation_test import validate_capacity_validation_package
+          validate_capacity_validation_package(
+              ".", load_config(".")["mutation"], Path("capacity-preparation"),
+              revision=os.environ["GITHUB_SHA"],
+              experiment_id=os.environ["EXPERIMENT_ID"],
+              plan_file_sha256=os.environ["PLAN_SHA256"],
+          )
+          PY
+      - name: Record execution provenance
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
+          PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path("capacity-validation-execution-source.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "capacity_validation_execution_source",
+              "revision": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "preparation_run_id": os.environ["PREPARATION_RUN_ID"],
+              "plan_file_sha256": os.environ["PLAN_SHA256"],
+          }, sort_keys=True) + "\n")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-execution-source-${{ github.run_id }}
+          path: capacity-validation-execution-source.json
+          if-no-files-found: error
+          retention-days: 90
+
+  capacity-batch-1:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    needs: capacity-execute-admission
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        unit: [0, 1, 2, 3]
+    uses: ./.github/workflows/mutation-capacity-validation-unit.yml
+    with:
+      unit: ${{ matrix.unit }}
+      preparation_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-admit-2:
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    needs: capacity-batch-1
+    name: capacity validation (admit batch 2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: capacity-validation-unit-${{ github.run_id }}-*
+          path: capacity-results
+      - name: Require four terminal, distinct, restored units
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from fettle.mutation_test import validate_capacity_validation_results
+          reports = [json.loads(path.read_text()) for path in Path("capacity-results").rglob("capacity-validation-result.json")]
+          plan_digests = {report.get("plan_digest") for report in reports if isinstance(report, dict)}
+          assert len(plan_digests) == 1
+          validate_capacity_validation_results(
+              reports, list(range(4)), revision=__import__("os").environ["GITHUB_SHA"],
+              experiment_id=__import__("os").environ["EXPERIMENT_ID"],
+              plan_digest=plan_digests.pop(),
+          )
+          # Four completed workers plus the next batch fit the independent worker ceiling.
+          assert (4 + 4) * 20 <= 240
+          assert 5 + 5 + 10 <= 25
+          assert 30 <= 30
+          PY
+
+  capacity-batch-2:
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-2.result == 'success'
+    needs: capacity-admit-2
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        unit: [4, 5, 6, 7]
+    uses: ./.github/workflows/mutation-capacity-validation-unit.yml
+    with:
+      unit: ${{ matrix.unit }}
+      preparation_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-admit-3:
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    needs: capacity-batch-2
+    name: capacity validation (admit batch 3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: capacity-validation-unit-${{ github.run_id }}-*
+          path: capacity-results
+      - name: Require eight terminal, distinct, restored units
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from fettle.mutation_test import validate_capacity_validation_results
+          reports = [json.loads(path.read_text()) for path in Path("capacity-results").rglob("capacity-validation-result.json")]
+          plan_digests = {report.get("plan_digest") for report in reports if isinstance(report, dict)}
+          assert len(plan_digests) == 1
+          validate_capacity_validation_results(
+              reports, list(range(8)), revision=__import__("os").environ["GITHUB_SHA"],
+              experiment_id=__import__("os").environ["EXPERIMENT_ID"],
+              plan_digest=plan_digests.pop(),
+          )
+          assert (8 + 4) * 20 <= 240
+          assert 5 + 5 + 5 + 10 <= 25
+          assert 30 <= 30
+          PY
+
+  capacity-batch-3:
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-3.result == 'success'
+    needs: capacity-admit-3
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        unit: [8, 9, 10, 11]
+    uses: ./.github/workflows/mutation-capacity-validation-unit.yml
+    with:
+      unit: ${{ matrix.unit }}
+      preparation_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-readback:
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    needs: [capacity-batch-1, capacity-batch-2, capacity-batch-3]
+    name: capacity validation (non-authoritative readback)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          pattern: capacity-validation-unit-${{ github.run_id }}-*
+          path: capacity-results
+      - name: Preserve exact visible state and separate accounting authorities
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.mutation_test import validate_capacity_validation_results
+          reports = []
+          malformed = []
+          for path in Path("capacity-results").rglob("capacity-validation-result.json"):
+              try:
+                  value = json.loads(path.read_text())
+                  if not isinstance(value, dict):
+                      raise ValueError("result is not an object")
+                  reports.append(value)
+              except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                  malformed.append({"path": str(path), "error": str(exc)})
+          indexes = [report.get("unit_index") for report in reports]
+          integer_indexes = [index for index in indexes if isinstance(index, int) and not isinstance(index, bool)]
+          conflicts = sorted(index for index in set(integer_indexes) if integer_indexes.count(index) > 1)
+          missing = sorted(set(range(12)) - {index for index in indexes if isinstance(index, int)})
+          nonterminal = sorted((
+              report.get("unit_index") for report in reports
+              if report.get("status") not in {"completed", "incomplete"}
+              and isinstance(report.get("unit_index"), int)
+          ))
+          completed = sorted((
+              report.get("unit_index") for report in reports
+              if report.get("status") == "completed"
+              and isinstance(report.get("unit_index"), int)
+          ))
+          validation_error = None
+          try:
+              plan_digests = {report.get("plan_digest") for report in reports}
+              if len(plan_digests) != 1:
+                  raise ValueError("result plan identities conflict")
+              validate_capacity_validation_results(
+                  reports, list(range(12)), revision=os.environ["GITHUB_SHA"],
+                  experiment_id=os.environ["EXPERIMENT_ID"],
+                  plan_digest=plan_digests.pop(),
+              )
+          except (TypeError, ValueError) as exc:
+              validation_error = str(exc)
+          readback = {
+              "schema_version": "1", "kind": "capacity_validation_readback",
+              "status": "completed" if validation_error is None and not malformed else "incomplete",
+              "passed": False, "qualification_eligible": False,
+              "billing_authority": False, "authoritative_predecessor": False,
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "revision": os.environ["GITHUB_SHA"],
+              "plan_file_sha256": os.environ["PLAN_SHA256"],
+              "completed_units": completed, "missing_units": missing,
+              "nonterminal_units": nonterminal, "conflicting_units": conflicts,
+              "malformed": malformed,
+              "validation_error": validation_error,
+              "accounting": {
+                  "worker": {"authority": "not_granted", "design_ceiling_minutes": 240, "transferable": False},
+                  "routine_support": {"authority": "not_granted", "design_ceiling_minutes": 25, "transferable": False},
+                  "terminal_readback_support": {"authority": "not_granted", "design_ceiling_minutes": 10, "transferable": False},
+                  "cancellation_controller": {"authority": "not_granted", "design_ceiling_minutes": 30, "transferable": False},
+              },
+              "provider_timing_authoritative": False,
+              "message": "Provider job timestamps and cancellation latency require separate API readback before charges can be determined.",
+          }
+          Path("capacity-validation-readback.json").write_text(json.dumps(readback, indent=2) + "\n")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-readback-${{ github.run_id }}
+          path: capacity-validation-readback.json
+          if-no-files-found: error
+          retention-days: 90
+
+  capacity-provider-readback:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'readback'
+    name: capacity validation (provider accounting readback)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate terminal readback identity
+        env:
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
+        run: >-
+          python -c 'import os,re,sys; sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
+          and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
+          and re.fullmatch(r"[1-9][0-9]*",os.environ["EXECUTION_RUN_ID"]) else 2)'
+      - name: Collect exact terminal provider records
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXECUTION_RUN_ID" > capacity-execution-run.json
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$EXECUTION_RUN_ID/attempts/1/jobs?per_page=100" \
+            > capacity-execution-jobs.json
+          gh run download "$EXECUTION_RUN_ID" \
+            --name "capacity-validation-execution-source-$EXECUTION_RUN_ID" \
+            --dir capacity-execution-source
+      - name: Reconcile separate provider ledgers
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
+          PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
+          PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fettle.mutation_test import reconcile_capacity_provider_accounting
+          run = json.loads(Path("capacity-execution-run.json").read_text())
+          pages = json.loads(Path("capacity-execution-jobs.json").read_text())
+          source = json.loads(Path("capacity-execution-source/capacity-validation-execution-source.json").read_text())
+          ledger = reconcile_capacity_provider_accounting(
+              run, pages, source, repository=os.environ["GITHUB_REPOSITORY"],
+              revision=os.environ["GITHUB_SHA"], experiment_id=os.environ["EXPERIMENT_ID"],
+              execution_run_id=os.environ["EXECUTION_RUN_ID"],
+              preparation_run_id=os.environ["PREPARATION_RUN_ID"],
+              plan_file_sha256=os.environ["PLAN_SHA256"],
+          )
+          Path("capacity-validation-provider-accounting.json").write_text(json.dumps(ledger, indent=2) + "\n")
+          if ledger["status"] != "completed":
+              raise SystemExit(2)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-provider-readback-${{ github.run_id }}
+          path: |
+            capacity-execution-run.json
+            capacity-execution-jobs.json
+            capacity-validation-provider-accounting.json
+          if-no-files-found: error
+          retention-days: 90
 
   preflight-aggregate:
     if: (github.event_name == 'schedule' || github.event.inputs.mode == 'preflight') && always()
@@ -987,7 +1520,7 @@ jobs:
           if-no-files-found: error
 
   calibration-launch-gate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && github.event.inputs.mode != 'capacity-validation'
     needs: prepare
     name: mutation (calibration launch gate)
     runs-on: ubuntu-latest
@@ -1049,7 +1582,7 @@ jobs:
           retention-days: 90
 
   full-shard:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'finalize' && github.event.inputs.mode != 'capacity-validation' && !(github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3')
     needs: [prepare, calibration-launch-gate]
     name: mutation (full shard ${{ matrix.shard }}, advisory)
     runs-on: ubuntu-latest
@@ -2373,7 +2906,7 @@ jobs:
           fi
 
   aggregate:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && always()
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'retention-probe' && github.event.inputs.mode != 'readback-probe' && github.event.inputs.mode != 'staged-preflight' && github.event.inputs.mode != 'capacity-validation' && always()
     name: mutation (assemble evidence)
     needs: [prepare, full-shard, calibration-stage-3-batch-7, calibration-accounting]
     runs-on: ubuntu-latest
@@ -2807,6 +3340,7 @@ jobs:
       && github.event.inputs.mode != 'staged-preflight'
       && github.event.inputs.mode != 'retention-probe'
       && github.event.inputs.mode != 'readback-probe'
+      && github.event.inputs.mode != 'capacity-validation'
     needs: aggregate
     name: mutation evidence
     runs-on: ubuntu-latest

@@ -16,6 +16,7 @@ import pytest
 from fettle.mutation_test import (
     build_mutation_cache_identity,
     build_mutation_report_artifact,
+    build_capacity_validation_plan,
     collect_mutation_dependency_identities,
     restore_mutation_native_cache,
     save_mutation_native_cache,
@@ -29,6 +30,7 @@ from fettle.mutation_test import (
     _patch_for_ranges,
     _mapped_tests,
     aggregate_shards,
+    aggregate_capacity_validation_shards,
     _get_all_py_files,
     _get_changed_py_files,
     _find_replacement,
@@ -64,10 +66,78 @@ from fettle.mutation_test import (
     select_shard_attempts,
     select_shard_subset_attempts,
     run_resumable_mutation_shard,
+    load_capacity_validation_plan,
+    run_capacity_validation_unit,
+    validate_capacity_validation_results,
+    validate_capacity_validation_package,
+    reconcile_capacity_provider_accounting,
     write_changed_partition_manifests,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
+
+
+def _capacity_manifest(index, line_range):
+    manifest = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": index,
+        "shard_count": 6, "files": [line_range["file"]], "ranges": [line_range],
+    }
+    manifest["digest"] = _canonical_digest(manifest)
+    return manifest
+
+
+def _capacity_preflight():
+    manifests = []
+    corpus = []
+    fingerprints = []
+    for group in range(6):
+        file = f"src/group_{group}.py"
+        ranges = [
+            {"file": file, "start": 1, "end": 10},
+            {"file": file, "start": 11, "end": 20},
+        ]
+        manifest = {
+            "schema_version": "1", "revision": "a" * 40, "shard_index": group,
+            "shard_count": 6, "files": [file], "ranges": ranges,
+        }
+        manifest["digest"] = _canonical_digest(manifest)
+        manifests.append(manifest)
+        for range_index, line_range in enumerate(ranges):
+            for ordinal in range(range_index + 1):
+                fingerprint = f"{group:02x}{range_index:02x}{ordinal:02x}".ljust(64, "a")
+                fingerprints.append(fingerprint)
+                corpus.append({
+                    "fingerprint": fingerprint, "file": file,
+                    "line": line_range["start"] + ordinal,
+                    "mapped_tests": [f"tests/test_group_{group}.py"],
+                    "shard_index": group,
+                })
+    corpus.sort(key=lambda item: item["fingerprint"])
+    preflight = {
+        "kind": "capacity_validation_corpus", "status": "enumerated", "passed": False,
+        "qualification_eligible": False, "billing_authority": False,
+        "authoritative_predecessor": False, "revision": "a" * 40,
+        "shard_count": 6,
+        "corpus": corpus, "fingerprints": sorted(fingerprints),
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [item["digest"] for item in manifests],
+    }
+    return preflight, manifests
+
+
+def _capacity_mapping():
+    return {f"src/group_{group}.py": [f"tests/test_group_{group}.py"] for group in range(6)}
+
+
+def _capacity_historical_source():
+    return {
+        "candidate_sha": "9" * 40,
+        "campaign_id": "cal-92984b1-20261014",
+        "environment_digest": "d" * 64,
+        "engine_version": "2.5.1",
+        "evidence_role": "modeling_only_terminal_non_pass",
+        "reusable_for_candidate": False,
+    }
 
 
 class _OsNameProxy:
@@ -3031,6 +3101,369 @@ def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema(
 
     assert report["killed"] == 1 and report["timeout"] == 1
     assert [record["fingerprint"] for record in report["non_killed"]] == ["b" * 64]
+
+
+def test_capacity_plan_selects_deterministic_low_high_units_across_six_groups(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    predictions = {"optimistic": 10, "central": 20, "conservative": 30, "stress": 40}
+
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        first = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+        second = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, list(reversed(manifests)),
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+
+    assert first["coverage"]["selected_units"] == 12
+    assert len({unit["mapped_test_group_digest"] for unit in first["units"]}) == 6
+    assert [len(unit["fingerprints"]) for unit in first["units"]] == [1, 2] * 6
+    assert first["passed"] is False and first["qualification_eligible"] is False
+    assert second == first
+
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(first))
+    assert load_capacity_validation_plan(path) == first
+
+
+def test_capacity_enumeration_is_non_authoritative_and_rejects_canonical_input(tmp_path):
+    source = tmp_path / "src/a.py"
+    source.parent.mkdir()
+    source.write_text("x = 1\n")
+    canonical = {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "shard_index": 0, "shard_count": 1, "generated": 1, "canonicalized": 1,
+        "manifest_digest": "d" * 64,
+        "fingerprints": ["a" * 64],
+        "corpus": [{"fingerprint": "a" * 64, "file": "src/a.py", "line": 1}],
+        "line_ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    isolated = {
+        **canonical, "kind": "capacity_validation_enumeration_shard",
+        "status": "enumerated", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_capacity_validation_shards(
+            str(tmp_path), [isolated], ["src/a.py"], [], 1,
+        )
+    rejected = aggregate_capacity_validation_shards(
+        str(tmp_path), [canonical], ["src/a.py"], [], 1,
+    )
+
+    assert result["kind"] == "capacity_validation_corpus"
+    assert result["status"] == "enumerated" and result["passed"] is False
+    assert result["qualification_eligible"] is False
+    assert rejected["status"] == "unknown" and rejected["passed"] is False
+
+
+def test_capacity_plan_rejects_fewer_than_six_eligible_groups():
+    preflight, manifests = _capacity_preflight()
+    preflight["corpus"] = [record for record in preflight["corpus"] if record["shard_index"] < 5]
+    preflight["fingerprints"] = [record["fingerprint"] for record in preflight["corpus"]]
+    preflight["corpus_digest"] = _canonical_digest(preflight["corpus"])
+
+    with pytest.raises(ValueError, match="six mapped-test groups"):
+        with (
+            patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+            patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+        ):
+            build_capacity_validation_plan(
+                ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+                experiment_id="capval-local", revision="a" * 40,
+                observed_group_digests=set(), historical_source=_capacity_historical_source(),
+                prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+            )
+
+
+def test_capacity_plan_rejects_tampering_and_calibration_inventory(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    plan["units"][0]["fingerprints"].append("f" * 64)
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+
+    with pytest.raises(ValueError, match="digest differs"):
+        load_capacity_validation_plan(path)
+    from fettle.mutation_test import read_calibration_representation_inventory
+    with pytest.raises(ValueError, match="malformed"):
+        read_calibration_representation_inventory(path)
+
+    from fettle.mutation_test import (
+        load_mutation_report_candidates,
+        merge_mutation_checkpoints,
+    )
+    reports, quarantined = load_mutation_report_candidates(tmp_path)
+    assert reports == []
+    assert quarantined == []
+    with pytest.raises(ValueError):
+        merge_mutation_checkpoints([plan], set())
+
+
+def test_capacity_unit_executes_only_frozen_fingerprints_and_is_non_authoritative(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    unit = plan["units"][0]
+    source = tmp_path / unit["range"]["file"]
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n" * 20)
+    tests = tmp_path / unit["mapped_tests"][0]
+    tests.parent.mkdir(parents=True)
+    tests.write_text("def test_value():\n    assert True\n")
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    plan_path.write_text(json.dumps(plan))
+    preflight_path.write_text(json.dumps(preflight))
+    completed = {
+        "outcomes": {fp: {"state": "killed", "duration_ms": 5} for fp in unit["fingerprints"]},
+        "attempts": [], "pending": 0, "status": "completed",
+    }
+
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+        patch("fettle.mutation_test.execute_pending_mutations", return_value=completed) as execute,
+    ):
+        result = run_capacity_validation_unit(
+            str(tmp_path), {"test_mappings": _capacity_mapping()}, plan_path, preflight_path, 0, 720,
+        )
+
+    assert result["status"] == "completed"
+    assert result["passed"] is result["qualification_eligible"] is False
+    assert result["billing_authority"] is result["authoritative_predecessor"] is False
+    assert result["source_restoration"]["restored"] is True
+    assert [record["fingerprint"] for record in execute.call_args.args[1]] == unit["fingerprints"]
+    assert execute.call_args.args[5] == 720
+
+
+def test_capacity_unit_preserves_partial_and_rejects_foreign_inputs(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    plan_path.write_text(json.dumps(plan))
+    preflight_path.write_text(json.dumps({**preflight, "revision": "b" * 40}))
+
+    with patch("fettle.mutation_test.execute_pending_mutations") as execute:
+        result = run_capacity_validation_unit(
+            str(tmp_path), {}, plan_path, preflight_path, 0, 720,
+        )
+
+    assert result["status"] == "unknown"
+    assert result["passed"] is result["qualification_eligible"] is False
+    execute.assert_not_called()
+
+
+def test_capacity_result_validation_rejects_partial_conflicting_and_authoritative_evidence():
+    base = {
+        "schema_version": "1", "kind": "capacity_validation_unit_result",
+        "status": "completed", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+        "experiment_id": "capval-local", "revision": "a" * 40,
+        "plan_digest": "p" * 64, "unit_index": 0,
+        "unit": {"fingerprints": ["f" * 64]},
+        "environment_digest": "e" * 64,
+        "outcomes": {"f" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [], "pending": 0, "elapsed_ms": 1,
+        "source_restoration": {"before_sha256": "s" * 64, "after_sha256": "s" * 64, "restored": True},
+    }
+    base["digest"] = _canonical_digest(base)
+
+    validate_capacity_validation_results(
+        [base], [0], revision="a" * 40, experiment_id="capval-local", plan_digest="p" * 64,
+    )
+    for mutation in (
+        {"status": "incomplete", "pending": 1},
+        {"revision": "b" * 40},
+        {"qualification_eligible": True},
+        {"digest": "0" * 64},
+    ):
+        report = {**base, **mutation}
+        if "digest" not in mutation:
+            report["digest"] = _canonical_digest({key: value for key, value in report.items() if key != "digest"})
+        with pytest.raises(ValueError):
+            validate_capacity_validation_results(
+                [report], [0], revision="a" * 40,
+                experiment_id="capval-local", plan_digest="p" * 64,
+            )
+
+
+def test_capacity_package_reproduces_and_rejects_tampered_corpus(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    manifest_dir = tmp_path / "capacity-manifests"
+    manifest_dir.mkdir()
+    for manifest in manifests:
+        (manifest_dir / f"partition-{manifest['shard_index']}.json").write_text(json.dumps(manifest))
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+        plan_path = tmp_path / "capacity-validation-plan.json"
+        corpus_path = tmp_path / "capacity-validation-corpus.json"
+        plan_path.write_text(json.dumps(plan))
+        corpus_path.write_text(json.dumps(preflight))
+        plan_file_sha256 = __import__("hashlib").sha256(plan_path.read_bytes()).hexdigest()
+        validated = validate_capacity_validation_package(
+            ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+            revision="a" * 40, experiment_id="capval-local",
+            plan_file_sha256=plan_file_sha256,
+        )
+        assert validated == plan
+        corpus_path.write_text(json.dumps({**preflight, "revision": "b" * 40}))
+        with pytest.raises(ValueError, match="corpus digest differs"):
+            validate_capacity_validation_package(
+                ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+                revision="a" * 40, experiment_id="capval-local",
+                plan_file_sha256=plan_file_sha256,
+            )
+        with pytest.raises(ValueError, match="file SHA-256 differs"):
+            validate_capacity_validation_package(
+                ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+                revision="a" * 40, experiment_id="capval-local",
+                plan_file_sha256="0" * 64,
+            )
+
+
+def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs():
+    run = {
+        "id": 123, "run_attempt": 1, "head_sha": "a" * 40,
+        "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+        "path": ".github/workflows/mutation.yml",
+    }
+    source = {
+        "kind": "capacity_validation_execution_source", "revision": "a" * 40,
+        "run_id": "123", "run_attempt": "1", "experiment_id": "capval-local",
+        "preparation_run_id": "100", "plan_file_sha256": "p" * 64,
+        "workflow_sha": "a" * 40,
+        "workflow_ref": "owner/repo/.github/workflows/mutation.yml@refs/heads/audit",
+    }
+    def job(name, conclusion="success", *, job_id=None, started_at="2026-10-15T10:00:00Z",
+            completed_at="2026-10-15T10:01:00Z"):
+        return {
+            "id": job_id, "name": name, "status": "completed", "conclusion": conclusion,
+            "started_at": started_at, "completed_at": completed_at,
+        }
+    workers = [job(f"capacity validation unit {index}", job_id=index + 1) for index in range(12)]
+    support = [job(name, job_id=index + 13) for index, name in enumerate((
+        "capacity validation (execution admission)",
+        "capacity validation (admit batch 2)",
+        "capacity validation (admit batch 3)",
+        "capacity validation (non-authoritative readback)",
+    ))]
+    pages = [{"total_count": len(workers + support), "jobs": workers + support}]
+
+    valid = reconcile_capacity_provider_accounting(
+        run, pages, source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    failed = reconcile_capacity_provider_accounting(
+        run, [{"total_count": 16, "jobs": [{**workers[0], "conclusion": "failure"}, *workers[1:], *support]}],
+        source, repository="owner/repo", revision="a" * 40,
+        experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert valid["status"] == "completed" and valid["passed"] is False
+    assert failed["status"] == "non_pass"
+    assert failed["cancellation_controller"]["status"] == "indeterminate_non_pass"
+    with pytest.raises(ValueError, match="duplicated"):
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 17, "jobs": [*workers, workers[0], *support]}],
+            source, repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    missing_support = reconcile_capacity_provider_accounting(
+        run, [{"total_count": 12, "jobs": workers}], source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert missing_support["status"] == "non_pass"
+    assert valid["routine_support"]["ceiling_minutes"] == 25
+    assert valid["terminal_readback_support"]["ceiling_minutes"] == 10
+    assert valid["terminal_readback_support"]["charged_minutes"] == 10
+    assert valid["terminal_readback_support"]["status"] == "conservative_ceiling_charged"
+    with pytest.raises(ValueError, match="identity"):
+        reconcile_capacity_provider_accounting(
+            {**run, "conclusion": "failure"}, pages, source, repository="owner/repo",
+            revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="pagination"):
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 17, "jobs": workers + support}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="pagination"):
+        malformed_ids = [{**item} for item in workers + support]
+        malformed_ids[0]["id"] = True
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 16, "jobs": malformed_ids}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="contradictory"):
+        contradictory = [{**item} for item in workers + support]
+        contradictory[0]["started_at"] = "2026-10-15T10:02:00Z"
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 16, "jobs": contradictory}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="identity"):
+        reconcile_capacity_provider_accounting(
+            run, pages, {**source, "experiment_id": "capval-foreign"},
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
 
 
 def test_resumable_shard_rejects_corpus_not_bound_to_manifest_before_execution(tmp_path):
