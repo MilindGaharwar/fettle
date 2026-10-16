@@ -46,6 +46,13 @@ def _first_python_heredoc(script):
     return script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
 
 
+def _python_heredoc_containing(script, needle):
+    heredocs = script.split("<<'PY'\n")[1:]
+    matches = [heredoc.split("\nPY", 1)[0] for heredoc in heredocs if needle in heredoc]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _workflow_step_script(job_name, step_name):
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -1807,9 +1814,15 @@ def _consume_launch_with_monitor_script(tmp_path, *, stage, jobs=None):
         "GITHUB_RUN_ID": "700", "GITHUB_RUN_ATTEMPT": "1",
         "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": str(stage),
         "RUNNER_MINUTE_CEILING": "3600", "OBSERVED_AT": "2026-10-10T01:02:00Z",
+        "SAMPLE_DIR": str(tmp_path),
     }
     return subprocess.run(
-        [sys.executable, "-c", _first_python_heredoc(monitor)], cwd=tmp_path, env=env,
+        [
+            sys.executable,
+            "-c",
+            _python_heredoc_containing(monitor, "account_runner_minutes("),
+        ],
+        cwd=tmp_path, env=env,
         capture_output=True, text=True,
     )
 
@@ -2038,6 +2051,281 @@ def test_actual_sparse_monitor_route_preserves_historical_floor(tmp_path):
     budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
     assert budget["estimated_runner_minutes"] == 20
     assert budget["historical_floor_applied"] is True
+
+
+def _write_sequenced_gh_jobs_stub(workspace, snapshots):
+    provider = workspace / "sequenced-provider"
+    provider.mkdir()
+    for index, snapshot in enumerate(snapshots, 1):
+        (provider / f"jobs-{index}.json").write_text(json.dumps(snapshot))
+    counter = provider / "counter"
+    gh = provider / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f"provider='{provider}'\n"
+        "count=0\n"
+        "test ! -f \"$provider/counter\" || count=$(cat \"$provider/counter\")\n"
+        "count=$((count + 1))\n"
+        "printf '%s\\n' \"$count\" > \"$provider/counter\"\n"
+        f"last={len(snapshots)}\n"
+        "test \"$count\" -le \"$last\" || count=$last\n"
+        "cat \"$provider/jobs-$count.json\"\n"
+    )
+    gh.chmod(0o755)
+    return provider, counter
+
+
+def _monitor_environment(provider, *, shards=None):
+    shards = shards or [8, 27, 28, 37, 48, 50, 51, 53]
+    return {
+        **os.environ,
+        "PATH": f"{provider}:{os.environ['PATH']}",
+        "PYTHONPATH": PLUGIN_DIR,
+        "GITHUB_REPOSITORY": "example/fettle",
+        "GITHUB_RUN_ID": "700",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "CALIBRATION_ID": "cal-test",
+        "CALIBRATION_STAGE": "1",
+        "RUNNER_MINUTE_CEILING": "3600",
+        "EXPECTED_SHARDS": json.dumps({"shard": shards}),
+    }
+
+
+def test_calibration_monitor_recovers_only_from_a_fresh_whole_snapshot(tmp_path):
+    assert _run_launch_script(tmp_path, stage=1).returncode == 0
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    valid = _calibration_jobs()
+    incident = json.loads((
+        Path(PLUGIN_DIR)
+        / "tests/fixtures/calibration-monitor-pagination-incident/jobs-105-121.json"
+    ).read_text())
+    assert [page["total_count"] for page in incident] == [105, 121]
+    assert [len(page["jobs"]) for page in incident] == [100, 21]
+    for page in incident:
+        for job in page["jobs"]:
+            job["run_id"] = 700
+            job["run_attempt"] = 1
+    provider, counter = _write_sequenced_gh_jobs_stub(tmp_path, [incident, valid])
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    result = _run_actions_bash(
+        monitor, cwd=tmp_path, env=_monitor_environment(provider),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert counter.read_text().strip() == "2"
+    assert json.loads((tmp_path / "jobs-monitor.json").read_text()) == valid
+    assert json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())[
+        "action"
+    ] == "complete"
+    attempts = sorted((tmp_path / "monitor-observations").glob("**/jobs-attempt-*.json"))
+    assert [json.loads(path.read_text()) for path in attempts] == [incident, valid]
+    assert hashlib.sha256((
+        Path(PLUGIN_DIR)
+        / "tests/fixtures/calibration-monitor-pagination-incident/jobs-105-121.json"
+    ).read_bytes()).hexdigest() == "1f96f207af9c95aa55e376024850516ea33fe269d864b660ace331633a75ea96"
+
+
+def test_calibration_monitor_persistent_inconsistency_stops_after_three_whole_attempts(
+    tmp_path,
+):
+    assert _run_launch_script(tmp_path, stage=1).returncode == 0
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    jobs = _calibration_jobs()
+    incident = json.loads((
+        Path(PLUGIN_DIR)
+        / "tests/fixtures/calibration-monitor-pagination-incident/jobs-105-121.json"
+    ).read_text())
+    for page in incident:
+        for job in page["jobs"]:
+            job["run_id"] = 700
+            job["run_attempt"] = 1
+    provider, counter = _write_sequenced_gh_jobs_stub(
+        tmp_path, [incident, incident, incident, jobs],
+    )
+    (tmp_path / "calibration-monitor-budget.json").write_text(
+        '{"passed":true,"sentinel":"stale-continue"}\n'
+    )
+    (tmp_path / "calibration-monitor-lifecycle.json").write_text(
+        '{"action":"continue","sentinel":"stale-continue"}\n'
+    )
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    result = _run_actions_bash(
+        monitor, cwd=tmp_path, env=_monitor_environment(provider),
+    )
+
+    assert result.returncode != 0
+    assert counter.read_text().strip() == "3"
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    lifecycle = json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())
+    assert budget["passed"] is False
+    assert budget["fresh_accounting"] is False
+    assert budget["conservative_worker_exposure_minutes"] == 8 * 35
+    assert budget["cancellation_reserve"] == 1200
+    assert lifecycle["action"] == "cancel"
+    assert lifecycle["passed"] is False
+    assert "sentinel" not in budget
+    assert "sentinel" not in lifecycle
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate"])
+def test_calibration_monitor_never_repairs_missing_or_duplicate_jobs_across_attempts(
+    tmp_path, fault,
+):
+    assert _run_launch_script(tmp_path, stage=1).returncode == 0
+    calibration_launch = tmp_path / "calibration-launch"
+    calibration_launch.mkdir()
+    shutil.copy(tmp_path / "launch-accounting.json", calibration_launch)
+    valid = _calibration_jobs()
+    malformed = json.loads(json.dumps(valid))
+    if fault == "missing":
+        malformed[0]["total_count"] += 1
+    else:
+        malformed[0]["jobs"][1]["id"] = malformed[0]["jobs"][0]["id"]
+    provider, counter = _write_sequenced_gh_jobs_stub(
+        tmp_path, [malformed, malformed, malformed, valid],
+    )
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    result = _run_actions_bash(
+        monitor, cwd=tmp_path, env=_monitor_environment(provider),
+    )
+
+    assert result.returncode != 0
+    assert counter.read_text().strip() == "3"
+    assert json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())[
+        "action"
+    ] == "cancel"
+
+
+def test_calibration_monitor_collection_and_publication_bounds_are_frozen():
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+
+    assert "MAX_COLLECTION_ATTEMPTS = 3" in monitor
+    assert "COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 15" in monitor
+    assert "COLLECTION_DEADLINE_SECONDS = 45" in monitor
+    assert "subprocess.run(" in monitor
+    assert "timeout=min(COLLECTION_ATTEMPT_TIMEOUT_SECONDS, remaining)" in monitor
+    assert "os.replace(sample_budget, latest_budget)" in monitor
+    assert "os.replace(sample_lifecycle, latest_lifecycle)" in monitor
+    assert "cycle_elapsed=$((SECONDS - cycle_started))" in monitor
+    assert "sleep $((60 - cycle_elapsed))" in monitor
+
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    steps = workflow["jobs"]["calibration-monitor"]["steps"]
+    retain = next(step for step in steps if step.get("id") == "retain-monitor")
+    cancel = next(step for step in steps if step.get("id") == "cancel-monitor")
+    retain_cancel = next(
+        step for step in steps
+        if step.get("name") == "Retain calibration monitor cancellation outcome"
+    )
+    assert retain["timeout-minutes"] == 5
+    assert cancel["timeout-minutes"] == 2
+    assert retain_cancel["timeout-minutes"] == 2
+    assert sum(step["timeout-minutes"] for step in (retain, cancel, retain_cancel)) == 9
+
+
+def test_calibration_monitor_timeout_attempts_obey_per_attempt_and_cumulative_bounds(
+    tmp_path,
+):
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    collection = _first_python_heredoc(monitor)
+    collection = collection.replace(
+        "COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 15",
+        "COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 0.05",
+    ).replace(
+        "COLLECTION_DEADLINE_SECONDS = 45",
+        "COLLECTION_DEADLINE_SECONDS = 0.12",
+    )
+    provider = tmp_path / "timeout-provider"
+    provider.mkdir()
+    gh = provider / "gh"
+    gh.write_text("#!/bin/sh\nsleep 1\n")
+    gh.chmod(0o755)
+    sample_dir = tmp_path / "monitor-observations" / "sample-0001"
+    sample_dir.mkdir(parents=True)
+    env = _monitor_environment(provider)
+    env["SAMPLE_DIR"] = str(sample_dir)
+
+    started = datetime.now(UTC)
+    result = subprocess.run(
+        [sys.executable, "-c", collection], cwd=tmp_path, env=env,
+        capture_output=True, text=True,
+    )
+    elapsed = (datetime.now(UTC) - started).total_seconds()
+
+    assert result.returncode == 2, result.stderr
+    assert elapsed < 0.5
+    record = json.loads((sample_dir / "collection.json").read_text())
+    assert record["attempts_made"] == 3
+    assert record["fresh_snapshot"] is False
+    assert [error["error_class"] for error in record["errors"]] == [
+        "TimeoutExpired", "TimeoutExpired", "TimeoutExpired",
+    ]
+    assert json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())[
+        "action"
+    ] == "cancel"
+
+
+def test_calibration_monitor_attempts_cancellation_after_publication_failure(tmp_path):
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    steps = workflow["jobs"]["calibration-monitor"]["steps"]
+    cancel = next(
+        step["run"] for step in steps
+        if step.get("name") == "Request cancellation after diagnostic retention"
+    )
+    (tmp_path / "calibration-monitor-containment-armed.txt").write_text("armed\n")
+    provider = tmp_path / "cancel-provider"
+    provider.mkdir()
+    capture = provider / "capture"
+    gh = provider / "gh"
+    gh.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{capture}'\n")
+    gh.chmod(0o755)
+
+    result = _run_actions_bash(cancel, cwd=tmp_path, env={
+        **os.environ,
+        "PATH": f"{provider}:{os.environ['PATH']}",
+        "GITHUB_REPOSITORY": "example/fettle",
+        "GITHUB_RUN_ID": "700",
+        "MONITOR_OUTCOME": "failure",
+        "RETENTION_OUTCOME": "failure",
+    })
+
+    assert result.returncode == 0, result.stderr
+    assert capture.read_text().splitlines() == [
+        "api", "--method", "POST", "repos/example/fettle/actions/runs/700/cancel",
+    ]
+    assert (tmp_path / "calibration-monitor-cancellation-status.txt").read_text() == "accepted\n"
+
+
+def test_calibration_monitor_preserves_current_cancel_before_failed_diagnostic_upload():
+    workflow = yaml.safe_load((Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text())
+    steps = workflow["jobs"]["calibration-monitor"]["steps"]
+    names = [step.get("name") for step in steps]
+    preserve = names.index("Preserve current containment decision before diagnostic retention")
+    retain = names.index("Retain monitor accounting before cancellation")
+    cancel = names.index("Request cancellation after diagnostic retention")
+    cancel_retain = names.index("Retain calibration monitor cancellation outcome")
+
+    assert preserve < retain < cancel < cancel_retain
+    assert steps[retain]["continue-on-error"] is True
+    assert steps[cancel]["if"] == "always()"
+    assert steps[cancel_retain]["if"] == "always() && steps.cancel-monitor.outcome != 'skipped'"
 
 
 def test_monitor_initialization_failure_retains_typed_nonpass_terminal_accounting(
@@ -2508,16 +2796,21 @@ def test_stage_3_monitor_accounts_support_costs_and_validates_floor_provenance()
     assert 'final_batch_jobs = [' in monitor
     assert 'route_complete=route_complete' in monitor
     assert 'steps.retain-monitor.outcome' in monitor
-    assert "/actions/runs/$GITHUB_RUN_ID/cancel" not in monitor
+    assert "/actions/runs/$GITHUB_RUN_ID/cancel" in monitor
     workflow = yaml.safe_load(source)
     retain = next(
         step for step in workflow["jobs"]["calibration-monitor"]["steps"]
         if step.get("name") == "Retain monitor accounting before cancellation"
     )
     assert retain["timeout-minutes"] == 5
-    cancel = next(
+    contain = next(
         step for step in workflow["jobs"]["calibration-monitor"]["steps"]
         if step.get("name") == "Contain monitor failure and preserve terminal accounting"
+    )
+    assert contain["if"] == "always()"
+    cancel = next(
+        step for step in workflow["jobs"]["calibration-monitor"]["steps"]
+        if step.get("name") == "Request cancellation after diagnostic retention"
     )
     assert cancel["if"] == "always()"
 

@@ -2861,15 +2861,115 @@ jobs:
         run: |
           observer_contract=$(python -c 'import json,os; from fettle.staged_preflight import calibration_observer_contract,calibration_stage_3_observer_contract; matrix=json.loads(os.environ["EXPECTED_SHARDS"])["shard"]; stage=os.environ["CALIBRATION_STAGE"]; contract=calibration_stage_3_observer_contract(matrix) if stage=="3" else calibration_observer_contract(len(matrix),{"1":8,"2":16}[stage],expected_shards=matrix); print(json.dumps(contract,separators=(",",":")))')
           printf '%s\n' "$observer_contract" > calibration-observer-contract.json
+          printf '%s\n' 'armed' > calibration-monitor-containment-armed.txt
           started=$SECONDS
-          mkdir -p monitor-history admission-accounting
+          sample=0
+          mkdir -p monitor-history monitor-observations admission-accounting
           while true; do
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > jobs-monitor.json
+            cycle_started=$SECONDS
+            sample=$((sample + 1))
+            sample_dir=$(printf 'monitor-observations/sample-%04d' "$sample")
+            mkdir -p "$sample_dir"
+            rm -f calibration-monitor-budget.json calibration-monitor-lifecycle.json
+            SAMPLE_DIR="$sample_dir" python - <<'PY'
+          import json, os, subprocess, time
+          from pathlib import Path
+          from fettle.staged_preflight import load_api_jobs_pages
+
+          MAX_COLLECTION_ATTEMPTS = 3
+          COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 15
+          COLLECTION_DEADLINE_SECONDS = 45
+          sample_dir = Path(os.environ["SAMPLE_DIR"])
+          endpoint = (
+              f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/'
+              f'{os.environ["GITHUB_RUN_ID"]}/attempts/'
+              f'{os.environ["GITHUB_RUN_ATTEMPT"]}/jobs?per_page=100'
+          )
+          started = time.monotonic()
+          errors = []
+          selected = None
+          attempts_made = 0
+          for attempt in range(1, MAX_COLLECTION_ATTEMPTS + 1):
+              elapsed = time.monotonic() - started
+              remaining = max(0.0, COLLECTION_DEADLINE_SECONDS - elapsed)
+              if remaining <= 0:
+                  break
+              target = sample_dir / f"jobs-attempt-{attempt}.json"
+              error = sample_dir / f"jobs-attempt-{attempt}.stderr"
+              attempts_made = attempt
+              try:
+                  result = subprocess.run(
+                      ["gh", "api", "--paginate", "--slurp", endpoint],
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+                      timeout=min(COLLECTION_ATTEMPT_TIMEOUT_SECONDS, remaining),
+                  )
+                  target.write_bytes(result.stdout)
+                  error.write_bytes(result.stderr[:65536])
+                  if result.returncode:
+                      raise RuntimeError(f"provider jobs collection exited {result.returncode}")
+                  load_api_jobs_pages(target)
+                  selected = target
+                  break
+              except Exception as exc:
+                  errors.append({
+                      "attempt": attempt, "error_class": type(exc).__name__,
+                      "error": str(exc)[:512],
+                  })
+          record = {
+              "schema_version": "1", "kind": "calibration_monitor_collection",
+              "sample": int(sample_dir.name.rsplit("-", 1)[1]),
+              "maximum_attempts": MAX_COLLECTION_ATTEMPTS,
+              "attempt_timeout_seconds": COLLECTION_ATTEMPT_TIMEOUT_SECONDS,
+              "collection_deadline_seconds": COLLECTION_DEADLINE_SECONDS,
+              "attempts_made": attempts_made,
+              "fresh_snapshot": selected is not None, "errors": errors,
+          }
+          (sample_dir / "collection.json").write_text(json.dumps(record, indent=2) + "\n")
+          if selected is not None:
+              Path("jobs-monitor.json.tmp").write_bytes(selected.read_bytes())
+              os.replace("jobs-monitor.json.tmp", "jobs-monitor.json")
+              raise SystemExit(0)
+          expected = json.loads(os.environ["EXPECTED_SHARDS"])["shard"]
+          budget = {
+              "schema_version": "1", "kind": "calibration_monitor_containment",
+              "passed": False, "billing_authority": False,
+              "fresh_accounting": False,
+              "stage": os.environ["CALIBRATION_STAGE"],
+              "calibration_id": os.environ["CALIBRATION_ID"],
+              "expected_run_id": os.environ["GITHUB_RUN_ID"],
+              "expected_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "ceiling": int(os.environ["RUNNER_MINUTE_CEILING"]),
+              "conservative_worker_exposure_minutes": len(expected) * 35,
+              "bounded_support_reserve_minutes": 55,
+              "cancellation_reserve": 1200,
+              "containment_reason": (
+                  "trustworthy provider accounting was not restored within "
+                  "three whole-response attempts and 45 seconds"
+              ),
+              "collection_evidence": str(sample_dir / "collection.json"),
+          }
+          lifecycle = {
+              "schema_version": "1", "kind": "calibration_observer_sample",
+              "passed": False, "billing_authority": False, "action": "cancel",
+              "reason": "fresh complete provider accounting is unavailable",
+              "expected_shards": expected, "terminal_shards": [],
+              "collection_evidence": str(sample_dir / "collection.json"),
+          }
+          sample_budget = sample_dir / "calibration-monitor-budget.json"
+          sample_lifecycle = sample_dir / "calibration-monitor-lifecycle.json"
+          sample_budget.write_text(json.dumps(budget, indent=2) + "\n")
+          sample_lifecycle.write_text(json.dumps(lifecycle, indent=2) + "\n")
+          latest_budget = Path("calibration-monitor-budget.json")
+          latest_lifecycle = Path("calibration-monitor-lifecycle.json")
+          os.replace(sample_budget, latest_budget)
+          os.replace(sample_lifecycle, latest_lifecycle)
+          raise SystemExit(2)
+          PY
             if [[ "$CALIBRATION_STAGE" == "3" ]]; then
               rm -rf admission-accounting/*
               gh run download "$GITHUB_RUN_ID" --pattern "mutation-calibration-admission-$GITHUB_RUN_ID-*" --dir admission-accounting || true
             fi
-            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) python - 2> >(tee -a calibration-monitor-error.log >&2) <<'PY'
+            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) SAMPLE_DIR="$sample_dir" python - 2> >(tee -a calibration-monitor-error.log >&2) <<'PY'
           import json, os
           from datetime import datetime
           from pathlib import Path
@@ -2912,10 +3012,12 @@ jobs:
               combined, ceiling=int(os.environ["RUNNER_MINUTE_CEILING"]),
               cancellation_reserve=1200,
           )
-          Path("calibration-monitor-budget.json").write_text(json.dumps(result, indent=2) + "\n")
+          Path(os.environ["SAMPLE_DIR"], "calibration-monitor-budget.json").write_text(
+              json.dumps(result, indent=2) + "\n"
+          )
           PY
-            passed=$(jq -r '.passed' calibration-monitor-budget.json)
-            ELAPSED_SECONDS=$((SECONDS - started)) BUDGET_PASSED="$passed" python - <<'PY'
+            passed=$(jq -r '.passed' "$sample_dir/calibration-monitor-budget.json")
+            ELAPSED_SECONDS=$((SECONDS - started)) BUDGET_PASSED="$passed" SAMPLE_DIR="$sample_dir" python - <<'PY'
           import json, os
           from pathlib import Path
           from fettle.staged_preflight import (
@@ -2955,13 +3057,84 @@ jobs:
               route_complete=route_complete,
               initial_admission_status=initial_admission_status,
           )
-          Path("calibration-monitor-lifecycle.json").write_text(json.dumps(result, indent=2) + "\n")
+          sample_budget = Path(os.environ["SAMPLE_DIR"], "calibration-monitor-budget.json")
+          sample_lifecycle = Path(os.environ["SAMPLE_DIR"], "calibration-monitor-lifecycle.json")
+          sample_lifecycle.write_text(json.dumps(result, indent=2) + "\n")
+          budget = json.loads(sample_budget.read_text())
+          lifecycle = json.loads(sample_lifecycle.read_text())
+          if not isinstance(budget.get("passed"), bool) or lifecycle.get("action") not in {
+              "continue", "complete", "cancel",
+          }:
+              raise ValueError("calibration monitor decision pair is malformed")
+          latest_budget = Path("calibration-monitor-budget.json")
+          latest_lifecycle = Path("calibration-monitor-lifecycle.json")
+          os.replace(sample_budget, latest_budget)
+          os.replace(sample_lifecycle, latest_lifecycle)
           PY
             action=$(jq -r '.action' calibration-monitor-lifecycle.json)
             [[ "$action" == "complete" ]] && break
             [[ "$action" == "cancel" ]] && exit 2
-            sleep 60
+            cycle_elapsed=$((SECONDS - cycle_started))
+            (( cycle_elapsed < 60 )) && sleep $((60 - cycle_elapsed))
           done
+      - name: Preserve current containment decision before diagnostic retention
+        if: always()
+        env:
+          RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
+          EXPECTED_SHARDS: ${{ needs.prepare.outputs.execution_matrix }}
+          CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
+          CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
+        run: |
+          if [[ "${{ steps.monitor.outcome }}" == "success" ]]; then
+            exit 0
+          fi
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          budget_path = Path("calibration-monitor-budget.json")
+          lifecycle_path = Path("calibration-monitor-lifecycle.json")
+          try:
+              budget = json.loads(budget_path.read_text())
+              lifecycle = json.loads(lifecycle_path.read_text())
+              current_nonpass = (
+                  budget.get("passed") is False
+                  and lifecycle.get("passed") is False
+                  and lifecycle.get("action") == "cancel"
+              )
+          except Exception:
+              current_nonpass = False
+          if current_nonpass:
+              raise SystemExit(0)
+          budget = {
+              "schema_version": "1", "kind": "calibration_monitor_containment",
+              "passed": False, "billing_authority": False,
+              "fresh_accounting": False,
+              "stage": os.environ["CALIBRATION_STAGE"],
+              "calibration_id": os.environ["CALIBRATION_ID"],
+              "expected_run_id": os.environ["GITHUB_RUN_ID"],
+              "expected_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "ceiling": int(os.environ["RUNNER_MINUTE_CEILING"]),
+              "cancellation_reserve": 1200,
+              "containment_reason": (
+                  "monitor setup, observation, accounting, or decision publication "
+                  "failed before a complete current decision"
+              ),
+          }
+          lifecycle = {
+              "schema_version": "1", "kind": "calibration_observer_sample",
+              "passed": False, "billing_authority": False, "action": "cancel",
+              "reason": "calibration monitor did not publish a complete current decision",
+              "expected_shards": json.loads(os.environ["EXPECTED_SHARDS"])["shard"],
+              "terminal_shards": [],
+          }
+          budget_tmp = budget_path.with_suffix(".json.tmp")
+          lifecycle_tmp = lifecycle_path.with_suffix(".json.tmp")
+          budget_tmp.write_text(json.dumps(budget, indent=2) + "\n")
+          lifecycle_tmp.write_text(json.dumps(lifecycle, indent=2) + "\n")
+          os.replace(budget_tmp, budget_path)
+          os.replace(lifecycle_tmp, lifecycle_path)
+          PY
       - name: Retain monitor accounting before cancellation
         id: retain-monitor
         if: always()
@@ -2977,6 +3150,7 @@ jobs:
              calibration-monitor-lifecycle.json
              calibration-monitor-error.log
              monitor-history
+             monitor-observations
              admission-accounting
           if-no-files-found: error
           retention-days: 90
@@ -2990,6 +3164,46 @@ jobs:
           if [[ "$passed" != "true" || "${{ steps.monitor.outcome }}" != "success" || "${{ steps.retain-monitor.outcome }}" != "success" ]]; then
             exit 2
           fi
+          action=$(jq -r '.action' calibration-monitor-lifecycle.json 2>/dev/null || printf cancel)
+          if [[ "$action" != "complete" ]]; then
+            exit 2
+          fi
+          rm -f calibration-monitor-containment-armed.txt
+      - name: Request cancellation after diagnostic retention
+        id: cancel-monitor
+        if: always()
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
+          RETENTION_OUTCOME: ${{ steps.retain-monitor.outcome }}
+        run: |
+          if [[ ! -f calibration-monitor-containment-armed.txt && "$MONITOR_OUTCOME" == success && "$RETENTION_OUTCOME" == success ]]; then
+            exit 0
+          fi
+          printf '%s\n' 'requested' > calibration-monitor-cancellation-requested.txt
+          if output=$(gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" 2>&1); then
+            printf '%s\n' "$output" > calibration-monitor-cancellation-response.log
+            printf '%s\n' 'accepted' > calibration-monitor-cancellation-status.txt
+          else
+            status=$?
+            printf '%s\n' "$output" > calibration-monitor-cancellation-response.log
+            printf 'api-failure-%s\n' "$status" > calibration-monitor-cancellation-status.txt
+            exit "$status"
+          fi
+      - name: Retain calibration monitor cancellation outcome
+        if: always() && steps.cancel-monitor.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-calibration-monitor-cancellation-${{ github.run_id }}
+          path: |
+            calibration-monitor-cancellation-requested.txt
+            calibration-monitor-cancellation-response.log
+            calibration-monitor-cancellation-status.txt
+          if-no-files-found: error
+          retention-days: 90
 
   calibration-stage-3-observer-live-2:
     if: always() && github.event.inputs.mode == 'calibration' && github.event.inputs.calibration_stage == '3'
