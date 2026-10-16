@@ -9,6 +9,7 @@ import tempfile
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 import pytest
@@ -2091,6 +2092,46 @@ def _monitor_environment(provider, *, shards=None):
     }
 
 
+def _run_monitor_collection_with_controlled_boundaries(
+    tmp_path, monkeypatch, *, monotonic_values, outcomes,
+):
+    monitor = _workflow_step_script(
+        "calibration-monitor", "Monitor active usage and request bounded cancellation",
+    )
+    collection = _first_python_heredoc(monitor)
+    sample_dir = tmp_path / "monitor-observations" / "sample-0001"
+    sample_dir.mkdir(parents=True)
+    calls = []
+    outcome_iterator = iter(outcomes)
+    monotonic_iterator = iter(monotonic_values)
+    timeout_expired = subprocess.TimeoutExpired
+
+    def controlled_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        outcome = next(outcome_iterator)
+        if outcome == "timeout":
+            raise timeout_expired(command, kwargs["timeout"])
+        return SimpleNamespace(
+            stdout=json.dumps(outcome).encode(), stderr=b"", returncode=0,
+        )
+
+    fake_subprocess = SimpleNamespace(PIPE=-1, run=controlled_run)
+    fake_time = SimpleNamespace(monotonic=lambda: next(monotonic_iterator))
+    env = _monitor_environment(tmp_path)
+    env["SAMPLE_DIR"] = str(sample_dir)
+    with monkeypatch.context() as controlled:
+        controlled.chdir(tmp_path)
+        for key, value in env.items():
+            controlled.setenv(key, value)
+        controlled.setitem(sys.modules, "subprocess", fake_subprocess)
+        controlled.setitem(sys.modules, "time", fake_time)
+        try:
+            exec(compile(collection, "calibration-monitor-collection", "exec"), {})
+        except SystemExit as exc:
+            return exc.code, sample_dir, calls
+    raise AssertionError("production collection script did not terminate")
+
+
 def test_calibration_monitor_recovers_only_from_a_fresh_whole_snapshot(tmp_path):
     assert _run_launch_script(tmp_path, stage=1).returncode == 0
     calibration_launch = tmp_path / "calibration-launch"
@@ -2238,48 +2279,103 @@ def test_calibration_monitor_collection_and_publication_bounds_are_frozen():
     assert sum(step["timeout-minutes"] for step in (retain, cancel, retain_cancel)) == 9
 
 
-def test_calibration_monitor_timeout_attempts_obey_per_attempt_and_cumulative_bounds(
-    tmp_path,
+def test_calibration_monitor_exhausts_three_attempts_when_deadline_allows(
+    tmp_path, monkeypatch,
 ):
-    monitor = _workflow_step_script(
-        "calibration-monitor", "Monitor active usage and request bounded cancellation",
-    )
-    collection = _first_python_heredoc(monitor)
-    collection = collection.replace(
-        "COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 15",
-        "COLLECTION_ATTEMPT_TIMEOUT_SECONDS = 0.05",
-    ).replace(
-        "COLLECTION_DEADLINE_SECONDS = 45",
-        "COLLECTION_DEADLINE_SECONDS = 0.12",
-    )
-    provider = tmp_path / "timeout-provider"
-    provider.mkdir()
-    gh = provider / "gh"
-    gh.write_text("#!/bin/sh\nsleep 1\n")
-    gh.chmod(0o755)
-    sample_dir = tmp_path / "monitor-observations" / "sample-0001"
-    sample_dir.mkdir(parents=True)
-    env = _monitor_environment(provider)
-    env["SAMPLE_DIR"] = str(sample_dir)
+    malformed = [{"total_count": 1, "jobs": []}]
 
-    started = datetime.now(UTC)
-    result = subprocess.run(
-        [sys.executable, "-c", collection], cwd=tmp_path, env=env,
-        capture_output=True, text=True,
+    code, sample_dir, calls = _run_monitor_collection_with_controlled_boundaries(
+        tmp_path, monkeypatch, monotonic_values=[0, 0, 10, 20],
+        outcomes=[malformed, malformed, malformed],
     )
-    elapsed = (datetime.now(UTC) - started).total_seconds()
 
-    assert result.returncode == 2, result.stderr
-    assert elapsed < 0.5
+    assert code == 2
     record = json.loads((sample_dir / "collection.json").read_text())
     assert record["attempts_made"] == 3
     assert record["fresh_snapshot"] is False
+    assert len(calls) == 3
+    assert [call["timeout"] for call in calls] == [15, 15, 15]
+
+
+def test_calibration_monitor_deadline_exhausts_before_attempt_three(
+    tmp_path, monkeypatch,
+):
+    malformed = [{"total_count": 1, "jobs": []}]
+
+    code, sample_dir, calls = _run_monitor_collection_with_controlled_boundaries(
+        tmp_path, monkeypatch, monotonic_values=[0, 0, 20, 45],
+        outcomes=[malformed, malformed],
+    )
+
+    assert code == 2
+    assert len(calls) == 2
+    record = json.loads((sample_dir / "collection.json").read_text())
+    assert record["attempts_made"] == 2
+    assert record["fresh_snapshot"] is False
+
+
+def test_calibration_monitor_timeout_is_smaller_of_attempt_limit_and_remaining_time(
+    tmp_path, monkeypatch,
+):
+    code, sample_dir, calls = _run_monitor_collection_with_controlled_boundaries(
+        tmp_path, monkeypatch, monotonic_values=[0, 0, 35, 45],
+        outcomes=["timeout", "timeout"],
+    )
+
+    assert code == 2
+    assert [call["timeout"] for call in calls] == [15, 10]
+    record = json.loads((sample_dir / "collection.json").read_text())
     assert [error["error_class"] for error in record["errors"]] == [
-        "TimeoutExpired", "TimeoutExpired", "TimeoutExpired",
+        "TimeoutExpired", "TimeoutExpired",
     ]
+
+
+def test_calibration_monitor_recovers_after_controlled_failed_attempt(
+    tmp_path, monkeypatch,
+):
+    malformed = [{"total_count": 1, "jobs": []}]
+    valid = _calibration_jobs()
+
+    code, sample_dir, calls = _run_monitor_collection_with_controlled_boundaries(
+        tmp_path, monkeypatch, monotonic_values=[0, 0, 5],
+        outcomes=[malformed, valid],
+    )
+
+    assert code == 0
+    assert len(calls) == 2
+    assert json.loads((tmp_path / "jobs-monitor.json").read_text()) == valid
+    record = json.loads((sample_dir / "collection.json").read_text())
+    assert record["attempts_made"] == 2
+    assert record["fresh_snapshot"] is True
+
+
+def test_calibration_monitor_exhaustion_publishes_current_fail_closed_decision(
+    tmp_path, monkeypatch,
+):
+    malformed = [{"total_count": 1, "jobs": []}]
+    (tmp_path / "calibration-monitor-budget.json").write_text(
+        '{"passed":true,"sentinel":"stale"}\n'
+    )
+    (tmp_path / "calibration-monitor-lifecycle.json").write_text(
+        '{"action":"continue","sentinel":"stale"}\n'
+    )
+
+    code, _, _ = _run_monitor_collection_with_controlled_boundaries(
+        tmp_path, monkeypatch, monotonic_values=[0, 0, 10, 20],
+        outcomes=[malformed, malformed, malformed],
+    )
+
+    assert code == 2
+    budget = json.loads((tmp_path / "calibration-monitor-budget.json").read_text())
+    lifecycle = json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())
+    assert budget["passed"] is False
+    assert budget["fresh_accounting"] is False
+    assert lifecycle["passed"] is False
     assert json.loads((tmp_path / "calibration-monitor-lifecycle.json").read_text())[
         "action"
     ] == "cancel"
+    assert "sentinel" not in budget
+    assert "sentinel" not in lifecycle
 
 
 def test_calibration_monitor_attempts_cancellation_after_publication_failure(tmp_path):
