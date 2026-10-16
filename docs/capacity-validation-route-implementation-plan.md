@@ -156,6 +156,46 @@ reruns, full-corpus mutation execution, host probes, acceptance, merge, tag, and
 release. Any missing, partial, malformed, stale, conflicting, unavailable, or
 indeterminate artifact or provider record is non-pass and cannot broaden scope.
 
+## Superseding Bounded Authorization
+
+`AH-CAPACITY-BOUNDED-20261016-A` supersedes the rejected request above for one
+candidate-bound experiment after delivery gates pass. It does not reopen the
+closed grant, provide historical spending credit, or authorize calibration.
+
+Preparation uses sixteen fixed batches of sixteen shards. Before each batch,
+complete provider pagination is accounted through the existing runner-time
+owner. The gate charges completed elapsed work, reserves only the unelapsed
+remainder for active or admitted-but-not-yet-observed workers, reserves the
+entire next batch at 35 minutes per worker, and keeps support and uncertainty
+categories fully reserved. The worker gate is:
+
+`observed + active_remaining + not_yet_observed×35 + next_batch×35 <= 952`.
+
+The non-transferable categories are 952 preparation workers, 168 preparation
+support, 100 preparation cancellation/uncertainty, 240 measurement workers, 25
+measurement support, 10 terminal readback, and 30 measurement cancellation
+controllers: 1,525 runner-minutes total. Containment does not guarantee corpus
+completion.
+
+### Frozen Model Decision
+
+Investment requires all 12 exact results, median absolute relative error to the
+central prediction at most 0.35, at least 10 rates between the optimistic and
+conservative assumptions, no stress-rate exceedance, at least five qualifying
+concordant low/high pairs, zero material inversions, and all exact whole-worker
+intervals at or below 960 seconds. A pair qualifies only when the high
+fingerprint count is at least 1.5 times the low count and the central predicted
+delta is at least 60 seconds. Concordance requires both a 1.2 duration ratio and
+60-second delta. Two distinct qualifying inversions, each at most a 0.8 ratio
+and at least a 60-second reverse delta, reject ranking.
+
+Exact attributable whole-worker duration above 960 seconds rejects the proposed
+range granularity. The 720-second execution deadline produces a timer-specific
+right-censored observation; the 840-second step timeout is not an execution
+duration; the 1,200-second worker timeout is containment, not success. Neither a
+720-second nor an 840-second censor proves the 960-second target was exceeded.
+Any case not meeting a frozen investment or rejection rule is inconclusive.
+
 ## Feature Manifest
 
 The repository has no `FEATURES.md`; behavior ownership is recorded in

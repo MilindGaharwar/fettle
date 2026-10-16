@@ -50,6 +50,7 @@ from fettle.mutation_test import (
     aggregate_preflight_shards,
     _run_shard_modules,
     evaluate_stability,
+    evaluate_capacity_validation_decision,
     evaluate_policy,
     compute_score,
     format_report,
@@ -3128,6 +3129,16 @@ def test_capacity_plan_selects_deterministic_low_high_units_across_six_groups(tm
     assert len({unit["mapped_test_group_digest"] for unit in first["units"]}) == 6
     assert [len(unit["fingerprints"]) for unit in first["units"]] == [1, 2] * 6
     assert first["passed"] is False and first["qualification_eligible"] is False
+    contract = first["decision_contract"]
+    assert contract["prediction_error"]["absolute_relative_error_median_max"] == 0.35
+    assert contract["ranking"]["reject_distinct_group_inversions_min"] == 2
+    assert contract["timers"]["execution"]["deadline_seconds"] == 720
+    assert contract["timers"]["workflow_step"]["deadline_seconds"] == 840
+    assert contract["timers"]["operating_target"]["deadline_seconds"] == 960
+    assert contract["timers"]["whole_worker"]["deadline_seconds"] == 1200
+    assert contract["censoring"]["shorter_timeout_never_proves_operating_target_exceeded"] is True
+    assert contract["outcome_precedence"][-1] == "inconclusive"
+    assert contract["substitution_allowed"] is contract["rerun_allowed"] is False
     assert second == first
 
     path = tmp_path / "plan.json"
@@ -3325,6 +3336,102 @@ def test_capacity_result_validation_rejects_partial_conflicting_and_authoritativ
             )
 
 
+def _capacity_decision_fixture(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    predictions = {
+        "optimistic": 30, "central": 60, "conservative": 90, "stress": 120,
+    }
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+    reports = []
+    for unit in plan["units"]:
+        seconds = round(len(unit["fingerprints"]) * predictions["central"])
+        report = {
+            "status": "completed", "unit_index": unit["unit_index"], "unit": unit,
+            "plan_digest": plan["digest"], "elapsed_ms": seconds * 1000,
+        }
+        reports.append(report)
+    return plan, reports
+
+
+def test_capacity_decision_invests_only_when_every_frozen_gate_passes(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "invest"
+    assert decision["exact_units"] == list(range(12))
+    assert len(decision["ranking"]["concordant_groups"]) == 6
+    assert decision["ranking"]["material_inversion_groups"] == []
+
+
+def test_capacity_decision_rejects_two_distinct_material_group_inversions(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+    inverted_groups = {
+        plan["units"][0]["mapped_test_group_digest"],
+        next(unit["mapped_test_group_digest"] for unit in plan["units"]
+             if unit["mapped_test_group_digest"]
+             != plan["units"][0]["mapped_test_group_digest"]),
+    }
+    for report in reports:
+        unit = report["unit"]
+        if unit["mapped_test_group_digest"] in inverted_groups:
+            report["elapsed_ms"] = (200 if unit["cost_class"] == "low" else 100) * 1000
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "reject_ranking"
+    assert set(decision["ranking"]["material_inversion_groups"]) == inverted_groups
+
+
+def test_capacity_decision_preserves_inconclusive_for_shorter_censor(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+    reports[0] = {"status": "incomplete", "unit_index": 0}
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "inconclusive"
+    assert decision["unknown_or_censored_units"] == [0]
+    assert decision["granularity"]["exact_whole_worker_target_exceedances"] == []
+    assert decision["granularity"]["shorter_timeout_inference_allowed"] is False
+
+
+def test_capacity_decision_rejects_only_exact_whole_worker_target_exceedance(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {**{index: 800 for index in range(12)}, 3: 961},
+    )
+
+    assert decision["outcome"] == "reject_granularity"
+    assert decision["granularity"]["exact_whole_worker_target_exceedances"] == [3]
+
+
+def test_capacity_decision_rejects_zero_or_malformed_provider_worker_intervals(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    for malformed in (
+        {**{index: 800 for index in range(12)}, 3: 0},
+        {**{index: 800 for index in range(12)}, 3: True},
+    ):
+        with pytest.raises(ValueError, match="provider worker timing is malformed"):
+            evaluate_capacity_validation_decision(plan, reports, malformed)
+
+
 def test_capacity_package_reproduces_and_rejects_tampered_corpus(tmp_path):
     preflight, manifests = _capacity_preflight()
     manifest_dir = tmp_path / "capacity-manifests"
@@ -3393,7 +3500,13 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         "capacity validation (admit batch 3)",
         "capacity validation (non-authoritative readback)",
     ))]
-    pages = [{"total_count": len(workers + support), "jobs": workers + support}]
+    controller = [job(
+        "capacity-measurement-monitor / capacity validation (monitor measurement containment)",
+        job_id=17,
+        completed_at="2026-10-15T10:02:00Z",
+    )]
+    all_jobs = workers + support + controller
+    pages = [{"total_count": len(all_jobs), "jobs": all_jobs}]
 
     valid = reconcile_capacity_provider_accounting(
         run, pages, source, repository="owner/repo",
@@ -3401,17 +3514,19 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         preparation_run_id="100", plan_file_sha256="p" * 64,
     )
     failed = reconcile_capacity_provider_accounting(
-        run, [{"total_count": 16, "jobs": [{**workers[0], "conclusion": "failure"}, *workers[1:], *support]}],
+        {**run, "conclusion": "failure"}, [{"total_count": 17, "jobs": [
+            {**workers[0], "conclusion": "failure"}, *workers[1:], *support, *controller,
+        ]}],
         source, repository="owner/repo", revision="a" * 40,
         experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
     )
     assert valid["status"] == "completed" and valid["passed"] is False
     assert failed["status"] == "non_pass"
-    assert failed["cancellation_controller"]["status"] == "indeterminate_non_pass"
+    assert failed["cancellation_controller"]["status"] == "completed"
     with pytest.raises(ValueError, match="duplicated"):
         reconcile_capacity_provider_accounting(
-            run, [{"total_count": 17, "jobs": [*workers, workers[0], *support]}],
+            run, [{"total_count": 18, "jobs": [*workers, workers[0], *support, *controller]}],
             source, repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
@@ -3426,33 +3541,34 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
     assert valid["terminal_readback_support"]["ceiling_minutes"] == 10
     assert valid["terminal_readback_support"]["charged_minutes"] == 10
     assert valid["terminal_readback_support"]["status"] == "conservative_ceiling_charged"
-    with pytest.raises(ValueError, match="identity"):
-        reconcile_capacity_provider_accounting(
-            {**run, "conclusion": "failure"}, pages, source, repository="owner/repo",
-            revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
-            preparation_run_id="100", plan_file_sha256="p" * 64,
-        )
+    assert valid["cancellation_controller"]["observed_minutes"] == 2
+    cancelled = reconcile_capacity_provider_accounting(
+        {**run, "conclusion": "cancelled"}, pages, source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert cancelled["status"] == "non_pass"
     with pytest.raises(ValueError, match="pagination"):
         reconcile_capacity_provider_accounting(
-            run, [{"total_count": 17, "jobs": workers + support}], source,
+            run, [{"total_count": 18, "jobs": all_jobs}], source,
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
         )
     with pytest.raises(ValueError, match="pagination"):
-        malformed_ids = [{**item} for item in workers + support]
+        malformed_ids = [{**item} for item in all_jobs]
         malformed_ids[0]["id"] = True
         reconcile_capacity_provider_accounting(
-            run, [{"total_count": 16, "jobs": malformed_ids}], source,
+            run, [{"total_count": 17, "jobs": malformed_ids}], source,
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
         )
     with pytest.raises(ValueError, match="contradictory"):
-        contradictory = [{**item} for item in workers + support]
+        contradictory = [{**item} for item in all_jobs]
         contradictory[0]["started_at"] = "2026-10-15T10:02:00Z"
         reconcile_capacity_provider_accounting(
-            run, [{"total_count": 16, "jobs": contradictory}], source,
+            run, [{"total_count": 17, "jobs": contradictory}], source,
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,

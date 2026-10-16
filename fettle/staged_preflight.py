@@ -119,6 +119,17 @@ CALIBRATION_SUPPORT_BOUNDS = {
     "mutation (assemble evidence)": 30,
     "mutation evidence": 10,
 }
+CAPACITY_PREPARATION_BUDGET = {
+    "worker_ceiling_minutes": 952,
+    "support_ceiling_minutes": 168,
+    "cancellation_uncertainty_headroom_minutes": 100,
+    "operational_ceiling_minutes": 1220,
+    "worker_timeout_minutes": 35,
+    "batch_size": 16,
+}
+_CAPACITY_ENUMERATION_JOB = re.compile(
+    r"^(?:[^/]+ / )?capacity validation \(enumerate (\d+)\)$"
+)
 CALIBRATION_ACCOUNTING_LOG_MARKER = "FETTLE_CALIBRATION_ACCOUNTING_LOG_V1 "
 CALIBRATION_ACCOUNTING_LOG_PAYLOAD_LIMIT = 256 * 1024
 CALIBRATION_ACCOUNTING_LOG_CHUNK_SIZE = 12 * 1024
@@ -2817,6 +2828,125 @@ def reserve_bounded_support_minutes(
         "bounded_support_reserve_minutes": total,
         "bounded_support_reservations": reservations,
     }
+
+
+def evaluate_capacity_preparation_admission(
+    accounting: dict,
+    *,
+    admitted_shards: list[int],
+    next_shards: list[int],
+    require_admitted_terminal: bool = True,
+) -> dict:
+    """Reserve complete capacity-preparation exposure before another fixed batch."""
+    policy = CAPACITY_PREPARATION_BUDGET
+    if sum((
+        policy["worker_ceiling_minutes"],
+        policy["support_ceiling_minutes"],
+        policy["cancellation_uncertainty_headroom_minutes"],
+    )) != policy["operational_ceiling_minutes"]:
+        raise ValueError("capacity preparation budget categories do not reconcile")
+    if (
+        not isinstance(accounting, dict)
+        or accounting.get("kind") not in {
+            "operational_runner_time_estimate", "combined_operational_runner_time_estimate",
+        }
+        or accounting.get("billing_authority") is not False
+    ):
+        raise ValueError("capacity preparation accounting is malformed")
+    included = accounting.get("included_jobs")
+    if included is None and accounting.get("kind") == "combined_operational_runner_time_estimate":
+        sources = accounting.get("sources")
+        if not isinstance(sources, list) or not sources:
+            raise ValueError("capacity preparation accounting sources are malformed")
+        included = [job for source in sources for job in source.get("included_jobs", [])]
+    if not isinstance(included, list) or any(not isinstance(job, dict) for job in included):
+        raise ValueError("capacity preparation included jobs are malformed")
+    for values, label in ((admitted_shards, "admitted"), (next_shards, "next")):
+        if (
+            not isinstance(values, list) or values != sorted(set(values))
+            or any(type(index) is not int or not 0 <= index < SHARD_COUNT for index in values)
+        ):
+            raise ValueError(f"capacity preparation {label} shards are malformed")
+    if set(admitted_shards) & set(next_shards):
+        raise ValueError("capacity preparation next shards overlap prior admission")
+    if len(next_shards) > policy["batch_size"]:
+        raise ValueError("capacity preparation batch exceeds the fixed size")
+
+    workers = []
+    seen = set()
+    active_statuses = {"in_progress", "queued", "requested", "pending", "waiting"}
+    for job in included:
+        match = _CAPACITY_ENUMERATION_JOB.fullmatch(str(job.get("name", "")))
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if index in seen or index not in admitted_shards:
+            raise ValueError("capacity preparation worker identity is duplicated or unadmitted")
+        seen.add(index)
+        minutes = job.get("minutes")
+        if (
+            not isinstance(minutes, (int, float)) or isinstance(minutes, bool)
+            or not math.isfinite(minutes) or minutes < 0
+        ):
+            raise ValueError("capacity preparation worker timing is malformed")
+        status = job.get("status")
+        if status not in {"completed", *active_statuses}:
+            raise ValueError("capacity preparation worker status is indeterminate")
+        if status == "completed" and job.get("conclusion") != "success":
+            raise ValueError("capacity preparation worker did not succeed")
+        if minutes > policy["worker_timeout_minutes"]:
+            raise ValueError("capacity preparation worker exceeded its accounting bound")
+        workers.append({**job, "shard_index": index})
+
+    completed = sorted(job["shard_index"] for job in workers if job["status"] == "completed")
+    active = sorted(job["shard_index"] for job in workers if job["status"] in active_statuses)
+    if require_admitted_terminal and (completed != admitted_shards or active):
+        raise ValueError("capacity preparation admitted workers are not complete and terminal")
+    if not require_admitted_terminal and not set(completed + active) <= set(admitted_shards):
+        raise ValueError("capacity preparation worker observation exceeds admission")
+
+    observed_worker = round(sum(float(job["minutes"]) for job in workers), 2)
+    not_yet_observed = sorted(set(admitted_shards) - set(completed) - set(active))
+    active_remaining = round(sum(
+        policy["worker_timeout_minutes"] - float(job["minutes"])
+        for job in workers if job["status"] in active_statuses
+    ) + len(not_yet_observed) * policy["worker_timeout_minutes"], 2)
+    next_reservation = len(next_shards) * policy["worker_timeout_minutes"]
+    worker_reserved_total = round(observed_worker + active_remaining + next_reservation, 2)
+    result = {
+        "schema_version": "1",
+        "kind": "capacity_preparation_admission",
+        "billing_authority": False,
+        "completion_guaranteed": False,
+        "admitted_shards": admitted_shards,
+        "completed_shards": completed,
+        "active_shards": active,
+        "not_yet_observed_shards": not_yet_observed,
+        "next_shards": next_shards,
+        "worker": {
+            "ceiling_minutes": policy["worker_ceiling_minutes"],
+            "observed_minutes": observed_worker,
+            "active_remaining_reservation_minutes": active_remaining,
+            "next_batch_reservation_minutes": next_reservation,
+            "reserved_total_minutes": worker_reserved_total,
+            "double_counted_elapsed_minutes": 0,
+            "transferable": False,
+        },
+        "support": {
+            "ceiling_minutes": policy["support_ceiling_minutes"],
+            "reserved_total_minutes": policy["support_ceiling_minutes"],
+            "transferable": False,
+        },
+        "cancellation_uncertainty": {
+            "ceiling_minutes": policy["cancellation_uncertainty_headroom_minutes"],
+            "reserved_total_minutes": policy["cancellation_uncertainty_headroom_minutes"],
+            "transferable": False,
+        },
+        "operational_ceiling_minutes": policy["operational_ceiling_minutes"],
+        "passed": worker_reserved_total <= policy["worker_ceiling_minutes"],
+        "notice": "Containment reservation only; it does not guarantee corpus completion.",
+    }
+    return result
 
 
 def build_calibration_terminal_accounting(

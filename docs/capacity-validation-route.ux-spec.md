@@ -20,7 +20,7 @@ so I can obtain bounded modeling evidence without creating qualification input.
 
 | Phase | Operator action | Sees | Desired feeling | Failure prevented |
 |---|---|---|---|---|
-| Prepare | Dispatches `capacity-validation` stage `prepare` at an exact SHA | Candidate-bound manifests, corpus, frozen 12-unit plan, and separate preparation cost | Confident | Parent evidence relabeled as current |
+| Prepare | Dispatches `capacity-validation` stage `prepare` at an exact SHA | Candidate-bound manifests, 16 sequential batches, reconciled accounting, corpus, frozen decision contract, and exact 12-unit plan | Confident | Eager fan-out or parent evidence relabeled as current |
 | Review | Reads the plan and records its digest | Units, fingerprints, mapped-test groups, rationale, predictions, and gaps | In control | Outcome-driven substitution |
 | Execute | Separately dispatches stage `execute` with preparation run and plan digest | Three admitted batches of at most four workers | Contained | Full-corpus or calibration fan-out |
 | Read back | Downloads non-authoritative experiment artifacts | Complete, partial, censored, missing, and conflicting states plus separate ledgers | Oriented | Incomplete evidence interpreted as pass |
@@ -40,8 +40,8 @@ can observe the execution attempt after its final timestamp exists.
 - Filtered empty: fewer than six eligible mapped-test groups with two nonempty
   units each is non-pass; selection is not weakened silently.
 - Loading brief: identity and manifest validation.
-- Loading long: enumeration exposes 256 bounded workers and execution exposes
-  the current four-worker batch.
+- Loading long: enumeration exposes only the current 16-worker admitted batch;
+  execution exposes the current four-worker batch.
 - Populated: exact corpus, plan, units, predictions, ledgers, and limitations.
 - Error recoverable: a bounded artifact retrieval failure retains the failed
   state and permits only a new separately authorized dispatch, never an
@@ -121,3 +121,25 @@ Given a push, pull request, schedule, or another mutation mode
 When workflows evaluate
 Then no capacity-validation preparation or sample worker starts and existing
 mutation behavior is unchanged.
+
+### Scenario: Preparation reserves before admission
+
+Given complete current-attempt provider accounting
+When observed worker use plus active, unobserved, and next-batch reservations
+would exceed 952 worker-minutes
+Then no later batch starts, support and uncertainty remain separately reserved,
+and uncertainty creates no headroom.
+
+### Scenario: Censoring cannot overstate a range
+
+Given a 720-second execution censor or 840-second step timeout
+When the frozen model decision is evaluated
+Then it cannot be reported as proof that the 960-second whole-worker operating
+target was exceeded.
+
+### Scenario: Decision remains non-authoritative
+
+Given complete exact sample results
+When the frozen numerical contract is evaluated
+Then the outcome is invest, reject ranking, reject granularity, or inconclusive,
+and no outcome becomes mutation qualification.

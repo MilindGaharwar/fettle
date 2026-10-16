@@ -18,6 +18,7 @@ from scripts.staged_preflight import (
     ARTIFACT_RETENTION_DAYS,
     BUDGET,
     CALIBRATION_SUPPORT_BOUNDS,
+    CAPACITY_PREPARATION_BUDGET,
     FROZEN_CANDIDATE,
     RECOVERY_ORCHESTRATION_SHA,
     RECOVERY_RUN_ID,
@@ -55,6 +56,7 @@ from scripts.staged_preflight import (
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
+    evaluate_capacity_preparation_admission,
     retain_historical_accounting_floor,
     reserve_bounded_support_minutes,
     validate_wave,
@@ -2113,6 +2115,92 @@ def test_accounting_rejects_nonpositive_provider_job_ids(tmp_path, job_id):
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
+
+
+def _capacity_accounting(jobs):
+    return {
+        "schema_version": "1", "kind": "operational_runner_time_estimate",
+        "billing_authority": False,
+        "estimated_runner_minutes": round(sum(job["minutes"] for job in jobs), 2),
+        "included_jobs": jobs,
+    }
+
+
+def _capacity_worker(index, minutes=1.5, status="completed", conclusion="success"):
+    return {
+        "name": f"capacity validation (enumerate {index})", "status": status,
+        "conclusion": conclusion, "minutes": minutes,
+    }
+
+
+def test_capacity_preparation_admission_reserves_next_batch_and_all_categories():
+    admitted = list(range(16))
+    next_shards = list(range(16, 32))
+    result = evaluate_capacity_preparation_admission(
+        _capacity_accounting([_capacity_worker(index) for index in admitted]),
+        admitted_shards=admitted, next_shards=next_shards,
+    )
+
+    assert result["passed"] is True
+    assert result["worker"]["observed_minutes"] == 24
+    assert result["worker"]["next_batch_reservation_minutes"] == 560
+    assert result["worker"]["reserved_total_minutes"] == 584
+    assert result["support"]["reserved_total_minutes"] == 168
+    assert result["cancellation_uncertainty"]["reserved_total_minutes"] == 100
+    assert result["operational_ceiling_minutes"] == 1220
+    assert result["completion_guaranteed"] is False
+
+
+def test_capacity_preparation_admission_reserves_active_remaining_without_double_counting():
+    result = evaluate_capacity_preparation_admission(
+        _capacity_accounting([
+            _capacity_worker(0, minutes=10, status="in_progress", conclusion=None),
+        ]),
+        admitted_shards=[0, 1], next_shards=[], require_admitted_terminal=False,
+    )
+
+    assert result["passed"] is True
+    assert result["worker"]["observed_minutes"] == 10
+    assert result["worker"]["active_remaining_reservation_minutes"] == 60
+    assert result["worker"]["reserved_total_minutes"] == 70
+    assert result["worker"]["double_counted_elapsed_minutes"] == 0
+    assert result["not_yet_observed_shards"] == [1]
+
+
+def test_capacity_preparation_admission_refuses_unsafe_or_uncertain_snapshots():
+    completed = [_capacity_worker(index, minutes=25) for index in range(16)]
+    refused = evaluate_capacity_preparation_admission(
+        _capacity_accounting(completed), admitted_shards=list(range(16)),
+        next_shards=list(range(16, 32)),
+    )
+    assert refused["passed"] is False
+    assert refused["worker"]["reserved_total_minutes"] == 960
+
+    with pytest.raises(ValueError, match="fixed size"):
+        evaluate_capacity_preparation_admission(
+            _capacity_accounting([]), admitted_shards=[], next_shards=list(range(17)),
+        )
+    with pytest.raises(ValueError, match="did not succeed"):
+        evaluate_capacity_preparation_admission(
+            _capacity_accounting([_capacity_worker(0, conclusion="failure")]),
+            admitted_shards=[0], next_shards=[],
+        )
+    with pytest.raises(ValueError, match="duplicated"):
+        evaluate_capacity_preparation_admission(
+            _capacity_accounting([_capacity_worker(0), _capacity_worker(0)]),
+            admitted_shards=[0], next_shards=[],
+        )
+
+
+def test_capacity_preparation_policy_categories_are_exact_and_nontransferable():
+    assert CAPACITY_PREPARATION_BUDGET == {
+        "worker_ceiling_minutes": 952,
+        "support_ceiling_minutes": 168,
+        "cancellation_uncertainty_headroom_minutes": 100,
+        "operational_ceiling_minutes": 1220,
+        "worker_timeout_minutes": 35,
+        "batch_size": 16,
+    }
 
 
 def test_calibration_budget_reserves_cancellation_lag_and_rejects_unknown_usage():

@@ -560,60 +560,431 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  capacity-enumerate:
+  capacity-preparation-admit-0:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
     needs: capacity-prepare
-    name: capacity validation (enumerate ${{ matrix.shard }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[]'
+      next_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 0
+
+  capacity-preparation-monitor:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-0
+    permissions:
+      actions: write
+      contents: read
+    uses: ./.github/workflows/mutation-capacity-preparation-monitor.yml
+    with:
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+
+  capacity-enumerate-1:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-0
     strategy:
       fail-fast: false
-      max-parallel: 32
-      matrix: ${{ fromJSON(needs.capacity-prepare.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12.13"
-      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
-      - name: Install pinned mutation tools
-        run: |
-          uv venv --python 3.12.13
-          uv pip install --quiet --require-hashes -r requirements-mutation.txt
-          uv pip install --quiet --no-deps -e .
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: capacity-validation-manifests-${{ github.run_id }}
-          path: capacity-manifests
-      - name: Enumerate canonical identities without mutation tests
-        run: |
-          uv run --no-sync python -m fettle.mutation_test --root . \
-            --preflight-manifest capacity-manifests/partition-${{ matrix.shard }}.json \
-            --json > transient-preflight.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path("transient-preflight.json").read_text())
-          assert report.get("status") == "completed" and report.get("passed") is True
-          report.update({
-              "kind": "capacity_validation_enumeration_shard",
-              "status": "enumerated", "passed": False,
-              "qualification_eligible": False, "billing_authority": False,
-              "authoritative_predecessor": False,
-          })
-          Path("capacity-validation-enumeration.json").write_text(json.dumps(report, indent=2) + "\n")
-          PY
-      - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: capacity-validation-enumeration-${{ github.run_id }}-${{ matrix.shard }}
-          path: capacity-validation-enumeration.json
-          if-no-files-found: error
-          retention-days: 90
+      max-parallel: 16
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-1:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-1
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]'
+      next_shards: '[16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 1
+
+  capacity-enumerate-2:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-1
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-2:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-2
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]'
+      next_shards: '[32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 2
+
+  capacity-enumerate-3:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-2
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-3:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-3
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
+      next_shards: '[48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 3
+
+  capacity-enumerate-4:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-3
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-4:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-4
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]'
+      next_shards: '[64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 4
+
+  capacity-enumerate-5:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-4
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-5:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-5
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79]'
+      next_shards: '[80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 5
+
+  capacity-enumerate-6:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-5
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-6:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-6
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]'
+      next_shards: '[96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 6
+
+  capacity-enumerate-7:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-6
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-7:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-7
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]'
+      next_shards: '[112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 7
+
+  capacity-enumerate-8:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-7
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-8:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-8
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127]'
+      next_shards: '[128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 8
+
+  capacity-enumerate-9:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-8
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-9:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-9
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143]'
+      next_shards: '[144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 9
+
+  capacity-enumerate-10:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-9
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-10:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-10
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]'
+      next_shards: '[160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 10
+
+  capacity-enumerate-11:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-10
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-11:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-11
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175]'
+      next_shards: '[176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 11
+
+  capacity-enumerate-12:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-11
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-12:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-12
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191]'
+      next_shards: '[192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 12
+
+  capacity-enumerate-13:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-12
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-13:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-13
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207]'
+      next_shards: '[208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 13
+
+  capacity-enumerate-14:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-13
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-14:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-14
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223]'
+      next_shards: '[224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 14
+
+  capacity-enumerate-15:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-14
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-15:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-15
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239]'
+      next_shards: '[240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 15
+
+  capacity-enumerate-16:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-preparation-admit-15
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255]
+    uses: ./.github/workflows/mutation-capacity-preparation-unit.yml
+    with:
+      shard: ${{ matrix.shard }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-preparation-admit-16:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    needs: capacity-enumerate-16
+    uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
+    with:
+      admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255]'
+      next_shards: '[]'
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      gate_id: 16
 
   capacity-freeze-plan:
     if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
-    needs: [capacity-prepare, capacity-enumerate]
+    needs: [capacity-prepare, capacity-preparation-admit-16, capacity-preparation-monitor]
     name: capacity validation (freeze sample)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -636,13 +1007,17 @@ jobs:
         with:
           pattern: capacity-validation-enumeration-${{ github.run_id }}-*
           path: capacity-enumeration
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-preparation-admission-${{ github.run_id }}-16
+          path: capacity-preparation-accounting
       - name: Aggregate candidate-bound corpus
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --aggregate-capacity-enumeration capacity-enumeration
           --shard-count ${{ needs.capacity-prepare.outputs.shard_count }}
           --json > capacity-validation-corpus.json
-      - name: Freeze selection assumptions and exact sample
+      - name: Freeze decision contract, selection assumptions, and exact sample
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
         run: |
@@ -672,6 +1047,7 @@ jobs:
             capacity-observed-groups.json
             capacity-predictions.json
             capacity-plan-command.json
+            capacity-preparation-accounting
           if-no-files-found: error
           retention-days: 90
 
@@ -764,6 +1140,17 @@ jobs:
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
+
+  capacity-measurement-monitor:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    needs: capacity-execute-admission
+    permissions:
+      actions: write
+      contents: read
+    uses: ./.github/workflows/mutation-capacity-measurement-monitor.yml
+    with:
+      candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
   capacity-admit-2:
     if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
@@ -876,7 +1263,7 @@ jobs:
 
   capacity-readback:
     if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
-    needs: [capacity-batch-1, capacity-batch-2, capacity-batch-3]
+    needs: [capacity-batch-1, capacity-batch-2, capacity-batch-3, capacity-measurement-monitor]
     name: capacity validation (non-authoritative readback)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -990,6 +1377,12 @@ jobs:
           gh run download "$EXECUTION_RUN_ID" \
             --name "capacity-validation-execution-source-$EXECUTION_RUN_ID" \
             --dir capacity-execution-source
+          gh run download "$EXECUTION_RUN_ID" \
+            --pattern "capacity-validation-unit-$EXECUTION_RUN_ID-*" \
+            --dir capacity-results || true
+          gh run download "${{ github.event.inputs.capacity_preparation_run_id }}" \
+            --name "capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}" \
+            --dir capacity-preparation
       - name: Reconcile separate provider ledgers
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
@@ -1000,7 +1393,10 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          from fettle.mutation_test import reconcile_capacity_provider_accounting
+          from fettle.mutation_test import (
+              evaluate_capacity_validation_decision,
+              reconcile_capacity_provider_accounting,
+          )
           run = json.loads(Path("capacity-execution-run.json").read_text())
           pages = json.loads(Path("capacity-execution-jobs.json").read_text())
           source = json.loads(Path("capacity-execution-source/capacity-validation-execution-source.json").read_text())
@@ -1012,6 +1408,43 @@ jobs:
               plan_file_sha256=os.environ["PLAN_SHA256"],
           )
           Path("capacity-validation-provider-accounting.json").write_text(json.dumps(ledger, indent=2) + "\n")
+          evaluation_error = None
+          try:
+              plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
+              reports = []
+              for path in Path("capacity-results").rglob("capacity-validation-result.json"):
+                  value = json.loads(path.read_text())
+                  if not isinstance(value, dict):
+                      raise ValueError(f"capacity result {path} is not an object")
+                  reports.append(value)
+              worker_elapsed = {}
+              for job in ledger["worker"]["jobs"]:
+                  index = int(job["name"].rsplit(" ", 1)[-1])
+                  if index in worker_elapsed:
+                      raise ValueError("capacity result provider worker is duplicated")
+                  worker_elapsed[index] = job["elapsed_seconds"]
+              decision = evaluate_capacity_validation_decision(
+                  plan, reports, worker_elapsed,
+              )
+          except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+              evaluation_error = str(exc)
+              decision = {
+                  "schema_version": "1", "kind": "capacity_validation_model_decision",
+                  "status": "incomplete", "passed": False,
+                  "qualification_eligible": False, "billing_authority": False,
+                  "authoritative_predecessor": False,
+                  "experiment_id": os.environ["EXPERIMENT_ID"],
+                  "revision": os.environ["GITHUB_SHA"], "outcome": "inconclusive",
+                  "reasons": ["terminal evidence is missing, malformed, or conflicting"],
+                  "validation_error": evaluation_error,
+                  "limitations": [
+                      "optimal_scheduler", "corpus_wide_p95", "full_campaign_budget",
+                      "mutation_qualification",
+                  ],
+              }
+          Path("capacity-validation-model-decision.json").write_text(
+              json.dumps(decision, indent=2) + "\n"
+          )
           if ledger["status"] != "completed":
               raise SystemExit(2)
           PY
@@ -1023,6 +1456,7 @@ jobs:
             capacity-execution-run.json
             capacity-execution-jobs.json
             capacity-validation-provider-accounting.json
+            capacity-validation-model-decision.json
           if-no-files-found: error
           retention-days: 90
 

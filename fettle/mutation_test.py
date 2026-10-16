@@ -1390,6 +1390,7 @@ def build_capacity_validation_plan(
         "prediction_seconds_per_unobserved_fingerprint": dict(sorted(prediction_seconds.items())),
         "historical_observed_group_digests": sorted(observed_group_digests),
         "historical_source": historical_source,
+        "decision_contract": capacity_validation_decision_contract(),
         "coverage": {
             "canonical_fingerprints": len(preflight["fingerprints"]),
             "mapped_test_groups": len(grouped),
@@ -1414,7 +1415,7 @@ def load_capacity_validation_plan(path: Path) -> dict:
         "preflight_digest", "preflight_corpus_digest", "manifest_digests",
         "selection_policy", "prediction_seconds_per_unobserved_fingerprint",
         "historical_observed_group_digests", "coverage", "units", "digest",
-        "historical_source",
+        "historical_source", "decision_contract",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError("capacity validation plan has an unsupported schema")
@@ -1427,6 +1428,7 @@ def load_capacity_validation_plan(path: Path) -> dict:
             "qualification_eligible", "billing_authority", "authoritative_predecessor",
         ))
         or len(value.get("units", [])) != 12
+        or value.get("decision_contract") != capacity_validation_decision_contract()
     ):
         raise ValueError("capacity validation plan is not non-authoritative and complete")
     payload = {key: item for key, item in value.items() if key != "digest"}
@@ -1440,6 +1442,79 @@ def load_capacity_validation_plan(path: Path) -> dict:
     if indexes != list(range(12)) or len(fingerprints) != len(set(fingerprints)):
         raise ValueError("capacity validation plan units are incomplete or duplicated")
     return value
+
+
+def capacity_validation_decision_contract() -> dict:
+    """Return the pre-observation model decision and timer semantics."""
+    return {
+        "schema_version": "1",
+        "kind": "capacity_validation_decision_contract",
+        "decision": (
+            "invest_in_separately_reviewed_cost_aware_repartitioning_prototype_or_"
+            "reject_fingerprint_ranking_and_or_range_granularity"
+        ),
+        "non_claims": [
+            "optimal_scheduler", "corpus_wide_p95", "full_campaign_budget",
+            "mutation_qualification",
+        ],
+        "prediction_error": {
+            "reference": "central_seconds_per_unobserved_fingerprint",
+            "absolute_relative_error_median_max": 0.35,
+            "optimistic_to_conservative_units_min": 10,
+            "stress_rate_exceedances_max": 0,
+        },
+        "ranking": {
+            "qualifying_count_ratio_min": 1.5,
+            "qualifying_central_delta_seconds_min": 60,
+            "concordance_duration_ratio_min": 1.2,
+            "concordance_delta_seconds_min": 60,
+            "investment_concordant_pairs_min": 5,
+            "investment_material_inversions_max": 0,
+            "material_inversion_duration_ratio_max": 0.8,
+            "material_inversion_delta_seconds_min": 60,
+            "reject_distinct_group_inversions_min": 2,
+        },
+        "timers": {
+            "execution": {
+                "deadline_seconds": 720,
+                "interval": "execute_pending_mutations_monotonic_elapsed",
+                "timeout_semantics": "right_censored_at_observed_execution_boundary",
+            },
+            "workflow_step": {
+                "deadline_seconds": 840,
+                "interval": "github_actions_execute_step_elapsed",
+                "timeout_semantics": "not_an_execution_duration",
+            },
+            "operating_target": {
+                "deadline_seconds": 960,
+                "interval": "whole_provider_worker_elapsed",
+                "timeout_semantics": "not_proven_exceeded_by_720_or_840_second_censoring",
+            },
+            "whole_worker": {
+                "deadline_seconds": 1200,
+                "interval": "whole_provider_worker_elapsed",
+                "timeout_semantics": "hard_containment_not_success",
+            },
+        },
+        "censoring": {
+            "exact_completion": "closed_interval",
+            "verified_incomplete": "right_censored_at_timer_specific_observed_boundary",
+            "unknown": "missing_malformed_stale_conflicting_or_unverifiable",
+            "shorter_timeout_never_proves_operating_target_exceeded": True,
+        },
+        "outcome_precedence": [
+            "reject_granularity_if_exact_attributable_whole_worker_interval_exceeds_960_seconds",
+            "reject_ranking_if_two_material_inversions_in_distinct_qualifying_groups",
+            "invest_if_all_12_exact_and_all_prediction_ranking_timing_identity_gates_pass",
+            "inconclusive",
+        ],
+        "granularity_limit": (
+            "A 720-second execution censor or 840-second step timeout cannot reject the "
+            "960-second range operating target; it makes investment fail and remains inconclusive."
+        ),
+        "substitution_allowed": False,
+        "rerun_allowed": False,
+    }
 
 
 def validate_capacity_validation_package(
@@ -1531,6 +1606,155 @@ def validate_capacity_validation_results(
             raise ValueError("capacity validation result coverage differs")
 
 
+def evaluate_capacity_validation_decision(
+    plan: dict,
+    reports: list[dict],
+    worker_elapsed_seconds: dict[int, int],
+) -> dict:
+    """Apply the frozen paired-falsification contract without refitting it."""
+    contract = plan.get("decision_contract")
+    if contract != capacity_validation_decision_contract():
+        raise ValueError("capacity validation decision contract differs")
+    if (
+        not isinstance(worker_elapsed_seconds, dict)
+        or any(type(index) is not int or type(seconds) is not int or seconds < 1
+               for index, seconds in worker_elapsed_seconds.items())
+    ):
+        raise ValueError("capacity validation provider worker timing is malformed")
+    report_by_index = {
+        report.get("unit_index"): report for report in reports if isinstance(report, dict)
+    }
+    if len(report_by_index) != len(reports):
+        raise ValueError("capacity validation result indexes are duplicated or malformed")
+
+    exact = []
+    unknown = []
+    for unit in plan["units"]:
+        index = unit["unit_index"]
+        report = report_by_index.get(index)
+        if report is None or report.get("status") != "completed":
+            unknown.append(index)
+            continue
+        count = len(unit["fingerprints"])
+        elapsed_ms = report.get("elapsed_ms")
+        if (
+            count < 1 or not isinstance(elapsed_ms, int) or isinstance(elapsed_ms, bool)
+            or elapsed_ms < 0 or report.get("unit") != unit
+            or report.get("plan_digest") != plan["digest"]
+        ):
+            unknown.append(index)
+            continue
+        exact.append({
+            "unit_index": index,
+            "group": unit["mapped_test_group_digest"],
+            "cost_class": unit["cost_class"],
+            "fingerprint_count": count,
+            "execution_seconds": elapsed_ms / 1000,
+            "seconds_per_fingerprint": elapsed_ms / 1000 / count,
+            "whole_worker_seconds": worker_elapsed_seconds.get(index),
+        })
+
+    predictions = plan["prediction_seconds_per_unobserved_fingerprint"]
+    errors = sorted(
+        abs(item["seconds_per_fingerprint"] / predictions["central"] - 1)
+        for item in exact
+    )
+    median_error = (
+        (errors[5] + errors[6]) / 2 if len(errors) == 12 else None
+    )
+    within_band = sum(
+        predictions["optimistic"] <= item["seconds_per_fingerprint"]
+        <= predictions["conservative"] for item in exact
+    )
+    stress_exceedances = sum(
+        item["seconds_per_fingerprint"] > predictions["stress"] for item in exact
+    )
+
+    pairs = []
+    inversions = []
+    concordances = []
+    by_group: dict[str, dict[str, dict]] = {}
+    for item in exact:
+        by_group.setdefault(item["group"], {})[item["cost_class"]] = item
+    for group in sorted(by_group):
+        values = by_group[group]
+        if set(values) != {"low", "high"}:
+            continue
+        low, high = values["low"], values["high"]
+        qualifying = (
+            high["fingerprint_count"] >= 1.5 * low["fingerprint_count"]
+            and predictions["central"]
+            * (high["fingerprint_count"] - low["fingerprint_count"]) >= 60
+        )
+        concordant = qualifying and (
+            high["execution_seconds"] >= 1.2 * low["execution_seconds"]
+            and high["execution_seconds"] - low["execution_seconds"] >= 60
+        )
+        inverted = qualifying and (
+            high["execution_seconds"] <= 0.8 * low["execution_seconds"]
+            and low["execution_seconds"] - high["execution_seconds"] >= 60
+        )
+        pair = {"group": group, "qualifying": qualifying,
+                "concordant": concordant, "material_inversion": inverted}
+        pairs.append(pair)
+        if concordant:
+            concordances.append(group)
+        if inverted:
+            inversions.append(group)
+
+    granularity_failures = sorted(
+        item["unit_index"] for item in exact
+        if item["whole_worker_seconds"] is not None
+        and item["whole_worker_seconds"] > contract["timers"]["operating_target"]["deadline_seconds"]
+    )
+    reasons = []
+    if granularity_failures:
+        outcome = "reject_granularity"
+        reasons.append("exact attributable whole-worker interval exceeded 960 seconds")
+    elif len(inversions) >= contract["ranking"]["reject_distinct_group_inversions_min"]:
+        outcome = "reject_ranking"
+        reasons.append("at least two qualifying mapped-test groups materially inverted")
+    else:
+        prediction_passed = (
+            median_error is not None
+            and median_error <= contract["prediction_error"]["absolute_relative_error_median_max"]
+            and within_band >= contract["prediction_error"]["optimistic_to_conservative_units_min"]
+            and stress_exceedances <= contract["prediction_error"]["stress_rate_exceedances_max"]
+        )
+        ranking_passed = (
+            len(concordances) >= contract["ranking"]["investment_concordant_pairs_min"]
+            and not inversions
+        )
+        timing_passed = (
+            len(exact) == 12 and set(worker_elapsed_seconds) == set(range(12))
+            and all(seconds <= contract["timers"]["operating_target"]["deadline_seconds"]
+                    for seconds in worker_elapsed_seconds.values())
+        )
+        if not unknown and prediction_passed and ranking_passed and timing_passed:
+            outcome = "invest"
+            reasons.append("all frozen prediction, ranking, identity, and timing gates passed")
+        else:
+            outcome = "inconclusive"
+            reasons.append("the complete frozen investment and rejection gates were not established")
+    return {
+        "schema_version": "1", "kind": "capacity_validation_model_decision",
+        "status": "completed", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+        "experiment_id": plan["experiment_id"], "revision": plan["revision"],
+        "plan_digest": plan["digest"], "outcome": outcome, "reasons": reasons,
+        "exact_units": sorted(item["unit_index"] for item in exact),
+        "unknown_or_censored_units": sorted(unknown),
+        "prediction": {"median_absolute_relative_error": median_error,
+                       "within_optimistic_conservative": within_band,
+                       "stress_exceedances": stress_exceedances},
+        "ranking": {"pairs": pairs, "concordant_groups": concordances,
+                    "material_inversion_groups": inversions},
+        "granularity": {"exact_whole_worker_target_exceedances": granularity_failures,
+                        "shorter_timeout_inference_allowed": False},
+        "limitations": plan["decision_contract"]["non_claims"],
+    }
+
+
 def reconcile_capacity_provider_accounting(
     run: dict,
     job_pages: list[dict],
@@ -1551,7 +1775,9 @@ def reconcile_capacity_provider_accounting(
         or run.get("head_sha") != revision
         or run.get("event") != "workflow_dispatch"
         or run.get("status") != "completed"
-        or run.get("conclusion") != "success"
+        or run.get("conclusion") not in {
+            "success", "failure", "cancelled", "timed_out", "action_required",
+        }
         or run.get("path") != ".github/workflows/mutation.yml"
         or source.get("kind") != "capacity_validation_execution_source"
         or source.get("revision") != revision
@@ -1618,17 +1844,23 @@ def reconcile_capacity_provider_accounting(
         "capacity validation (admit batch 3)",
         "capacity validation (non-authoritative readback)",
     }
+    controller_name = "capacity validation (monitor measurement containment)"
+    controller = [item for item in support if item["name"].endswith(controller_name)]
+    support = [item for item in support if not item["name"].endswith(controller_name)]
     support_names = [item["name"] for item in support]
     worker_minutes = sum(item["charged_minutes_ceiling"] for item in worker)
     support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
     terminal_success = all(
         item["status"] == "completed" and item["conclusion"] == "success"
-        for item in worker + support
+        for item in worker + support + controller
     )
+    controller_minutes = sum(item["charged_minutes_ceiling"] for item in controller)
     passed = (
         sorted(indexes) == list(range(12)) and len(indexes) == len(set(indexes))
         and set(support_names) == expected_support and len(support_names) == len(expected_support)
-        and terminal_success and worker_minutes <= 240 and support_minutes <= 25
+        and len(controller) == 1 and controller[0]["name"].endswith(controller_name)
+        and terminal_success and run.get("conclusion") == "success"
+        and worker_minutes <= 240 and support_minutes <= 25 and controller_minutes <= 30
     )
     return {
         "schema_version": "1", "kind": "capacity_validation_provider_accounting",
@@ -1646,9 +1878,11 @@ def reconcile_capacity_provider_accounting(
             "measurement_basis": "The readback cannot observe its own terminal timestamp; charge the full independent ceiling.",
         },
         "cancellation_controller": {
-            "ceiling_minutes": 30, "observed_minutes": None, "transferable": False,
-            "status": "not_invoked" if terminal_success else "indeterminate_non_pass",
-            "note": "Any failed, timed-out, or cancelled job leaves cancellation latency indeterminate and non-pass.",
+            "ceiling_minutes": 30, "observed_minutes": controller_minutes,
+            "transferable": False, "jobs": controller,
+            "status": "completed" if len(controller) == 1 and controller_minutes <= 30
+            else "indeterminate_non_pass",
+            "note": "Failure or cancellation remains non-pass even when controller exposure is bounded.",
         },
     }
 

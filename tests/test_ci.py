@@ -107,6 +107,110 @@ def test_capacity_validation_measurement_batches_are_exact_once_and_bounded():
     assert jobs["capacity-batch-1"]["needs"] == "capacity-execute-admission"
     assert jobs["capacity-batch-2"]["needs"] == "capacity-admit-2"
     assert jobs["capacity-batch-3"]["needs"] == "capacity-admit-3"
+    assert jobs["capacity-readback"]["needs"] == [
+        "capacity-batch-1", "capacity-batch-2", "capacity-batch-3",
+        "capacity-measurement-monitor",
+    ]
+    assert jobs["capacity-measurement-monitor"]["needs"] == "capacity-execute-admission"
+    assert jobs["capacity-measurement-monitor"]["uses"] == (
+        "./.github/workflows/mutation-capacity-measurement-monitor.yml"
+    )
+    assert jobs["capacity-measurement-monitor"]["permissions"] == {
+        "actions": "write", "contents": "read",
+    }
+
+
+def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    jobs = workflow["jobs"]
+    selected = []
+    for batch in range(1, 17):
+        worker = jobs[f"capacity-enumerate-{batch}"]
+        gate = jobs[f"capacity-preparation-admit-{batch}"]
+        indexes = list(range((batch - 1) * 16, batch * 16))
+        selected.extend(worker["strategy"]["matrix"]["shard"])
+        assert worker["strategy"]["matrix"]["shard"] == indexes
+        assert worker["strategy"]["max-parallel"] == 16
+        assert worker["uses"] == "./.github/workflows/mutation-capacity-preparation-unit.yml"
+        assert worker["needs"] == (
+            "capacity-preparation-admit-0" if batch == 1
+            else f"capacity-preparation-admit-{batch - 1}"
+        )
+        assert gate["needs"] == f"capacity-enumerate-{batch}"
+        assert gate["uses"] == "./.github/workflows/mutation-capacity-preparation-gate.yml"
+        assert json.loads(gate["with"]["admitted_shards"]) == list(range(batch * 16))
+        assert json.loads(gate["with"]["next_shards"]) == (
+            list(range(batch * 16, min(256, (batch + 1) * 16)))
+        )
+    assert selected == list(range(256))
+    initial = jobs["capacity-preparation-admit-0"]
+    assert initial["needs"] == "capacity-prepare"
+    assert json.loads(initial["with"]["admitted_shards"]) == []
+    assert json.loads(initial["with"]["next_shards"]) == list(range(16))
+    assert jobs["capacity-freeze-plan"]["needs"] == [
+        "capacity-prepare", "capacity-preparation-admit-16",
+        "capacity-preparation-monitor",
+    ]
+    assert jobs["capacity-preparation-monitor"]["needs"] == "capacity-preparation-admit-0"
+    assert jobs["capacity-preparation-monitor"]["uses"] == (
+        "./.github/workflows/mutation-capacity-preparation-monitor.yml"
+    )
+    assert jobs["capacity-preparation-monitor"]["permissions"] == {
+        "actions": "write", "contents": "read",
+    }
+
+
+def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_accounting():
+    root = Path(PLUGIN_DIR) / ".github/workflows"
+    worker = yaml.safe_load((root / "mutation-capacity-preparation-unit.yml").read_text())
+    gate = yaml.safe_load((root / "mutation-capacity-preparation-gate.yml").read_text())
+    monitor = yaml.safe_load((root / "mutation-capacity-preparation-monitor.yml").read_text())
+    worker_job = worker["jobs"]["enumerate"]
+    gate_job = gate["jobs"]["gate"]
+    gate_scripts = "\n".join(step.get("run", "") for step in gate_job["steps"])
+
+    assert worker["permissions"] == {"actions": "read", "contents": "read"}
+    assert worker_job["timeout-minutes"] == 35
+    assert gate["permissions"] == {"actions": "read", "contents": "read"}
+    assert gate_job["timeout-minutes"] == 5
+    assert "--paginate --slurp" in gate_scripts
+    assert "attempts/$GITHUB_RUN_ATTEMPT/jobs" in gate_scripts
+    assert "account_runner_minutes" in gate_scripts
+    assert "evaluate_capacity_preparation_admission" in gate_scripts
+    assert "datetime.now(UTC)" in gate_scripts
+    monitor_job = monitor["jobs"]["monitor"]
+    monitor_scripts = "\n".join(step.get("run", "") for step in monitor_job["steps"])
+    assert monitor["permissions"] == {"actions": "write", "contents": "read"}
+    assert monitor_job["timeout-minutes"] == 100
+    assert "evaluate_capacity_preparation_admission" in monitor_scripts
+    assert "enumeration worker appeared before admission" in monitor_scripts
+    assert "actions/runs/$GITHUB_RUN_ID/cancel" in monitor_scripts
+    assert "all 256 enumeration workers are terminal-success" in monitor_scripts
+
+
+def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_retention():
+    path = Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-measurement-monitor.yml"
+    workflow = yaml.safe_load(path.read_text())
+    job = workflow["jobs"]["monitor"]
+    scripts = "\n".join(step.get("run", "") for step in job["steps"])
+    artifact_index = next(
+        index for index, step in enumerate(job["steps"])
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    cancel_index = next(
+        index for index, step in enumerate(job["steps"])
+        if "actions/runs/$GITHUB_RUN_ID/cancel" in step.get("run", "")
+    )
+
+    assert workflow["permissions"] == {"actions": "write", "contents": "read"}
+    assert job["timeout-minutes"] == 30
+    assert "--paginate --slurp" in scripts
+    assert "measurement worker appeared before admission" in scripts
+    assert "len(observed) != len(set(observed))" in scripts
+    assert "all 12 measurement workers are terminal-success" in scripts
+    assert artifact_index < cancel_index
 
 
 def test_capacity_validation_worker_has_containment_and_non_authoritative_namespace():
@@ -183,7 +287,12 @@ def test_capacity_validation_provider_readback_uses_terminal_exact_attempt_recor
     assert "capacity_stage == 'readback'" in job["if"]
     assert "attempts/1/jobs" in scripts
     assert "capacity-validation-execution-source-$EXECUTION_RUN_ID" in scripts
+    assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in scripts
+    assert "capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}" in scripts
     assert "reconcile_capacity_provider_accounting" in scripts
+    assert "evaluate_capacity_validation_decision" in scripts
+    assert '"outcome": "inconclusive"' in scripts
+    assert "capacity-validation-model-decision.json" in scripts
     assert 'ledger["status"] != "completed"' in scripts
 
 
