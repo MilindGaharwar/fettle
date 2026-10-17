@@ -1,5 +1,24 @@
 # Audit Hardening Worklog
 
+## 2026-10-17: WP-AH08 Remote Delivery And Release-Gate Assessment
+
+Signed commit `072bd62b388334b747f0d3c477a0ab2bd61d6efa` was pushed unchanged to
+`repair/calibration-monitor-observation-20261016` and
+`audit/hardening-integration-20261005`. The other integration worktree contained
+newer uncommitted planning changes and was not modified or synchronized. Exact-head
+push CI run `39041471220` passed, including the blocking critical mypy verifier,
+independent combined and branch coverage floors, strict completion validation, Linux
+wheel, Windows bridge, platform tests, self-scan, and the `CI required` aggregate.
+
+The separate PR mutation-containment run `39041473547` retained an explicit failure:
+`mutation qualification pending`. Main-branch protection requires both `CI required`
+and `mutation evidence`, with strict up-to-date checks. Therefore full-repository
+mutation qualification remains `CLOSED_NON_PASS` and is a concrete merge/release
+prerequisite through protected `main`, despite successful AH08 CI. Reconsider broader
+qualification at H5, or earlier only for a demonstrated critical gap or governing
+requirement. No full mutation run, protection change, bypass, merge, tag, release, or
+AH09 start occurred.
+
 ## 2026-10-17: WP-AH08 Type And Branch Ratchets Verified
 
 WP-AH08 uses one executable verifier, `fettle.quality_ratchet`, and one policy,

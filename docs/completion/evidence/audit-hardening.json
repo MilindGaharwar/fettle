@@ -157,10 +157,10 @@
     },
     {
       "item": "Overall exact-head CI",
-      "status": "non_green",
+      "status": "confirmed_for_ah08_delivery",
       "required_evidence": "Terminal success of every required exact-head check",
       "responsible_reviewer_or_environment": "Repository CI",
-      "remaining": "Report separately from amended repair acceptance; do not infer an overall pass from successful individual jobs."
+      "remaining": "Exact-head push CI run 39041471220 passed for signed AH08 commit 072bd62b388334b747f0d3c477a0ab2bd61d6efa. Mutation evidence remains a separate required non-pass check and no merge or release is inferred."
     },
     {
       "item": "Archive verification",
@@ -378,7 +378,7 @@
     "Historical worklog observations remain provenance and are not silently relabelled as exact-candidate evidence.",
     "Full-repository mutation qualification is CLOSED_NON_PASS and incomplete; no stage-1 partial result supplies qualification credit.",
     "Five retained quality_scan.py survivors remain unresolved mutation-quality findings and are not proof of an unmutated AH01 defect.",
-    "Overall CI is reported separately and was non-green at this acceptance boundary; successful individual jobs are not an overall pass.",
+    "Overall CI was non-green at the historical acceptance boundary. Exact-head push CI later passed for AH08 commit 072bd62, while mutation evidence remained separately non-pass.",
     "Claude Code is blocked by expired OAuth; Codex and Gemini are unavailable. No blocked or unavailable host is inferred as passing.",
     "Archive verification is closed without pass or portability credit. No human acceptance or human-usability validation is inferred."
   ],
@@ -490,9 +490,12 @@
         "reason": "deadline-exhausted compatible checkpoints remain incomplete; stages 2 and 3 and further qualification dispatch are forbidden"
       },
       "overall_ci": {
-        "status": "non_green",
-        "run": 39021262830,
-        "reason": "exact-head matrix was still in progress at the acceptance boundary and mutation containment remains intentionally non-pass"
+        "status": "passed_for_ah08_delivery",
+        "historical_acceptance_run": 39021262830,
+        "run": 39041471220,
+        "candidate": "072bd62b388334b747f0d3c477a0ab2bd61d6efa",
+        "url": "https://github.com/MilindGaharwar/fettle/actions/runs/39041471220",
+        "reason": "every blocking exact-head push CI job and the CI required aggregate passed; mutation containment remains a separate required non-pass check"
       },
       "archive_verification": {
         "status": "closed_non_pass",
@@ -502,6 +505,43 @@
         "E2": "751d05e6d2abe53f7488438fae3f6737a500f801",
         "E3": "ab302eab20333127dd5cd3981d804ba06802aefd",
         "run": 38988846150
+      }
+    },
+    "ah08_delivery": {
+      "commit": "072bd62b388334b747f0d3c477a0ab2bd61d6efa",
+      "signed": true,
+      "branches": [
+        "repair/calibration-monitor-observation-20261016",
+        "audit/hardening-integration-20261005"
+      ],
+      "exact_head_ci": {
+        "run": 39041471220,
+        "status": "success",
+        "url": "https://github.com/MilindGaharwar/fettle/actions/runs/39041471220"
+      },
+      "type_policy": {
+        "critical_modules": 7,
+        "critical_errors": 0,
+        "whole_source_status": "advisory",
+        "whole_source_errors": 214,
+        "whole_source_files": 36
+      },
+      "coverage": {
+        "combined_covered": 30216,
+        "combined_total": 39568,
+        "combined_percent": 76.36473918317833,
+        "combined_floor": 65.0,
+        "branch_covered": 7823,
+        "branch_total": 11156,
+        "branch_percent": 70.12370025098602,
+        "branch_floor": 69.0
+      },
+      "subprocess_limitations": "Python subprocesses launched through supported coverage.py paths are exercised; non-Python processes, unsupported exec patterns, and abruptly terminated children may remain unobserved.",
+      "mutation_qualification": {
+        "status": "CLOSED_NON_PASS",
+        "pr_containment_run": 39041473547,
+        "check": "mutation qualification pending",
+        "reconsideration": "H5, or earlier only for a demonstrated critical gap or governing requirement"
       }
     },
     "mutation_findings_review": {

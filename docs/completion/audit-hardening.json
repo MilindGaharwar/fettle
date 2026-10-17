@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "milestone": "audit-hardening",
-  "revision": "audit-hardening-d342de4-2026-10-17",
+  "revision": "audit-hardening-ah08-072bd62-2026-10-17",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
@@ -13,8 +13,8 @@
       "observed": "exact candidate d342de4 is signed and passes isolated CPython 3.12.13 wheel installation, pip check, full local tests, Ruff, and the 421-file Fettle scan",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run AH00 only if candidate, interpreter, dependencies, platform, or qualification identity changes"
     },
@@ -26,8 +26,8 @@
       "observed": "current-compatible focused and live evidence confirms required analyzer failure remains structured and nonzero; retained scope/ignore mutation survivors remain separate non-qualification findings",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run if scanner code, dependencies, or candidate identity changes"
     },
@@ -39,8 +39,8 @@
       "observed": "current-compatible focused, workflow-contract, and live evidence confirms empty, malformed, or contradictory action results cannot pass",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run if action entrypoint, workflows, scanner contract, or candidate identity changes"
     },
@@ -52,8 +52,8 @@
       "observed": "retained dispatcher evidence plus exact-candidate regressions and installed OpenCode 2.0.20 probes confirm corrupt policy denies native shell before execution and repaired policy allows exactly once",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run if dispatcher policy, host normalization, transport behavior, dependencies, or candidate identity changes; do not infer blocked-host or mutation-qualification credit."
     },
@@ -65,8 +65,8 @@
       "observed": "current-compatible race, interruption, rotation, anchor, tamper, and 24-process workload evidence confirms unique ordered sequences and a valid chain",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run if ledger behavior, supported-platform coverage, dependencies, or candidate identity changes."
     },
@@ -78,8 +78,8 @@
       "observed": "current-compatible package and command evidence plus exact-candidate wheel SHA-256 4fb1771470791a406c1d50c53566d3e4aee98638eb3a98ca8d77c865e695e459, pip check, Linux wheel, Windows bridge, and installed-host probes pass",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Rebuild and replay if package metadata, package sources, dependencies, or candidate identity changes"
     },
@@ -91,8 +91,8 @@
       "observed": "current-compatible focused and live profile evidence preserves numeric zero, valid email and phone formats, Unicode, whitespace, and punctuation classes",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "Re-run if UAT profile generation, consumers, or candidate identity changes"
     },
@@ -101,11 +101,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "independent read-only review session ses_eb6cbc649ffe2BTUDHbJojZttG confirmed AH01-AH06 under the owner-amended contract; mutation qualification remains CLOSED_NON_PASS, overall CI non-green, Claude blocked, Codex/Gemini unavailable, and archive verification closed without pass credit",
+      "observed": "independent read-only review session ses_eb6cbc649ffe2BTUDHbJojZttG confirmed AH01-AH06 under the owner-amended contract; signed AH08 commit 072bd62 later passed exact-head push CI run 39041471220; mutation qualification remains CLOSED_NON_PASS, Claude is blocked, Codex/Gemini are unavailable, and archive verification is closed without pass credit",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
-        "revision": "audit-hardening-d342de4-2026-10-17"
+        "sha256": "232cba38f99960dd05683a524ca5a5f00a481401e3295406ede684a37c9ce524",
+        "revision": "audit-hardening-ah08-072bd62-2026-10-17"
       },
       "recovery": "No repair-acceptance recovery is required. Report mutation qualification, overall CI, archive status, and blocked or unavailable hosts separately; do not infer pass, merge, tag, or release authorization."
     }
