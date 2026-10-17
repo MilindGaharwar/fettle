@@ -66,6 +66,17 @@ full_shards = 256
 
 [mutation.test_mappings]
 "fettle/__main__.py" = ["tests/test_cli.py"]
+"fettle/cli.py" = [
+    "tests/test_semantic.py",
+    "tests/test_spec_model.py",
+    "tests/test_uat_benchmark.py",
+    "tests/test_uat_manual.py",
+    "tests/test_uat_session.py",
+    "tests/test_uat_surfaces.py",
+    "tests/test_verify_gate.py",
+    "tests/test_work_items.py",
+    "tests/test_worktrees.py",
+]
 "fettle/agents/claude_code.py" = ["tests/test_agents.py"]
 "fettle/agents/codex.py" = ["tests/test_agents.py"]
 "fettle/agents/gemini.py" = ["tests/test_agents.py"]

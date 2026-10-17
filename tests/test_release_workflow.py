@@ -1,7 +1,11 @@
 """Release workflow invariants for fail-closed publication."""
 
 from pathlib import Path
+import os
+import subprocess
 import zipfile
+
+import yaml
 
 
 WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "release.yml"
@@ -147,14 +151,165 @@ def test_ci_exposes_one_stable_required_check():
 
     assert "  required:\n" in workflow
     assert "name: CI required" in workflow
-    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel]" in workflow
+    assert "needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]" in workflow
     assert "if: always()" in workflow
     assert "LINT_RESULT: ${{ needs.lint.result }}" in workflow
     assert "TEST_RESULT: ${{ needs.test.result }}" in workflow
     assert "COVERAGE_RESULT: ${{ needs.coverage.result }}" in workflow
     assert "WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}" in workflow
     assert "LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}" in workflow
-    assert workflow.count('!= "success"') == 5
+    assert "COMPLETION_RESULT: ${{ needs.completion-strict.result }}" in workflow
+    assert workflow.count('!= "success"') == 6
+
+
+def test_ci_pushes_delivery_branch_and_verifies_every_checkout_identity():
+    workflow = CI_WORKFLOW.read_text()
+    parsed = yaml.load(workflow, Loader=yaml.BaseLoader)
+    checkout = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    default_identity_script = """actual_head="$(git rev-parse HEAD)"
+if [ "$actual_head" != "$GITHUB_SHA" ]; then
+  echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+  exit 1
+fi
+"""
+    container_identity_script = """if [ -z "${GITHUB_WORKSPACE:-}" ] || [ ! -d "$GITHUB_WORKSPACE" ]; then
+  echo "::error::GITHUB_WORKSPACE must identify an existing directory"
+  exit 1
+fi
+actual_head="$(git -C "$GITHUB_WORKSPACE" -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)"
+if [ "$actual_head" != "$EXPECTED_SHA" ]; then
+  echo "::error::Checked out $actual_head instead of immutable event SHA $EXPECTED_SHA"
+  exit 1
+fi
+"""
+    checkout_jobs = {
+        "lint", "typecheck", "test", "coverage", "windows-bridge", "linux-wheel",
+        "completion-strict",
+    }
+
+    assert parsed["on"]["push"]["branches"] == [
+        "main", "audit/hardening-integration-20261005",
+    ]
+    assert "pull_request" in parsed["on"]
+    for job_name in checkout_jobs:
+        steps = parsed["jobs"][job_name]["steps"]
+        checkout_index = next(i for i, step in enumerate(steps) if step.get("uses") == checkout)
+        identity_index = next(
+            i for i, step in enumerate(steps)
+            if step.get("name") == "Verify exact event commit"
+        )
+        assert identity_index == checkout_index + 1
+        assert steps[identity_index]["shell"] == "bash"
+        expected_script = (
+            container_identity_script if job_name == "linux-wheel" else default_identity_script
+        )
+        assert steps[identity_index]["run"] == expected_script
+        if job_name == "linux-wheel":
+            assert steps[identity_index]["env"] == {"EXPECTED_SHA": "${{ github.sha }}"}
+        else:
+            assert "env" not in steps[identity_index]
+
+    linux_steps = parsed["jobs"]["linux-wheel"]["steps"]
+    install_index = next(
+        i for i, step in enumerate(linux_steps)
+        if step.get("name") == "Install checkout prerequisite"
+    )
+    checkout_index = next(i for i, step in enumerate(linux_steps) if step.get("uses") == checkout)
+    assert install_index < checkout_index
+    assert "apt-get install -yq --no-install-recommends git" in linux_steps[install_index]["run"]
+
+
+def _run_linux_wheel_identity_step(workspace: str, expected_sha: str) -> subprocess.CompletedProcess:
+    workflow = yaml.load(CI_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+    step = next(
+        step for step in workflow["jobs"]["linux-wheel"]["steps"]
+        if step.get("name") == "Verify exact event commit"
+    )
+    env = os.environ.copy()
+    env.update(GITHUB_WORKSPACE=workspace, EXPECTED_SHA=expected_sha)
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+
+def test_linux_wheel_identity_step_accepts_exact_repository_head(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "ci@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "CI"], check=True)
+    (tmp_path / "subject.txt").write_text("subject\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "subject.txt"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "subject"], check=True)
+    head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _run_linux_wheel_identity_step(str(tmp_path), head)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_linux_wheel_identity_step_rejects_wrong_expected_sha(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "ci@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "CI"], check=True)
+    (tmp_path / "subject.txt").write_text("subject\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "subject.txt"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "subject"], check=True)
+
+    result = _run_linux_wheel_identity_step(str(tmp_path), "0" * 40)
+
+    assert result.returncode != 0
+    assert "instead of immutable event SHA" in result.stdout + result.stderr
+
+
+def test_linux_wheel_identity_step_rejects_invalid_workspace(tmp_path):
+    for workspace in ("", str(tmp_path / "missing")):
+        result = _run_linux_wheel_identity_step(workspace, "0" * 40)
+
+        assert result.returncode != 0
+        assert "GITHUB_WORKSPACE must identify an existing directory" in result.stdout + result.stderr
+
+
+def test_linux_wheel_identity_step_propagates_git_failure(tmp_path):
+    result = _run_linux_wheel_identity_step(str(tmp_path), "0" * 40)
+
+    assert result.returncode != 0
+    assert "not a git repository" in result.stderr
+
+
+def test_ci_runs_acceptance_jobs_before_strict_completion_can_pass():
+    workflow = CI_WORKFLOW.read_text()
+    test_job = workflow[workflow.index("  test:"):workflow.index("  coverage:")]
+    strict_job = workflow[
+        workflow.index("  completion-strict:"):workflow.index("  required:")
+    ]
+
+    assert "fettle completion validate --checkpoint" in test_job
+    assert "fettle completion validate\n" in strict_job
+    assert "--checkpoint" not in strict_job
+    assert "needs:" not in strict_job
+    assert "needs:" not in workflow[
+        workflow.index("  windows-bridge:"):workflow.index("  linux-wheel:")
+    ]
+    assert "needs:" not in workflow[
+        workflow.index("  linux-wheel:"):workflow.index("  completion-strict:")
+    ]
+
+
+def test_precommit_uses_checkpoint_but_release_remains_strict():
+    precommit = (ROOT / ".pre-commit-config.yaml").read_text()
+    release = WORKFLOW.read_text()
+
+    assert "completion validate --checkpoint" in precommit
+    assert "fettle completion validate\n" in release
+    assert "completion validate --checkpoint" not in release
 
 
 def test_ci_runs_blocking_windows_bridge_publication_uat():

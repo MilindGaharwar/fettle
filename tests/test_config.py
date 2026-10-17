@@ -68,6 +68,45 @@ def test_malformed_toml_falls_back_loudly(tmp_path, capsys):
     assert "could not parse" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("layer", ["repo", "org", "team", "directory", "explicit"])
+def test_strict_config_rejects_corrupt_layers(tmp_path, monkeypatch, layer):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("FETTLE_CONFIG", raising=False)
+    root = tmp_path / "project"
+    root.mkdir()
+    if layer in {"org", "team"}:
+        path = tmp_path / "config" / "fettle" / f"{layer}.toml"
+    elif layer == "directory":
+        path = root / "src" / ".fettle.toml"
+    elif layer == "explicit":
+        path = tmp_path / "custom.toml"
+        monkeypatch.setenv("FETTLE_CONFIG", str(path))
+    else:
+        path = root / ".fettle.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("this is [not toml")
+
+    with pytest.raises(ValueError, match="policy layer"):
+        load_config(str(root), for_path="src/app.py", strict=True)
+
+
+def test_strict_config_allows_absent_optional_layers(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("FETTLE_CONFIG", raising=False)
+    assert load_config(str(tmp_path), strict=True)["gates"]["lint"]["enabled"]
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_strict_config_rejects_invalid_explicit_path(tmp_path, monkeypatch, kind):
+    path = tmp_path / "explicit.toml"
+    if kind == "directory":
+        path.mkdir()
+    monkeypatch.setenv("FETTLE_CONFIG", str(path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    with pytest.raises(ValueError, match="policy layer"):
+        load_config(str(tmp_path), strict=True)
+
+
 def test_defaults_not_mutated_by_load(tmp_path):
     (tmp_path / ".fettle.toml").write_text('[gates.lint]\nmode = "enforce"\n')
     load_config(str(tmp_path))

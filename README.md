@@ -155,7 +155,7 @@ invalidates an older assurance record so stale approval cannot look current.
 | Polyglot workspaces | Python, JavaScript/TypeScript, Go, and Rust post-edit and verification routing | Native toolchains remain external |
 | Verification | Test execution with canonical source, policy, scope, producer, and occurrence bindings | Local evidence does not replace remote CI |
 | Assurance | Nine-dimension canonical Assurance Record and frozen baseline comparison tooling | Graduation of stronger security enforcement still requires real shadow evidence |
-| Mutation quality | Python preflight, changed/full execution, replay, stable fingerprints, accepted baselines, survivor enforcement | Python and pinned `mutmut==2.5.1` only |
+| Mutation quality | Python preflight, explicit-dispatch replay/full execution, stable fingerprints, accepted baselines, survivor enforcement; PR scope checks fail closed when qualification is required | Python and pinned `mutmut==2.5.1` only |
 | Delegated work | Plans, worktrees, claims, topology, role-aware spawn, policy capsules, lineage, completion reports | Defense in depth, not OS isolation |
 | Specifications | Markdown specs, lint, scenario inventory, trace coverage, and canonical drift evidence | Declared links count only when execution evidence passes |
 | User acceptance | CLI, API, web, and library sessions; manual walkthroughs; artifact-bound verdicts; seeded benchmark | Report-only unless separately promoted by policy |

@@ -44,7 +44,7 @@ repos:
         always_run: true
       - id: fettle-completion
         name: fettle completion evidence
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m fettle.cli completion validate'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m fettle.cli completion validate --checkpoint'
         language: system
         pass_filenames: false
         always_run: true

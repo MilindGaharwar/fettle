@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "suites": [
+    {
+      "id": "signed-window",
+      "requirements": "The product is invoked as python app.py ARG with exactly one string argument. ARG is valid only when the entire string consists of an optional single ASCII plus sign (+) or ASCII minus sign (-), followed by one or more ASCII digits (0 through 9). No whitespace, separators, decimal points, other characters, or non-ASCII digits or signs are permitted. Leading zeros are allowed. Interpret valid strings as base-10 integers, with the sign applied to the value; signed zero is zero. For a valid integer in the inclusive range -24 through 73, print admit. For any other valid integer, print reject. For any invalid string, print malformed. In every case, stdout must contain exactly the specified lowercase word followed by one newline, the exit code must be 0, and stderr must be empty. No other output is permitted.",
+      "oracle": {
+        "minimum": -24,
+        "maximum": 73,
+        "inside": "admit",
+        "outside": "reject",
+        "invalid": "malformed"
+      },
+      "cases": [
+        {
+          "id": "signed-baseline",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 <= value <= 73 else \"reject\")\n",
+          "expected_state": "pass"
+        },
+        {
+          "id": "signed-lower-open",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 < value <= 73 else \"reject\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "signed-upper-open",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 <= value < 73 else \"reject\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "signed-unsigned-only",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 <= value <= 73 else \"reject\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "signed-trims-space",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1].strip()\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 <= value <= 73 else \"reject\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "signed-timeout",
+          "source": "import re\nimport sys\nimport time\n\ntoken = sys.argv[1]\ntime.sleep(3)\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"malformed\")\nelse:\n    value = int(token)\n    print(\"admit\" if -24 <= value <= 73 else \"reject\")\n",
+          "expected_state": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "positive-window",
+      "requirements": "The product is invoked as python app.py ARG with exactly one string argument. ARG is valid only when the entire string consists of an optional single ASCII plus sign (+) or ASCII minus sign (-), followed by one or more ASCII digits (0 through 9). No whitespace, separators, decimal points, other characters, or non-ASCII digits or signs are permitted. Leading zeros are allowed. Interpret valid strings as base-10 integers, with the sign applied to the value; signed zero is zero. For a valid integer in the inclusive range 120 through 480, print within. For any other valid integer, print beyond. For any invalid string, print invalid. In every case, stdout must contain exactly the specified lowercase word followed by one newline, the exit code must be 0, and stderr must be empty. No other output is permitted.",
+      "oracle": {
+        "minimum": 120,
+        "maximum": 480,
+        "inside": "within",
+        "outside": "beyond",
+        "invalid": "invalid"
+      },
+      "cases": [
+        {
+          "id": "positive-baseline",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"invalid\")\nelse:\n    value = int(token)\n    print(\"within\" if 120 <= value <= 480 else \"beyond\")\n",
+          "expected_state": "pass"
+        },
+        {
+          "id": "positive-no-leading-zero",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?(?:0|[1-9][0-9]*)\", token) is None:\n    print(\"invalid\")\nelse:\n    value = int(token)\n    print(\"within\" if 120 <= value <= 480 else \"beyond\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "positive-unicode-digits",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?\\d+\", token) is None:\n    print(\"invalid\")\nelse:\n    value = int(token)\n    print(\"within\" if 120 <= value <= 480 else \"beyond\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "positive-magnitude",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"invalid\")\nelse:\n    value = abs(int(token))\n    print(\"within\" if 120 <= value <= 480 else \"beyond\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "positive-text-order",
+          "source": "import re\nimport sys\n\ntoken = sys.argv[1]\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"invalid\")\nelse:\n    print(\"within\" if \"120\" <= token <= \"480\" else \"beyond\")\n",
+          "expected_state": "violation"
+        },
+        {
+          "id": "positive-timeout",
+          "source": "import re\nimport sys\nimport time\n\ntoken = sys.argv[1]\ntime.sleep(3)\nif re.fullmatch(r\"[+-]?[0-9]+\", token) is None:\n    print(\"invalid\")\nelse:\n    value = int(token)\n    print(\"within\" if 120 <= value <= 480 else \"beyond\")\n",
+          "expected_state": "unknown"
+        }
+      ]
+    }
+  ]
+}

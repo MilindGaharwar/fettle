@@ -1,0 +1,147 @@
+name: Mutation capacity preparation monitor
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+      experiment_id:
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  monitor:
+    name: capacity validation (monitor preparation containment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Monitor admitted worker exposure
+        id: monitor
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+        run: |
+          set +e
+          mkdir -p capacity-preparation-monitor
+          for sample in $(seq 1 190); do
+            jobs="capacity-preparation-monitor/jobs-$sample.json"
+            decision="capacity-preparation-monitor/decision-$sample.json"
+            if ! gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+              > "$jobs"; then
+              printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
+              cp "$decision" capacity-preparation-monitor/final-decision.json
+              exit 2
+            fi
+            OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) JOBS="$jobs" DECISION="$decision" \
+              python - <<'PY'
+          import json, os, re
+          from datetime import datetime
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              account_runner_minutes, evaluate_capacity_preparation_admission,
+          )
+          pages = json.loads(Path(os.environ["JOBS"]).read_text())
+          jobs = [job for page in pages for job in page["jobs"]]
+          worker = re.compile(r"^(?:[^/]+ / )?capacity validation \(enumerate (\d+)\)$")
+          gate = re.compile(
+              r"^capacity-preparation-admit-(\d+) / capacity validation "
+              r"\(preparation admission\)$"
+          )
+          completed_gates = [
+              int(match.group(1))
+              for job in jobs
+              if (match := gate.fullmatch(str(job.get("name", "")))) is not None
+              and job.get("status") == "completed" and job.get("conclusion") == "success"
+          ]
+          if not completed_gates or completed_gates != sorted(set(completed_gates)):
+              raise ValueError("preparation admission lineage is missing or duplicated")
+          admitted_count = min(256, (max(completed_gates) + 1) * 16)
+          admitted = list(range(admitted_count))
+          terminal = []
+          failed = []
+          for job in jobs:
+              match = worker.fullmatch(str(job.get("name", "")))
+              if match is None:
+                  continue
+              index = int(match.group(1))
+              if index not in admitted:
+                  raise ValueError("enumeration worker appeared before admission")
+              if job.get("status") == "completed":
+                  terminal.append(index)
+                  if job.get("conclusion") != "success":
+                      failed.append(index)
+          accounting = account_runner_minutes(
+              Path(os.environ["JOBS"]),
+              datetime.fromisoformat(os.environ["OBSERVED_AT"].replace("Z", "+00:00")),
+              expected_run_id=os.environ["GITHUB_RUN_ID"],
+              expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              job_timeout_minutes=35,
+          )
+          result = evaluate_capacity_preparation_admission(
+              accounting, admitted_shards=admitted, next_shards=[],
+              require_admitted_terminal=False,
+          )
+          if failed:
+              action, reason = "cancel", "an admitted enumeration worker failed"
+          elif result["passed"] is not True:
+              action, reason = "cancel", "reserved worker exposure exceeded 952 minutes"
+          elif sorted(terminal) == list(range(256)):
+              action, reason = "complete", "all 256 enumeration workers are terminal-success"
+          else:
+              action, reason = "continue", "admitted work remains within the reserved ceiling"
+          Path(os.environ["DECISION"]).write_text(json.dumps({
+              **result, "authorization_id": "AH-CAPACITY-BOUNDED-20261016-A",
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "action": action, "reason": reason,
+              "admitted_worker_shards": admitted,
+              "terminal_worker_shards": sorted(set(terminal)),
+              "failed_worker_shards": sorted(set(failed)),
+              "active_jobs": sorted(set(admitted) - set(terminal)),
+              "evidence": {"provider_jobs": os.environ["JOBS"]},
+              "next_permitted_action": (
+                  "freeze_exact_sample" if action == "complete"
+                  else "continue_observation" if action == "continue"
+                  else "stop_and_reconcile"
+              ),
+          }, indent=2) + "\n")
+          raise SystemExit(0 if action == "continue" else 10 if action == "complete" else 2)
+          PY
+            status=$?
+            cp "$decision" capacity-preparation-monitor/final-decision.json
+            if [ "$status" -eq 10 ]; then exit 0; fi
+            if [ "$status" -ne 0 ]; then exit 2; fi
+            sleep 30
+          done
+          printf '%s\n' '{"action":"cancel","reason":"monitor observation deadline expired"}' \
+            > capacity-preparation-monitor/final-decision.json
+          exit 2
+      - name: Retain monitor state before cancellation
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-preparation-monitor-${{ github.run_id }}
+          path: capacity-preparation-monitor
+          if-no-files-found: error
+          retention-days: 90
+      - name: Request cancellation after retaining diagnostics
+        if: steps.monitor.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --method POST
+          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
+      - name: Require successful terminal observation
+        if: always()
+        run: test "${{ steps.monitor.outcome }}" = "success"

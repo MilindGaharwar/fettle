@@ -2,19 +2,21 @@
 
 import json
 import importlib.metadata
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sqlite3
-from unittest.mock import patch
+import sys
+from unittest.mock import Mock, patch
 
 import pytest
 
-from fettle.mutation_baseline import establish_baseline
 from fettle.mutation_test import (
     build_mutation_cache_identity,
     build_mutation_report_artifact,
+    build_capacity_validation_plan,
     collect_mutation_dependency_identities,
     restore_mutation_native_cache,
     save_mutation_native_cache,
@@ -22,11 +24,13 @@ from fettle.mutation_test import (
     _checkpoint_environment_digest,
     _canonical_digest,
     _runtime_cache_identity,
+    _source_tree_digest,
     _shard_files,
     _shard_ranges,
     _patch_for_ranges,
     _mapped_tests,
     aggregate_shards,
+    aggregate_capacity_validation_shards,
     _get_all_py_files,
     _get_changed_py_files,
     _find_replacement,
@@ -39,10 +43,14 @@ from fettle.mutation_test import (
     _validate_report_schema,
     _rerun_mutant,
     _run_mutmut,
+    _run_mutmut_process,
+    _terminate_process_tree,
+    _MutationProcessTerminationError,
     _preflight_mutmut,
     aggregate_preflight_shards,
     _run_shard_modules,
     evaluate_stability,
+    evaluate_capacity_validation_decision,
     evaluate_policy,
     compute_score,
     format_report,
@@ -57,11 +65,94 @@ from fettle.mutation_test import (
     report_from_mutation_checkpoint,
     prepare_shard_replay_matrix,
     select_shard_attempts,
+    select_shard_subset_attempts,
     run_resumable_mutation_shard,
+    load_capacity_validation_plan,
+    run_capacity_validation_unit,
+    validate_capacity_validation_results,
+    validate_capacity_validation_package,
+    reconcile_capacity_provider_accounting,
     write_changed_partition_manifests,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mutation"
+
+
+def _capacity_manifest(index, line_range):
+    manifest = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": index,
+        "shard_count": 6, "files": [line_range["file"]], "ranges": [line_range],
+    }
+    manifest["digest"] = _canonical_digest(manifest)
+    return manifest
+
+
+def _capacity_preflight():
+    manifests = []
+    corpus = []
+    fingerprints = []
+    for group in range(6):
+        file = f"src/group_{group}.py"
+        ranges = [
+            {"file": file, "start": 1, "end": 10},
+            {"file": file, "start": 11, "end": 20},
+        ]
+        manifest = {
+            "schema_version": "1", "revision": "a" * 40, "shard_index": group,
+            "shard_count": 6, "files": [file], "ranges": ranges,
+        }
+        manifest["digest"] = _canonical_digest(manifest)
+        manifests.append(manifest)
+        for range_index, line_range in enumerate(ranges):
+            for ordinal in range(range_index + 1):
+                fingerprint = f"{group:02x}{range_index:02x}{ordinal:02x}".ljust(64, "a")
+                fingerprints.append(fingerprint)
+                corpus.append({
+                    "fingerprint": fingerprint, "file": file,
+                    "line": line_range["start"] + ordinal,
+                    "mapped_tests": [f"tests/test_group_{group}.py"],
+                    "shard_index": group,
+                })
+    corpus.sort(key=lambda item: item["fingerprint"])
+    preflight = {
+        "kind": "capacity_validation_corpus", "status": "enumerated", "passed": False,
+        "qualification_eligible": False, "billing_authority": False,
+        "authoritative_predecessor": False, "revision": "a" * 40,
+        "shard_count": 6,
+        "corpus": corpus, "fingerprints": sorted(fingerprints),
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [item["digest"] for item in manifests],
+    }
+    return preflight, manifests
+
+
+def _capacity_mapping():
+    return {f"src/group_{group}.py": [f"tests/test_group_{group}.py"] for group in range(6)}
+
+
+def _capacity_historical_source():
+    return {
+        "candidate_sha": "9" * 40,
+        "campaign_id": "cal-92984b1-20261014",
+        "environment_digest": "d" * 64,
+        "engine_version": "2.5.1",
+        "evidence_role": "modeling_only_terminal_non_pass",
+        "reusable_for_candidate": False,
+    }
+
+
+class _OsNameProxy:
+    """Override the mutation module's platform without mutating global os.name."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _use_mutation_os(monkeypatch, name):
+    monkeypatch.setattr("fettle.mutation_test.os", _OsNameProxy(name))
 
 
 def test_historical_failure_fixture_references_executable_regressions():
@@ -74,6 +165,608 @@ def test_historical_failure_fixture_references_executable_regressions():
 
 def _proc(code=0, out="", err=""):
     return subprocess.CompletedProcess([], code, out, err)
+
+
+def test_mutmut_process_timeout_restores_all_python_sources_and_removes_backup(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    initial_mode = source.stat().st_mode & 0o777
+    script = (
+        "from pathlib import Path; import time; "
+        "p=Path('src/nested.py'); "
+        "Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\"); p.chmod(0o600); time.sleep(30)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_mutmut_process(
+            [sys.executable, "-c", script, "--paths-to-mutate=src/nested.py"],
+            str(tmp_path),
+            0.2,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == initial_mode
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+@pytest.mark.parametrize("filename", ["quality_scan.py", "import_graph.py"])
+def test_mutmut_process_stops_descendants_after_leader_exits(tmp_path, filename):
+    source = tmp_path / "fettle" / filename
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    initial_mode = source.stat().st_mode & 0o777
+    child = (
+        "import time; from pathlib import Path; "
+        f"time.sleep(0.15); Path('fettle/{filename}').write_text(\"VALUE = 'late-mutant'\\n\")"
+    )
+    parent = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+
+    result = _run_mutmut_process([sys.executable, "-c", parent], str(tmp_path), 5)
+    __import__("time").sleep(0.35)
+
+    assert result.returncode == 0
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == initial_mode
+
+
+def test_windows_cleanup_targets_descendants_after_leader_exit(monkeypatch):
+    process = Mock(pid=123)
+    process.poll.return_value = 0
+    close_job = Mock()
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test._close_windows_kill_job", close_job)
+
+    _terminate_process_tree(process)
+
+    close_job.assert_called_once_with(process)
+
+
+def test_windows_cleanup_failure_is_not_hidden(monkeypatch):
+    process = Mock(pid=123)
+    process.poll.return_value = 0
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job",
+        Mock(side_effect=PermissionError("denied")),
+    )
+
+    with pytest.raises(OSError, match="process tree termination failed: denied"):
+        _terminate_process_tree(process)
+
+
+def test_windows_job_attachment_failure_stops_worker_before_restoration(monkeypatch, tmp_path):
+    process = Mock()
+    process._fettle_job_handle = None
+    process.communicate.return_value = ("", "")
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    monkeypatch.setattr(
+        "fettle.mutation_test._attach_windows_kill_job",
+        Mock(side_effect=PermissionError("denied")),
+    )
+
+    with pytest.raises(PermissionError, match="denied"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=10)
+
+
+@pytest.mark.parametrize("failure", [OSError("kill failed"), KeyboardInterrupt()])
+def test_windows_attachment_cleanup_failure_blocks_restoration(monkeypatch, tmp_path, failure):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+    process = Mock()
+    process._fettle_job_handle = None
+    process.kill.side_effect = failure
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+
+    def fail_attachment(_process):
+        source.write_text("VALUE = 'mutated'\n")
+        raise OSError("attach failed")
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", fail_attachment)
+
+    with pytest.raises(OSError, match="cannot confirm unattached Windows mutation process stopped"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+
+
+def test_windows_worker_is_attached_before_it_is_resumed(monkeypatch, tmp_path):
+    events = []
+    process = Mock(returncode=0)
+    process._fettle_job_handle = None
+    process.communicate.return_value = ("", "")
+    process.poll.return_value = 0
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    popen = Mock(return_value=process)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", popen)
+    monkeypatch.setattr(
+        "fettle.mutation_test._attach_windows_kill_job", lambda child: events.append(("attach", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process", lambda child: events.append(("resume", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._terminate_process_tree", lambda child: events.append(("terminate", child)),
+    )
+
+    _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert popen.call_args.kwargs["creationflags"] == 516
+    assert events == [("attach", process), ("resume", process), ("terminate", process)]
+
+
+def test_windows_resume_failure_closes_attached_job(monkeypatch, tmp_path):
+    events = []
+    process = Mock()
+    process._fettle_job_handle = None
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    def attach(child):
+        child._fettle_job_handle = 1
+        events.append(("attach", child))
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process",
+        Mock(side_effect=OSError("resume failed")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job", lambda child: events.append(("close", child)),
+    )
+
+    with pytest.raises(OSError, match="resume failed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert events == [("attach", process), ("close", process)]
+    process.kill.assert_not_called()
+
+
+def test_windows_resume_cleanup_failure_does_not_restore_source(monkeypatch, tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+    process = Mock()
+    process._fettle_job_handle = None
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+
+    def attach(_process):
+        _process._fettle_job_handle = 1
+        source.write_text("VALUE = 'mutated'\n")
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+    monkeypatch.setattr(
+        "fettle.mutation_test._resume_windows_process", Mock(side_effect=OSError("resume failed")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job",
+        Mock(side_effect=_MutationProcessTerminationError("unconfirmed", tree_stopped=False)),
+    )
+
+    with pytest.raises(OSError, match="unconfirmed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+
+
+def test_windows_interrupt_after_resume_stops_job_before_restoration(monkeypatch, tmp_path):
+    events = []
+    process = Mock()
+    process._fettle_job_handle = None
+    _use_mutation_os(monkeypatch, "nt")
+    monkeypatch.setattr("fettle.mutation_test.subprocess.CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", Mock(return_value=process))
+    def attach(child):
+        child._fettle_job_handle = 1
+        events.append(("attach", child))
+
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", attach)
+
+    def interrupt_after_resume(child):
+        events.append(("resume", child))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("fettle.mutation_test._resume_windows_process", interrupt_after_resume)
+    monkeypatch.setattr(
+        "fettle.mutation_test._close_windows_kill_job", lambda child: events.append(("close", child)),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test._restore_mutation_source_state",
+        lambda *_args: (events.append(("restore", process)) or ("", [])),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert events == [
+        ("attach", process), ("resume", process), ("close", process), ("restore", process),
+    ]
+
+
+def test_unconfirmed_tree_termination_does_not_restore_source(monkeypatch, tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 'original'\n")
+
+    class FailedProcess:
+        pid = 123
+        returncode = 1
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                source.write_text("VALUE = 'mutated'\n")
+                raise subprocess.TimeoutExpired([], timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: FailedProcess())
+    monkeypatch.setattr("fettle.mutation_test._attach_windows_kill_job", lambda _process: None)
+    monkeypatch.setattr("fettle.mutation_test._resume_windows_process", lambda _process: None)
+    monkeypatch.setattr(
+        "fettle.mutation_test._terminate_process_tree",
+        Mock(side_effect=_MutationProcessTerminationError("unconfirmed", tree_stopped=False)),
+    )
+
+    with pytest.raises(OSError, match="unconfirmed"):
+        _run_mutmut_process([sys.executable, "-c", "pass"], str(tmp_path), 5)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")
+def test_mutmut_process_fails_closed_when_descendant_termination_fails(
+    monkeypatch, tmp_path,
+):
+    source = tmp_path / "fettle" / "quality_scan.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    child = (
+        "import time; from pathlib import Path; "
+        "time.sleep(0.15); Path('fettle/quality_scan.py').write_text(\"VALUE = 'late-mutant'\\n\")"
+    )
+    parent = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.os.killpg",
+        lambda *_args: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(OSError, match="process tree termination failed"):
+        _run_mutmut_process([sys.executable, "-c", parent], str(tmp_path), 5)
+    __import__("time").sleep(0.35)
+
+    assert source.read_text() == "VALUE = 'late-mutant'\n"
+
+
+def test_mutmut_process_keyboard_interrupt_restores_source(monkeypatch, tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+
+    class InterruptedProcess:
+        pid = 123
+        returncode = -2
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                (tmp_path / "src/nested.py.bak").write_text("VALUE = 'original'\n")
+                source.write_text("VALUE = 'mutated'\n")
+                raise KeyboardInterrupt
+            return "", ""
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return self.returncode
+
+    process = InterruptedProcess()
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("fettle.mutation_test._terminate_process_tree", lambda child: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process(
+            ["mutmut", "run", "1", "--paths-to-mutate=src/nested.py"],
+            str(tmp_path),
+            10,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal contract")
+def test_mutmut_process_sigterm_restores_source(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o744)
+    original_mode = source.stat().st_mode & 0o777
+    unrelated_backup = tmp_path / "src/user-notes.py.bak"
+    unrelated_backup.write_text("user backup\n")
+    unrelated_file = tmp_path / "notes.txt"
+    unrelated_file.write_text("leave me alone\n")
+    child = (
+        "from pathlib import Path; import os,time; "
+        "p=Path('src/nested.py'); Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\"); p.chmod(0o600); "
+        "ready=Path('fixture-ready.tmp'); ready.write_text(str(os.getpid())); "
+        "os.replace(ready, 'fixture-ready'); time.sleep(30)"
+    )
+    wrapper = (
+        "import sys; from fettle.mutation_test import _run_mutmut_process; "
+        f"_run_mutmut_process([sys.executable, '-c', {child!r}], '.', 60)"
+    )
+    environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    process = subprocess.Popen(
+        [sys.executable, "-c", wrapper], cwd=tmp_path, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = __import__("time").monotonic() + 5
+        ready = tmp_path / "fixture-ready"
+        while not ready.exists():
+            assert process.poll() is None
+            if __import__("time").monotonic() >= deadline:
+                pytest.fail("mutation child did not apply its fixture mutation")
+            __import__("time").sleep(0.01)
+        child_pid = int(ready.read_text())
+        ready.unlink()
+        assert source.read_text() == "VALUE = 'mutated'\n"
+        assert source.stat().st_mode & 0o777 == 0o600
+        assert source.with_name(source.name + ".bak").read_text() == "VALUE = 'original'\n"
+        process.terminate()
+        process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    assert process.returncode != 0
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == original_mode
+    assert not (tmp_path / "src/nested.py.bak").exists()
+    with pytest.raises(ProcessLookupError):
+        os.killpg(child_pid, 0)
+    assert unrelated_backup.read_text() == "user backup\n"
+    assert unrelated_file.read_text() == "leave me alone\n"
+
+
+def test_mutmut_process_rejects_unexplained_source_drift_and_residue(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    script = (
+        "from pathlib import Path; "
+        "p=Path('src/nested.py'); p.write_text(\"VALUE = 'mutated'\\n\"); "
+        "Path('src/unrelated.orig').write_text('residue')"
+    )
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.read_text() == "VALUE = 'mutated'\n"
+    assert (tmp_path / "src/unrelated.orig").is_file()
+
+
+def test_mutmut_process_repairs_but_rejects_unrestored_success(tmp_path):
+    source = tmp_path / "src" / "nested.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    script = (
+        "from pathlib import Path; "
+        "p=Path('src/nested.py'); Path('src/nested.py.bak').write_bytes(p.read_bytes()); "
+        "p.write_text(\"VALUE = 'mutated'\\n\")"
+    )
+
+    with pytest.raises(OSError, match="returned without restoring"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert not (tmp_path / "src/nested.py.bak").exists()
+
+
+def test_mutmut_process_rejects_unexplained_mode_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process([sys.executable, "-c", script], str(tmp_path), 10)
+
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.parametrize("exit_code", [0, 1, 2])
+def test_mutmut_process_restores_in_scope_mode_after_engine_consumes_backup(tmp_path, exit_code):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = (
+        "from pathlib import Path; import shutil,sys; "
+        "p=Path('src/command.py'); b=Path('src/command.py.bak'); "
+        "b.write_bytes(p.read_bytes()); p.write_text(\"VALUE = 'mutated'\\n\"); "
+        f"shutil.move(b, p); sys.exit({exit_code})"
+    )
+
+    result = _run_mutmut_process(
+        [
+            sys.executable, "-c", script,
+            "--paths-to-mutate=src/command.py",
+        ],
+        str(tmp_path),
+        10,
+    )
+
+    assert result.returncode == exit_code
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+    assert not source.with_name(source.name + ".bak").exists()
+
+
+def test_mutmut_process_rejects_out_of_scope_mode_only_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(
+            [
+                sys.executable, "-c", script,
+                "--paths-to-mutate=src/other.py",
+            ],
+            str(tmp_path),
+            10,
+        )
+
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.parametrize(
+    "scope_argument",
+    [
+        None,
+        "--paths-to-mutate=",
+        "--paths-to-mutate=/src/command.py",
+        "--paths-to-mutate=../src/command.py",
+    ],
+)
+def test_mutmut_process_malformed_scope_fails_closed(scope_argument, tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = "from pathlib import Path; Path('src/command.py').chmod(0o644)"
+    argv = [sys.executable, "-c", script]
+    if scope_argument is not None:
+        argv.append(scope_argument)
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(argv, str(tmp_path), 10)
+
+    assert source.stat().st_mode & 0o777 == 0o644
+    assert not source.with_name(source.name + ".bak").exists()
+
+
+def test_mutmut_process_does_not_hide_in_scope_content_and_mode_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    script = (
+        "from pathlib import Path; p=Path('src/command.py'); "
+        "p.write_text(\"VALUE = 'changed'\\n\"); p.chmod(0o644)"
+    )
+
+    with pytest.raises(OSError, match="source integrity"):
+        _run_mutmut_process(
+            [sys.executable, "-c", script, "--paths-to-mutate=src/command.py"],
+            str(tmp_path),
+            10,
+        )
+
+    assert source.read_text() == "VALUE = 'changed'\n"
+    assert source.stat().st_mode & 0o777 == 0o644
+
+
+def test_mutmut_process_timeout_restores_in_scope_mode_only_drift(tmp_path):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+    original_mode = source.stat().st_mode & 0o777
+    script = (
+        "import time; from pathlib import Path; "
+        "Path('src/command.py').chmod(0o644); time.sleep(30)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_mutmut_process(
+            [
+                sys.executable, "-c", script,
+                "--paths-to-mutate=src/command.py",
+            ],
+            str(tmp_path),
+            1,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == original_mode
+
+
+def test_mutmut_process_keyboard_interrupt_restores_in_scope_mode_only_drift(
+    monkeypatch, tmp_path,
+):
+    source = tmp_path / "src" / "command.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 'original'\n")
+    source.chmod(0o755)
+
+    class InterruptedProcess:
+        pid = 123
+        returncode = -2
+
+        def communicate(self, timeout=None):
+            if timeout is not None:
+                source.chmod(0o644)
+                raise KeyboardInterrupt
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    process = InterruptedProcess()
+    monkeypatch.setattr("fettle.mutation_test.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("fettle.mutation_test._terminate_process_tree", lambda child: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_mutmut_process(
+            ["mutmut", "run", "--paths-to-mutate=src/command.py"], str(tmp_path), 10,
+        )
+
+    assert source.read_text() == "VALUE = 'original'\n"
+    assert source.stat().st_mode & 0o777 == 0o755
+
+
+def test_mutmut_process_does_not_start_without_complete_source_manifest(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "fettle.mutation_test._mutation_source_state",
+        lambda root: (_ for _ in ()).throw(OSError("unreadable source")),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.subprocess.Popen",
+        lambda *args, **kwargs: pytest.fail("mutation process started"),
+    )
+
+    with pytest.raises(OSError, match="pre-run mutation source manifest"):
+        _run_mutmut_process(["mutmut", "run", "1"], str(tmp_path), 10)
 
 
 def test_score_counts_every_non_skipped_outcome_and_rejects_zero():
@@ -125,6 +818,23 @@ def test_policy_suspicious_budget_boundaries(mode, budget, count, passed, reason
     assert (reason is None) == (not result["reasons"])
     if reason:
         assert reason in result["reasons"][0]
+
+
+@pytest.mark.parametrize("mode", ["advisory", "enforce"])
+def test_required_skipped_outcome_is_always_incomplete(mode):
+    result = evaluate_policy(
+        {
+            "killed": 9, "survived": 1, "timeout": 0,
+            "suspicious": 0, "untested": 0, "skipped": 1,
+        },
+        {"mode": mode, "score_target": 70, "max_untested": 0},
+    )
+
+    assert result["passed"] is False
+    assert result["eligible"] is False
+    assert result["score"] is None
+    assert result["score_eligible"] is False
+    assert "required skipped" in result["reasons"][0]
 
 
 def test_policy_suppresses_only_tiny_scope_score_decision():
@@ -1148,6 +1858,15 @@ def test_dependency_identity_collects_editable_source_and_invalidates_changes(tm
     assert first[0]["editable_source_digest"] != second[0]["editable_source_digest"]
 
 
+def test_source_tree_digest_ignores_downloaded_mutation_shards(tmp_path):
+    (tmp_path / "module.py").write_text("VALUE = 1\n")
+    before = _source_tree_digest(tmp_path)
+    (tmp_path / "mutation-shards" / "shard-0").mkdir(parents=True)
+    (tmp_path / "mutation-shards" / "shard-0" / "mutation-report.json").write_text("{}")
+
+    assert _source_tree_digest(tmp_path) == before
+
+
 def test_dependency_identity_collects_legacy_editable_egg_info_source(tmp_path):
     dist = _mutation_distribution(tmp_path / "legacy")
     metadata = Path(dist._path)
@@ -1582,6 +2301,46 @@ def test_aggregate_scope_rejects_manifest_files_outside_changed_selection(tmp_pa
     assert "changed-file scope" in report["message"]
 
 
+def test_qualification_aggregate_uses_full_configured_scope(tmp_path, monkeypatch, capsys):
+    manifests = tmp_path / "manifests"
+    reports = tmp_path / "reports"
+    manifests.mkdir()
+    reports.mkdir()
+    (reports / "mutation-report.json").write_text(json.dumps(
+        _shard_report(0, ["src/a.py"], shard_count=1)
+    ))
+    payload = {
+        "schema_version": "1", "revision": "a" * 40, "shard_index": 0,
+        "shard_count": 1, "files": ["src/a.py"],
+        "ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    digest = _canonical_digest(payload)
+    (manifests / "partition-0.json").write_text(json.dumps({**payload, "digest": digest}))
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text("{}")
+    captured = {}
+    monkeypatch.setattr("fettle.mutation_test._get_all_py_files", lambda *args: ["src/a.py"])
+    monkeypatch.setattr(
+        "fettle.mutation_test._get_changed_py_files",
+        lambda *args: pytest.fail("qualification aggregation must not use changed scope"),
+    )
+    monkeypatch.setattr(
+        "fettle.mutation_test.aggregate_shards",
+        lambda *args, **kwargs: captured.update({"args": args, **kwargs})
+        or {"status": "completed", "passed": True},
+    )
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--aggregate", str(reports), "--aggregate-scope", str(manifests),
+        "--aggregate-preflight-evidence", str(preflight), "--calibration-id", "calibration-a",
+        "--shard-count", "1", "--json",
+    ])
+
+    assert main() == 0
+    assert captured["args"][10] == "calibration-a"
+    assert captured["args"][8][0]["digest"] == digest
+    assert captured["args"][9] == {}
+
+
 def test_manifest_scope_supplies_complete_changed_file_set(tmp_path, monkeypatch, capsys):
     manifests = tmp_path / "manifests"
     manifests.mkdir()
@@ -1618,25 +2377,33 @@ def test_patch_for_ranges_marks_only_selected_lines_as_added(tmp_path):
     assert patch_text == "--- a/src/a.py\n+++ b/src/a.py\n@@ -2,0 +2,2 @@\n+two\n+three\n"
 
 
-def test_range_results_exclude_mutants_outside_shard_lines(tmp_path):
+@pytest.mark.parametrize(("start", "end", "expected"), [
+    (1, 1, ["1"]),
+    (10, 10, ["3"]),
+    (10, 11, ["3", "4"]),
+])
+def test_range_results_exclude_mutants_outside_shard_lines(tmp_path, start, end, expected):
     connection = sqlite3.connect(tmp_path / ".mutmut-cache")
     connection.executescript(
         "CREATE TABLE SourceFile (id INTEGER PRIMARY KEY, filename TEXT, hash TEXT);"
         "CREATE TABLE Line (id INTEGER PRIMARY KEY, sourcefile INTEGER, line TEXT, line_number INTEGER);"
         "CREATE TABLE Mutant (id INTEGER PRIMARY KEY, line INTEGER, idx INTEGER, tested_against_hash TEXT, status TEXT);"
         "INSERT INTO SourceFile VALUES (1, 'src/app.py', 'hash');"
-        "INSERT INTO Line VALUES (1, 1, 'a', 10), (2, 1, 'b', 11);"
-        "INSERT INTO Mutant VALUES (1, 1, 0, 'tests', 'ok_killed'), (2, 2, 0, 'tests', 'untested');"
+        "INSERT INTO Line VALUES (1, 1, 'first', 0), (2, 1, 'before', 8), "
+        "(3, 1, 'start', 9), (4, 1, 'end', 10), (5, 1, 'after', 11);"
+        "INSERT INTO Mutant VALUES (1, 1, 0, 'tests', 'ok_killed'), "
+        "(2, 2, 0, 'tests', 'ok_killed'), (3, 3, 0, 'tests', 'ok_killed'), "
+        "(4, 4, 0, 'tests', 'ok_killed'), (5, 5, 0, 'tests', 'ok_killed');"
     )
     connection.commit()
     connection.close()
 
     ids, error = _collect_range_results(
-        str(tmp_path), [{"file": "src/app.py", "start": 10, "end": 10}], "2.5.1", 0
+        str(tmp_path), [{"file": "src/app.py", "start": start, "end": end}], "2.5.1", 0
     )
 
     assert error is None
-    assert ids == {"killed": ["1"], "survived": [], "timeout": [], "suspicious": [], "untested": [], "skipped": []}
+    assert ids == {"killed": expected, "survived": [], "timeout": [], "suspicious": [], "untested": [], "skipped": []}
 
 
 def test_mapped_tests_combines_filename_and_direct_imports(tmp_path):
@@ -1645,18 +2412,50 @@ def test_mapped_tests_combines_filename_and_direct_imports(tmp_path):
     (tmp_path / "fettle/widget.py").write_text("")
     (tmp_path / "tests/test_widget.py").write_text("from fettle.widget import run\n")
     (tmp_path / "tests/test_integration.py").write_text("from fettle import widget\n")
+    (tmp_path / "tests/test_adversary.py").write_text("import fettle.widget\n")
 
-    assert _mapped_tests(str(tmp_path), ["fettle/widget.py"]) == {
-        "fettle/widget.py": ["tests/test_integration.py", "tests/test_widget.py"]
+    assert _mapped_tests(
+        str(tmp_path), ["fettle/widget.py"],
+        {"fettle/widget.py": ["tests/test_widget.py", "tests/test_integration.py"]},
+    ) == {
+        "fettle/widget.py": ["tests/test_widget.py", "tests/test_adversary.py", "tests/test_integration.py"]
     }
+
+
+@pytest.mark.parametrize("flat_owner", [True, False])
+def test_mapped_tests_prioritizes_nested_owner_without_dropping_importers(tmp_path, flat_owner):
+    (tmp_path / "fettle/uat").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    source = "fettle/uat/widget.py"
+    (tmp_path / source).write_text("")
+    (tmp_path / "tests/test_uat_widget.py").write_text("from fettle.uat.widget import run\n")
+    (tmp_path / "tests/test_adversary.py").write_text("import fettle.uat.widget\n")
+    if flat_owner:
+        (tmp_path / "tests/test_widget.py").write_text("")
+    expected = (["tests/test_widget.py", "tests/test_adversary.py", "tests/test_uat_widget.py"]
+                if flat_owner else ["tests/test_uat_widget.py", "tests/test_adversary.py"])
+    assert _mapped_tests(str(tmp_path), [source]) == {source: expected}
 
 
 def test_mapped_tests_leaves_unmapped_modules_visible(tmp_path):
     (tmp_path / "fettle").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "fettle/orphan.py").write_text("")
+    (tmp_path / "script.py").write_text("")
 
-    assert _mapped_tests(str(tmp_path), ["fettle/orphan.py"]) == {"fettle/orphan.py": []}
+    assert _mapped_tests(str(tmp_path), ["fettle/orphan.py", "script.py"]) == {
+        "fettle/orphan.py": [], "script.py": []}
+
+
+@pytest.mark.parametrize("stem", ["__init__", "__main__"])
+def test_mapped_tests_entry_points_require_import_or_explicit_mapping(tmp_path, stem):
+    (tmp_path / "fettle/uat").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    source = f"fettle/uat/{stem}.py"
+    (tmp_path / source).write_text("")
+    (tmp_path / f"tests/test_{stem}.py").write_text("")
+    (tmp_path / "tests/test_uat.py").write_text("")
+    assert _mapped_tests(str(tmp_path), [source]) == {source: []}
 
 
 def test_mapped_tests_uses_supplied_project_mapping(tmp_path):
@@ -1961,6 +2760,27 @@ def test_checkpoint_merge_is_idempotent_and_pending_selects_only_unfinished():
     assert len(merged["attempts"]) == 2
 
 
+def test_checkpoint_merge_preserves_execution_error_after_later_terminal_outcome():
+    fingerprint = "a" * 64
+    failed = _checkpoint(attempts=[{
+        "fingerprint": fingerprint, "status": "execution_error",
+        "message": "runner exited", "stdout": "partial", "stderr": "",
+    }])
+    completed = _checkpoint(
+        outcomes={fingerprint: {"state": "killed", "duration_ms": 1}},
+        attempts=[{"fingerprint": fingerprint, "status": "completed"}],
+    )
+
+    merged = merge_mutation_checkpoints([failed, completed], {fingerprint})
+
+    assert merged["status"] == "completed"
+    assert merged["pending"] == 0
+    assert merged["outcomes"] == {fingerprint: {"state": "killed", "duration_ms": 1}}
+    assert [attempt["status"] for attempt in merged["attempts"]] == [
+        "execution_error", "completed",
+    ]
+
+
 @pytest.mark.parametrize(
     "checkpoints,message",
     [
@@ -1985,6 +2805,19 @@ def test_execution_error_attempt_leaves_mutant_pending_and_unscored():
 
     assert merged["pending"] == 1
     assert merged["outcomes"] == {}
+
+
+def test_skipped_checkpoint_outcome_remains_pending_and_unscored():
+    checkpoint = _checkpoint(
+        outcomes={"a" * 64: {"state": "skipped", "duration_ms": 1}},
+        attempts=[{
+            "fingerprint": "a" * 64, "status": "completed",
+            "state": "skipped", "duration_ms": 1,
+        }],
+    )
+
+    with pytest.raises(ValueError, match="outcome is malformed"):
+        merge_mutation_checkpoints([checkpoint], {"a" * 64})
 
 
 def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(tmp_path):
@@ -2023,9 +2856,59 @@ def test_pending_execution_uses_verified_current_id_and_does_not_rerun_terminal(
     assert result["outcomes"]["a" * 64]["state"] == "killed"
     assert result["outcomes"]["b" * 64]["state"] == "survived"
     assert run.call_args.args[0] == [
-        "mutmut", "run", "42", "--test-time-base", "60", "--runner",
+        "mutmut", "run", "42", "--paths-to-mutate=src/a.py",
+        "--test-time-base", "60", "--runner",
         "python -m pytest -x --assert=plain tests/test_a.py",
     ]
+
+
+def test_pending_execution_rejects_conflicting_regenerated_locator(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {
+        "status": "completed", "corpus": [{
+            **corpus[0], "locator": {"file": "src/other.py", "engine_id": "42"},
+        }],
+    }
+
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+    ):
+        with pytest.raises(ValueError, match="regenerated mutation locator differs"):
+            execute_pending_mutations(
+                str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+                [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+            )
+
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("engine_id", ["", "0", "-1", "abc", "١"])
+def test_pending_execution_rejects_invalid_regenerated_engine_id(tmp_path, engine_id):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {
+        "status": "completed", "corpus": [{
+            **corpus[0], "locator": {"file": "src/a.py", "engine_id": engine_id},
+        }],
+    }
+
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+    ):
+        with pytest.raises(ValueError, match="regenerated mutation engine ID is invalid"):
+            execute_pending_mutations(
+                str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+                [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+            )
+
+    run.assert_not_called()
 
 
 def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tmp_path):
@@ -2045,9 +2928,196 @@ def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tm
         )
 
     assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
     assert result["pending"] == 1
     assert result["attempts"][-1]["status"] == "execution_error"
     assert result["outcomes"] == {}
+
+
+def test_pending_execution_regeneration_deadline_is_explicitly_classified(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value={
+            "status": "tool_error", "deadline_exhausted": True,
+        }),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
+    assert result["attempts"] == []
+
+
+def test_pending_execution_deadline_before_next_mutant_is_explicitly_classified(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+        patch("fettle.mutation_test.time.monotonic", side_effect=[1.0, 1.0, 62.0]),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
+    run.assert_not_called()
+
+
+def test_pending_execution_skipped_result_is_retryable_and_unscored(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    observed = {state: [] for state in (
+        "killed", "survived", "timeout", "suspicious", "untested", "skipped",
+    )}
+    observed["skipped"] = ["1"]
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", return_value=_proc(0)),
+        patch("fettle.mutation_test._collect_range_results", return_value=(observed, None)),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert result["attempts"][-1]["status"] == "execution_error"
+    assert "skipped a required" in result["attempts"][-1]["message"]
+
+
+def test_pending_execution_fatal_exit_retains_bounded_diagnostics_without_an_outcome(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch(
+            "fettle.mutation_test._run",
+            return_value=_proc(
+                1, "x" * 2001,
+                f"{tmp_path}/src/a.py token=synthetic-secret-value fatal stderr",
+            ),
+        ),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert result["attempts"][-1] == {
+        "fingerprint": "a" * 64,
+        "status": "execution_error",
+        "message": "mutmut exited with 1",
+        "stdout": "x" * 2000,
+        "stderr": "<repo>/src/a.py ***REDACTED*** fatal stderr",
+    }
+
+
+@pytest.mark.parametrize("timeout_seconds", [4, 7, 10, 61, 80, 125, 159, 198])
+def test_pending_execution_deadline_exhaustion_leaves_mutant_pending_without_tool_error(
+    tmp_path, timeout_seconds,
+):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    timeout = subprocess.TimeoutExpired(
+        ["mutmut", "run", "1"], timeout_seconds,
+        output="partial stdout", stderr="partial stderr",
+    )
+    checkpoint_path = tmp_path / "checkpoint.json"
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run", side_effect=timeout) as run,
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(),
+            timeout_seconds, checkpoint_path,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
+    assert result["pending"] == 1
+    assert result["outcomes"] == {}
+    assert result["attempts"] == []
+    assert json.loads(checkpoint_path.read_text()) == result
+    assert run.call_args.args[2] == timeout_seconds
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "x" * 2001,
+        "/home/runner/work/repo/test.py:1",
+        "/.ssh/id_rsa",
+        "'/Users/Jane Doe/private/test.py:1'",
+        "C:\\runner\\repo\\test.py:1",
+        "'C:\\Users\\Jane Doe\\private\\test.py:1'",
+        "\\\\server\\share\\private\\test.py:1",
+        "file:///home/runner/private/test.py:1",
+        "token=synthetic-secret-value",
+    ],
+)
+def test_checkpoint_merge_rejects_unsafe_execution_diagnostics(diagnostic):
+    checkpoint = _checkpoint(attempts=[{
+        "fingerprint": "a" * 64, "status": "execution_error", "message": "runner exited",
+        "stderr": diagnostic,
+    }])
+
+    with pytest.raises(ValueError, match="diagnostic is unsafe"):
+        merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "bounded stderr",
+        "AssertionError: expected killed / survived",
+        "ratio = killed / total",
+        "retry 1 / 3 failed",
+        "./tests/test_a.py and ../fixture.py",
+        "https://example.invalid/diagnostic",
+    ],
+)
+def test_checkpoint_merge_preserves_safe_bounded_execution_diagnostics(diagnostic):
+    checkpoint = _checkpoint(attempts=[{
+        "fingerprint": "a" * 64, "status": "execution_error", "message": "runner exited",
+        "stdout": "bounded stdout", "stderr": diagnostic,
+    }])
+
+    merged = merge_mutation_checkpoints([checkpoint], {"a" * 64})
+
+    assert merged["attempts"] == checkpoint["attempts"]
 
 
 def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema():
@@ -2083,6 +3153,484 @@ def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema(
 
     assert report["killed"] == 1 and report["timeout"] == 1
     assert [record["fingerprint"] for record in report["non_killed"]] == ["b" * 64]
+
+
+def test_capacity_plan_selects_deterministic_low_high_units_across_six_groups(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    predictions = {"optimistic": 10, "central": 20, "conservative": 30, "stress": 40}
+
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        first = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+        second = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, list(reversed(manifests)),
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+
+    assert first["coverage"]["selected_units"] == 12
+    assert len({unit["mapped_test_group_digest"] for unit in first["units"]}) == 6
+    assert [len(unit["fingerprints"]) for unit in first["units"]] == [1, 2] * 6
+    assert first["passed"] is False and first["qualification_eligible"] is False
+    contract = first["decision_contract"]
+    assert contract["prediction_error"]["absolute_relative_error_median_max"] == 0.35
+    assert contract["ranking"]["reject_distinct_group_inversions_min"] == 2
+    assert contract["timers"]["execution"]["deadline_seconds"] == 720
+    assert contract["timers"]["workflow_step"]["deadline_seconds"] == 840
+    assert contract["timers"]["operating_target"]["deadline_seconds"] == 960
+    assert contract["timers"]["whole_worker"]["deadline_seconds"] == 1200
+    assert contract["censoring"]["shorter_timeout_never_proves_operating_target_exceeded"] is True
+    assert contract["outcome_precedence"][-1] == "inconclusive"
+    assert contract["substitution_allowed"] is contract["rerun_allowed"] is False
+    assert second == first
+
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(first))
+    assert load_capacity_validation_plan(path) == first
+
+
+def test_capacity_enumeration_is_non_authoritative_and_rejects_canonical_input(tmp_path):
+    source = tmp_path / "src/a.py"
+    source.parent.mkdir()
+    source.write_text("x = 1\n")
+    canonical = {
+        "status": "completed", "passed": True, "engine_version": "2.5.1",
+        "shard_index": 0, "shard_count": 1, "generated": 1, "canonicalized": 1,
+        "manifest_digest": "d" * 64,
+        "fingerprints": ["a" * 64],
+        "corpus": [{"fingerprint": "a" * 64, "file": "src/a.py", "line": 1}],
+        "line_ranges": [{"file": "src/a.py", "start": 1, "end": 1}],
+    }
+    isolated = {
+        **canonical, "kind": "capacity_validation_enumeration_shard",
+        "status": "enumerated", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_capacity_validation_shards(
+            str(tmp_path), [isolated], ["src/a.py"], [], 1,
+        )
+    rejected = aggregate_capacity_validation_shards(
+        str(tmp_path), [canonical], ["src/a.py"], [], 1,
+    )
+
+    assert result["kind"] == "capacity_validation_corpus"
+    assert result["status"] == "enumerated" and result["passed"] is False
+    assert result["qualification_eligible"] is False
+    assert rejected["status"] == "unknown" and rejected["passed"] is False
+
+
+def test_capacity_plan_rejects_fewer_than_six_eligible_groups():
+    preflight, manifests = _capacity_preflight()
+    preflight["corpus"] = [record for record in preflight["corpus"] if record["shard_index"] < 5]
+    preflight["fingerprints"] = [record["fingerprint"] for record in preflight["corpus"]]
+    preflight["corpus_digest"] = _canonical_digest(preflight["corpus"])
+
+    with pytest.raises(ValueError, match="six mapped-test groups"):
+        with (
+            patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+            patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+        ):
+            build_capacity_validation_plan(
+                ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+                experiment_id="capval-local", revision="a" * 40,
+                observed_group_digests=set(), historical_source=_capacity_historical_source(),
+                prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+            )
+
+
+def test_capacity_plan_rejects_tampering_and_calibration_inventory(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    plan["units"][0]["fingerprints"].append("f" * 64)
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+
+    with pytest.raises(ValueError, match="digest differs"):
+        load_capacity_validation_plan(path)
+    from fettle.mutation_test import read_calibration_representation_inventory
+    with pytest.raises(ValueError, match="malformed"):
+        read_calibration_representation_inventory(path)
+
+    from fettle.mutation_test import (
+        load_mutation_report_candidates,
+        merge_mutation_checkpoints,
+    )
+    reports, quarantined = load_mutation_report_candidates(tmp_path)
+    assert reports == []
+    assert quarantined == []
+    with pytest.raises(ValueError):
+        merge_mutation_checkpoints([plan], set())
+
+
+def test_capacity_unit_executes_only_frozen_fingerprints_and_is_non_authoritative(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    unit = plan["units"][0]
+    source = tmp_path / unit["range"]["file"]
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n" * 20)
+    tests = tmp_path / unit["mapped_tests"][0]
+    tests.parent.mkdir(parents=True)
+    tests.write_text("def test_value():\n    assert True\n")
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    plan_path.write_text(json.dumps(plan))
+    preflight_path.write_text(json.dumps(preflight))
+    completed = {
+        "outcomes": {fp: {"state": "killed", "duration_ms": 5} for fp in unit["fingerprints"]},
+        "attempts": [], "pending": 0, "status": "completed",
+    }
+
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+        patch("fettle.mutation_test.execute_pending_mutations", return_value=completed) as execute,
+    ):
+        result = run_capacity_validation_unit(
+            str(tmp_path), {"test_mappings": _capacity_mapping()}, plan_path, preflight_path, 0, 720,
+        )
+
+    assert result["status"] == "completed"
+    assert result["passed"] is result["qualification_eligible"] is False
+    assert result["billing_authority"] is result["authoritative_predecessor"] is False
+    assert result["source_restoration"]["restored"] is True
+    assert [record["fingerprint"] for record in execute.call_args.args[1]] == unit["fingerprints"]
+    assert execute.call_args.args[5] == 720
+
+
+def test_capacity_unit_preserves_partial_and_rejects_foreign_inputs(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    plan_path.write_text(json.dumps(plan))
+    preflight_path.write_text(json.dumps({**preflight, "revision": "b" * 40}))
+
+    with patch("fettle.mutation_test.execute_pending_mutations") as execute:
+        result = run_capacity_validation_unit(
+            str(tmp_path), {}, plan_path, preflight_path, 0, 720,
+        )
+
+    assert result["status"] == "unknown"
+    assert result["passed"] is result["qualification_eligible"] is False
+    execute.assert_not_called()
+
+
+def test_capacity_result_validation_rejects_partial_conflicting_and_authoritative_evidence():
+    base = {
+        "schema_version": "1", "kind": "capacity_validation_unit_result",
+        "status": "completed", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+        "experiment_id": "capval-local", "revision": "a" * 40,
+        "plan_digest": "p" * 64, "unit_index": 0,
+        "unit": {"fingerprints": ["f" * 64]},
+        "environment_digest": "e" * 64,
+        "outcomes": {"f" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [], "pending": 0, "elapsed_ms": 1,
+        "source_restoration": {"before_sha256": "s" * 64, "after_sha256": "s" * 64, "restored": True},
+    }
+    base["digest"] = _canonical_digest(base)
+
+    validate_capacity_validation_results(
+        [base], [0], revision="a" * 40, experiment_id="capval-local", plan_digest="p" * 64,
+    )
+    for mutation in (
+        {"status": "incomplete", "pending": 1},
+        {"revision": "b" * 40},
+        {"qualification_eligible": True},
+        {"digest": "0" * 64},
+    ):
+        report = {**base, **mutation}
+        if "digest" not in mutation:
+            report["digest"] = _canonical_digest({key: value for key, value in report.items() if key != "digest"})
+        with pytest.raises(ValueError):
+            validate_capacity_validation_results(
+                [report], [0], revision="a" * 40,
+                experiment_id="capval-local", plan_digest="p" * 64,
+            )
+
+
+def _capacity_decision_fixture(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    predictions = {
+        "optimistic": 30, "central": 60, "conservative": 90, "stress": 120,
+    }
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds=predictions,
+        )
+    reports = []
+    for unit in plan["units"]:
+        seconds = round(len(unit["fingerprints"]) * predictions["central"])
+        report = {
+            "status": "completed", "unit_index": unit["unit_index"], "unit": unit,
+            "plan_digest": plan["digest"], "elapsed_ms": seconds * 1000,
+        }
+        reports.append(report)
+    return plan, reports
+
+
+def test_capacity_decision_invests_only_when_every_frozen_gate_passes(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "invest"
+    assert decision["exact_units"] == list(range(12))
+    assert len(decision["ranking"]["concordant_groups"]) == 6
+    assert decision["ranking"]["material_inversion_groups"] == []
+
+
+def test_capacity_decision_rejects_two_distinct_material_group_inversions(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+    inverted_groups = {
+        plan["units"][0]["mapped_test_group_digest"],
+        next(unit["mapped_test_group_digest"] for unit in plan["units"]
+             if unit["mapped_test_group_digest"]
+             != plan["units"][0]["mapped_test_group_digest"]),
+    }
+    for report in reports:
+        unit = report["unit"]
+        if unit["mapped_test_group_digest"] in inverted_groups:
+            report["elapsed_ms"] = (200 if unit["cost_class"] == "low" else 100) * 1000
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "reject_ranking"
+    assert set(decision["ranking"]["material_inversion_groups"]) == inverted_groups
+
+
+def test_capacity_decision_preserves_inconclusive_for_shorter_censor(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+    reports[0] = {"status": "incomplete", "unit_index": 0}
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {index: 800 for index in range(12)},
+    )
+
+    assert decision["outcome"] == "inconclusive"
+    assert decision["unknown_or_censored_units"] == [0]
+    assert decision["granularity"]["exact_whole_worker_target_exceedances"] == []
+    assert decision["granularity"]["shorter_timeout_inference_allowed"] is False
+
+
+def test_capacity_decision_rejects_only_exact_whole_worker_target_exceedance(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    decision = evaluate_capacity_validation_decision(
+        plan, reports, {**{index: 800 for index in range(12)}, 3: 961},
+    )
+
+    assert decision["outcome"] == "reject_granularity"
+    assert decision["granularity"]["exact_whole_worker_target_exceedances"] == [3]
+
+
+def test_capacity_decision_rejects_zero_or_malformed_provider_worker_intervals(tmp_path):
+    plan, reports = _capacity_decision_fixture(tmp_path)
+
+    for malformed in (
+        {**{index: 800 for index in range(12)}, 3: 0},
+        {**{index: 800 for index in range(12)}, 3: True},
+    ):
+        with pytest.raises(ValueError, match="provider worker timing is malformed"):
+            evaluate_capacity_validation_decision(plan, reports, malformed)
+
+
+def test_capacity_package_reproduces_and_rejects_tampered_corpus(tmp_path):
+    preflight, manifests = _capacity_preflight()
+    manifest_dir = tmp_path / "capacity-manifests"
+    manifest_dir.mkdir()
+    for manifest in manifests:
+        (manifest_dir / f"partition-{manifest['shard_index']}.json").write_text(json.dumps(manifest))
+    with (
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+        plan_path = tmp_path / "capacity-validation-plan.json"
+        corpus_path = tmp_path / "capacity-validation-corpus.json"
+        plan_path.write_text(json.dumps(plan))
+        corpus_path.write_text(json.dumps(preflight))
+        plan_file_sha256 = __import__("hashlib").sha256(plan_path.read_bytes()).hexdigest()
+        validated = validate_capacity_validation_package(
+            ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+            revision="a" * 40, experiment_id="capval-local",
+            plan_file_sha256=plan_file_sha256,
+        )
+        assert validated == plan
+        corpus_path.write_text(json.dumps({**preflight, "revision": "b" * 40}))
+        with pytest.raises(ValueError, match="corpus digest differs"):
+            validate_capacity_validation_package(
+                ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+                revision="a" * 40, experiment_id="capval-local",
+                plan_file_sha256=plan_file_sha256,
+            )
+        with pytest.raises(ValueError, match="file SHA-256 differs"):
+            validate_capacity_validation_package(
+                ".", {"test_mappings": _capacity_mapping()}, tmp_path,
+                revision="a" * 40, experiment_id="capval-local",
+                plan_file_sha256="0" * 64,
+            )
+
+
+def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs():
+    run = {
+        "id": 123, "run_attempt": 1, "head_sha": "a" * 40,
+        "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+        "path": ".github/workflows/mutation.yml",
+    }
+    source = {
+        "kind": "capacity_validation_execution_source", "revision": "a" * 40,
+        "run_id": "123", "run_attempt": "1", "experiment_id": "capval-local",
+        "preparation_run_id": "100", "plan_file_sha256": "p" * 64,
+        "workflow_sha": "a" * 40,
+        "workflow_ref": "owner/repo/.github/workflows/mutation.yml@refs/heads/audit",
+    }
+    def job(name, conclusion="success", *, job_id=None, started_at="2026-10-15T10:00:00Z",
+            completed_at="2026-10-15T10:01:00Z"):
+        return {
+            "id": job_id, "name": name, "status": "completed", "conclusion": conclusion,
+            "started_at": started_at, "completed_at": completed_at,
+        }
+    workers = [job(f"capacity validation unit {index}", job_id=index + 1) for index in range(12)]
+    support = [job(name, job_id=index + 13) for index, name in enumerate((
+        "capacity validation (execution admission)",
+        "capacity validation (admit batch 2)",
+        "capacity validation (admit batch 3)",
+        "capacity validation (non-authoritative readback)",
+    ))]
+    controller = [job(
+        "capacity-measurement-monitor / capacity validation (monitor measurement containment)",
+        job_id=17,
+        completed_at="2026-10-15T10:02:00Z",
+    )]
+    all_jobs = workers + support + controller
+    pages = [{"total_count": len(all_jobs), "jobs": all_jobs}]
+
+    valid = reconcile_capacity_provider_accounting(
+        run, pages, source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    failed = reconcile_capacity_provider_accounting(
+        {**run, "conclusion": "failure"}, [{"total_count": 17, "jobs": [
+            {**workers[0], "conclusion": "failure"}, *workers[1:], *support, *controller,
+        ]}],
+        source, repository="owner/repo", revision="a" * 40,
+        experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert valid["status"] == "completed" and valid["passed"] is False
+    assert failed["status"] == "non_pass"
+    assert failed["cancellation_controller"]["status"] == "completed"
+    with pytest.raises(ValueError, match="duplicated"):
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 18, "jobs": [*workers, workers[0], *support, *controller]}],
+            source, repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    missing_support = reconcile_capacity_provider_accounting(
+        run, [{"total_count": 12, "jobs": workers}], source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert missing_support["status"] == "non_pass"
+    assert valid["routine_support"]["ceiling_minutes"] == 25
+    assert valid["terminal_readback_support"]["ceiling_minutes"] == 10
+    assert valid["terminal_readback_support"]["charged_minutes"] == 10
+    assert valid["terminal_readback_support"]["status"] == "conservative_ceiling_charged"
+    assert valid["cancellation_controller"]["observed_minutes"] == 2
+    cancelled = reconcile_capacity_provider_accounting(
+        {**run, "conclusion": "cancelled"}, pages, source, repository="owner/repo",
+        revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
+        preparation_run_id="100", plan_file_sha256="p" * 64,
+    )
+    assert cancelled["status"] == "non_pass"
+    with pytest.raises(ValueError, match="pagination"):
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 18, "jobs": all_jobs}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="pagination"):
+        malformed_ids = [{**item} for item in all_jobs]
+        malformed_ids[0]["id"] = True
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 17, "jobs": malformed_ids}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="contradictory"):
+        contradictory = [{**item} for item in all_jobs]
+        contradictory[0]["started_at"] = "2026-10-15T10:02:00Z"
+        reconcile_capacity_provider_accounting(
+            run, [{"total_count": 17, "jobs": contradictory}], source,
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
+    with pytest.raises(ValueError, match="identity"):
+        reconcile_capacity_provider_accounting(
+            run, pages, {**source, "experiment_id": "capval-foreign"},
+            repository="owner/repo", revision="a" * 40,
+            experiment_id="capval-local", execution_run_id="123",
+            preparation_run_id="100", plan_file_sha256="p" * 64,
+        )
 
 
 def test_resumable_shard_rejects_corpus_not_bound_to_manifest_before_execution(tmp_path):
@@ -2535,6 +4083,12 @@ def _shard_report(index, files, **changes):
         tests_run=sorted({f"tests/test_{file.rsplit('/', 1)[-1][:-3]}.py" for file in files}),
         line_ranges=[{"file": file, "start": 1, "end": 1} for file in files],
         duration_ms=1000 + index,
+        calibration_id="calibration-a",
+        preflight_digest="1" * 64,
+        preflight_corpus_digest="2" * 64,
+        manifest_digest=("3" if index == 0 else "4") * 64,
+        corpus_digest=("5" if index == 0 else "6") * 64,
+        environment_digest="7" * 64,
         non_killed=[
             {
                 **record,
@@ -2577,12 +4131,16 @@ def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):
     assert result["total_duration_ms"] == 2001
     assert all(re.fullmatch(r"[0-9a-f]{64}", result[field]) for field in (
         "policy_digest", "source_scope_digest", "test_mapping_digest", "line_range_digest",
+        "preflight_digest", "corpus_digest", "execution_identity_digest",
     ))
+    assert result["calibration_id"] == "calibration-a"
     assert [record["engine_id"] for record in result["non_killed"]] == ["1", "2", "3", "4"]
     _validate_report_schema(result)
 
 
 def test_aggregate_shards_produces_baseline_compatible_identity(tmp_path):
+    from fettle.mutation_baseline import establish_baseline
+
     (tmp_path / "fettle").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "fettle/a.py").write_text("a")
@@ -2677,6 +4235,126 @@ def test_aggregate_shards_rejects_incomplete_evidence(tmp_path, reports, message
     assert message in result["message"]
 
 
+@pytest.mark.parametrize("field", [
+    "calibration_id", "preflight_digest", "preflight_corpus_digest",
+    "manifest_digest", "corpus_digest", "environment_digest",
+])
+def test_aggregate_shards_rejects_missing_qualification_identity(tmp_path, field):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    reports[0].pop(field)
+
+    result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] == "unknown"
+    assert "qualification identity" in result["message"]
+
+
+def test_aggregate_shards_rejects_mixed_qualification_identity(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    reports[1]["preflight_digest"] = "8" * 64
+
+    result = aggregate_shards(str(tmp_path), reports, ["fettle/"], [], 2, 70)
+
+    assert result["status"] == "unknown"
+    assert "qualification identities differ" in result["message"]
+
+
+def test_aggregate_shards_rejects_valid_looking_unrelated_qualification(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    manifests = [
+        {
+            "shard_index": index, "shard_count": 2, "revision": "a" * 40,
+            "digest": report["manifest_digest"],
+            "files": report["files_tested"],
+            "ranges": report["line_ranges"],
+        }
+        for index, report in enumerate(reports)
+    ]
+    corpus = [
+        {"fingerprint": "a" * 64, "shard_index": 0},
+        {"fingerprint": "b" * 64, "shard_index": 1},
+    ]
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 2, "corpus": corpus,
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70,
+            manifests=manifests, preflight=preflight, calibration_id="calibration-a",
+        )
+
+    assert result["status"] == "unknown"
+    assert "stale or unrelated" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"revision": "b" * 40}, "revision or topology"),
+        ({"shard_count": 3}, "revision or topology"),
+        ({"ranges": [{"file": "fettle/a.py", "start": 1, "end": 2}]}, "scope differs"),
+    ],
+)
+def test_aggregate_shards_rejects_manifest_linkage_mismatch(tmp_path, change, message):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    reports = [_shard_report(0, ["fettle/a.py"]), _shard_report(1, ["fettle/b.py"])]
+    manifests = [
+        {
+            "shard_index": index, "shard_count": 2, "revision": "a" * 40,
+            "digest": report["manifest_digest"], "files": report["files_tested"],
+            "ranges": report["line_ranges"],
+        }
+        for index, report in enumerate(reports)
+    ]
+    manifests[0].update(change)
+    corpus = [
+        {"fingerprint": "a" * 64, "shard_index": 0},
+        {"fingerprint": "b" * 64, "shard_index": 1},
+    ]
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 2, "corpus": corpus,
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+
+    with patch("fettle.mutation_test._revision", return_value="a" * 40):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70,
+            manifests=manifests, preflight=preflight, calibration_id="calibration-a",
+        )
+
+    assert result["status"] == "unknown"
+    assert message in result["message"]
+
+
 def test_shard_attempt_selection_replaces_timeout_with_completed_replay():
     timeout = {
         "status": "tool_error", "shard_index": 0, "shard_count": 2,
@@ -2706,6 +4384,22 @@ def test_shard_attempt_selection_requires_one_completed_attempt_per_index():
 
     with pytest.raises(ValueError, match="no completed attempt"):
         select_shard_attempts([timeout], 1)
+
+
+def test_shard_subset_selection_accepts_only_explicit_stage_members():
+    first = {"shard_index": 8, "shard_count": 256, "status": "completed"}
+    second = {"shard_index": 27, "shard_count": 256, "status": "completed"}
+
+    assert select_shard_subset_attempts([second, first], 256, [8, 27]) == [first, second]
+
+
+def test_shard_subset_selection_rejects_missing_or_conflicting_stage_attempts():
+    report = {"shard_index": 8, "shard_count": 256, "status": "completed", "killed": 1}
+
+    with pytest.raises(ValueError, match="shard 27 has no completed attempt"):
+        select_shard_subset_attempts([report], 256, [8, 27])
+    with pytest.raises(ValueError, match="conflicting completed attempts"):
+        select_shard_subset_attempts([report, {**report, "killed": 2}], 256, [8])
 
 
 def test_replay_matrix_selects_only_incomplete_initial_shards():

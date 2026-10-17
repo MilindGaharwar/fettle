@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "canonical": {
+        "state": "pass",
+        "validity": "valid"
+      },
+      "case": "success",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "observation": {
+        "attempt": 1,
+        "error": "",
+        "exit_code": 0,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": "Hello, Ada\n"
+      },
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "seeded-defect",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "observation": {
+        "attempt": 1,
+        "error": "",
+        "exit_code": 0,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": "Hello, wrong person\n"
+      },
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    },
+    {
+      "canonical": {
+        "state": "unknown",
+        "validity": "valid"
+      },
+      "case": "write-denied",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "observation": {
+        "attempt": 1,
+        "error": "command terminated by signal or sandbox denial; review authorized action",
+        "exit_code": -9,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": ""
+      },
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    }
+  ],
+  "installed_identity": {
+    "controller_sha256": "69aaa34fc2523086813af18fd19b2ef4b8a37455956cb1393c4f2736d68ea340",
+    "installed": true,
+    "python": "3.12.13"
+  },
+  "limits": [
+    "macOS read-only CLI only",
+    "trusted controller and system runtime",
+    "no unrestricted same-user explorer",
+    "not human parity or enforcement graduation"
+  ],
+  "passed": true,
+  "platform": "macOS-26.7-arm64-arm-64bit",
+  "recorded_at": "2026-09-22T04:46:11.123469+00:00",
+  "schema_version": 1,
+  "wheel_digest": "sha256:1bc2d0b9d0e989ff0285232471bd04000037567979b15d083991b7ac7e419af0"
+}

@@ -1,0 +1,356 @@
+{
+  "schema_version": "2",
+  "status": "completed",
+  "revision": "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286",
+  "merge_base": null,
+  "selection": "shard",
+  "files_tested": [
+    "fettle/config.py",
+    "fettle/mutation_test.py",
+    "fettle/quality_scan.py"
+  ],
+  "deleted_files": [],
+  "engine_version": "2.5.1",
+  "test_runner": "python -m pytest -x --assert=plain {mapped_tests}",
+  "tests_run": [
+    "tests/test_assurance_integrity.py",
+    "tests/test_assurance_loop_example.py",
+    "tests/test_assurance_record.py",
+    "tests/test_ci.py",
+    "tests/test_cli.py",
+    "tests/test_config.py",
+    "tests/test_config_schema.py",
+    "tests/test_dispatcher_failure_visibility.py",
+    "tests/test_integrations.py",
+    "tests/test_mutation_test.py",
+    "tests/test_policy_layers.py",
+    "tests/test_policy_remote.py",
+    "tests/test_project_rules.py",
+    "tests/test_quality_gate_dispatch.py",
+    "tests/test_quality_scan.py",
+    "tests/test_security_review.py",
+    "tests/test_session_report.py",
+    "tests/test_spec_audit.py",
+    "tests/test_staged_preflight.py",
+    "tests/test_uat_session.py"
+  ],
+  "line_ranges": [
+    {
+      "end": 60,
+      "file": "fettle/config.py",
+      "start": 1
+    },
+    {
+      "end": 995,
+      "file": "fettle/mutation_test.py",
+      "start": 991
+    },
+    {
+      "end": 2275,
+      "file": "fettle/mutation_test.py",
+      "start": 2271
+    },
+    {
+      "end": 398,
+      "file": "fettle/quality_scan.py",
+      "start": 397
+    }
+  ],
+  "shard_index": 48,
+  "calibration_id": "cal-1d5bb2cd-s1-20261011-fresh",
+  "preflight_digest": "3876dadd17bac2cbe67b7452bb2210ba4f3be8c1732b0fa9de056e8d7cb5b4f1",
+  "preflight_corpus_digest": "eff88ad30727a1e7985726b979e80e8d84ddcdfe6fa3a3980979100945b6660d",
+  "manifest_digest": "ccdc500eddccd2d30334b01077b82ab2882ca5fda086b59474f399cf9b206d30",
+  "corpus_digest": "303c63e2f63cf82bacfef4f71f198cd7f0bd3bbf632844f2273ad6678d48af9e",
+  "environment_digest": "d997f7de5807ef3d857d78aac9b9b59ea7c48fa43e7e681a1cd378078aec6d8e",
+  "shard_count": 256,
+  "killed": 81,
+  "survived": 11,
+  "timeout": 0,
+  "suspicious": 0,
+  "untested": 0,
+  "skipped": 0,
+  "non_killed": [
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "4ca41165505c54030edfc244c45ab008b09d055fb7d4be972056a2c7d065b529",
+      "source_context_digest": "39381ae810743cc434ea08a63485f29618b765dfb1345f98262f957fb639432f",
+      "engine_id": "1",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "25"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 2274,
+      "symbol": "_preflight_mutmut",
+      "operator": "Constant",
+      "before": "'tool_error'",
+      "after": "'XXtool_errorXX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 25",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "631aa0f4954251e6205400bba2d442047973f209382420dd5f2f86ab4782d420",
+      "source_context_digest": "200f41cce48cb2d235ccc4f09df774a7b4edcaf8dffb44e791710bf01884bdb6",
+      "engine_id": "2",
+      "locator": {
+        "file": "fettle/quality_scan.py",
+        "engine_id": "2"
+      },
+      "state": "survived",
+      "file": "fettle/quality_scan.py",
+      "line": 397,
+      "symbol": "scan_project",
+      "operator": "Constant",
+      "before": "'file'",
+      "after": "'XXfileXX'",
+      "mapped_tests": [
+        "tests/test_assurance_loop_example.py",
+        "tests/test_ci.py",
+        "tests/test_quality_scan.py"
+      ],
+      "rerun_command": "mutmut run 2",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "6b1f4c1f36cad0c6bebc44e1d3a7451a9dfca67a71b3f427e023e4d755280af6",
+      "source_context_digest": "39381ae810743cc434ea08a63485f29618b765dfb1345f98262f957fb639432f",
+      "engine_id": "3",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "21"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 2271,
+      "symbol": "_preflight_mutmut",
+      "operator": "Constant",
+      "before": "'unrecognized'",
+      "after": "'XXunrecognizedXX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 21",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "6d0a5227fb7c66b2b2274a89af4c1c5ec364dac05f3bb3ede7593c1d756fa336",
+      "source_context_digest": "39381ae810743cc434ea08a63485f29618b765dfb1345f98262f957fb639432f",
+      "engine_id": "4",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "26"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 2275,
+      "symbol": "_preflight_mutmut",
+      "operator": "JoinedStr",
+      "before": "f'Unsupported mutmut version {actual}; install mutmut=={MUTMUT_VERSION}'",
+      "after": "f'XXUnsupported mutmut version {actual}; install mutmut=={MUTMUT_VERSION}XX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 26",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "86b4280bd2c8b6d66a43d845181a4c8ad85a3cd6c71889c8acce2037f1cb0cc0",
+      "source_context_digest": "45e5d71515ee7de86e3414b54bedfd4889de2fa468f91cb3db6fa337ab8f9f00",
+      "engine_id": "5",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "18"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 994,
+      "symbol": "merge_mutation_checkpoints",
+      "operator": "BoolOp",
+      "before": "not required <= set(first) <= allowed or first.get('schema_version') != _CHECKPOINT_SCHEMA_VERSION",
+      "after": "not required <= set(first) <= allowed and first.get('schema_version') != _CHECKPOINT_SCHEMA_VERSION",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 18",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "86cd0254faa411eea167870093fcf33ef771ed5beb2bcd4ccae31e81fc5e852a",
+      "source_context_digest": "45e5d71515ee7de86e3414b54bedfd4889de2fa468f91cb3db6fa337ab8f9f00",
+      "engine_id": "6",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "11"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 993,
+      "symbol": "merge_mutation_checkpoints",
+      "operator": "Constant",
+      "before": "'pending'",
+      "after": "'XXpendingXX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 11",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "955b62f7b7908b2ed9e866a6278668482f9f4ab013a5e49e72c5d49cc86ee0d2",
+      "source_context_digest": "45e5d71515ee7de86e3414b54bedfd4889de2fa468f91cb3db6fa337ab8f9f00",
+      "engine_id": "7",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "15"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 994,
+      "symbol": "merge_mutation_checkpoints",
+      "operator": "Compare",
+      "before": "required <= set(first) <= allowed",
+      "after": "required <= set(first) < allowed",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 15",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "e7f4cbd133d86a87b6c64ba165adb3d3c24b3423d7e0299fff8a5979f54f5715",
+      "source_context_digest": "200f41cce48cb2d235ccc4f09df774a7b4edcaf8dffb44e791710bf01884bdb6",
+      "engine_id": "8",
+      "locator": {
+        "file": "fettle/quality_scan.py",
+        "engine_id": "3"
+      },
+      "state": "survived",
+      "file": "fettle/quality_scan.py",
+      "line": 397,
+      "symbol": "scan_project",
+      "operator": "Constant",
+      "before": "''",
+      "after": "'XXXX'",
+      "mapped_tests": [
+        "tests/test_assurance_loop_example.py",
+        "tests/test_ci.py",
+        "tests/test_quality_scan.py"
+      ],
+      "rerun_command": "mutmut run 3",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "ee78403cace0f7e14ce6a559dd388e34a33ee1d5cc27a88db34a440f8e1b7c82",
+      "source_context_digest": "39381ae810743cc434ea08a63485f29618b765dfb1345f98262f957fb639432f",
+      "engine_id": "9",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "24"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 2272,
+      "symbol": "_preflight_mutmut",
+      "operator": "BoolOp",
+      "before": "version.returncode or actual != MUTMUT_VERSION",
+      "after": "version.returncode and actual != MUTMUT_VERSION",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 24",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "f0f72cd6e57528a10f8d92efef57266dc2e8fa08a8d63c773904d0810281121f",
+      "source_context_digest": "45e5d71515ee7de86e3414b54bedfd4889de2fa468f91cb3db6fa337ab8f9f00",
+      "engine_id": "10",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "19"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 995,
+      "symbol": "merge_mutation_checkpoints",
+      "operator": "Constant",
+      "before": "'mutation checkpoint has an unsupported schema'",
+      "after": "'XXmutation checkpoint has an unsupported schemaXX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 19",
+      "shard_index": 48
+    },
+    {
+      "fingerprint_version": "2",
+      "fingerprint": "fd3a9312ef258b3baef6484df3117f0edec316074432b83790a329c90288f90e",
+      "source_context_digest": "45e5d71515ee7de86e3414b54bedfd4889de2fa468f91cb3db6fa337ab8f9f00",
+      "engine_id": "11",
+      "locator": {
+        "file": "fettle/mutation_test.py",
+        "engine_id": "10"
+      },
+      "state": "survived",
+      "file": "fettle/mutation_test.py",
+      "line": 993,
+      "symbol": "merge_mutation_checkpoints",
+      "operator": "Constant",
+      "before": "'status'",
+      "after": "'XXstatusXX'",
+      "mapped_tests": [
+        "tests/test_assurance_integrity.py",
+        "tests/test_ci.py",
+        "tests/test_mutation_test.py",
+        "tests/test_staged_preflight.py"
+      ],
+      "rerun_command": "mutmut run 10",
+      "shard_index": 48
+    }
+  ],
+  "duration_ms": 1406406,
+  "mode": "advisory",
+  "score": 88.0,
+  "score_eligible": true,
+  "eligible": true,
+  "passed": true,
+  "reasons": [],
+  "threshold": 80.0
+}

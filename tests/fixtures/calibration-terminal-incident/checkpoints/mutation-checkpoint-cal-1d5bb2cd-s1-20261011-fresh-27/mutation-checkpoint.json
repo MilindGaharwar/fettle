@@ -1,0 +1,604 @@
+{
+  "schema_version": "1",
+  "calibration_id": "cal-1d5bb2cd-s1-20261011-fresh",
+  "identity": {
+    "revision": "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286",
+    "preflight_digest": "3876dadd17bac2cbe67b7452bb2210ba4f3be8c1732b0fa9de056e8d7cb5b4f1",
+    "manifest_digest": "fe51f70178fb89536eab411c2c7b7a3548f3f39e0f1e2cbb9bf6f9db657cebc1",
+    "corpus_digest": "3479cac4ef9fb1d591fc9a1f6aa0515bf8079d9b01ca667f4bbd8afa7418f12c",
+    "environment_digest": "d997f7de5807ef3d857d78aac9b9b59ea7c48fa43e7e681a1cd378078aec6d8e"
+  },
+  "outcomes": {
+    "05295f8b846421eb4f446f3a641edca1c514e27f943e287d83223297671e28e3": {
+      "state": "survived",
+      "duration_ms": 50753
+    },
+    "0838a50ed5bfc34af6ecbcb211b35f2ecb951be911b7af16cbaeda0e4ba67dd9": {
+      "state": "survived",
+      "duration_ms": 26256
+    },
+    "11bb0c8465db2fb996cdbb980c8b753f494d7e66b96b29186143f4029fce87a7": {
+      "state": "survived",
+      "duration_ms": 27168
+    },
+    "1acf4cdb1a5a062ab5949d52716d89f0a721f319310c6ce64900fd897bfe1ec0": {
+      "state": "survived",
+      "duration_ms": 27233
+    },
+    "1af28b53e837832f8cb1a7d2b2f79975e5597cfbab454616290861af8eb47f96": {
+      "state": "survived",
+      "duration_ms": 27120
+    },
+    "203ae02c4a47d548a054eb89c9e9f9441f32471f33b55328b972da630d4e020f": {
+      "state": "survived",
+      "duration_ms": 26979
+    },
+    "20e4943a4f85c5b9fd1299d16ec85863d8a4f94b0792daeecfd8505e454fccbf": {
+      "state": "survived",
+      "duration_ms": 26994
+    },
+    "218689a5158a072880cdaf29ab6d7973b0244f7035821f17e0c51e462ccf2bb2": {
+      "state": "survived",
+      "duration_ms": 27550
+    },
+    "25ef97d4b6168389f295f41bab1cb14d7d21bd77f0eab1266708b745e7985417": {
+      "state": "survived",
+      "duration_ms": 27436
+    },
+    "276a656c262accac61b4172eebf416938ca15578dd014c2425c78ed3c147a5bb": {
+      "state": "survived",
+      "duration_ms": 27193
+    },
+    "2a07d3ab7a1192239b6465bd5a2e0debd558584a15b7c442df67af3b850549bc": {
+      "state": "survived",
+      "duration_ms": 27337
+    },
+    "2e22c3c83b91c8cad0eb9c48ac0a0a11848382ded41d63dc5ec9ec0566d41fa6": {
+      "state": "survived",
+      "duration_ms": 27574
+    },
+    "30c410abeb19c7c0cef31cf28dee7bd5379e24e335119a55ab371a1b1f23932b": {
+      "state": "survived",
+      "duration_ms": 27270
+    },
+    "30c4f7ec2b523a4b69fed0a1066618ce8b2da24709c8022da7b82d550ce6015e": {
+      "state": "survived",
+      "duration_ms": 27192
+    },
+    "3485981d9bbd792a001a408a21e1f77611e83c59eece8f4d05f9596b9534e7bc": {
+      "state": "survived",
+      "duration_ms": 27468
+    },
+    "37812f2768ab082d6589b530d60f1025acfea8b2dd31a2dc4547b36010037cd8": {
+      "state": "survived",
+      "duration_ms": 27598
+    },
+    "381cd9cdcb7fd48fdd6df1db4c2e339d0f3217a44c017190706c651718c7569b": {
+      "state": "survived",
+      "duration_ms": 27235
+    },
+    "392775e118ae2a9f12ab729b4d4de449298314dbc067322093958142ccd19726": {
+      "state": "survived",
+      "duration_ms": 27201
+    },
+    "40ac751b54eb57451e39a13dd507a418177ae0e783db41991cc0bda9b53a95ee": {
+      "state": "survived",
+      "duration_ms": 27463
+    },
+    "4c7f758dd9a4678a1c6b1423fb8722ae9a9a5d1e6fd593602e0a48def0e9dac9": {
+      "state": "survived",
+      "duration_ms": 26903
+    },
+    "59d58443a013ffc237497972235c3a302f2ada2608aaad03f4a32133eb9b38b4": {
+      "state": "survived",
+      "duration_ms": 27069
+    },
+    "5cfd4194ee129ed632a4f7332037c6983f82298da8f65f9ea353152b38a9bd50": {
+      "state": "survived",
+      "duration_ms": 27028
+    },
+    "6163a4fc04a54a1460c112e8fa7001ae726b6e579df9a0b8b7628f82e856bc2b": {
+      "state": "survived",
+      "duration_ms": 26991
+    },
+    "6daec588060a6ac99b225be23a32edaa12cb23060f3badb3f3a0f3486ca0826a": {
+      "state": "survived",
+      "duration_ms": 26939
+    },
+    "74cacda54f929f4a4e52565058a95d7425e2aeea085bec9fc587eb3453b72809": {
+      "state": "survived",
+      "duration_ms": 27937
+    },
+    "7ad30590a3b6a4de146ffd453b9f7d102da0722bf9b00384bbf0fdcecf704145": {
+      "state": "survived",
+      "duration_ms": 27420
+    },
+    "7b4f38ec8a79280924187076038ddbce3a4e17e823f1ef0fb4068658326ab462": {
+      "state": "survived",
+      "duration_ms": 27492
+    },
+    "7ce19cd8ec35dae5eb713e39f888022a20c808e255c6b9c1efba8d4cdd15070e": {
+      "state": "survived",
+      "duration_ms": 27338
+    },
+    "7ea805ad89595922e9e348052b7464fef5f328699c297cba1c43919693ee89ff": {
+      "state": "survived",
+      "duration_ms": 27600
+    },
+    "7fb3a8e1c7e0c01c863e709889d7752dc5c22cbd9d4cd7c7f8487405b59e348c": {
+      "state": "survived",
+      "duration_ms": 27374
+    },
+    "87152d2b6f66d8310c5fb3fd647b559dd9a69a48099d84abce9c633b936008fe": {
+      "state": "survived",
+      "duration_ms": 27310
+    },
+    "8e2b68279d478ed7ae7c4435bb18def2e28f7411402f40b676b87c77bf8ee534": {
+      "state": "survived",
+      "duration_ms": 27445
+    },
+    "9f15f08b31396b321bddf84943b149419259b34180e9537e3a2aeded0e0f48ea": {
+      "state": "survived",
+      "duration_ms": 27347
+    },
+    "b2f7f5904327ec1c621a748e7b39f26cd89c8c85b21ac7f59cbd69a3d2017d7a": {
+      "state": "survived",
+      "duration_ms": 27094
+    },
+    "b4d24c5142ea10400a3eaf8a99af6cf6d837b1713d2578b82834ecd65d8496b4": {
+      "state": "survived",
+      "duration_ms": 27144
+    },
+    "b7ed12ee8ff41469452678c50de370760b7110c66c25638d86ae7d0e6e4b6e30": {
+      "state": "survived",
+      "duration_ms": 27196
+    },
+    "b939e75df11a3a56fabe71d079ac468babe32e989ea9fb9707c57727f89bde26": {
+      "state": "survived",
+      "duration_ms": 27294
+    },
+    "b94dea9aaa173e94b1e53c11c85f18fce1026de4205baef38ae6f0107ff5b302": {
+      "state": "survived",
+      "duration_ms": 27162
+    },
+    "c0c6997fd74a26c8a6f728822358d9a83e87337cca5ee93df28777e353138bef": {
+      "state": "survived",
+      "duration_ms": 27411
+    },
+    "c9a0e6f9bf3cbb17657f4a69b846e768b766cf2f8839948ca909adafcb30b15d": {
+      "state": "survived",
+      "duration_ms": 27540
+    },
+    "d487f392312fd74ae5151dd5297b01067bae41f64e931da4277a0fe1ad33fb26": {
+      "state": "survived",
+      "duration_ms": 27150
+    },
+    "d72f39f8d81361547d94cae4a11a9211a39c9845161d5c6abed5142e3162e904": {
+      "state": "survived",
+      "duration_ms": 27164
+    },
+    "dc0f978d8fe14ed6a170b9ca560d60c9150ae0de42e2433ea9c2b1ae86a6afb9": {
+      "state": "survived",
+      "duration_ms": 27014
+    },
+    "e5ee044b6e7e0926e0ef14f9e448073d68d0fa36554b8a3793c8722d4ba82cbf": {
+      "state": "survived",
+      "duration_ms": 27122
+    },
+    "f63fb5e560a0f37a0889dbbf37013e776445bb402b5b716197c40b95250f5d5d": {
+      "state": "survived",
+      "duration_ms": 27776
+    },
+    "f7306a237d66b80a3965d88bd7ecc7e15f18656198c2a99f5f491c54b01d1968": {
+      "state": "survived",
+      "duration_ms": 28068
+    },
+    "fc59e2c1c9b36f971f4f5d1091669a82d5d6b1db94edcaeffc17eae87558e235": {
+      "state": "survived",
+      "duration_ms": 28238
+    },
+    "ffcbba5542d21138bd0b7935c19deba09606f5bfb4bb99b6446d08c6f41bb3b8": {
+      "state": "survived",
+      "duration_ms": 27795
+    },
+    "03c0e0ef569c3b0c00f0d62e3022cc449cad42980ce344cd7e873b9c857df0f1": {
+      "state": "survived",
+      "duration_ms": 104386
+    },
+    "064e83b6426a646c3c0b44e24f027fe44fd5b181c022e800155e7406a1c555a5": {
+      "state": "killed",
+      "duration_ms": 8553
+    },
+    "0e6a8ebb3e92d93a5357223575d6f9c4709fd398c86cf65f272ecdde19b8a4dd": {
+      "state": "killed",
+      "duration_ms": 9786
+    },
+    "12e407258fc61a0216548c1d22fbfad3ff75bd8e3d629ce3f7a9551aaf86ece1": {
+      "state": "survived",
+      "duration_ms": 53918
+    },
+    "1a9ccb4381e6f86c8efad87a65dbd9ac2a2c83c61b2ffe8cd330eb994d638a22": {
+      "state": "killed",
+      "duration_ms": 8015
+    },
+    "25c13e9a2c6388c0880d42a7398b74edc8bf910e3892e64fe40eb92442a533f9": {
+      "state": "killed",
+      "duration_ms": 7958
+    },
+    "31eccf866ff627cd1320e32580f068954a5c6a28f9644a0dc04055b694d0eb09": {
+      "state": "survived",
+      "duration_ms": 54399
+    },
+    "428ff93cad167b9fce42885c36ba35fc115d8c316d4fb05b497556cbcab6a6a3": {
+      "state": "killed",
+      "duration_ms": 8027
+    },
+    "4cf4265fee08b48735cbe4d38a2f675dbdc605b4e06e414c3356ff087485202e": {
+      "state": "killed",
+      "duration_ms": 7922
+    },
+    "7a9063ae544bb28af5480f1cee87508e005b16ac86ed88b71cf625c67ab3520a": {
+      "state": "survived",
+      "duration_ms": 54025
+    }
+  },
+  "attempts": [
+    {
+      "fingerprint": "05295f8b846421eb4f446f3a641edca1c514e27f943e287d83223297671e28e3",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 50753
+    },
+    {
+      "fingerprint": "0838a50ed5bfc34af6ecbcb211b35f2ecb951be911b7af16cbaeda0e4ba67dd9",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26256
+    },
+    {
+      "fingerprint": "11bb0c8465db2fb996cdbb980c8b753f494d7e66b96b29186143f4029fce87a7",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27168
+    },
+    {
+      "fingerprint": "1acf4cdb1a5a062ab5949d52716d89f0a721f319310c6ce64900fd897bfe1ec0",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27233
+    },
+    {
+      "fingerprint": "1af28b53e837832f8cb1a7d2b2f79975e5597cfbab454616290861af8eb47f96",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27120
+    },
+    {
+      "fingerprint": "203ae02c4a47d548a054eb89c9e9f9441f32471f33b55328b972da630d4e020f",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26979
+    },
+    {
+      "fingerprint": "20e4943a4f85c5b9fd1299d16ec85863d8a4f94b0792daeecfd8505e454fccbf",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26994
+    },
+    {
+      "fingerprint": "218689a5158a072880cdaf29ab6d7973b0244f7035821f17e0c51e462ccf2bb2",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27550
+    },
+    {
+      "fingerprint": "25ef97d4b6168389f295f41bab1cb14d7d21bd77f0eab1266708b745e7985417",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27436
+    },
+    {
+      "fingerprint": "276a656c262accac61b4172eebf416938ca15578dd014c2425c78ed3c147a5bb",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27193
+    },
+    {
+      "fingerprint": "2a07d3ab7a1192239b6465bd5a2e0debd558584a15b7c442df67af3b850549bc",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27337
+    },
+    {
+      "fingerprint": "2e22c3c83b91c8cad0eb9c48ac0a0a11848382ded41d63dc5ec9ec0566d41fa6",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27574
+    },
+    {
+      "fingerprint": "30c410abeb19c7c0cef31cf28dee7bd5379e24e335119a55ab371a1b1f23932b",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27270
+    },
+    {
+      "fingerprint": "30c4f7ec2b523a4b69fed0a1066618ce8b2da24709c8022da7b82d550ce6015e",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27192
+    },
+    {
+      "fingerprint": "3485981d9bbd792a001a408a21e1f77611e83c59eece8f4d05f9596b9534e7bc",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27468
+    },
+    {
+      "fingerprint": "37812f2768ab082d6589b530d60f1025acfea8b2dd31a2dc4547b36010037cd8",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27598
+    },
+    {
+      "fingerprint": "381cd9cdcb7fd48fdd6df1db4c2e339d0f3217a44c017190706c651718c7569b",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27235
+    },
+    {
+      "fingerprint": "392775e118ae2a9f12ab729b4d4de449298314dbc067322093958142ccd19726",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27201
+    },
+    {
+      "fingerprint": "40ac751b54eb57451e39a13dd507a418177ae0e783db41991cc0bda9b53a95ee",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27463
+    },
+    {
+      "fingerprint": "4c7f758dd9a4678a1c6b1423fb8722ae9a9a5d1e6fd593602e0a48def0e9dac9",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26903
+    },
+    {
+      "fingerprint": "59d58443a013ffc237497972235c3a302f2ada2608aaad03f4a32133eb9b38b4",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27069
+    },
+    {
+      "fingerprint": "5cfd4194ee129ed632a4f7332037c6983f82298da8f65f9ea353152b38a9bd50",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27028
+    },
+    {
+      "fingerprint": "6163a4fc04a54a1460c112e8fa7001ae726b6e579df9a0b8b7628f82e856bc2b",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26991
+    },
+    {
+      "fingerprint": "6daec588060a6ac99b225be23a32edaa12cb23060f3badb3f3a0f3486ca0826a",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 26939
+    },
+    {
+      "fingerprint": "74cacda54f929f4a4e52565058a95d7425e2aeea085bec9fc587eb3453b72809",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27937
+    },
+    {
+      "fingerprint": "7ad30590a3b6a4de146ffd453b9f7d102da0722bf9b00384bbf0fdcecf704145",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27420
+    },
+    {
+      "fingerprint": "7b4f38ec8a79280924187076038ddbce3a4e17e823f1ef0fb4068658326ab462",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27492
+    },
+    {
+      "fingerprint": "7ce19cd8ec35dae5eb713e39f888022a20c808e255c6b9c1efba8d4cdd15070e",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27338
+    },
+    {
+      "fingerprint": "7ea805ad89595922e9e348052b7464fef5f328699c297cba1c43919693ee89ff",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27600
+    },
+    {
+      "fingerprint": "7fb3a8e1c7e0c01c863e709889d7752dc5c22cbd9d4cd7c7f8487405b59e348c",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27374
+    },
+    {
+      "fingerprint": "87152d2b6f66d8310c5fb3fd647b559dd9a69a48099d84abce9c633b936008fe",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27310
+    },
+    {
+      "fingerprint": "8e2b68279d478ed7ae7c4435bb18def2e28f7411402f40b676b87c77bf8ee534",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27445
+    },
+    {
+      "fingerprint": "9f15f08b31396b321bddf84943b149419259b34180e9537e3a2aeded0e0f48ea",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27347
+    },
+    {
+      "fingerprint": "b2f7f5904327ec1c621a748e7b39f26cd89c8c85b21ac7f59cbd69a3d2017d7a",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27094
+    },
+    {
+      "fingerprint": "b4d24c5142ea10400a3eaf8a99af6cf6d837b1713d2578b82834ecd65d8496b4",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27144
+    },
+    {
+      "fingerprint": "b7ed12ee8ff41469452678c50de370760b7110c66c25638d86ae7d0e6e4b6e30",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27196
+    },
+    {
+      "fingerprint": "b939e75df11a3a56fabe71d079ac468babe32e989ea9fb9707c57727f89bde26",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27294
+    },
+    {
+      "fingerprint": "b94dea9aaa173e94b1e53c11c85f18fce1026de4205baef38ae6f0107ff5b302",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27162
+    },
+    {
+      "fingerprint": "c0c6997fd74a26c8a6f728822358d9a83e87337cca5ee93df28777e353138bef",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27411
+    },
+    {
+      "fingerprint": "c9a0e6f9bf3cbb17657f4a69b846e768b766cf2f8839948ca909adafcb30b15d",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27540
+    },
+    {
+      "fingerprint": "d487f392312fd74ae5151dd5297b01067bae41f64e931da4277a0fe1ad33fb26",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27150
+    },
+    {
+      "fingerprint": "d72f39f8d81361547d94cae4a11a9211a39c9845161d5c6abed5142e3162e904",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27164
+    },
+    {
+      "fingerprint": "dc0f978d8fe14ed6a170b9ca560d60c9150ae0de42e2433ea9c2b1ae86a6afb9",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27014
+    },
+    {
+      "fingerprint": "e5ee044b6e7e0926e0ef14f9e448073d68d0fa36554b8a3793c8722d4ba82cbf",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27122
+    },
+    {
+      "fingerprint": "f63fb5e560a0f37a0889dbbf37013e776445bb402b5b716197c40b95250f5d5d",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27776
+    },
+    {
+      "fingerprint": "f7306a237d66b80a3965d88bd7ecc7e15f18656198c2a99f5f491c54b01d1968",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 28068
+    },
+    {
+      "fingerprint": "fc59e2c1c9b36f971f4f5d1091669a82d5d6b1db94edcaeffc17eae87558e235",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 28238
+    },
+    {
+      "fingerprint": "ffcbba5542d21138bd0b7935c19deba09606f5bfb4bb99b6446d08c6f41bb3b8",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 27795
+    },
+    {
+      "fingerprint": "03c0e0ef569c3b0c00f0d62e3022cc449cad42980ce344cd7e873b9c857df0f1",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 104386
+    },
+    {
+      "fingerprint": "064e83b6426a646c3c0b44e24f027fe44fd5b181c022e800155e7406a1c555a5",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 8553
+    },
+    {
+      "fingerprint": "0e6a8ebb3e92d93a5357223575d6f9c4709fd398c86cf65f272ecdde19b8a4dd",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 9786
+    },
+    {
+      "fingerprint": "12e407258fc61a0216548c1d22fbfad3ff75bd8e3d629ce3f7a9551aaf86ece1",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 53918
+    },
+    {
+      "fingerprint": "1a9ccb4381e6f86c8efad87a65dbd9ac2a2c83c61b2ffe8cd330eb994d638a22",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 8015
+    },
+    {
+      "fingerprint": "25c13e9a2c6388c0880d42a7398b74edc8bf910e3892e64fe40eb92442a533f9",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 7958
+    },
+    {
+      "fingerprint": "31eccf866ff627cd1320e32580f068954a5c6a28f9644a0dc04055b694d0eb09",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 54399
+    },
+    {
+      "fingerprint": "428ff93cad167b9fce42885c36ba35fc115d8c316d4fb05b497556cbcab6a6a3",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 8027
+    },
+    {
+      "fingerprint": "4cf4265fee08b48735cbe4d38a2f675dbdc605b4e06e414c3356ff087485202e",
+      "status": "completed",
+      "state": "killed",
+      "duration_ms": 7922
+    },
+    {
+      "fingerprint": "7a9063ae544bb28af5480f1cee87508e005b16ac86ed88b71cf625c67ab3520a",
+      "status": "completed",
+      "state": "survived",
+      "duration_ms": 54025
+    },
+    {
+      "fingerprint": "962a88baa7c6c9df265b2b442baa332bcca0aae0149dc7a5f6c0ef27dd62cff9",
+      "status": "execution_error",
+      "message": "Command '['mutmut', 'run', '58', '--paths-to-mutate=fettle/mutation_test.py', '--test-time-base', '1740', '--runner', 'python -m pytest -x --assert=plain tests/test_mutation_test.py tests/test_assurance_integrity.py tests/test_ci.py tests/test_staged_preflight.py']' timed out after 4 seconds",
+      "stdout": "- Mutation testing starting -\n\nThese are the steps:\n1. A full test suite run will be made to make sure we\n   can run the tests successfully and we know how long\n   it takes (to detect infinite loops for example)\n2. Mutants will be generated and checked\n\nResults are stored in .mutmut-cache.\nPrint found mutants with `mutmut results`.\n\nLegend for output:\n\ud83c\udf89 Killed mutants.   The goal is for everything to end up in this bucket.\n\u23f0 Timeout.          Test suite took 10 times as long as the baseline so were killed.\n\ud83e\udd14 Suspicious.       Tests took a long time, but not long enough to be fatal.\n\ud83d\ude41 Survived.         This means your tests need to be expanded.\n\ud83d\udd07 Skipped.          Skipped.\n\n1. Using cached time for baseline tests, to run baseline again delete the cache file\n\n2. Checking mutants\n\n\u280b 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2819 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2839 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2838 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u283c 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2834 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2826 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2827 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0\n\u2807 0/1  \ud83c\udf89 0  \u23f0 0  \ud83e\udd14 0  \ud83d\ude41 0  \ud83d\udd07 0",
+      "stderr": ""
+    }
+  ],
+  "status": "incomplete",
+  "pending": 12
+}

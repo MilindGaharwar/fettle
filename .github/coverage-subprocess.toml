@@ -1,0 +1,6 @@
+[run]
+branch = true
+parallel = true
+patch = ["subprocess"]
+source = ["fettle"]
+disable_warnings = ["no-data-collected"]

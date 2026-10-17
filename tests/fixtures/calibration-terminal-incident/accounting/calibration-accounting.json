@@ -1,0 +1,960 @@
+{
+  "schema_version": "1",
+  "stage": "1",
+  "calibration_id": "cal-1d5bb2cd-s1-20261011-fresh",
+  "estimated_runner_minutes": 286.99,
+  "included_jobs": [
+    {
+      "id": 114497644112,
+      "name": "mutation (prepare partitions)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045457,
+      "started_at": "2026-10-11T14:50:10Z",
+      "completed_at": "2026-10-11T14:50:28Z",
+      "minutes": 0.3,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497719466,
+      "name": "mutation (calibration launch gate)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045458,
+      "started_at": "2026-10-11T14:50:31Z",
+      "completed_at": "2026-10-11T14:50:42Z",
+      "minutes": 0.18,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766460,
+      "name": "mutation (monitor calibration budget)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045464,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:21:22Z",
+      "minutes": 30.62,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766503,
+      "name": "mutation (full shard 51, advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 1000045459,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:20:08Z",
+      "minutes": 29.38,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766508,
+      "name": "mutation (full shard 48, advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045460,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:15:21Z",
+      "minutes": 24.6,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766517,
+      "name": "mutation (full shard 8, advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045465,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:11:38Z",
+      "minutes": 20.88,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766520,
+      "name": "mutation (full shard 28, advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 1000045461,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:20:15Z",
+      "minutes": 29.5,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766527,
+      "name": "mutation (full shard 37, advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045463,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:04:18Z",
+      "minutes": 13.55,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766539,
+      "name": "mutation (full shard 27, advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 1000045466,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:20:17Z",
+      "minutes": 29.53,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766542,
+      "name": "mutation (full shard 50, advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 1000045467,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:09:58Z",
+      "minutes": 19.22,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114497766560,
+      "name": "mutation (full shard 53, advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 1000045462,
+      "started_at": "2026-10-11T14:50:45Z",
+      "completed_at": "2026-10-11T15:20:13Z",
+      "minutes": 29.47,
+      "basis": "completed observed interval",
+      "execution_evidence": "confirmed"
+    },
+    {
+      "id": 114504046271,
+      "name": "mutation (calibration accounting)",
+      "status": "in_progress",
+      "conclusion": null,
+      "runner_id": 1000045468,
+      "started_at": "2026-10-11T15:21:25Z",
+      "completed_at": null,
+      "minutes": 0.18,
+      "basis": "elapsed through observation time",
+      "execution_evidence": "confirmed"
+    }
+  ],
+  "sources": [
+    {
+      "schema_version": "1",
+      "kind": "operational_runner_time_estimate",
+      "billing_authority": false,
+      "source_sha256": "935230d3074819fea26788f1ade0cf777091fe4d850f61e83dc5f682c0aad394",
+      "expected_run_id": "38148783107",
+      "expected_run_attempt": "1",
+      "observed_at": "2026-10-11T15:21:35.879843+00:00",
+      "page_count": 1,
+      "job_count": 44,
+      "estimated_runner_minutes": 227.41,
+      "included_jobs": [
+        {
+          "id": 114497644112,
+          "name": "mutation (prepare partitions)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045457,
+          "started_at": "2026-10-11T14:50:10Z",
+          "completed_at": "2026-10-11T14:50:28Z",
+          "minutes": 0.3,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497719466,
+          "name": "mutation (calibration launch gate)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045458,
+          "started_at": "2026-10-11T14:50:31Z",
+          "completed_at": "2026-10-11T14:50:42Z",
+          "minutes": 0.18,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766460,
+          "name": "mutation (monitor calibration budget)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045464,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:21:22Z",
+          "minutes": 30.62,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766503,
+          "name": "mutation (full shard 51, advisory)",
+          "status": "completed",
+          "conclusion": "failure",
+          "runner_id": 1000045459,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:20:08Z",
+          "minutes": 29.38,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766508,
+          "name": "mutation (full shard 48, advisory)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045460,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:15:21Z",
+          "minutes": 24.6,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766517,
+          "name": "mutation (full shard 8, advisory)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045465,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:11:38Z",
+          "minutes": 20.88,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766520,
+          "name": "mutation (full shard 28, advisory)",
+          "status": "completed",
+          "conclusion": "failure",
+          "runner_id": 1000045461,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:20:15Z",
+          "minutes": 29.5,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766527,
+          "name": "mutation (full shard 37, advisory)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045463,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:04:18Z",
+          "minutes": 13.55,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766539,
+          "name": "mutation (full shard 27, advisory)",
+          "status": "completed",
+          "conclusion": "failure",
+          "runner_id": 1000045466,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:20:17Z",
+          "minutes": 29.53,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766542,
+          "name": "mutation (full shard 50, advisory)",
+          "status": "completed",
+          "conclusion": "success",
+          "runner_id": 1000045467,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:09:58Z",
+          "minutes": 19.22,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114497766560,
+          "name": "mutation (full shard 53, advisory)",
+          "status": "completed",
+          "conclusion": "failure",
+          "runner_id": 1000045462,
+          "started_at": "2026-10-11T14:50:45Z",
+          "completed_at": "2026-10-11T15:20:13Z",
+          "minutes": 29.47,
+          "basis": "completed observed interval",
+          "execution_evidence": "confirmed"
+        },
+        {
+          "id": 114504046271,
+          "name": "mutation (calibration accounting)",
+          "status": "in_progress",
+          "conclusion": null,
+          "runner_id": 1000045468,
+          "started_at": "2026-10-11T15:21:25Z",
+          "completed_at": null,
+          "minutes": 0.18,
+          "basis": "elapsed through observation time",
+          "execution_evidence": "confirmed"
+        }
+      ],
+      "excluded_jobs": [
+        {
+          "id": 114497644884,
+          "name": "mutation (freeze staged preflight)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497644941,
+          "name": "mutation (staged preflight wave 1 shard ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645143,
+          "name": "mutation (validate staged preflight wave 1)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645441,
+          "name": "mutation (staged preflight wave 2 shard ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645498,
+          "name": "mutation (validate staged preflight wave 2)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645793,
+          "name": "mutation (monitor staged preflight budget)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497646096,
+          "name": "mutation (dispatch staged preflight continuation)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:08Z"
+        },
+        {
+          "id": 114497720347,
+          "name": "mutation (diagnostic preflight shard)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497720441,
+          "name": "mutation (detail preflight ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497720564,
+          "name": "mutation (complete detail corpus)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497721347,
+          "name": "mutation (read back detail corpus)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497767263,
+          "name": "mutation (require stage 3 observer readiness)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767645,
+          "name": "calibration-stage-3-batch-1",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767768,
+          "name": "calibration-stage-3-admit-2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767799,
+          "name": "mutation (watch stage 3 observer)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497768232,
+          "name": "mutation (require stage 3 observer after admission 1)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497768564,
+          "name": "calibration-stage-3-batch-2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497768767,
+          "name": "calibration-stage-3-admit-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497768858,
+          "name": "calibration-stage-3-batch-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497769157,
+          "name": "mutation (require stage 3 observer after admission 2)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497769543,
+          "name": "calibration-stage-3-admit-4",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497769815,
+          "name": "mutation (require stage 3 observer after admission 3)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497769873,
+          "name": "calibration-stage-3-batch-4",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770060,
+          "name": "calibration-stage-3-batch-5",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770183,
+          "name": "calibration-stage-3-admit-5",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770194,
+          "name": "mutation (require stage 3 observer after admission 4)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770667,
+          "name": "calibration-stage-3-admit-6",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497771050,
+          "name": "mutation (require stage 3 observer after admission 5)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497771070,
+          "name": "calibration-stage-3-batch-6",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:44Z"
+        },
+        {
+          "id": 114497771100,
+          "name": "calibration-stage-3-admit-7",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:44Z"
+        },
+        {
+          "id": 114497771759,
+          "name": "mutation (require stage 3 observer after admission 6)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:44Z"
+        },
+        {
+          "id": 114497771969,
+          "name": "calibration-stage-3-batch-7",
+          "status": "completed",
+          "conclusion": "skipped",
+          "reason": "completed skipped job did not acquire a runner",
+          "excluded_fields": [
+            "started_at",
+            "completed_at"
+          ],
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:44Z"
+        }
+      ],
+      "anomalies": [
+        {
+          "id": 114497644884,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497644941,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645143,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645441,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645498,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497645793,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:08Z",
+          "completed_at": "2026-10-11T14:50:07Z"
+        },
+        {
+          "id": 114497720347,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497720441,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497720564,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497721347,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:29Z",
+          "completed_at": "2026-10-11T14:50:28Z"
+        },
+        {
+          "id": 114497767263,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767645,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767768,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497767799,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:43Z",
+          "completed_at": "2026-10-11T14:50:42Z"
+        },
+        {
+          "id": 114497770060,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770183,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770194,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497770667,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        },
+        {
+          "id": 114497771050,
+          "reason": "skipped job timestamps are reversed",
+          "started_at": "2026-10-11T14:50:44Z",
+          "completed_at": "2026-10-11T14:50:43Z"
+        }
+      ]
+    }
+  ],
+  "monitor_floor_runner_minutes": 232.17,
+  "bounded_support_reserve_minutes": 54.82,
+  "bounded_support_reservations": [
+    {
+      "name": "mutation (calibration accounting)",
+      "bound_minutes": 15,
+      "already_observed_minutes": 0.18,
+      "reserved_minutes": 14.82
+    },
+    {
+      "name": "mutation (assemble evidence)",
+      "bound_minutes": 30,
+      "already_observed_minutes": 0.0,
+      "reserved_minutes": 30.0
+    },
+    {
+      "name": "mutation evidence",
+      "bound_minutes": 10,
+      "already_observed_minutes": 0.0,
+      "reserved_minutes": 10.0
+    }
+  ],
+  "ceiling": 3600,
+  "cancellation_reserve": 1200,
+  "launch_cutoff": 2400,
+  "active_jobs": 1,
+  "cancellation_lag_minutes_per_active_job": 5,
+  "cancellation_lag_charge": 5,
+  "charged_runner_minutes": 291.99,
+  "billing_authority": false,
+  "budget_notice": "Operational launch and cancellation control; provider cancellation latency can exceed the estimate and this is not a guaranteed billing cap.",
+  "passed": true,
+  "observer_evidence": {
+    "lifecycle": {
+      "schema_version": "1",
+      "kind": "calibration_observer_sample",
+      "passed": true,
+      "billing_authority": false,
+      "completion_guaranteed": false,
+      "elapsed_seconds": 1825,
+      "expected_workers": 8,
+      "expected_shards": [
+        8,
+        27,
+        28,
+        37,
+        48,
+        50,
+        51,
+        53
+      ],
+      "admitted_shards": [
+        8,
+        27,
+        28,
+        37,
+        48,
+        50,
+        51,
+        53
+      ],
+      "observed_worker_jobs": 8,
+      "terminal_workers": 8,
+      "terminal_shards": [
+        8,
+        27,
+        28,
+        37,
+        48,
+        50,
+        51,
+        53
+      ],
+      "missing_terminal_shards": [],
+      "pending_admission_shards": [],
+      "completed_admissions": 0,
+      "expected_admissions": 0,
+      "route_complete": true,
+      "action": "complete",
+      "reason": "all admitted workers are terminal",
+      "contract": {
+        "schema_version": "1",
+        "kind": "calibration_observer_contract",
+        "shard_count": 8,
+        "expected_shards": [
+          8,
+          27,
+          28,
+          37,
+          48,
+          50,
+          51,
+          53
+        ],
+        "max_parallel": 8,
+        "worker_timeout_minutes": 35,
+        "worker_waves": 1,
+        "admission_dependencies": 0,
+        "components": {
+          "worker_waves_minutes": 35,
+          "scheduling_minutes": 5,
+          "polling_minutes": 1,
+          "publication_minutes": 5,
+          "cancellation_minutes": 5,
+          "reconciliation_minutes": 5,
+          "shutdown_minutes": 9
+        },
+        "observer_deadline_seconds": 3360,
+        "job_timeout_minutes": 65,
+        "completion_guaranteed": false
+      }
+    },
+    "budget_sha256": "83d0e04004525d5c70273b3692a0240e31f51a9814cbe8516540f2152d3547e8"
+  }
+}

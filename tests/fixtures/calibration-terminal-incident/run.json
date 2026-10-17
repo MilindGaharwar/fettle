@@ -1,0 +1,8 @@
+{
+  "id": 38148783107,
+  "run_attempt": 1,
+  "status": "completed",
+  "conclusion": "failure",
+  "event": "workflow_dispatch",
+  "head_sha": "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286"
+}

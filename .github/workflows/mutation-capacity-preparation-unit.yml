@@ -1,0 +1,76 @@
+name: Mutation capacity preparation unit
+
+on:
+  workflow_call:
+    inputs:
+      shard:
+        required: true
+        type: number
+      experiment_id:
+        required: true
+        type: string
+      candidate_sha:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  enumerate:
+    name: capacity validation (enumerate ${{ inputs.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Bind immutable preparation identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          SHARD: ${{ inputs.shard }}
+        run: >-
+          python -c 'import os,re,sys; sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
+          and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
+          and os.environ["SHARD"].isdigit() and 0<=int(os.environ["SHARD"])<256 else 2)'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-manifests-${{ github.run_id }}
+          path: capacity-manifests
+      - name: Enumerate canonical identities without mutation tests
+        run: |
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --preflight-manifest capacity-manifests/partition-${{ inputs.shard }}.json \
+            --json > transient-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("transient-preflight.json").read_text())
+          assert report.get("status") == "completed" and report.get("passed") is True
+          report.update({
+              "kind": "capacity_validation_enumeration_shard",
+              "status": "enumerated", "passed": False,
+              "qualification_eligible": False, "billing_authority": False,
+              "authoritative_predecessor": False,
+          })
+          Path("capacity-validation-enumeration.json").write_text(
+              json.dumps(report, indent=2) + "\n"
+          )
+          PY
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-enumeration-${{ github.run_id }}-${{ inputs.shard }}
+          path: capacity-validation-enumeration.json
+          if-no-files-found: error
+          retention-days: 90
