@@ -5,6 +5,12 @@ Date: 2026-10-10
 Historical candidate: `8c31238d3a72af0ef1f85c5bee0aa49a3c565b88`  
 Historical run attempt: `38041454291/1`
 
+> **Successor budget note (2026-10-17):** The historical limits below remain part
+> of this incident contract. For the newly frozen successor only,
+> `docs/calibration-budget-contract-amendment.md` supersedes the full-chain ceiling
+> and launch cutoff and narrowly authorizes one deadline-only continuation per stage.
+> It does not change any historical verdict.
+
 This document freezes the repair contract before executable edits. It does not authorize a
 recovery, mutation execution, preflight, calibration, active-discipline change, commit, push,
 stage 3, finalization, merge, release, or completion claim. The historical stage-2 result remains

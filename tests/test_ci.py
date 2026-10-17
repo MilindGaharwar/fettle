@@ -434,7 +434,7 @@ def _cumulative_accounting(*, stage, run_ids, estimated, charged=None):
         "billing_authority": False,
         "stage": str(stage),
         "calibration_id": "cal-test",
-        "ceiling": 3600,
+        "ceiling": 12000,
         "estimated_runner_minutes": estimated,
         "charged_runner_minutes": charged,
         "sources": sources,
@@ -450,7 +450,7 @@ def _cumulative_accounting(*, stage, run_ids, estimated, charged=None):
             for name, bound in support_bounds.items()
         ],
         "cancellation_reserve": 1200,
-        "launch_cutoff": 2400,
+        "launch_cutoff": 10800,
         "active_jobs": int((charged - estimated) / 5),
         "cancellation_lag_minutes_per_active_job": 5,
         "cancellation_lag_charge": charged - estimated,
@@ -779,8 +779,14 @@ def test_final_candidate_mutation_path_uses_exact_runtime_and_stages():
     assert "name: mutation (read back detail corpus)" in workflow
     assert "name: mutation (calibration accounting)" in workflow
     assert "runner_minute_ceiling:" in workflow
-    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="3600"' in workflow
-    assert "int(value)<=12000" not in workflow
+    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="12000"' in workflow
+    assert '"continuation_of": os.environ["RESUME_RUN_ID"] or None' in workflow
+    parsed = yaml.safe_load(workflow)
+    provenance = next(
+        step for step in parsed["jobs"]["prepare"]["steps"]
+        if step.get("name") == "Record calibration source provenance"
+    )
+    assert provenance["env"]["RESUME_RUN_ID"] == "${{ github.event.inputs.resume_run_id }}"
     assert "fail-fast: false" in workflow
     readback = workflow.split("\n  evidence-readback:", 1)[1]
     assert "github.event.inputs.calibration_stage != '3'" in readback
@@ -1755,7 +1761,7 @@ def test_fresh_stage_1_launch_output_is_consumed_by_actual_monitor_script(tmp_pa
         "PRIOR_RUN_ID": "",
         "CALIBRATION_ID": "cal-test",
         "CALIBRATION_STAGE": "1",
-        "RUNNER_MINUTE_CEILING": "3600",
+        "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
     }
 
@@ -1793,7 +1799,7 @@ def _run_launch_script(tmp_path, *, stage, resume="", prior="", predecessor=None
         "PRIOR_RUN_ID": prior,
         "CALIBRATION_ID": "cal-test",
         "CALIBRATION_STAGE": str(stage),
-        "RUNNER_MINUTE_CEILING": "3600",
+        "RUNNER_MINUTE_CEILING": "12000",
     }
     return _run_actions_bash(launch, cwd=tmp_path, env=env)
 
@@ -1814,7 +1820,7 @@ def _consume_launch_with_monitor_script(tmp_path, *, stage, jobs=None):
         **os.environ, "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_RUN_ID": "700", "GITHUB_RUN_ATTEMPT": "1",
         "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": str(stage),
-        "RUNNER_MINUTE_CEILING": "3600", "OBSERVED_AT": "2026-10-10T01:02:00Z",
+        "RUNNER_MINUTE_CEILING": "12000", "OBSERVED_AT": "2026-10-10T01:02:00Z",
         "SAMPLE_DIR": str(tmp_path),
     }
     return subprocess.run(
@@ -2039,7 +2045,7 @@ def test_actual_sparse_monitor_route_preserves_historical_floor(tmp_path):
         **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
         "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
-        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": [8, 48]}),
     }
     monitor = _workflow_step_script(
@@ -2087,7 +2093,7 @@ def _monitor_environment(provider, *, shards=None):
         "GITHUB_RUN_ATTEMPT": "1",
         "CALIBRATION_ID": "cal-test",
         "CALIBRATION_STAGE": "1",
-        "RUNNER_MINUTE_CEILING": "3600",
+        "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": shards}),
     }
 
@@ -2439,7 +2445,7 @@ def test_monitor_initialization_failure_retains_typed_nonpass_terminal_accountin
         **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
         "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
-        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
     }
     monitor = _workflow_step_script(
@@ -2505,7 +2511,7 @@ def test_terminal_accounting_fallback_survives_accounting_import_failure(tmp_pat
         **os.environ, "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_RUN_ID": "700", "GITHUB_RUN_ATTEMPT": "1",
         "CALIBRATION_ID": "cal-test", "CALIBRATION_STAGE": "1",
-        "RUNNER_MINUTE_CEILING": "3600",
+        "RUNNER_MINUTE_CEILING": "12000",
     })
 
     assert preserved.returncode == 0, preserved.stderr
@@ -2530,7 +2536,7 @@ def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch
         **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
         "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
-        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "3600",
+        "CALIBRATION_STAGE": "1", "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": [8, 27, 28, 37, 48, 50, 51, 53]}),
     }
     monitor = _workflow_step_script(
@@ -2552,7 +2558,7 @@ def test_actual_terminal_accounting_output_is_accepted_once_by_next_stage_launch
     terminal = json.loads((tmp_path / "calibration-accounting.json").read_text())
     assert terminal["stage"] == "1"
     assert terminal["calibration_id"] == "cal-test"
-    assert terminal["ceiling"] == 3600
+    assert terminal["ceiling"] == 12000
     assert terminal["passed"] is True
     assert terminal["charged_runner_minutes"] >= terminal["estimated_runner_minutes"]
 
@@ -2589,7 +2595,7 @@ def test_resumed_stage_monitor_lifecycle_reaches_terminal_accounting_once(tmp_pa
         **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
         "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
-        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "3600",
+        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "12000",
         "EXPECTED_SHARDS": json.dumps({"shard": [shard]}),
     }
     monitor = _workflow_step_script(
@@ -2626,7 +2632,7 @@ def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):
     terminal_observer.mkdir()
     monitor = {
         **_operational_source("700", 8),
-        "stage": "2", "calibration_id": "cal-test", "ceiling": 3600,
+        "stage": "2", "calibration_id": "cal-test", "ceiling": 12000,
         "charged_runner_minutes": 8, "passed": True,
     }
     (terminal_observer / "calibration-monitor-budget.json").write_text(json.dumps(monitor))
@@ -2645,7 +2651,7 @@ def test_actual_terminal_accounting_rejects_failed_prior_record(tmp_path):
         **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_REPOSITORY": "example/fettle", "GITHUB_RUN_ID": "700",
         "GITHUB_RUN_ATTEMPT": "1", "CALIBRATION_ID": "cal-test",
-        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "3600",
+        "CALIBRATION_STAGE": "2", "RUNNER_MINUTE_CEILING": "12000",
         "RESUME_RUN_ID": "", "PRIOR_RUN_ID": "381",
     })
 
@@ -3511,10 +3517,10 @@ def test_calibration_publication_is_atomic_and_consolidation_is_inventory_bound(
     ).read_text()
 
 
-def test_calibration_workflow_requires_fixed_3600_minute_ceiling():
+def test_calibration_workflow_requires_fixed_12000_minute_ceiling():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
-    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="3600"' in workflow
+    assert 'os.environ["RUNNER_MINUTE_CEILING"]=="12000"' in workflow
     assert "int(value)<=12000" not in workflow
 
 

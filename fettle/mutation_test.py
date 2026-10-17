@@ -993,7 +993,7 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
         raise ValueError("at least one mutation checkpoint is required")
     first = checkpoints[0]
     required = {"schema_version", "calibration_id", "identity", "outcomes", "attempts"}
-    allowed = required | {"status", "pending"}
+    allowed = required | {"status", "pending", "incomplete_reason"}
     if not required <= set(first) <= allowed or first.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION:
         raise ValueError("mutation checkpoint has an unsupported schema")
     calibration_id = first.get("calibration_id")
@@ -1016,6 +1016,9 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
             raise ValueError("mutation checkpoints belong to different calibrations")
         if checkpoint.get("identity") != identity:
             raise ValueError("mutation checkpoint identity differs")
+        reason = checkpoint.get("incomplete_reason")
+        if reason is not None and reason not in {"deadline_exhausted", "execution_error"}:
+            raise ValueError("mutation checkpoint incomplete reason is malformed")
         checkpoint_outcomes = checkpoint.get("outcomes")
         checkpoint_attempts = checkpoint.get("attempts")
         if not isinstance(checkpoint_outcomes, dict) or not isinstance(checkpoint_attempts, list):
@@ -1059,7 +1062,7 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
                 attempts.append(dict(attempt))
                 seen_attempts.add(digest)
     pending = len(expected_fingerprints - outcomes.keys())
-    return {
+    merged = {
         "schema_version": _CHECKPOINT_SCHEMA_VERSION,
         "calibration_id": calibration_id,
         "identity": identity,
@@ -1068,6 +1071,15 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
         "status": "completed" if pending == 0 else "incomplete",
         "pending": pending,
     }
+    reasons = {
+        checkpoint.get("incomplete_reason") for checkpoint in checkpoints
+        if checkpoint.get("incomplete_reason") is not None
+    }
+    if pending and reasons:
+        merged["incomplete_reason"] = (
+            "execution_error" if "execution_error" in reasons else "deadline_exhausted"
+        )
+    return merged
 
 
 def pending_mutation_records(corpus: list[dict], checkpoint: dict) -> list[dict]:
@@ -1098,6 +1110,7 @@ def execute_pending_mutations(
     """Execute only pending canonical mutants after verifying current local IDs."""
     expected = {record["fingerprint"] for record in corpus}
     merged = merge_mutation_checkpoints([checkpoint], expected)
+    merged.pop("incomplete_reason", None)
     if checkpoint_path is not None:
         _write_json_atomic(checkpoint_path, merged)
     started = time.monotonic()
@@ -1109,11 +1122,16 @@ def execute_pending_mutations(
         ranges = [item for item in line_ranges if item["file"] == file]
         remaining = timeout - int(time.monotonic() - started)
         if remaining < 1:
+            deadline_exhausted = True
             break
         generated = _preflight_mutmut(
             root, [file], mapping[file], {file: mapping[file]}, remaining, ranges,
         )
         if generated.get("status") != "completed":
+            deadline_exhausted = generated.get("deadline_exhausted") is True
+            merged["incomplete_reason"] = (
+                "deadline_exhausted" if deadline_exhausted else "execution_error"
+            )
             break
         current = {record["fingerprint"]: record for record in generated.get("corpus", [])}
         file_expected = {record["fingerprint"] for record in corpus if record["file"] == file}
@@ -1122,6 +1140,7 @@ def execute_pending_mutations(
         for record in file_pending:
             remaining = timeout - int(time.monotonic() - started)
             if remaining < 1:
+                deadline_exhausted = True
                 break
             regenerated = current[record["fingerprint"]]
             locator = regenerated.get("locator", {})
@@ -1164,6 +1183,7 @@ def execute_pending_mutations(
                     _write_json_atomic(checkpoint_path, merged)
             except subprocess.TimeoutExpired:
                 deadline_exhausted = True
+                merged["incomplete_reason"] = "deadline_exhausted"
                 break
             except OSError as exc:
                 attempt = {
@@ -1176,6 +1196,7 @@ def execute_pending_mutations(
                         stderr=_safe_mutation_diagnostic(run.stderr, root),
                     )
                 merged["attempts"].append(attempt)
+                merged["incomplete_reason"] = "execution_error"
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
                 break
@@ -1188,6 +1209,10 @@ def execute_pending_mutations(
             break
     merged["pending"] = len(expected - merged["outcomes"].keys())
     merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
+    if merged["status"] == "completed":
+        merged.pop("incomplete_reason", None)
+    elif deadline_exhausted:
+        merged["incomplete_reason"] = "deadline_exhausted"
     if checkpoint_path is not None:
         _write_json_atomic(checkpoint_path, merged)
     return merged
@@ -3077,7 +3102,10 @@ def _preflight_mutmut(
             argv.extend(["--use-patch-file", patch_path])
         run = _run(argv, root, timeout)
     except subprocess.TimeoutExpired:
-        return _error("tool_error", f"Mutation preflight timed out after {timeout}s", engine_version=actual)
+        return _error(
+            "tool_error", f"Mutation preflight timed out after {timeout}s",
+            engine_version=actual, deadline_exhausted=True,
+        )
     except OSError as exc:
         return _error("tool_error", f"Cannot execute mutmut preflight: {exc}", engine_version=actual)
     finally:

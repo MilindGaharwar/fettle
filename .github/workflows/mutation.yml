@@ -75,7 +75,7 @@ on:
         required: false
         type: string
       runner_minute_ceiling:
-        description: "Fixed cumulative calibration ceiling (must be 3600)"
+        description: "Fixed cumulative calibration ceiling (must be 12000)"
         required: false
         type: string
       resume_run_id:
@@ -180,7 +180,7 @@ jobs:
         env:
           RUNNER_MINUTE_CEILING: ${{ github.event.inputs.runner_minute_ceiling }}
         run: >-
-          python -c 'import os,sys; sys.exit(0 if os.environ["RUNNER_MINUTE_CEILING"]=="3600" else 2)'
+          python -c 'import os,sys; sys.exit(0 if os.environ["RUNNER_MINUTE_CEILING"]=="12000" else 2)'
       - name: Download retained partition manifests
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'preflight' && github.event.inputs.mode != 'diagnostic-canary'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -373,6 +373,7 @@ jobs:
           CALIBRATION_ID: ${{ github.event.inputs.calibration_id }}
           CALIBRATION_STAGE: ${{ github.event.inputs.calibration_stage }}
           PREFLIGHT_RUN_ID: ${{ github.event.inputs.preflight_run_id }}
+          RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -385,6 +386,7 @@ jobs:
               "calibration_id": os.environ["CALIBRATION_ID"],
               "calibration_stage": os.environ["CALIBRATION_STAGE"],
               "preflight_run_id": os.environ["PREFLIGHT_RUN_ID"],
+              "continuation_of": os.environ["RESUME_RUN_ID"] or None,
           }
           Path("mutation-manifests/calibration-source-provenance.json").write_text(
               json.dumps(record, indent=2) + "\n"

@@ -80,6 +80,9 @@ RECOVERY_REPORT_SHA256 = {
 }
 SHARD_COUNT = 256
 ARTIFACT_RETENTION_DAYS = 90
+CALIBRATION_RUNNER_MINUTE_CEILING = 12_000
+CALIBRATION_CANCELLATION_RESERVE = 1_200
+CALIBRATION_LAUNCH_CUTOFF = 10_800
 WAVES = {
     "wave-1": [8, 27, 28, 37, 48, 50, 51, 53],
     "wave-2": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16,
@@ -2375,9 +2378,9 @@ def validate_calibration_accounting(report: dict) -> tuple[list[tuple[str, str]]
         report.get("passed") is not True
         or report.get("stage") not in {"1", "2", "3"}
         or not isinstance(report.get("calibration_id"), str)
-        or report.get("ceiling") != 3600
-        or cancellation_reserve != 1200
-        or launch_cutoff != 2400
+        or report.get("ceiling") != CALIBRATION_RUNNER_MINUTE_CEILING
+        or cancellation_reserve != CALIBRATION_CANCELLATION_RESERVE
+        or launch_cutoff != CALIBRATION_LAUNCH_CUTOFF
         or not isinstance(active_jobs, int) or isinstance(active_jobs, bool) or active_jobs < 0
         or included != source_included
         or active_jobs != canonical_active_jobs
@@ -2540,7 +2543,7 @@ def build_calibration_launch_accounting(
     if (
         stage not in {"1", "2", "3"}
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
-        or ceiling != 3600
+        or ceiling != CALIBRATION_RUNNER_MINUTE_CEILING
         or not isinstance(resume_run_id, str)
         or not isinstance(prior_stage_run_id, str)
     ):
@@ -2975,7 +2978,7 @@ def build_calibration_terminal_accounting(
     if (
         stage not in {"1", "2", "3"}
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", calibration_id)
-        or ceiling != 3600
+        or ceiling != CALIBRATION_RUNNER_MINUTE_CEILING
         or monitor_ids != current_ids
         or monitor.get("stage") != stage
         or monitor.get("calibration_id") != calibration_id
@@ -3018,7 +3021,8 @@ def build_calibration_terminal_accounting(
     }
     reserved = reserve_bounded_support_minutes(cumulative, support_bounds)
     result = evaluate_calibration_budget(
-        reserved, ceiling=ceiling, cancellation_reserve=1200,
+        reserved, ceiling=ceiling,
+        cancellation_reserve=CALIBRATION_CANCELLATION_RESERVE,
     )
     result["observer_evidence"] = {"lifecycle": lifecycle}
     return result
@@ -3070,6 +3074,8 @@ def plan_calibration_continuation(
         or provenance.get("mode") != "calibration"
         or provenance.get("calibration_id") != calibration_id
         or provenance.get("calibration_stage") != expected_stage
+        or "continuation_of" not in provenance
+        or provenance.get("continuation_of") is not None
     ):
         raise ValueError("calibration source run provenance differs")
     manifest_by_shard = {
@@ -3259,13 +3265,9 @@ def plan_calibration_continuation(
                         f"completed shard {index} has conflicting retained reports"
                     )
                 if not completed_reports:
-                    state = "completed_checkpoint_missing_report"
-                    retry.append(index)
-                    states[str(index)] = {
-                        "state": state, "job_id": job["id"],
-                        "checkpoint": path.as_posix(), "pending": 0,
-                    }
-                    continue
+                    raise ValueError(
+                        f"completed shard {index} is missing its canonical report"
+                    )
                 report = completed_reports[0]
                 if (report.get("calibration_id") != calibration_id
                         or report.get("revision") != checkpoint["identity"]["revision"]
@@ -3284,6 +3286,18 @@ def plan_calibration_continuation(
             else:
                 if job.get("status") == "completed" and job.get("conclusion") == "success":
                     raise ValueError(f"successful shard {index} has an incomplete checkpoint")
+                if checkpoint.get("incomplete_reason") != "deadline_exhausted":
+                    raise ValueError(
+                        f"shard {index} is not a fixed-deadline-exhausted checkpoint"
+                    )
+                if any(
+                    not isinstance(attempt, dict)
+                    or attempt.get("status") == "execution_error"
+                    for attempt in checkpoint["attempts"]
+                ):
+                    raise ValueError(
+                        f"shard {index} checkpoint contains genuine failure evidence"
+                    )
                 partial_reports = [report for report in reports_by_shard[index]
                                    if report.get("status") == "incomplete"]
                 cancelled_producer = (
@@ -3333,7 +3347,11 @@ def plan_calibration_continuation(
                         raise ValueError(
                             f"shard {index} checkpoint lacks source artifact provenance"
                         )
-                checkpoint_only = not partial_reports and (cancelled_producer or failed_producer)
+                if cancelled_producer:
+                    raise ValueError(
+                        f"shard {index} cancellation is not deadline-exhaustion authority"
+                    )
+                checkpoint_only = not partial_reports and failed_producer
                 if not checkpoint_only and (
                     len(partial_reports) != 1 or partial_reports[0] != checkpoint
                 ):
@@ -3360,16 +3378,17 @@ def plan_calibration_continuation(
                                   }}
             continue
         if never_started:
-            state = "never_started"
-            retry.append(index)
+            raise ValueError(
+                f"shard {index} did not produce a deadline-exhausted checkpoint"
+            )
         elif job.get("status") == "completed" and job.get("conclusion") == "success":
             raise ValueError(f"successful shard {index} has no checkpoint")
         elif has_runner or job.get("steps"):
-            state = "started_interrupted" if job.get("conclusion") in {"cancelled", None} else "started_failed"
-            retry.append(index)
+            raise ValueError(
+                f"shard {index} did not produce a deadline-exhausted checkpoint"
+            )
         else:
             raise ValueError(f"shard {index} missing checkpoint has indeterminate provenance")
-        states[str(index)] = {"state": state, "job_id": job["id"], "checkpoint": None}
     representations = {
         str(index): {
             **states[str(index)].get("representation", {"kind": "pending", "path": None}),

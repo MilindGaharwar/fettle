@@ -2928,9 +2928,52 @@ def test_pending_execution_process_failure_is_retryable_and_stops_before_next(tm
         )
 
     assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
     assert result["pending"] == 1
     assert result["attempts"][-1]["status"] == "execution_error"
     assert result["outcomes"] == {}
+
+
+def test_pending_execution_regeneration_deadline_is_explicitly_classified(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value={
+            "status": "tool_error", "deadline_exhausted": True,
+        }),
+        patch("fettle.mutation_test.time.monotonic", return_value=1.0),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
+    assert result["attempts"] == []
+
+
+def test_pending_execution_deadline_before_next_mutant_is_explicitly_classified(tmp_path):
+    corpus = [{
+        "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
+        "locator": {"file": "src/a.py", "engine_id": "1"},
+    }]
+    regenerated = {"status": "completed", "corpus": corpus}
+    with (
+        patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
+        patch("fettle.mutation_test._run") as run,
+        patch("fettle.mutation_test.time.monotonic", side_effect=[1.0, 1.0, 62.0]),
+    ):
+        result = execute_pending_mutations(
+            str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+        )
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
+    run.assert_not_called()
 
 
 def test_pending_execution_skipped_result_is_retryable_and_unscored(tmp_path):
@@ -2955,6 +2998,7 @@ def test_pending_execution_skipped_result_is_retryable_and_unscored(tmp_path):
         )
 
     assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
     assert result["pending"] == 1
     assert result["outcomes"] == {}
     assert result["attempts"][-1]["status"] == "execution_error"
@@ -2984,6 +3028,7 @@ def test_pending_execution_fatal_exit_retains_bounded_diagnostics_without_an_out
         )
 
     assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "execution_error"
     assert result["pending"] == 1
     assert result["outcomes"] == {}
     assert result["attempts"][-1] == {
@@ -3021,6 +3066,7 @@ def test_pending_execution_deadline_exhaustion_leaves_mutant_pending_without_too
         )
 
     assert result["status"] == "incomplete"
+    assert result["incomplete_reason"] == "deadline_exhausted"
     assert result["pending"] == 1
     assert result["outcomes"] == {}
     assert result["attempts"] == []
