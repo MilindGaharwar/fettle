@@ -64,6 +64,7 @@ def test_bridge_manifest_binds_every_owned_file(tmp_path, monkeypatch):
     transport = (root / "opencode" / "fettle.ts").read_text()
     before_transport = transport.split('"tool.execute.after"', 1)[0]
     assert "if (!tool) return" not in before_transport
+    assert 'shell: "Bash"' in transport
     assert 'blocked: event === "PreToolUse"' in transport
 
 

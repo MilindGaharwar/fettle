@@ -9,6 +9,7 @@ const launcher = join(pluginRoot, "fettle", "run.sh")
 
 const toolNames: Record<string, string> = {
   bash: "Bash",
+  shell: "Bash",
   edit: "Edit",
   read: "Read",
   write: "Write",

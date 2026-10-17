@@ -1058,6 +1058,33 @@ class TestDispatchLevelFailures:
         assert code == 2
         assert "fettle doctor" in output["reason"]
 
+    def test_native_opencode_shell_blocks_on_corrupt_policy(
+        self, tmp_path, monkeypatch, capsys, isolated_trace
+    ):
+        config = tmp_path / "policy.toml"
+        config.write_text("[gates.tests\nenabled = true\n")
+        monkeypatch.setenv("FETTLE_CONFIG", str(config))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setattr(
+            dispatcher_mod,
+            "select_checks",
+            lambda ctx: pytest.fail("corrupt policy must not run checks"),
+        )
+        payload = json.dumps({
+            "type": "tool.execute.before",
+            "tool": "shell",
+            "args": {"command": "printf FETTLE_AH07_MARKER"},
+            "directory": str(tmp_path),
+            "sessionID": "opencode-shell-test",
+        })
+
+        code, output = _run_main(monkeypatch, capsys, payload)
+
+        assert code == 2
+        assert output["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "fettle doctor" in output["reason"]
+
     @pytest.mark.parametrize("config", [
         None,
         {"gates": []},

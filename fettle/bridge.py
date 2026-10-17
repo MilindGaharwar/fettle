@@ -83,7 +83,7 @@ def _opencode_transport() -> str:
 import type {{ Plugin }} from "@opencode-ai/plugin"
 
 const python = {executable}
-const toolNames: Record<string, string> = {{ bash: "Bash", edit: "Edit", read: "Read", write: "Write" }}
+const toolNames: Record<string, string> = {{ bash: "Bash", shell: "Bash", edit: "Edit", read: "Read", write: "Write" }}
 
 function normalizeArgs(args: Record<string, unknown>) {{
   const normalized = {{ ...args }}
