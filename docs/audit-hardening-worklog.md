@@ -1,5 +1,40 @@
 # Audit Hardening Worklog
 
+## 2026-10-17: WP-AH08 Type And Branch Ratchets Verified
+
+WP-AH08 uses one executable verifier, `fettle.quality_ratchet`, and one policy,
+`.github/quality-ratchet.json`, in both CI and release. The policy keeps the seven
+existing critical modules at zero mypy errors and blocking. Whole-source mypy remains
+advisory and reports the accepted debt of 214 errors across 36 files; a checker crash
+reports `unavailable` with null counts rather than zero. The previous whole-source
+`|| true` masking is removed without making that historical debt release-blocking.
+
+Coverage validation reads coverage.py JSON integer counts. It independently enforces
+65% combined and 69% branch coverage and rejects missing, malformed, contradictory,
+or unexpectedly empty evidence. Seeded tests pass at exactly 69%, reject 68.99%,
+exercise each floor independently, reject contradictory reported percentages, reject
+zero or malformed policy floors, block a critical mypy defect, and preserve advisory
+whole-source debt. The focused ratchet suite passes 20 cases; the affected workflow,
+completion, and verifier integration suite passes 192 tests.
+
+The final workflow-equivalent run passed 4,906 tests with 20 declared skips. A
+separate seeded Python-subprocess fixture exercised both verifier acceptance and
+rejection under coverage.py subprocess patching, then merged with the unchanged main
+suite measurement. Final counts are 30,216 covered of 39,568 combined line/branch
+opportunities (76.3647%) and 7,823 covered of 11,156 branches (70.1237%). This is a
+comparable expanded measurement, not a reinterpretation of the accepted pre-change
+baseline. Python subprocesses launched through supported coverage.py paths are now
+observed in the seeded check; non-Python processes, unsupported exec patterns, and
+abruptly terminated children may remain unobserved.
+
+Independent read-only review session `ses_eb65c5476ffeORrhkcqHInKNly` initially
+identified a zero-floor policy boundary and missing compound error-path tests. After
+repair, it returned PASS with no remaining concrete false-pass, workflow-consistency,
+or security finding. Ruff, workflow YAML parsing, diff hygiene, critical mypy, and
+the shared verifier pass. Audit-hardening acceptance remains intact. Full-repository
+mutation qualification remains separately `CLOSED_NON_PASS`; no mutation run,
+merge, tag, release, or AH09 start is authorized or inferred.
+
 ## 2026-10-17: AH01-AH06 Accepted Under Amended AH07
 
 Exact candidate `d342de4fb439ad7ca0a91b9e5c0d3dcedb1c30dd` is signed and

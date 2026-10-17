@@ -43,7 +43,7 @@ jobs:
       - name: Typecheck hardened trust boundaries
         run: |
           python -m pip install --quiet mypy==2.3.0
-          mypy --follow-imports=silent --ignore-missing-imports fettle/evidence_ledger.py fettle/dispatcher.py fettle/dispatcher_types.py fettle/dispatcher_registry.py fettle/action_entrypoint.py fettle/quality_scan.py fettle/config.py
+          python -m fettle.quality_ratchet types --policy .github/quality-ratchet.json
 
       - name: Verify production Assurance policy
         timeout-minutes: 15
@@ -103,11 +103,17 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pip install --quiet pytest==9.1.1 ruff==0.15.20 semgrep==1.168.0 pyyaml==6.0.3
+          python -m pip install --quiet pytest==9.1.1 pytest-cov==7.1.0 ruff==0.15.20 semgrep==1.168.0 pyyaml==6.0.3
           # CLI subprocess tests spawn `python -m fettle.cli` from tmp dirs —
           # fettle must be importable from any cwd (same fix as ci.yml).
           python -m pip install --quiet -e .
-          python -m pytest tests/ -q
+          python -m pytest tests/ -q --cov=fettle --cov-branch --cov-report=
+          mv .coverage .coverage.main
+          coverage run --rcfile=.github/coverage-subprocess.toml -m pytest tests/test_quality_ratchet_subprocess.py -q
+          coverage combine
+          coverage report
+          coverage json -o coverage.json
+          python -m fettle.quality_ratchet coverage --policy .github/quality-ratchet.json --report coverage.json
           fettle completion validate
 
       - name: Build sdist + wheel

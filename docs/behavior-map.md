@@ -19,6 +19,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Coordinate stage-3 readiness and zero-worker containment | Validate exact-attempt typed readiness in `fettle/staged_preflight.py`; use the pinned current-run artifact handoff and exact-attempt jobs API in `.github/workflows/mutation.yml`; exercise the same producer/consumer through its isolated `readback-probe` mode with no mutation workers and only non-authoritative probe output; prove parsed scripts in `tests/test_ci.py` and observer transitions in `tests/test_staged_preflight.py` |
 | Add a policy control or exception | Extend the config schema and policy merge path; expose decisions through `fettle config`, `fettle policy`, `fettle overrides`, or `fettle suppressions` as appropriate |
 | Change enforcement maturity | Keep the rule advisory until evidence supports `fettle ratchet`; retain the decision in `fettle ledger` |
+| Prevent CI type or coverage regression without hiding existing debt | Use `fettle.quality_ratchet` with `.github/quality-ratchet.json`; enforce zero errors in the named critical type scope and independent combined/branch coverage floors from integer coverage.py counts; retain whole-source typing as a visible advisory measurement |
 
 ## Commands and surfaces
 

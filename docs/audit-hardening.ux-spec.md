@@ -1,7 +1,7 @@
 # Audit Hardening UX Acceptance Contract
 
-Date: 2026-09-18. Status: immediate repairs authorized and locally exercised;
-independent acceptance and later enhancement designs remain pending.
+Date: 2026-09-18. Status: AH01-AH06 accepted under amended AH07 on 2026-10-17;
+AH08 ratchet outcomes specified before implementation.
 Plan: [work packages](audit-hardening-implementation-plan.md).
 
 ## Jobs To Be Done And Personas
@@ -112,6 +112,19 @@ Given the same profile seed,
 when the user generates a UAT profile twice,
 then outputs are deterministic, zero is numeric zero, valid email remains valid,
 and deliberately invalid values are labeled separately from valid classes.
+
+### AH-UAT-08: Type And Branch Ratchets Remain Honest
+
+Given the pinned checker and an approved critical-module type baseline,
+when a candidate introduces a new type error in that scope,
+then local, pull-request, and release verification reject the candidate while
+unchanged explicitly recorded whole-repository debt remains visible and non-blocking.
+
+Given the approved branch-coverage baseline and a seeded uncovered branch regression,
+when the coverage verifier evaluates the candidate report,
+then it rejects the regression without treating subprocess-unobserved branches as
+covered. A missing checker, missing report, malformed report, or unknown measurement
+also remains non-pass and names the recovery action.
 
 ## Admission Limits
 

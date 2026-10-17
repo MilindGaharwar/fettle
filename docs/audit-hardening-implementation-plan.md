@@ -78,7 +78,7 @@ Estimates are focused engineering days including review, not calendar promises.
 | [x] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | Accepted; exact wheel and installed-host probes pass |
 | [x] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Accepted under amended AH07 |
 | [x] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent criterion review confirmed AH01-AH06; separate non-pass states retained |
-| [ ] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Narrow type gate added; branch baseline measured |
+| [x] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Shared fail-closed CI/release verifier; 65% combined and 69% branch floors |
 | [ ] | WP-AH09 | P2 | Measured hook and ledger performance | AH07 | 2-3 | Exploratory local baseline; frozen benchmark pending |
 | [ ] | WP-AH10 | P2 | One justified CLI or mutation responsibility extraction | AH08-AH09 | 3-5 | Measurement-gated |
 | [ ] | WP-AH11 | P2 | Clear command discovery and recovery summary | AH07; UX approval | 2-4 | Existing help inspected; journey approval pending |
@@ -233,12 +233,12 @@ Estimate: 2-4 days after baseline. No unrelated whole-repo type cleanup.
 
 | # | Task | Method | Verify by |
 |---|---|---|---|
-| [ ] 08.1 | Establish real type and subprocess-coverage baselines before choosing ratchets | INSPECT | Retained reports; unknown/degraded tooling is not zero defects |
-| [ ] 08.2 | Pin newly introduced type-error and coverage-regression rejection | TDD | Deliberate fixture defect fails the gate |
-| [ ] 08.3 | Remove unconditional masking only for approved baseline-controlled scope | FIX | Existing debt explicit; new critical errors block |
-| [ ] 08.4 | Verify local, PR, and release workflow consistency | INTEGRATION | CI fixture checks plus critical-module suite |
-| [ ] 08.5 | Preserve visibility of missing checker and subprocess branches | REGRESSION | Missing mypy or unknown coverage cannot produce a passing report |
-| [ ] 08.6 | Run actual type and branch measurement commands in candidate environment | LIVE | `mypy fettle --ignore-missing-imports` and `pytest --cov=fettle --cov-branch`; retain baseline and ratchet decision |
+| [x] 08.1 | Establish real type and subprocess-coverage baselines before choosing ratchets | INSPECT | Retained reports; unknown/degraded tooling is not zero defects |
+| [x] 08.2 | Pin newly introduced type-error and coverage-regression rejection | TDD | Deliberate fixture defect fails the gate |
+| [x] 08.3 | Remove unconditional masking only for approved baseline-controlled scope | FIX | Existing debt explicit; new critical errors block |
+| [x] 08.4 | Verify local, PR, and release workflow consistency | INTEGRATION | CI fixture checks plus critical-module suite |
+| [x] 08.5 | Preserve visibility of missing checker and subprocess branches | REGRESSION | Missing mypy or unknown coverage cannot produce a passing report |
+| [x] 08.6 | Run actual type and branch measurement commands in candidate environment | LIVE | `mypy fettle --ignore-missing-imports` and `pytest --cov=fettle --cov-branch`; retain baseline and ratchet decision |
 
 ### WP-AH09: Hook And Ledger Performance Baseline
 
@@ -338,10 +338,14 @@ Budget: 1-2 baseline days excluding access waits and remediation.
 These are proposals and explicit non-pass conditions, not completed packages.
 The worklog retains executable results and environment limits.
 
-- AH08: blocking mypy 2.3.0 now covers seven repaired critical modules in CI and
-  release. Whole-repository typing remains informative. Combined coverage is
-  75.46%, branch coverage 68.34%; no new floor is selected from one macOS run.
-  Subprocess instrumentation and a seeded regression-rejection check remain open.
+- AH08 completed 2026-10-17: pinned mypy 2.3.0 blocks at zero errors across the
+  seven named critical modules in CI and release. Whole-source typing remains
+  structured advisory debt at 214 errors across 36 files. Coverage.py integer
+  counts independently enforce the retained 65% combined floor and a 69% branch
+  floor. The final workflow-equivalent measurement is 30,216/39,568 combined
+  (76.3647%) and 7,823/11,156 branches (70.1237%). A seeded Python-subprocess
+  pass exercises the real verifier; non-Python, unsupported exec, and abruptly
+  terminated child coverage remain explicit collection limitations.
 - AH09: 30 warm in-process observations per event and 1,000 sequential durable
   appends supply a first baseline, not a production budget. Freeze cold/warm,
   concurrent, slow-check and omitted-check fixtures before performance decisions.
