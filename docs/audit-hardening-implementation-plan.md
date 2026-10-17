@@ -1,7 +1,7 @@
 # Application Audit Follow-Up Plan
 
 Date: 2026-09-18
-Status: Implementation authorized 2026-09-18; hardening in progress, acceptance pending.
+Status: AH01-AH06 accepted 2026-10-17 under amended AH07; later packages remain pending.
 Owner: Milind (approval); implementing engineer (delivery); independent automated
 reviewer in an isolated session (acceptance review).
 
@@ -48,6 +48,10 @@ An audit observation is not a completed fix. Green lint alone is not acceptance.
   criteria remain unchanged. Real-participant parity belongs to later WP-AH13/P77,
   not Milestone A. Public-PyPI canary verification belongs to WP-AH15 and the release
   contract, not AH05 or Milestone A.
+- On 2026-10-17 the owner amended AH07 so AH01-AH06 can close independently after
+  criterion-level review. Full-repository mutation qualification, overall CI,
+  archive verification, and blocked or unavailable hosts remain separately reported
+  non-pass states; none is converted into repair-acceptance credit.
 - Before a multi-file implementation slice, run `kgraph impact <owner> --json`;
   if unavailable, record a references/call-site impact review, not a claimed pass.
 - Resolve existing work and dirty changes before edits. Claim the actual work item
@@ -66,14 +70,14 @@ Estimates are focused engineering days including review, not calendar promises.
 
 | Done | Package | Priority | Outcome | Depends on | Estimate | State |
 |---|---|---|---|---|---|---|
-| [ ] | WP-AH00 | P0 | Restore trustworthy verification environment | Working CLT Git found | 0.5-1 | Local environment restored |
-| [ ] | WP-AH01 | P0 | Scanner failures cannot produce clean standalone results | AH00 for full acceptance | 1-2 | Implemented; local tests and live recovery pass |
-| [ ] | WP-AH02 | P0 | Action validates scope and scanner evidence | AH01 | 0.5-1 | Implemented; 21 focused tests pass |
-| [ ] | WP-AH03 | P0 | Required enforcement survives budget/error paths | AH00; policy review | 2-3 | Registry/config and compound gaps repaired locally; acceptance open |
-| [ ] | WP-AH04 | P0 | Concurrent ledger operations preserve valid history | AH00 | 2-3 | POSIX concurrency/interruption verified; Windows gate added, run pending |
-| [ ] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | September 19 wheel/sdist isolated smoke passed; remote acceptance open |
-| [ ] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Implemented; 23 focused tests pass |
-| [ ] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent automated review is required; supported-platform, available-host, remote-CI, and inspectable evidence remain blockers until confirmed |
+| [x] | WP-AH00 | P0 | Restore trustworthy verification environment | Working CLT Git found | 0.5-1 | Exact-candidate environment confirmed |
+| [x] | WP-AH01 | P0 | Scanner failures cannot produce clean standalone results | AH00 for full acceptance | 1-2 | Accepted under amended AH07 |
+| [x] | WP-AH02 | P0 | Action validates scope and scanner evidence | AH01 | 0.5-1 | Accepted under amended AH07 |
+| [x] | WP-AH03 | P0 | Required enforcement survives budget/error paths | AH00; policy review | 2-3 | Accepted; exact-wheel OpenCode deny/allow passes |
+| [x] | WP-AH04 | P0 | Concurrent ledger operations preserve valid history | AH00 | 2-3 | Accepted under amended AH07 |
+| [x] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | Accepted; exact wheel and installed-host probes pass |
+| [x] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Accepted under amended AH07 |
+| [x] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent criterion review confirmed AH01-AH06; separate non-pass states retained |
 | [ ] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Narrow type gate added; branch baseline measured |
 | [ ] | WP-AH09 | P2 | Measured hook and ledger performance | AH07 | 2-3 | Exploratory local baseline; frozen benchmark pending |
 | [ ] | WP-AH10 | P2 | One justified CLI or mutation responsibility extraction | AH08-AH09 | 3-5 | Measurement-gated |
@@ -208,18 +212,19 @@ in a separate session and isolated review environment; no automatic release. Bef
 2026-10-05 this package required an independent human reviewer. The owner explicitly
 replaced only that requirement because no human reviewer is available. No human
 acceptance or human-usability validation was performed or inferred.
-Acceptance: every AH01-AH06 criterion has current evidence; blocked/skipped checks
-remain non-pass. No remote verification or installed-host claim is inferred. AH07
-does not require a separate human-acceptance sign-off or real-participant parity
-study after the owner-authorized reviewer replacement. Those observations must still
-not be fabricated or attributed to automation.
+Acceptance: every AH01-AH06 criterion has current-compatible evidence; blocked or
+skipped checks remain non-pass in the state they govern. Under the 2026-10-17 owner
+amendment, full-repository mutation qualification, overall CI, archive verification,
+and unavailable or unauthenticated hosts are reported separately and do not block
+criterion-level closure. No remote verification, installed-host result, human
+acceptance, or real-participant parity is inferred.
 
 | # | Task | Method | Verify by |
 |---|---|---|---|
-| [ ] 07.1 | Replay all six audit cases against final candidate and record source/policy identity | VERIFY | Named regressions and safe end-to-end fixtures pass |
-| [ ] 07.2 | Run full suite, Ruff, Fettle, applicable rule packs, and completion validation | VERIFY | `python -m pytest tests -q`, `ruff check fettle tests`, `fettle check --all`, `fettle completion validate` |
-| [ ] 07.3 | Perform supported-platform wheel/host smoke checks and failure-path UAT | REVIEW | Unsupported or inaccessible host remains unverified, not pass |
-| [ ] 07.4 | Independently inspect the candidate diff, artifacts, migration notes, operator recovery, and evidence completeness; execute relevant checks without repairing the candidate | REVIEW | Independent automated reviewer records criterion-by-criterion verdicts, evidence references, findings, and limitations; user separately authorizes commit/push/release, and unavailable evidence remains non-pass |
+| [x] 07.1 | Replay all six audit cases against final candidate and record source/policy identity | VERIFY | Named regressions and safe end-to-end fixtures pass |
+| [x] 07.2 | Run full suite, Ruff, Fettle, applicable rule packs, and completion validation | VERIFY | `python -m pytest tests -q`, `ruff check fettle tests`, `fettle check --all`, `fettle completion validate` |
+| [x] 07.3 | Perform supported-platform wheel/host smoke checks and failure-path UAT | REVIEW | Unsupported or inaccessible host remains unverified, not pass |
+| [x] 07.4 | Independently inspect the candidate diff, artifacts, migration notes, operator recovery, and evidence completeness; execute relevant checks without repairing the candidate | REVIEW | Independent automated reviewer records criterion-by-criterion verdicts, evidence references, findings, and limitations; user separately authorizes commit/push/release, and unavailable evidence remains non-pass |
 
 ### WP-AH08: Critical Type And Branch Ratchets
 

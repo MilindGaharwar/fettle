@@ -1,5 +1,54 @@
 # Audit Hardening Worklog
 
+## 2026-10-17: AH01-AH06 Accepted Under Amended AH07
+
+Exact candidate `d342de4fb439ad7ca0a91b9e5c0d3dcedb1c30dd` is signed and
+was pushed to both authorized branches. The candidate adds OpenCode 2 compatibility
+without changing the AH01, AH02, AH04, AH05, or AH06 owning production files. Its
+AH03-relevant host normalization maps OpenCode's native `shell` event to canonical
+`Bash` in the source transport, installed-wheel transport, and native translator.
+Focused validation passed 304 tests. The full local suite passed 4,886 tests with 20
+declared skips; Ruff, diff hygiene, the 421-file Fettle scan, commit hooks, and both
+full-suite pre-push hooks passed.
+
+An exact-commit wheel installed outside the checkout under CPython 3.12.13, passed
+`pip check`, and has SHA-256
+`4fb1771470791a406c1d50c53566d3e4aee98638eb3a98ca8d77c865e695e459`.
+OpenCode 2.0.20 loaded that generated transport. With a malformed policy, its actual
+`shell` tool event ended in `error` before execution and included `fettle doctor`;
+the marker was absent. With the repaired policy, the actual tool event completed once
+and returned `FETTLE_AH07_MARKER`. The deny and allow transcript SHA-256 values are
+`c543cc077c3474eb48afb135eae0fd9d81da74f6bf78bc4a2773d5cd5be14c39`
+and `3fc1ec2d02874a3c2b8e60621537b8c265d52d1321a1119cb93c2e36f9589a62`.
+Claude Code 2.1.234 reached no tool event because its OAuth session had expired; it
+remains blocked pending re-authentication and repetition of the harmless pair. Codex
+and Gemini remain unavailable and are not inferred as passing.
+
+Independent read-only review session `ses_eb6cbc649ffe2BTUDHbJojZttG` inspected each
+criterion and returned PASS for AH01 through AH06. After applying the owner amendment,
+it confirmed AH07's independent acceptance function and accepted the six repairs as
+complete. This decision does not depend on converting any blocked host, archive, CI,
+or mutation state into a pass.
+
+Mutation qualification remains separately `CLOSED_NON_PASS`. Accepted preflight
+lineage is `39005280651 -> 39006811920`; initial calibration `39011023843` and its
+sole continuation `39013135295` are terminal non-pass. Shards 37, 50, 51, and 53
+remain `deadline_exhausted` with 11, 3, 7, and 11 pending fingerprints and no reports.
+The four completed retained shards contain survivors. Five are in
+`fettle/quality_scan.py` scope/ignore filtering; they remain unresolved
+mutation-quality findings, not proof of an unmutated AH01 failure and not qualification
+credit. E2 `751d05e6d2abe53f7488438fae3f6737a500f801`, signed E3
+`ab302eab20333127dd5cd3981d804ba06802aefd`, and run `38988846150` remain
+immutable non-pass evidence. Stages 2 and 3 and further qualification dispatch remain
+forbidden.
+
+Overall exact-head CI is also reported separately. At this acceptance boundary the
+Linux wheel, Windows installed bridge, lint, and type checks had passed, while matrix
+jobs were still running and strict completion still reflected the stale pre-amendment
+record; overall CI was therefore non-green. Archive verification is closed with no
+further action and no pass or portability credit. No merge, tag, or release is
+authorized or inferred.
+
 ## 2026-10-09: Bounded Wave-3 Admission Implemented Locally
 
 ### Corrected admission sensitivity and final review repairs

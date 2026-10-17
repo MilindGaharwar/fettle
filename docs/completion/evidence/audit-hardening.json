@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "milestone": "audit-hardening",
-  "revision": "integration-candidate-2026-10-05",
+  "revision": "audit-hardening-d342de4-2026-10-17",
   "observations": {
-    "ah00": "confirmed for the current development candidate: isolated Python 3.12.13, Git/disposable init, complete dependencies/build tools, focused baseline tests, and TLS-enabled all-source scan pass",
-    "ah01": "confirmed locally: 165 focused tests pass; a real clean scan exits 0 and a fresh environment without either analyzer returns structured tool_error with exit 2",
-    "ah02": "confirmed locally: 21 focused tests pass; empty scope exits 2, while a clean enforced scan exits 0 and emits findings metadata plus SARIF",
-    "ah03": "confirmed locally: 293 focused tests and the live config-error block/recovery/trace fixture pass; durable run-05 executed seven partitions once each and a separate read-only verifier confirmed all 299 canonical fingerprints, 269 killed, 30 survived, zero indeterminate outcomes, exact equivalence-set reconciliation, source restoration, and no mutation-cache residue",
-    "ah04": "confirmed locally on Darwin-arm64: 59 focused tests pass, including interruption and race cases; 24 independent writers produced unique contiguous sequences and a verified chain",
-    "ah05": "confirmed locally: fresh wheel and sdist contain providers, install outside the checkout, resolve only from isolated site-packages, and pass demo/help/graph probes",
-    "ah06": "confirmed locally: 339 tests pass with 20 declared skips; the live deterministic profile preserves zero, valid email/phone formats, Unicode, whitespace, and punctuation classes",
-    "ah07": "blocked: exact-head substantive CI and native Windows lifecycle evidence passed, and aggregation-only recovery 37560100974 accepted an exact 256-report preflight for candidate 0fc41fd with 45,432 canonical details and zero collisions. Source runs 37464324954, 37476889333, and 37550308775 retain their failed verdicts. Preflight acceptance does not satisfy mutation qualification: exact-candidate calibration remains unexecuted and unauthorized. Authorized available-host execution is absent, and the private run-05 archive lacks an approved durable resolvable locator. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; participant parity is later WP-AH13/P77 and public-PyPI verification is later WP-AH15/release work"
+    "ah00": "confirmed for exact candidate d342de4: signed source, isolated CPython 3.12.13 installed wheel, pip check, full local suite, Ruff, and 421-file Fettle scan pass",
+    "ah01": "confirmed by current-compatible focused and live scanner evidence; the exact-candidate delta does not change the AH01 owner. Five retained quality_scan scope/ignore survivors remain separate unresolved mutation-quality findings, not demonstrated candidate defects",
+    "ah02": "confirmed by current-compatible focused, workflow-contract, and live action evidence; the exact-candidate delta does not change the AH02 owner",
+    "ah03": "confirmed by retained dispatcher acceptance plus exact-candidate OpenCode normalization regressions and an installed-wheel OpenCode 2.0.20 corrupt-policy deny/repaired-policy allow pair",
+    "ah04": "confirmed by current-compatible race, interruption, rotation, anchor, tamper, and 24-process live-ledger evidence; the exact-candidate delta does not change the AH04 owner",
+    "ah05": "confirmed by current-compatible package inventory and command probes plus exact-candidate CPython 3.12.13 wheel installation, pip check, Linux wheel CI, Windows installed bridge CI, and installed OpenCode transport probes",
+    "ah06": "confirmed by current-compatible focused and live class-valid profile evidence; the exact-candidate delta does not change the AH06 owner",
+    "ah07": "confirmed under the owner-amended contract: independent read-only criterion review passed AH01-AH06 for exact candidate d342de4. Full-repository mutation qualification, overall CI, archive verification, and unavailable or unauthenticated hosts are reported separately and are not inferred as passes"
   },
   "dispatcher_baseline": {
     "role": "diagnostic baseline, not final qualification",
@@ -76,7 +76,9 @@
     "fettle_all": "pass; 195 files; zero findings and tool errors",
     "fettle_changed": "pass; 11 files; zero findings and tool errors",
     "wheel_sha256": "74b15c92f4b39b5dcc4f91a9ea64734ec402e99ddb9d9c4f37015d250d6d189d",
-    "sdist_sha256": "90f118b5e5e229367fb4d5142ada670b6bba990ed6397e609f880ca64d50dd65"
+    "sdist_sha256": "90f118b5e5e229367fb4d5142ada670b6bba990ed6397e609f880ca64d50dd65",
+    "role": "historical 2026-10-05 candidate acceptance; hashes in this section are not d342de4 artifact hashes",
+    "revision": "integration-candidate-2026-10-05"
   },
   "ah03_run_05_qualification": {
     "role": "durable held-out AH03 qualification with separate read-only artifact verification",
@@ -133,32 +135,39 @@
   },
   "ah07_finite_checklist": [
     {
-      "item": "Portable immutable evidence channel",
-      "status": "blocked",
-      "required_evidence": "Repository-relative digest-bound index resolving the durable run-05 raw package, verifier output, and independent review without embedding workstation paths or copying bulky caches into Git",
-      "responsible_reviewer_or_environment": "Repository maintainer and approved immutable artifact store",
-      "remaining": "Approve a durable immutable store and replace the unresolved private-local run-05 archive URL, SHA-256, and byte count in docs/completion/evidence/external/audit-hardening/run-05-locator.json; retain its existing digest-bound content index, verifier output, and independent-review attestation. No upload or relocation is authorized yet."
-    },
-    {
-      "item": "Independent acceptance review",
+      "item": "Independent criterion-level acceptance",
       "status": "confirmed",
-      "required_evidence": "Independent automated acceptance in a separate isolated session, with direct artifact inspection, executed checks, criterion verdicts, evidence references, findings, and limitations",
-      "responsible_reviewer_or_environment": "Independent automated reviewer that did not implement the integration changes",
-      "remaining": "None. The owner-authorized remediation-head review and post-repair automated addendum satisfy the replacement for the unavailable human reviewer. Do not infer human acceptance or usability validation."
+      "required_evidence": "Read-only criterion verdicts for AH01-AH06 against the exact candidate under the owner amendment",
+      "responsible_reviewer_or_environment": "Independent OpenCode review session ses_eb6cbc649ffe2BTUDHbJojZttG",
+      "remaining": "None for AH01-AH06 repair acceptance."
     },
     {
-      "item": "Live host verification",
-      "status": "blocked",
-      "required_evidence": "Installed-candidate registration and safe real-session transport probes on every available and authenticated agent host; unavailable hosts remain explicit blocked inventory rows with exact recovery actions",
-      "responsible_reviewer_or_environment": "Operators with access to the available Claude Code and OpenCode installations; Codex CLI and Gemini CLI remain blocked unless they become available and authenticated before the evidence boundary",
-      "remaining": "Authorize and retain the defined harmless corrupt-policy deny and repaired-policy allow probes on available authenticated hosts for the final candidate. Current read-only inventory finds Claude Code 2.1.234 and OpenCode 2.0.20; Codex and Gemini are absent from PATH. Do not infer unavailable-host success or place credentials in repository evidence."
+      "item": "Available and authenticated host verification",
+      "status": "confirmed_with_inventory_limitations",
+      "required_evidence": "Exercise each available authenticated host and retain blocked or unavailable inventory rows without inferring pass",
+      "responsible_reviewer_or_environment": "OpenCode 2.0.20 exercised; Claude, Codex, and Gemini states retained separately",
+      "remaining": "Claude requires re-authentication before any future Claude live-host claim. Codex and Gemini require installation and authentication. These rows do not block amended AH01-AH06 closure."
     },
     {
-      "item": "Final-candidate CI and mutation qualification",
-      "status": "blocked",
-      "required_evidence": "Fresh preflight and authoritative calibration bound to the future frozen final executable SHA, exact CPython 3.12.13, fresh manifests and corpus, hash-locked dependencies, unchanged policy, failure-path behavior, retained logs, terminal accounting, source restoration, and independent readback; exact-head required CI must also pass",
-      "responsible_reviewer_or_environment": "Repository CI environment and authorized maintainer",
-      "remaining": "Approve and implement the bounded final-candidate repair described in docs/exact-candidate-calibration-proposal.md, including the Node-24-native setup-uv pin and Windows portability correction; freeze the resulting SHA; obtain separate fresh-preflight and recalculated calibration authorization; then satisfy CI required and mutation evidence on the exact PR head. Recovery run 37560100974 remains historical evidence for 0fc41fd only."
+      "item": "Full-repository mutation qualification",
+      "status": "CLOSED_NON_PASS",
+      "required_evidence": "Complete compatible reports for every required shard and authoritative aggregate readback",
+      "responsible_reviewer_or_environment": "Repository mutation workflow",
+      "remaining": "No action authorized. Stages 2 and 3 and further qualification dispatch are forbidden; preserve the incomplete stage-1 evidence as non-pass."
+    },
+    {
+      "item": "Overall exact-head CI",
+      "status": "non_green",
+      "required_evidence": "Terminal success of every required exact-head check",
+      "responsible_reviewer_or_environment": "Repository CI",
+      "remaining": "Report separately from amended repair acceptance; do not infer an overall pass from successful individual jobs."
+    },
+    {
+      "item": "Archive verification",
+      "status": "closed_non_pass",
+      "required_evidence": "Previously proposed portable immutable archive resolution",
+      "responsible_reviewer_or_environment": "Owner decision",
+      "remaining": "None. Verification is closed; no pass, portability credit, upload, or relocation is inferred or authorized."
     }
   ],
   "mutation_preflight_incident": {
@@ -166,10 +175,23 @@
     "candidate": "8c865a18a4a187ad782dc4db856e2cff23199253",
     "status": "cancelled; diagnostic-only; permanently non-pass",
     "archive_sha256": "8de38e2b26f7b861ecce29ce4847a9450301070d6ad1d750c8f81432f0fe55a7",
-    "job_counts": {"success": 9, "failure": 22, "cancelled": 228, "skipped": 1},
-    "shard_reports": {"completed": 13, "tool_error": 29, "malformed": 5, "missing": 209},
+    "job_counts": {
+      "success": 9,
+      "failure": 22,
+      "cancelled": 228,
+      "skipped": 1
+    },
+    "shard_reports": {
+      "completed": 13,
+      "tool_error": 29,
+      "malformed": 5,
+      "missing": 209
+    },
     "job_shard_ledger_sha256": "6afdd188272f34c78834ace1cb90b10fcea2155c28c47b4f1a10085c48180f3b",
-    "earliest_failure_shards": [8, 27],
+    "earliest_failure_shards": [
+      8,
+      27
+    ],
     "root_cause": "mutmut 2.5.1 restores exact source bytes from a newly created backup but loses executable mode; the backup is consumed before Fettle verifies the whole source tree",
     "repair_review_session": "ses_eef5d5ca9ffe0UE3pkRaG8dzTC",
     "local_repair_evidence": "4368 passed, 20 skipped; exact shard 27 generated and canonicalized 61 details with zero collisions and restored exact bytes/mode",
@@ -193,7 +215,16 @@
       "orchestration": "891562ba4909b16e6252a0eb7e8674393f43eba0",
       "status": "failed closed after accepted wave 1; permanently non-pass",
       "wave_1": {
-        "shards": [8, 27, 28, 37, 48, 50, 51, 53],
+        "shards": [
+          8,
+          27,
+          28,
+          37,
+          48,
+          50,
+          51,
+          53
+        ],
         "reports": 8,
         "generated": 629,
         "canonicalized": 629,
@@ -226,7 +257,7 @@
         "stop_reason": "GitHub's documented 256-job workflow-run limit prevented the 216-shard wave-3 matrix from expanding after earlier jobs were materialized",
         "launch_cumulative_operational_minutes": 53.63,
         "terminal_recovery_operational_minutes": 45.13,
-        "terminal_cumulative_operational_minutes": 57.10,
+        "terminal_cumulative_operational_minutes": 57.1,
         "billing_authority": false,
         "qualification_effect": "none; incomplete 40-of-256 preflight corpus",
         "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-recovery-37476889333",
@@ -238,8 +269,17 @@
           "run_attempt": 1,
           "orchestration": "9a66e4fdc2edff60d65d6dd48d6d4e61dce2f807",
           "status": "failed closed after all 216 continuation shards succeeded; permanently non-pass",
-          "topology": {"matrix_jobs": 216, "support_jobs": 7, "expanded_jobs": 223},
-          "wave_3": {"jobs": 216, "successful_jobs": 216, "artifacts": 216, "generated": 42398},
+          "topology": {
+            "matrix_jobs": 216,
+            "support_jobs": 7,
+            "expanded_jobs": 223
+          },
+          "wave_3": {
+            "jobs": 216,
+            "successful_jobs": 216,
+            "artifacts": 216,
+            "generated": 42398
+          },
           "stop_reason": "validation support job install step failed with uv: command not found; workflow aggregate, readback, and terminal accounting were skipped",
           "terminal_continuation_operational_minutes": 293.17,
           "terminal_cumulative_operational_minutes": 350.27,
@@ -252,7 +292,11 @@
             "collisions": 0,
             "corpus_digest": "155a02b863d6b440211e09eef8daf189098554ca5871c5a484e7b65a3b005be2",
             "aggregate_sha256": "dded4dfe0ba8fcb9a1eccd995d7e2e31b68215c3468884dc418dd8709699f173",
-            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216}
+            "origin_counts": {
+              "37464324954": 8,
+              "37476889333": 32,
+              "37550308775": 216
+            }
           },
           "qualification_effect": "none; workflow validation and durable aggregate readback did not complete",
           "retained_root": "external://local/audit-hardening/candidate-0fc41fd/staged-preflight-continuation-37550308775",
@@ -265,7 +309,11 @@
             "mutation_jobs": 0,
             "support_jobs": 3,
             "reports": 256,
-            "origin_counts": {"37464324954": 8, "37476889333": 32, "37550308775": 216},
+            "origin_counts": {
+              "37464324954": 8,
+              "37476889333": 32,
+              "37550308775": 216
+            },
             "generated": 45432,
             "canonicalized": 45432,
             "collisions": 0,
@@ -327,12 +375,14 @@
     }
   },
   "limitations": [
-    "Historical worklog observations are provenance, not current-candidate acceptance.",
-    "The lost earlier replacement aggregate remains unsupported and is not substituted for durable run-05 evidence.",
-    "Run-05 external artifacts are locally durable and digest-indexed but not repository-portable until an immutable evidence channel is approved.",
-    "No human acceptance or human-usability validation was performed or inferred. Real-participant parity is a later WP-AH13/P77 criterion, and public-PyPI verification is a later WP-AH15/release criterion, not Milestone A. Current live-host execution and durable external resolution of the private archive remain unavailable."
+    "Historical worklog observations remain provenance and are not silently relabelled as exact-candidate evidence.",
+    "Full-repository mutation qualification is CLOSED_NON_PASS and incomplete; no stage-1 partial result supplies qualification credit.",
+    "Five retained quality_scan.py survivors remain unresolved mutation-quality findings and are not proof of an unmutated AH01 defect.",
+    "Overall CI is reported separately and was non-green at this acceptance boundary; successful individual jobs are not an overall pass.",
+    "Claude Code is blocked by expired OAuth; Codex and Gemini are unavailable. No blocked or unavailable host is inferred as passing.",
+    "Archive verification is closed without pass or portability credit. No human acceptance or human-usability validation is inferred."
   ],
-  "uat_decision": "FIX_FIRST",
+  "uat_decision": "SHIP",
   "integration_authorization": {
     "date": "2026-10-05",
     "qualified_scope": "68-path working-tree candidate containing Milestone A and concurrent UAT acceptance-integrity work",
@@ -341,17 +391,27 @@
     "human_acceptance_performed": false,
     "human_usability_validation_performed": false,
     "not_waived": [
-      "platform evidence",
-      "live-host evidence",
-      "artifact evidence",
-      "remote-CI evidence",
-      "strict completion"
-    ]
+      "truthful mutation qualification status",
+      "truthful overall CI status",
+      "truthful blocked and unavailable host inventory",
+      "truthful archive status"
+    ],
+    "amendment": {
+      "date": "2026-10-17",
+      "scope": "Independent closure of AH01-AH06 under amended AH07 for exact candidate d342de4fb439ad7ca0a91b9e5c0d3dcedb1c30dd",
+      "separate_non_pass_states": [
+        "full-repository mutation qualification",
+        "overall CI",
+        "archive verification",
+        "blocked or unavailable hosts"
+      ],
+      "release_authorized": false
+    }
   },
   "portable_local_evidence": {
     "run_05_complete_index_sha256": "deeb1788f2609cc01a185f221f44cc753b7618514ef3d4bae5bd957cb900bfe9",
     "locator": "docs/completion/evidence/external/audit-hardening/run-05-locator.json",
-    "publication_status": "not published; raw evidence remains private; a composite archive was verified after fresh extraction, but its durable storage locator is not approved",
+    "publication_status": "archive verification closed without pass or portability credit; raw historical evidence remains private and no upload or relocation is authorized",
     "sanitized_copy": {
       "role": "distribution copy, not qualification evidence",
       "file_count": 100,
@@ -360,6 +420,105 @@
       "manifest_sha256": "34f1a531ef883f7bb293e5290a9badfab66e5e883c17ac10cbb1d8057ffc639c",
       "archive_sha256": "4de5f7f44fcc591a4d7a566b80658dc51fa7365182bd95ee0099934f0706b7dd",
       "location": "external://local/audit-hardening/sanitized-run-05"
+    }
+  },
+  "amended_acceptance_2026_10_17": {
+    "candidate": "d342de4fb439ad7ca0a91b9e5c0d3dcedb1c30dd",
+    "candidate_signed": true,
+    "decision": "ACCEPTED",
+    "scope": "AH01-AH06 audit-hardening repairs under amended AH07",
+    "reviewer": "independent OpenCode review session",
+    "review_session": "ses_eb6cbc649ffe2BTUDHbJojZttG",
+    "criteria": {
+      "AH01": "confirmed",
+      "AH02": "confirmed",
+      "AH03": "confirmed",
+      "AH04": "confirmed",
+      "AH05": "confirmed",
+      "AH06": "confirmed"
+    },
+    "ah07_independent_acceptance": "confirmed",
+    "local_validation": {
+      "focused": "304 passed",
+      "full_suite": "4886 passed, 20 skipped",
+      "ruff": "pass",
+      "diff_check": "pass",
+      "fettle": "pass; 421 files; zero findings and tool errors",
+      "pre_push_full_suite": "pass"
+    },
+    "installed_candidate": {
+      "python": "3.12.13",
+      "version": "1.13.1",
+      "pip_check": "pass",
+      "wheel_sha256": "4fb1771470791a406c1d50c53566d3e4aee98638eb3a98ca8d77c865e695e459"
+    },
+    "host_inventory": {
+      "opencode_2_0_20": {
+        "status": "confirmed",
+        "deny": "corrupt policy returned shell tool status error before execution with fettle doctor recovery",
+        "deny_transcript_sha256": "c543cc077c3474eb48afb135eae0fd9d81da74f6bf78bc4a2773d5cd5be14c39",
+        "allow": "repaired policy completed shell once and emitted FETTLE_AH07_MARKER",
+        "allow_transcript_sha256": "3fc1ec2d02874a3c2b8e60621537b8c265d52d1321a1119cb93c2e36f9589a62",
+        "transport_sha256": "4c6c0486442c9f38ea4c3f3d097cb2f60b6a37ce80aede8f6a8e66c4d874ab7e"
+      },
+      "claude_code_2_1_234": {
+        "status": "blocked",
+        "reason": "OAuth session expired before any tool event",
+        "recovery": "Re-authenticate, then rerun the harmless corrupt-policy deny and repaired-policy allow probes"
+      },
+      "codex": {
+        "status": "unavailable",
+        "recovery": "Install and authenticate before any future live-host claim"
+      },
+      "gemini": {
+        "status": "unavailable",
+        "recovery": "Install and authenticate before any future live-host claim"
+      }
+    },
+    "separate_states": {
+      "mutation_qualification": {
+        "status": "CLOSED_NON_PASS",
+        "accepted_preflight": "39005280651 -> 39006811920",
+        "initial_calibration": 39011023843,
+        "sole_continuation": 39013135295,
+        "missing_reports": {
+          "37": 11,
+          "50": 3,
+          "51": 7,
+          "53": 11
+        },
+        "reason": "deadline-exhausted compatible checkpoints remain incomplete; stages 2 and 3 and further qualification dispatch are forbidden"
+      },
+      "overall_ci": {
+        "status": "non_green",
+        "run": 39021262830,
+        "reason": "exact-head matrix was still in progress at the acceptance boundary and mutation containment remains intentionally non-pass"
+      },
+      "archive_verification": {
+        "status": "closed_non_pass",
+        "reason": "closed with no further action; no pass or portability credit inferred"
+      },
+      "immutable_non_pass": {
+        "E2": "751d05e6d2abe53f7488438fae3f6737a500f801",
+        "E3": "ab302eab20333127dd5cd3981d804ba06802aefd",
+        "run": 38988846150
+      }
+    },
+    "mutation_findings_review": {
+      "completed_stage_1_shards": [
+        8,
+        27,
+        28,
+        48
+      ],
+      "incomplete_stage_1_shards": [
+        37,
+        50,
+        51,
+        53
+      ],
+      "ah01_relevant_findings": "five surviving fettle/quality_scan.py scope/ignore mutations; unresolved mutation-quality findings only, with no demonstrated unmutated scanner-failure-integrity defect",
+      "qualification_credit": "none"
     }
   }
 }

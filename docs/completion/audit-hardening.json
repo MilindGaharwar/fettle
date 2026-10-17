@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
   "milestone": "audit-hardening",
-  "revision": "integration-candidate-2026-10-05",
-  "status": "in_progress",
-  "uat_decision": "FIX_FIRST",
+  "revision": "audit-hardening-d342de4-2026-10-17",
+  "status": "complete",
+  "uat_decision": "SHIP",
   "criteria": [
     {
       "id": "AH00-verification-environment-and-baseline",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "isolated Python 3.12.13 environment passes AH00 local acceptance checks for the current candidate",
+      "observed": "exact candidate d342de4 is signed and passes isolated CPython 3.12.13 wheel installation, pip check, full local tests, Ruff, and the 421-file Fettle scan",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
       "recovery": "Re-run AH00 only if candidate, interpreter, dependencies, platform, or qualification identity changes"
     },
@@ -23,11 +23,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "165 focused tests pass; clean live scan exits 0 and a fresh analyzer-free environment returns structured tool_error with exit 2",
+      "observed": "current-compatible focused and live evidence confirms required analyzer failure remains structured and nonzero; retained scope/ignore mutation survivors remain separate non-qualification findings",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
       "recovery": "Re-run if scanner code, dependencies, or candidate identity changes"
     },
@@ -36,11 +36,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "21 focused tests pass; empty scope exits 2 and clean enforced live execution exits 0 with output metadata and SARIF",
+      "observed": "current-compatible focused, workflow-contract, and live evidence confirms empty, malformed, or contradictory action results cannot pass",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
       "recovery": "Re-run if action entrypoint, workflows, scanner contract, or candidate identity changes"
     },
@@ -49,37 +49,37 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "focused and live criteria pass; durable run-05 executed seven partitions once each and separate read-only verification confirmed all 299 fingerprints, 269 killed, 30 reviewed equivalents, zero indeterminate outcomes, source restoration, and no mutation-cache residue",
+      "observed": "retained dispatcher evidence plus exact-candidate regressions and installed OpenCode 2.0.20 probes confirm corrupt policy denies native shell before execution and repaired policy allows exactly once",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
-      "recovery": "Re-run only if the qualified source, tests, runtime, dependencies, mappings, exclusions, policy, or equivalence applicability changes; approve a portable immutable channel before relying on the external package from another checkout"
+      "recovery": "Re-run if dispatcher policy, host normalization, transport behavior, dependencies, or candidate identity changes; do not infer blocked-host or mutation-qualification credit."
     },
     {
       "id": "AH04-concurrent-evidence-ledger-integrity",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "59 focused race/interruption tests pass on Darwin-arm64; live 24-process workload yields unique contiguous sequences and a verified chain",
+      "observed": "current-compatible race, interruption, rotation, anchor, tamper, and 24-process workload evidence confirms unique ordered sequences and a valid chain",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
-      "recovery": "Retain additional supported-platform evidence for AH07; re-run if ledger behavior or candidate identity changes"
+      "recovery": "Re-run if ledger behavior, supported-platform coverage, dependencies, or candidate identity changes."
     },
     {
       "id": "AH05-installed-wheel-and-command-smoke",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "fresh wheel and sdist include providers, install outside checkout, resolve from isolated site-packages, and pass demo/help/graph probes",
+      "observed": "current-compatible package and command evidence plus exact-candidate wheel SHA-256 4fb1771470791a406c1d50c53566d3e4aee98638eb3a98ca8d77c865e695e459, pip check, Linux wheel, Windows bridge, and installed-host probes pass",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
       "recovery": "Rebuild and replay if package metadata, package sources, dependencies, or candidate identity changes"
     },
@@ -88,11 +88,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "339 tests pass with 20 declared skips; live profile preserves numeric zero, valid email/phone, Unicode, whitespace, and punctuation classes",
+      "observed": "current-compatible focused and live profile evidence preserves numeric zero, valid email and phone formats, Unicode, whitespace, and punctuation classes",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
       "recovery": "Re-run if UAT profile generation, consumers, or candidate identity changes"
     },
@@ -100,14 +100,14 @@
       "id": "AH07-independent-hardening-acceptance",
       "kind": "success",
       "required": true,
-      "verdict": "blocked",
-      "observed": "Owner authorized independent automated acceptance in place of the unavailable human reviewer. Aggregation-only recovery 37560100974 accepted an exact 256-report historical preflight for candidate 0fc41fd with 45,432 canonical details and zero collisions, while preserving the failed verdicts of source runs 37464324954, 37476889333, and 37550308775. Current PR head 2752f01 adds mutation-relevant executable code, so the old preflight is not applicable to final delivery. Latest exact-head CI is non-pass because Windows lifecycle and strict completion failed; mutation qualification remains non-pass and unexecuted. Available-host execution and a durable resolvable run-05 evidence location remain pending. No human acceptance or human-usability validation was performed or required after the reviewer-type replacement; real-participant parity is a later WP-AH13/P77 gate, and public-PyPI verification is a later WP-AH15/release gate.",
+      "verdict": "confirmed",
+      "observed": "independent read-only review session ses_eb6cbc649ffe2BTUDHbJojZttG confirmed AH01-AH06 under the owner-amended contract; mutation qualification remains CLOSED_NON_PASS, overall CI non-green, Claude blocked, Codex/Gemini unavailable, and archive verification closed without pass credit",
       "evidence": {
         "path": "docs/completion/evidence/audit-hardening.json",
-        "sha256": "af83e3bcf95d9954c69fbd523a8883d7c2fd445aeb9fa955c512ce103cdd8c94",
-        "revision": "integration-candidate-2026-10-05"
+        "sha256": "ae300e5780cf23ddea776c5c0bb2b6ac8022dc072ace6000e851a16de12f8b72",
+        "revision": "audit-hardening-d342de4-2026-10-17"
       },
-      "recovery": "Do not retry or substitute runs 37464324954, 37476889333, or 37550308775, and do not relabel recovery 37560100974 for the final candidate. Implement and review the bounded final-candidate repair only after approval; freeze its SHA; obtain separate authorization for a fresh CPython 3.12.13 preflight and recalculated calibration; make exact-head CI and mutation evidence pass; complete authorized available-host checks and provide a durable digest-bound location for the private run-05 archive; then run strict completion validation"
+      "recovery": "No repair-acceptance recovery is required. Report mutation qualification, overall CI, archive status, and blocked or unavailable hosts separately; do not infer pass, merge, tag, or release authorization."
     }
   ]
 }
