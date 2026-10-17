@@ -142,6 +142,46 @@ export const FettlePlugin = (async ({{ client, directory }}) => {{
     }},
   }}
 }}) satisfies Plugin
+
+export default {{
+  id: "fettle.policy",
+  async setup(ctx: any) {{
+    await ctx.tool.hook("execute.before", async (event: any) => {{
+      try {{
+        const tool = toolNames[event.tool] ?? event.tool
+        const directory = event.input?.workdir ?? ctx.location.directory
+        const result = await runFettle("PreToolUse", tool, event.input ?? {{}}, directory, event.sessionID)
+        if (result.blocked) throw new Error(result.message || "Blocked by Fettle")
+      }} catch (error) {{
+        const message = error instanceof Error ? error.message : "Fettle policy check failed. Run `fettle doctor`."
+        throw new Error(message)
+      }}
+    }})
+    await ctx.tool.hook("execute.after", async (event: any) => {{
+      const tool = toolNames[event.tool]
+      if (!tool) return
+      const directory = event.input?.workdir ?? ctx.location.directory
+      const result = await runFettle("PostToolUse", tool, event.input ?? {{}}, directory, event.sessionID)
+      if (result.message && event.status === "completed" && Array.isArray(event.result?.content)) {{
+        event.result.content.push({{ type: "text", text: `Fettle:\n${{result.message}}` }})
+      }}
+    }})
+    const controller = new AbortController()
+    void (async () => {{
+      try {{
+        for await (const event of ctx.event.subscribe({{ signal: controller.signal }})) {{
+          if (event.type !== "session.idle") continue
+          const result = await runFettle("Stop", undefined, {{}}, ctx.location.directory, event.properties.sessionID)
+          if (result.message) console.error(`Fettle ${{result.blocked ? "error" : "warning"}}: ${{result.message}}`)
+        }}
+      }} catch {{
+        if (!controller.signal.aborted) console.error("Fettle Stop observer unavailable. Run `fettle doctor`.")
+      }}
+    }})()
+    return () => controller.abort()
+  }},
+  server: FettlePlugin,
+}}
 '''
 
 

@@ -107,6 +107,12 @@ class TestAgentDetection:
         assert 'join(pluginRoot, "fettle", "run.sh")' in transport
         assert 'join(pluginRoot, "scripts", "run.sh")' not in transport
         assert 'shell: "Bash"' in transport
+        assert 'id: "fettle.policy"' in transport
+        assert 'ctx.tool.hook("execute.before"' in transport
+        assert "Array.isArray(event.result?.content)" in transport
+        assert "ctx.event.subscribe({ signal: controller.signal })" in transport
+        assert 'result.blocked ? "error" : "warning"' in transport
+        assert "server: FettlePlugin" in transport
 
     def test_opencode_preserves_existing_config(self, repo) -> None:
         oc_dir = Path.home() / ".config" / "opencode"

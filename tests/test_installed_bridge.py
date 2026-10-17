@@ -65,6 +65,12 @@ def test_bridge_manifest_binds_every_owned_file(tmp_path, monkeypatch):
     before_transport = transport.split('"tool.execute.after"', 1)[0]
     assert "if (!tool) return" not in before_transport
     assert 'shell: "Bash"' in transport
+    assert 'id: "fettle.policy"' in transport
+    assert 'ctx.tool.hook("execute.before"' in transport
+    assert "Array.isArray(event.result?.content)" in transport
+    assert "ctx.event.subscribe({ signal: controller.signal })" in transport
+    assert 'result.blocked ? "error" : "warning"' in transport
+    assert "server: FettlePlugin" in transport
     assert 'blocked: event === "PreToolUse"' in transport
 
 
