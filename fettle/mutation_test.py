@@ -1101,6 +1101,7 @@ def execute_pending_mutations(
     if checkpoint_path is not None:
         _write_json_atomic(checkpoint_path, merged)
     started = time.monotonic()
+    deadline_exhausted = False
     for file in sorted(mapping):
         file_pending = [record for record in pending_mutation_records(corpus, merged) if record["file"] == file]
         if not file_pending:
@@ -1161,17 +1162,15 @@ def execute_pending_mutations(
                 merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except subprocess.TimeoutExpired:
+                deadline_exhausted = True
+                break
+            except OSError as exc:
                 attempt = {
                     "fingerprint": record["fingerprint"], "status": "execution_error",
                     "message": _safe_mutation_diagnostic(str(exc), root),
                 }
-                if isinstance(exc, subprocess.TimeoutExpired):
-                    attempt.update(
-                        stdout=_safe_mutation_diagnostic(exc.output, root),
-                        stderr=_safe_mutation_diagnostic(exc.stderr, root),
-                    )
-                elif run is not None:
+                if run is not None:
                     attempt.update(
                         stdout=_safe_mutation_diagnostic(run.stdout, root),
                         stderr=_safe_mutation_diagnostic(run.stderr, root),
@@ -1180,6 +1179,8 @@ def execute_pending_mutations(
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
                 break
+        if deadline_exhausted:
+            break
         if any(
             attempt["status"] == "execution_error"
             for attempt in merged["attempts"][-len(file_pending):]

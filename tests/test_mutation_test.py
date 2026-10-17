@@ -2995,32 +2995,37 @@ def test_pending_execution_fatal_exit_retains_bounded_diagnostics_without_an_out
     }
 
 
-def test_pending_execution_timeout_retains_diagnostics_without_an_outcome(tmp_path):
+@pytest.mark.parametrize("timeout_seconds", [4, 7, 10, 61, 80, 125, 159, 198])
+def test_pending_execution_deadline_exhaustion_leaves_mutant_pending_without_tool_error(
+    tmp_path, timeout_seconds,
+):
     corpus = [{
         "fingerprint": "a" * 64, "file": "src/a.py", "state": "killed",
         "locator": {"file": "src/a.py", "engine_id": "1"},
     }]
     regenerated = {"status": "completed", "corpus": corpus}
     timeout = subprocess.TimeoutExpired(
-        ["mutmut", "run", "1"], 60, output="partial stdout", stderr="partial stderr",
+        ["mutmut", "run", "1"], timeout_seconds,
+        output="partial stdout", stderr="partial stderr",
     )
+    checkpoint_path = tmp_path / "checkpoint.json"
     with (
         patch("fettle.mutation_test._preflight_mutmut", return_value=regenerated),
-        patch("fettle.mutation_test._run", side_effect=timeout),
+        patch("fettle.mutation_test._run", side_effect=timeout) as run,
         patch("fettle.mutation_test.time.monotonic", return_value=1.0),
     ):
         result = execute_pending_mutations(
             str(tmp_path), corpus, {"src/a.py": ["tests/test_a.py"]},
-            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(), 60,
+            [{"file": "src/a.py", "start": 1, "end": 1}], _checkpoint(),
+            timeout_seconds, checkpoint_path,
         )
 
-    attempt = result["attempts"][-1]
     assert result["status"] == "incomplete"
     assert result["pending"] == 1
     assert result["outcomes"] == {}
-    assert attempt["status"] == "execution_error"
-    assert attempt["stdout"] == "partial stdout"
-    assert attempt["stderr"] == "partial stderr"
+    assert result["attempts"] == []
+    assert json.loads(checkpoint_path.read_text()) == result
+    assert run.call_args.args[2] == timeout_seconds
 
 
 @pytest.mark.parametrize(
