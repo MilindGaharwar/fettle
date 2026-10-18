@@ -2,6 +2,10 @@
 
 Status: authorized by `AH-CAPACITY-ROUTE-20261015-B` on 2026-10-15.
 
+Narrow repair authorized by `AH-UNTIMED-DIAGNOSTIC-20261018-A` on
+2026-10-18. This repair does not renew or consume the separately reported
+12,000-minute calibration allowance.
+
 Related UX contract:
 [capacity-validation-route.ux-spec.md](capacity-validation-route.ux-spec.md)
 
@@ -21,6 +25,49 @@ provider limits without starting calibration or qualification.
 - Provider job timeout is a containment control, not proof of instantaneous
   termination. Cancellation latency remains charged and disclosed.
 - This change delivers a dormant route only. No provider run is authorized.
+
+## 2026-10-18 Frozen Untimed Diagnostic Contract
+
+- Historical comparison candidate:
+  `9eef2fab60c504e26be176db123164bc46e593fe`.
+- Historical runs: `31850858224` and `31865158733`, each with 514 retained
+  artifacts. Their 28,723 distinct terminal checkpoint fingerprints have
+  canonical digest
+  `75807358bcaaed80efb2f0f3cd5ed99e9f573f2ded26c50e2c6281c851abe5b3`.
+- Direct canonical matching against retained candidate `5d24a3bd...` gives
+  27,718 fingerprints (digest
+  `cc57b1f709083447884b31ac5f67d647d9fc15a73b2e84bda18d68e06e0aa1de`)
+  in 154 files (file-list digest
+  `c2c042b5c4fd497f1854c65faed5269e01e06b730d9cbdee16b8975dd3976957`).
+  This exact reconstruction supersedes the earlier 27,850 scheduling estimate.
+- An **untimed file** is a candidate file with no canonical fingerprint matched
+  to either frozen historical run. Historical data remains modeling-only and
+  incompatible with exact-head qualification.
+- Ownership is the tuple `(manifest shard, file)`. A unit contains every
+  manifest range for that file in that shard and every canonical corpus record
+  carrying the same validated shard/file identity. Mutation-line containment is
+  deliberately not an ownership rule. Every corpus fingerprint must be owned
+  exactly once before selection.
+- Candidate preparation sorts historically unmeasured file windows by mapped
+  test count, mapped-test digest, file, and shard. It divides that fixed order
+  into six deterministic equal-rank cost strata and selects the lowest and
+  highest fingerprint-count unit in each stratum, with deterministic file/shard
+  tie breaks. The resulting 12-unit plan and its SHA-256 are frozen before any
+  execution. No substitution or rerun is allowed.
+- The reported 10,800 runner-minute launch cutoff and 1,740-second worker window
+  come only from `docs/calibration-budget-contract-amendment.md`. At most one
+  compatible continuation yields two windows, or 3,480 seconds, per shard.
+  They are comparison context, not renewed authority.
+- For this diagnostic, **material reserve** means at least 20% of the reported
+  10,800-minute launch cutoff: 2,160 runner-minutes. A favorable projection
+  therefore must not exceed 8,640 runner-minutes and must fit every shard within
+  two 1,740-second windows. The diagnostic cannot itself prove that projection;
+  it can reject the model, support a separately reviewed next step, or remain
+  inconclusive.
+- Twelve purposively selected units cannot establish corpus-wide percentiles or
+  affordability. Timeouts are censored evidence. Recurring file regeneration,
+  setup, and mapped-test baseline costs are file-window costs and must not be
+  multiplied again as per-fingerprint costs.
 
 ## Decision and Tradeoffs
 

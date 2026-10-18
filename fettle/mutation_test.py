@@ -67,7 +67,7 @@ _MAX_SHOW_BYTES = 50 * 1024 * 1024
 _PARTITION_SCHEMA_VERSION = "1"
 _MUTATION_CACHE_SCHEMA_VERSION = "1"
 _CHECKPOINT_SCHEMA_VERSION = "1"
-_CAPACITY_PLAN_SCHEMA_VERSION = "1"
+_CAPACITY_PLAN_SCHEMA_VERSION = "2"
 _CAPACITY_RESULT_SCHEMA_VERSION = "1"
 _MUTATION_WATCH_NAMES = (
     ".fettle.toml", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini",
@@ -1241,7 +1241,7 @@ def report_from_mutation_checkpoint(corpus: list[dict], checkpoint: dict) -> dic
 
 
 def _capacity_unit_candidates(preflight: dict, manifests: list[dict]) -> list[dict]:
-    """Map a complete canonical corpus to nonempty executor-compatible ranges."""
+    """Map the corpus exactly once to executor-compatible shard/file windows."""
     corpus = preflight.get("corpus")
     if not isinstance(corpus, list):
         raise ValueError("capacity validation preflight corpus is malformed")
@@ -1255,12 +1255,14 @@ def _capacity_unit_candidates(preflight: dict, manifests: list[dict]) -> list[di
     for manifest in manifests:
         shard = manifest["shard_index"]
         shard_records = by_shard.get(shard, [])
+        ranges_by_file: dict[str, list[dict]] = {}
         for line_range in manifest["ranges"]:
+            ranges_by_file.setdefault(line_range["file"], []).append(dict(line_range))
+        for file, ranges in sorted(ranges_by_file.items()):
             records = sorted(
                 (
                     record for record in shard_records
-                    if record.get("file") == line_range["file"]
-                    and line_range["start"] <= record.get("line", 0) <= line_range["end"]
+                    if record.get("file") == file
                 ),
                 key=lambda record: record["fingerprint"],
             )
@@ -1268,23 +1270,24 @@ def _capacity_unit_candidates(preflight: dict, manifests: list[dict]) -> list[di
                 continue
             groups = {tuple(record.get("mapped_tests", [])) for record in records}
             if len(groups) != 1 or not next(iter(groups)):
-                raise ValueError("capacity validation range has inconsistent mapped tests")
+                raise ValueError("capacity validation file window has inconsistent mapped tests")
             fingerprints = [record["fingerprint"] for record in records]
             if any(not isinstance(item, str) or item in seen for item in fingerprints):
-                raise ValueError("capacity validation range fingerprints are duplicated or malformed")
+                raise ValueError("capacity validation file-window fingerprints are duplicated or malformed")
             seen.update(fingerprints)
             mapped_tests = list(next(iter(groups)))
             candidates.append({
                 "source_shard_index": shard,
                 "manifest_digest": manifest["digest"],
-                "range": dict(line_range),
+                "file": file,
+                "ranges": sorted(ranges, key=lambda item: (item["start"], item["end"])),
                 "mapped_tests": mapped_tests,
                 "mapped_test_group_digest": _canonical_digest(mapped_tests),
                 "fingerprints": fingerprints,
             })
     declared = preflight.get("fingerprints")
     if not isinstance(declared, list) or seen != set(declared):
-        raise ValueError("capacity validation ranges do not exactly cover the canonical corpus")
+        raise ValueError("capacity validation file windows do not exactly cover the canonical corpus")
     return candidates
 
 
@@ -1296,11 +1299,11 @@ def build_capacity_validation_plan(
     *,
     experiment_id: str,
     revision: str,
-    observed_group_digests: set[str],
+    historical_measured_files: set[str],
     historical_source: dict,
     prediction_seconds: dict[str, float],
 ) -> dict:
-    """Freeze six mapped-test strata with deterministic low/high range units."""
+    """Freeze low/high whole-file units across six mapped-test-cost strata."""
     if re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}", experiment_id) is None:
         raise ValueError("capacity validation experiment ID is malformed")
     if (
@@ -1338,17 +1341,31 @@ def build_capacity_validation_plan(
         for value in prediction_seconds.values()
     ):
         raise ValueError("capacity validation prediction assumptions are malformed")
-    if any(re.fullmatch(r"[0-9a-f]{64}", item) is None for item in observed_group_digests):
-        raise ValueError("capacity validation observed group identity is malformed")
+    if any(not isinstance(item, str) or not item.endswith(".py") for item in historical_measured_files):
+        raise ValueError("capacity validation historical file identity is malformed")
     historical_required = {
-        "candidate_sha", "campaign_id", "environment_digest", "engine_version",
-        "evidence_role", "reusable_for_candidate",
+        "candidate_sha", "run_ids", "artifact_counts", "historical_fingerprint_digest",
+        "candidate_matched_fingerprint_digest", "candidate_matched_fingerprint_count",
+        "candidate_measured_file_digest", "candidate_measured_file_count",
+        "engine_version", "evidence_role", "reusable_for_candidate",
     }
     if (
         set(historical_source) != historical_required
         or re.fullmatch(r"[0-9a-f]{40}", str(historical_source.get("candidate_sha", ""))) is None
-        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("environment_digest", ""))) is None
-        or historical_source.get("campaign_id") != "cal-92984b1-20261014"
+        or historical_source.get("run_ids") != ["31850858224", "31865158733"]
+        or historical_source.get("artifact_counts") != {
+            "31850858224": 514, "31865158733": 514,
+        }
+        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("historical_fingerprint_digest", ""))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("candidate_matched_fingerprint_digest", ""))) is None
+        or historical_source.get("candidate_matched_fingerprint_digest")
+        != "cc57b1f709083447884b31ac5f67d647d9fc15a73b2e84bda18d68e06e0aa1de"
+        or historical_source.get("historical_fingerprint_digest")
+        != "75807358bcaaed80efb2f0f3cd5ed99e9f573f2ded26c50e2c6281c851abe5b3"
+        or historical_source.get("candidate_measured_file_digest") != _canonical_digest(
+            sorted(historical_measured_files)
+        )
+        or historical_source.get("candidate_measured_file_count") != len(historical_measured_files)
         or historical_source.get("engine_version") != MUTMUT_VERSION
         or historical_source.get("evidence_role") != "modeling_only_terminal_non_pass"
         or historical_source.get("reusable_for_candidate") is not False
@@ -1357,30 +1374,43 @@ def build_capacity_validation_plan(
         raise ValueError("capacity validation historical source provenance is malformed")
 
     candidates = _capacity_unit_candidates(preflight, manifests)
-    grouped: dict[str, list[dict]] = {}
-    for candidate in candidates:
-        grouped.setdefault(candidate["mapped_test_group_digest"], []).append(candidate)
-    eligible = {digest: units for digest, units in grouped.items() if len(units) >= 2}
-    ordered_groups = sorted(eligible, key=lambda digest: (digest in observed_group_digests, digest))
-    if len(ordered_groups) < 6:
-        raise ValueError("capacity validation requires six mapped-test groups with two range units each")
+    candidate_files = {candidate["file"] for candidate in candidates}
+    if not historical_measured_files <= candidate_files:
+        raise ValueError("capacity validation historical measured files differ from candidate")
+    measured_files = historical_measured_files
+    eligible = sorted(
+        (candidate for candidate in candidates if candidate["file"] not in measured_files),
+        key=lambda unit: (
+            len(unit["mapped_tests"]), unit["mapped_test_group_digest"],
+            unit["file"], unit["source_shard_index"],
+        ),
+    )
+    if len(eligible) < 12:
+        raise ValueError("capacity validation requires twelve historically unmeasured file windows")
+    strata = [
+        eligible[(len(eligible) * index) // 6:(len(eligible) * (index + 1)) // 6]
+        for index in range(6)
+    ]
+    if any(len(stratum) < 2 for stratum in strata):
+        raise ValueError("capacity validation mapped-test-cost strata are not meaningful")
 
     selected = []
-    for digest in ordered_groups[:6]:
+    for stratum_index, stratum in enumerate(strata):
         units = sorted(
-            eligible[digest],
+            stratum,
             key=lambda unit: (
-                len(unit["fingerprints"]), unit["range"]["file"],
-                unit["range"]["start"], unit["source_shard_index"],
+                len(unit["fingerprints"]), unit["file"], unit["source_shard_index"],
             ),
         )
         choices = [units[0], units[-1]]
-        if choices[0]["range"] == choices[1]["range"]:
+        if (choices[0]["source_shard_index"], choices[0]["file"]) == (
+            choices[1]["source_shard_index"], choices[1]["file"]
+        ):
             raise ValueError("capacity validation low/high units are not distinct")
         for cost_class, unit in zip(("low", "high"), choices, strict=True):
             count = len(unit["fingerprints"])
-            mapping = _mapped_tests(root, [unit["range"]["file"]], cfg.get("test_mappings", {}))
-            if mapping != {unit["range"]["file"]: unit["mapped_tests"]}:
+            mapping = _mapped_tests(root, [unit["file"]], cfg.get("test_mappings", {}))
+            if mapping != {unit["file"]: unit["mapped_tests"]}:
                 raise ValueError("capacity validation selection test mapping differs")
             environment = _runtime_cache_identity(root, list(mapping), mapping, cfg)
             if environment is None:
@@ -1388,7 +1418,8 @@ def build_capacity_validation_plan(
             selected.append({
                 "unit_index": len(selected),
                 "cost_class": cost_class,
-                "historically_observed_group": digest in observed_group_digests,
+                "cost_stratum": stratum_index,
+                "historically_measured_file": False,
                 **unit,
                 "environment_digest": _checkpoint_environment_digest(environment),
                 "predicted_minutes": {
@@ -1412,16 +1443,16 @@ def build_capacity_validation_plan(
         "preflight_digest": _canonical_digest(preflight),
         "preflight_corpus_digest": preflight["corpus_digest"],
         "manifest_digests": manifest_digests,
-        "selection_policy": "six-groups-unobserved-first-low-high-fingerprint-count-v1",
+        "selection_policy": "six-mapped-test-cost-strata-unmeasured-files-low-high-fingerprint-count-v2",
         "prediction_seconds_per_unobserved_fingerprint": dict(sorted(prediction_seconds.items())),
-        "historical_observed_group_digests": sorted(observed_group_digests),
+        "historical_measured_files": sorted(historical_measured_files),
         "historical_source": historical_source,
         "decision_contract": capacity_validation_decision_contract(),
         "coverage": {
             "canonical_fingerprints": len(preflight["fingerprints"]),
-            "mapped_test_groups": len(grouped),
-            "eligible_groups": len(eligible),
-            "selected_groups": 6,
+            "historically_measured_files": len(measured_files),
+            "historically_unmeasured_file_windows": len(eligible),
+            "selected_cost_strata": 6,
             "selected_units": 12,
             "selected_fingerprints": len(selected_fingerprints),
             "supports_corpus_wide_p95": False,
@@ -1440,7 +1471,7 @@ def load_capacity_validation_plan(path: Path) -> dict:
         "billing_authority", "authoritative_predecessor", "experiment_id", "revision",
         "preflight_digest", "preflight_corpus_digest", "manifest_digests",
         "selection_policy", "prediction_seconds_per_unobserved_fingerprint",
-        "historical_observed_group_digests", "coverage", "units", "digest",
+        "historical_measured_files", "coverage", "units", "digest",
         "historical_source", "decision_contract",
     }
     if not isinstance(value, dict) or set(value) != required:
@@ -1483,6 +1514,16 @@ def capacity_validation_decision_contract() -> dict:
             "optimal_scheduler", "corpus_wide_p95", "full_campaign_budget",
             "mutation_qualification",
         ],
+        "reported_calibration_context_not_renewed": {
+            "source": "docs/calibration-budget-contract-amendment.md",
+            "launch_cutoff_runner_minutes": 10800,
+            "material_reserve_runner_minutes": 2160,
+            "material_reserve_fraction_of_launch_cutoff": 0.2,
+            "material_reserve_projection_max_runner_minutes": 8640,
+            "worker_window_seconds": 1740,
+            "maximum_windows_per_shard": 2,
+            "two_window_seconds": 3480,
+        },
         "prediction_error": {
             "reference": "central_seconds_per_unobserved_fingerprint",
             "absolute_relative_error_median_max": 0.35,
@@ -1580,7 +1621,7 @@ def validate_capacity_validation_package(
     rebuilt = build_capacity_validation_plan(
         root, cfg, corpus, manifests,
         experiment_id=experiment_id, revision=revision,
-        observed_group_digests=set(plan["historical_observed_group_digests"]),
+        historical_measured_files=set(plan["historical_measured_files"]),
         historical_source=plan["historical_source"],
         prediction_seconds=plan["prediction_seconds_per_unobserved_fingerprint"],
     )
@@ -1672,7 +1713,7 @@ def evaluate_capacity_validation_decision(
             continue
         exact.append({
             "unit_index": index,
-            "group": unit["mapped_test_group_digest"],
+            "group": str(unit["cost_stratum"]),
             "cost_class": unit["cost_class"],
             "fingerprint_count": count,
             "execution_seconds": elapsed_ms / 1000,
@@ -1942,16 +1983,15 @@ def run_capacity_validation_unit(
         corpus = []
         for fingerprint in unit["fingerprints"]:
             record = corpus_by_fingerprint.get(fingerprint)
-            line_range = unit["range"]
             if (
-                record is None or record.get("file") != line_range["file"]
-                or not line_range["start"] <= record.get("line", 0) <= line_range["end"]
+                record is None or record.get("file") != unit["file"]
+                or record.get("shard_index") != unit["source_shard_index"]
                 or record.get("mapped_tests") != unit["mapped_tests"]
             ):
                 raise ValueError("capacity validation unit differs from the canonical corpus")
             corpus.append(record)
-        mapping = _mapped_tests(root, [unit["range"]["file"]], cfg.get("test_mappings", {}))
-        if mapping != {unit["range"]["file"]: unit["mapped_tests"]}:
+        mapping = _mapped_tests(root, [unit["file"]], cfg.get("test_mappings", {}))
+        if mapping != {unit["file"]: unit["mapped_tests"]}:
             raise ValueError("capacity validation test mapping differs")
         environment = _runtime_cache_identity(root, list(mapping), mapping, cfg)
         if environment is None:
@@ -1959,7 +1999,7 @@ def run_capacity_validation_unit(
         environment_digest = _checkpoint_environment_digest(environment)
         if environment_digest != unit.get("environment_digest"):
             raise ValueError("capacity validation environment identity differs")
-        source_path = Path(root) / unit["range"]["file"]
+        source_path = Path(root) / unit["file"]
         source_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
         checkpoint = {
             "schema_version": _CHECKPOINT_SCHEMA_VERSION,
@@ -1974,7 +2014,7 @@ def run_capacity_validation_unit(
         checkpoint_path = checkpoint_path or plan_path.parent / f"capacity-validation-checkpoint-{unit_index}.json"
         started = time.monotonic()
         result = execute_pending_mutations(
-            root, corpus, mapping, [unit["range"]], checkpoint, timeout, checkpoint_path,
+            root, corpus, mapping, unit["ranges"], checkpoint, timeout, checkpoint_path,
         )
         elapsed_ms = round((time.monotonic() - started) * 1000)
         source_after = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -4120,7 +4160,7 @@ def main() -> int:
     parser.add_argument("--capacity-plan", metavar="PATH", help="Write a non-authoritative capacity-validation plan")
     parser.add_argument("--capacity-unit", type=int, help="Execute one frozen capacity-validation unit")
     parser.add_argument("--capacity-experiment-id")
-    parser.add_argument("--capacity-observed-groups", help="JSON file containing historically observed group digests")
+    parser.add_argument("--capacity-history", help="JSON file containing frozen historical fingerprints")
     parser.add_argument("--capacity-predictions", help="JSON file containing frozen prediction seconds")
     parser.add_argument("--capacity-manifests", help="Complete manifest directory for capacity preparation")
     parser.add_argument("--capacity-result", help="Atomic capacity-validation result output")
@@ -4189,8 +4229,8 @@ def main() -> int:
     base = args.base or mutation["base"]
     if args.capacity_plan and args.capacity_unit is None:
         try:
-            if not all((args.retained_preflight, args.capacity_experiment_id, args.capacity_observed_groups, args.capacity_predictions, args.capacity_manifests)):
-                raise ValueError("capacity plan requires retained preflight, experiment ID, observed groups, predictions, and manifests")
+            if not all((args.retained_preflight, args.capacity_experiment_id, args.capacity_history, args.capacity_predictions, args.capacity_manifests)):
+                raise ValueError("capacity plan requires retained preflight, experiment ID, history, predictions, and manifests")
             preflight = json.loads(Path(args.retained_preflight).read_text(encoding="utf-8"))
             manifests = [
                 load_partition_manifest(path)
@@ -4199,12 +4239,12 @@ def main() -> int:
                     key=lambda path: int(path.stem.split("-")[1]),
                 )
             ]
-            observed = json.loads(Path(args.capacity_observed_groups).read_text(encoding="utf-8"))
+            history = json.loads(Path(args.capacity_history).read_text(encoding="utf-8"))
             predictions = json.loads(Path(args.capacity_predictions).read_text(encoding="utf-8"))
             if (
-                not isinstance(observed, dict)
-                or not isinstance(observed.get("group_digests"), list)
-                or not isinstance(observed.get("source"), dict)
+                not isinstance(history, dict)
+                or not isinstance(history.get("measured_files"), list)
+                or not isinstance(history.get("source"), dict)
                 or not isinstance(predictions, dict)
             ):
                 raise ValueError("capacity plan assumptions are malformed")
@@ -4212,8 +4252,8 @@ def main() -> int:
                 args.root, mutation, preflight, manifests,
                 experiment_id=args.capacity_experiment_id,
                 revision=_revision(args.root),
-                observed_group_digests=set(observed["group_digests"]),
-                historical_source=observed["source"],
+                historical_measured_files=set(history["measured_files"]),
+                historical_source=history["source"],
                 prediction_seconds=predictions,
             )
             _write_json_atomic(Path(args.capacity_plan), report)

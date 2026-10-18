@@ -1,5 +1,82 @@
 # Audit Hardening Worklog
 
+## 2026-10-18: Mutation Scheduling Diagnosis And Bounded Next Step
+
+PR #46 remains blocked at signed head
+`6137a436734e8d456207c2b06feb51a8a1a32b3e`. Exact-head `CI required` is
+green, but exact-head `mutation evidence` is absent and mutation qualification
+remains `CLOSED_NON_PASS`. AH01--AH08 remain complete; AH09 has not started.
+No mutation execution, workflow dispatch, executable edit, budget increase,
+protection change, exclusion, threshold change, merge, tag, or release occurred
+during this diagnosis.
+
+One focused Astra consultation challenged the retained scheduling model. Its
+useful conclusion was independently confirmed against the executor: terminal
+checkpoint outcomes are merged by canonical fingerprint and are not rerun.
+Continuation repeats checkout and environment setup, and regenerates each file
+that still has pending fingerprints before executing only those pending engine
+IDs. Regeneration and mapped-test baseline cost therefore belong to an active
+file/test group in each worker window, not to every terminal fingerprint.
+Historical per-mutant durations are not a validated additive runner-time model;
+P75, P90, and P95 imputations remain sensitivity cases, not bounds. The proposed
+deterministic balancing still has demonstrated structural value: it preserves
+the retained 51,888-fingerprint exact-once corpus and 8/32/216 stage coverage,
+reduces the estimated longest shard, and reduces retained file-shard
+intersections from about 1,450 to 1,310. Those properties do not establish that
+two 1,740-second windows or the fixed budget will suffice.
+
+The missing timing population is materially different. A later direct
+canonical-fingerprint reconstruction of the two frozen historical runs found
+27,718 matched candidate fingerprints, superseding the earlier 27,850
+scheduling estimate; 24,170 therefore have no direct canonical match. Of the
+untimed population, 14,854 are in 40 files
+absent from the older completed timing population, while 9,316 are new
+fingerprints in files that have some matched history. The untimed population has
+fewer mapped tests on average (3.47 versus 4.41), but is concentrated in newly
+added, large modules: `fettle/staged_preflight.py` alone contributes 4,930, and
+`fettle/assurance_baseline.py`, `fettle/uat/network_controller.py`,
+`fettle/assurance.py`, and `fettle/uat/reconcile.py` contribute another 3,507.
+This disproves exchangeability with the measured population; it does not prove
+that the untimed population is cheaper or more expensive.
+
+The existing capacity-validation route cannot answer this question unchanged.
+Its frozen selector uses six mapped-test groups from older group history rather
+than the missing timing population; several selected retained units contain no
+untimed fingerprints. More importantly, it assigns canonical records to a
+manifest range by requiring the reported mutation line to fall literally within
+that range. Retained canonical evidence leaves 270 valid fingerprints
+unattributed because mutmut's canonical mutation line can be offset from the
+diff-whitelisted source range. The route would therefore fail its exact-coverage
+gate before measurement. Its full bounded authority is also 1,525
+runner-minutes, including the 1,220 preparation allowance, not a 160-minute
+sample.
+
+The smallest useful next step is a narrow repair to that isolated diagnostic
+route, followed by one bounded diagnostic only if its focused tests and
+independent review pass. The selector should use the executor's real atomic
+unit--all retained manifest ranges for one file in one source shard--and validate
+membership by canonical shard/file identity rather than mutation-line
+containment. It should select deterministic low/high fingerprint-count units
+from files absent at the frozen historical timing candidate, stratified across
+mapped-test cost so expensive baseline groups are represented. Results remain
+qualification-ineligible and cannot be reused as calibration outcomes. The
+measurement can falsify an affordable repartitioning model or provide support
+for requesting a separate qualification decision; twelve deliberately selected
+units cannot prove a corpus-wide percentile or guarantee campaign completion.
+
+Authorization `AH-UNTIMED-DIAGNOSTIC-20261018-A` froze the repair and conditional
+diagnostic contract. The comparison identity is historical candidate
+`9eef2fab60c504e26be176db123164bc46e593fe`, runs `31850858224` and
+`31865158733`; their 28,723 distinct terminal fingerprints digest to
+`75807358bcaaed80efb2f0f3cd5ed99e9f573f2ded26c50e2c6281c851abe5b3`.
+Candidate matching and the 154 measured-file identities are frozen in the
+workflow. The reported 10,800-minute cutoff and two 1,740-second windows are
+comparison context from `docs/calibration-budget-contract-amendment.md`, not
+renewed authority. “Material reserve” is fixed at 2,160 runner-minutes (20% of
+10,800), so a favorable modeled path must project no more than 8,640 minutes and
+fit each shard within 3,480 seconds. This diagnostic cannot itself establish
+that corpus-wide result.
+
 ## 2026-10-17: WP-AH08 Remote Delivery And Release-Gate Assessment
 
 Signed commit `072bd62b388334b747f0d3c477a0ab2bd61d6efa` was pushed unchanged to

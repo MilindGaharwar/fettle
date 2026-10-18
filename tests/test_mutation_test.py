@@ -92,33 +92,39 @@ def _capacity_preflight():
     corpus = []
     fingerprints = []
     for group in range(6):
-        file = f"src/group_{group}.py"
-        ranges = [
-            {"file": file, "start": 1, "end": 10},
-            {"file": file, "start": 11, "end": 20},
-        ]
-        manifest = {
-            "schema_version": "1", "revision": "a" * 40, "shard_index": group,
-            "shard_count": 6, "files": [file], "ranges": ranges,
-        }
-        manifest["digest"] = _canonical_digest(manifest)
-        manifests.append(manifest)
-        for range_index, line_range in enumerate(ranges):
-            for ordinal in range(range_index + 1):
-                fingerprint = f"{group:02x}{range_index:02x}{ordinal:02x}".ljust(64, "a")
+        for file_index in range(2):
+            shard = group * 2 + file_index
+            file = f"src/group_{group}_{file_index}.py"
+            ranges = [
+                {"file": file, "start": 1, "end": 10},
+                {"file": file, "start": 11, "end": 20},
+            ]
+            manifest = {
+                "schema_version": "1", "revision": "a" * 40, "shard_index": shard,
+                "shard_count": 12, "files": [file], "ranges": ranges,
+            }
+            manifest["digest"] = _canonical_digest(manifest)
+            manifests.append(manifest)
+            mapped_tests = [f"tests/test_group_{group}_{file_index}.py"] + [
+                f"tests/test_group_{group}_{index}.py"
+                for index in range(group + 1) if index != file_index
+            ]
+            for ordinal in range(file_index + 1):
+                fingerprint = f"{group:02x}{file_index:02x}{ordinal:02x}".ljust(64, "a")
                 fingerprints.append(fingerprint)
                 corpus.append({
                     "fingerprint": fingerprint, "file": file,
-                    "line": line_range["start"] + ordinal,
-                    "mapped_tests": [f"tests/test_group_{group}.py"],
-                    "shard_index": group,
+                    # Canonical lines need not be literally inside a manifest range.
+                    "line": 30 + ordinal,
+                    "mapped_tests": mapped_tests,
+                    "shard_index": shard,
                 })
     corpus.sort(key=lambda item: item["fingerprint"])
     preflight = {
         "kind": "capacity_validation_corpus", "status": "enumerated", "passed": False,
         "qualification_eligible": False, "billing_authority": False,
         "authoritative_predecessor": False, "revision": "a" * 40,
-        "shard_count": 6,
+        "shard_count": 12,
         "corpus": corpus, "fingerprints": sorted(fingerprints),
         "corpus_digest": _canonical_digest(corpus),
         "manifest_digests": [item["digest"] for item in manifests],
@@ -127,14 +133,25 @@ def _capacity_preflight():
 
 
 def _capacity_mapping():
-    return {f"src/group_{group}.py": [f"tests/test_group_{group}.py"] for group in range(6)}
+    return {
+        f"src/group_{group}_{file_index}.py": [f"tests/test_group_{group}_{file_index}.py"] + [
+            f"tests/test_group_{group}_{index}.py"
+            for index in range(group + 1) if index != file_index
+        ]
+        for group in range(6) for file_index in range(2)
+    }
 
 
 def _capacity_historical_source():
     return {
         "candidate_sha": "9" * 40,
-        "campaign_id": "cal-92984b1-20261014",
-        "environment_digest": "d" * 64,
+        "run_ids": ["31850858224", "31865158733"],
+        "artifact_counts": {"31850858224": 514, "31865158733": 514},
+        "historical_fingerprint_digest": "75807358bcaaed80efb2f0f3cd5ed99e9f573f2ded26c50e2c6281c851abe5b3",
+        "candidate_matched_fingerprint_digest": "cc57b1f709083447884b31ac5f67d647d9fc15a73b2e84bda18d68e06e0aa1de",
+        "candidate_matched_fingerprint_count": 0,
+        "candidate_measured_file_digest": _canonical_digest([]),
+        "candidate_measured_file_count": 0,
         "engine_version": "2.5.1",
         "evidence_role": "modeling_only_terminal_non_pass",
         "reusable_for_candidate": False,
@@ -3155,7 +3172,7 @@ def test_checkpoint_report_requires_complete_corpus_and_preserves_public_schema(
     assert [record["fingerprint"] for record in report["non_killed"]] == ["b" * 64]
 
 
-def test_capacity_plan_selects_deterministic_low_high_units_across_six_groups(tmp_path):
+def test_capacity_plan_selects_whole_file_units_across_six_cost_strata(tmp_path):
     preflight, manifests = _capacity_preflight()
     predictions = {"optimistic": 10, "central": 20, "conservative": 30, "stress": 40}
 
@@ -3166,19 +3183,21 @@ def test_capacity_plan_selects_deterministic_low_high_units_across_six_groups(tm
         first = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds=predictions,
         )
         second = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, list(reversed(manifests)),
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds=predictions,
         )
 
     assert first["coverage"]["selected_units"] == 12
-    assert len({unit["mapped_test_group_digest"] for unit in first["units"]}) == 6
+    assert [unit["cost_stratum"] for unit in first["units"]] == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
     assert [len(unit["fingerprints"]) for unit in first["units"]] == [1, 2] * 6
+    assert all(len(unit["ranges"]) == 2 for unit in first["units"])
+    assert all(unit["historically_measured_file"] is False for unit in first["units"])
     assert first["passed"] is False and first["qualification_eligible"] is False
     contract = first["decision_contract"]
     assert contract["prediction_error"]["absolute_relative_error_median_max"] == 0.35
@@ -3229,13 +3248,13 @@ def test_capacity_enumeration_is_non_authoritative_and_rejects_canonical_input(t
     assert rejected["status"] == "unknown" and rejected["passed"] is False
 
 
-def test_capacity_plan_rejects_fewer_than_six_eligible_groups():
+def test_capacity_plan_rejects_fewer_than_twelve_unmeasured_file_windows():
     preflight, manifests = _capacity_preflight()
-    preflight["corpus"] = [record for record in preflight["corpus"] if record["shard_index"] < 5]
+    preflight["corpus"] = [record for record in preflight["corpus"] if record["shard_index"] < 11]
     preflight["fingerprints"] = [record["fingerprint"] for record in preflight["corpus"]]
     preflight["corpus_digest"] = _canonical_digest(preflight["corpus"])
 
-    with pytest.raises(ValueError, match="six mapped-test groups"):
+    with pytest.raises(ValueError, match="twelve historically unmeasured"):
         with (
             patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
             patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
@@ -3243,9 +3262,23 @@ def test_capacity_plan_rejects_fewer_than_six_eligible_groups():
             build_capacity_validation_plan(
                 ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
                 experiment_id="capval-local", revision="a" * 40,
-                observed_group_digests=set(), historical_source=_capacity_historical_source(),
+                historical_measured_files=set(), historical_source=_capacity_historical_source(),
                 prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
             )
+
+
+def test_capacity_file_window_attribution_rejects_unowned_fingerprint():
+    preflight, manifests = _capacity_preflight()
+    preflight["corpus"][0] = {**preflight["corpus"][0], "shard_index": 1}
+    preflight["corpus_digest"] = _canonical_digest(preflight["corpus"])
+
+    with pytest.raises(ValueError, match="do not exactly cover"):
+        build_capacity_validation_plan(
+            ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
 
 
 def test_capacity_plan_rejects_tampering_and_calibration_inventory(tmp_path):
@@ -3257,7 +3290,7 @@ def test_capacity_plan_rejects_tampering_and_calibration_inventory(tmp_path):
         plan = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
         )
     plan["units"][0]["fingerprints"].append("f" * 64)
@@ -3290,11 +3323,11 @@ def test_capacity_unit_executes_only_frozen_fingerprints_and_is_non_authoritativ
         plan = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
         )
     unit = plan["units"][0]
-    source = tmp_path / unit["range"]["file"]
+    source = tmp_path / unit["file"]
     source.parent.mkdir(parents=True)
     source.write_text("VALUE = 1\n" * 20)
     tests = tmp_path / unit["mapped_tests"][0]
@@ -3323,6 +3356,7 @@ def test_capacity_unit_executes_only_frozen_fingerprints_and_is_non_authoritativ
     assert result["billing_authority"] is result["authoritative_predecessor"] is False
     assert result["source_restoration"]["restored"] is True
     assert [record["fingerprint"] for record in execute.call_args.args[1]] == unit["fingerprints"]
+    assert execute.call_args.args[3] == unit["ranges"]
     assert execute.call_args.args[5] == 720
 
 
@@ -3335,7 +3369,7 @@ def test_capacity_unit_preserves_partial_and_rejects_foreign_inputs(tmp_path):
         plan = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
         )
     plan_path = tmp_path / "plan.json"
@@ -3399,7 +3433,7 @@ def _capacity_decision_fixture(tmp_path):
         plan = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds=predictions,
         )
     reports = []
@@ -3429,14 +3463,13 @@ def test_capacity_decision_invests_only_when_every_frozen_gate_passes(tmp_path):
 def test_capacity_decision_rejects_two_distinct_material_group_inversions(tmp_path):
     plan, reports = _capacity_decision_fixture(tmp_path)
     inverted_groups = {
-        plan["units"][0]["mapped_test_group_digest"],
-        next(unit["mapped_test_group_digest"] for unit in plan["units"]
-             if unit["mapped_test_group_digest"]
-             != plan["units"][0]["mapped_test_group_digest"]),
+        plan["units"][0]["cost_stratum"],
+        next(unit["cost_stratum"] for unit in plan["units"]
+             if unit["cost_stratum"] != plan["units"][0]["cost_stratum"]),
     }
     for report in reports:
         unit = report["unit"]
-        if unit["mapped_test_group_digest"] in inverted_groups:
+        if unit["cost_stratum"] in inverted_groups:
             report["elapsed_ms"] = (200 if unit["cost_class"] == "low" else 100) * 1000
 
     decision = evaluate_capacity_validation_decision(
@@ -3444,7 +3477,7 @@ def test_capacity_decision_rejects_two_distinct_material_group_inversions(tmp_pa
     )
 
     assert decision["outcome"] == "reject_ranking"
-    assert set(decision["ranking"]["material_inversion_groups"]) == inverted_groups
+    assert {int(item) for item in decision["ranking"]["material_inversion_groups"]} == inverted_groups
 
 
 def test_capacity_decision_preserves_inconclusive_for_shorter_censor(tmp_path):
@@ -3496,7 +3529,7 @@ def test_capacity_package_reproduces_and_rejects_tampered_corpus(tmp_path):
         plan = build_capacity_validation_plan(
             ".", {"test_mappings": _capacity_mapping()}, preflight, manifests,
             experiment_id="capval-local", revision="a" * 40,
-            observed_group_digests=set(), historical_source=_capacity_historical_source(),
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
             prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
         )
         plan_path = tmp_path / "capacity-validation-plan.json"
