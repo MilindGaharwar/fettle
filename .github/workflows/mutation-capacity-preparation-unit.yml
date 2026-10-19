@@ -34,8 +34,8 @@ jobs:
           SHARD: ${{ inputs.shard }}
           AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: >-
-          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and os.environ["SHARD"].isdigit() and 0<=int(os.environ["SHARD"])<256 else 2)'

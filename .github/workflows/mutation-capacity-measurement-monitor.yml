@@ -35,7 +35,7 @@ jobs:
         run: |
           set +e
           mkdir -p capacity-measurement-monitor
-          if ! python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization; validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'; then
+          if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract; capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
             printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
               > capacity-measurement-monitor/final-decision.json
             exit 2
@@ -61,10 +61,10 @@ jobs:
             JOBS="$jobs" DECISION="$decision" python - <<'PY'
           import json, os, re
           from pathlib import Path
-          from fettle.staged_preflight import validate_capacity_authorization
+          from fettle.staged_preflight import capacity_authorization_contract
 
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
-          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
+          authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
           if (
               not isinstance(pages, list) or not pages
               or any(not isinstance(page, dict) or not isinstance(page.get("jobs"), list)

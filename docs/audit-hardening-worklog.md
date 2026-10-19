@@ -1,5 +1,42 @@
 # Audit Hardening Worklog
 
+## 2026-10-19: Standing grant binding and conditional diagnostic ledger
+
+Standing authorization `AH-GRANT-BINDING-20261019-B` permits one narrow binding
+repair, one signed delivery to the two existing authorized branches, and then one
+conditional capacity diagnostic comprising one preparation, twelve exact-once
+measurement units, and one terminal readback. The repair starts from signed commit
+`3626e883a3b0d63b50e98a5cdba501d5ab107f9e` and does not reopen earlier grants or
+attempts. The final candidate, tree, workflow blob identities, review identity,
+delivery runs, dispatch IDs, and observed category charges must be appended here
+before each next phase is treated as eligible.
+
+The committed permission record is fixed to this grant and the reviewed
+non-transferable ceilings: preparation workers 952, preparation support 168,
+preparation cancellation/uncertainty 100, measurement workers 240, measurement
+support 25, terminal readback 10, and measurement cancellation controllers 30
+runner-minutes, totaling 1,525. Dispatch supplies the grant as run provenance. The
+preparation corpus freezes an immutable execution contract containing that grant,
+candidate, experiment, fixed scope, and ceilings. Plans, units, accounting, and
+readback must reproduce or exactly match the originating contract. A well-formed
+caller string alone grants no permission; the prior hard-bound diagnostic grant and
+any other string fail admission. No calibration or qualification authority follows.
+
+The delivery candidate is the signed commit containing this ledger entry. Before
+delivery, the final implementation passed all 799 owning staged-preflight, mutation,
+and parsed-workflow tests; the required full suite passed with 4,923 tests and 20
+skips. Ruff, actionlint, whitespace, changed-file and 425-file Fettle scans, and
+completion validation passed. Independent review closed trust-inversion and
+error-artifact provenance findings, then reported no concrete findings on the
+complete final implementation. Astra advice agreed with the permission/provenance
+split and emphasized that the operational ledger must prevent duplicate dispatches.
+
+Current phase: reviewed repair ready for the one signed delivery. No provider
+workflow has been dispatched and all category consumption under this grant remains
+zero. The next permitted action after exact-head CI and live-state reconciliation is
+one candidate-bound preparation dispatch with this grant and one unique experiment
+identity; no replacement preparation is authorized.
+
 ## 2026-10-19: Pagination consistency and active-grant repair checkpoint
 
 Candidate base is signed commit `ea65710ccab402fcd45f1abb6c113ff935431120`.

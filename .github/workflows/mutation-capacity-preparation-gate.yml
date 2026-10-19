@@ -36,9 +36,11 @@ jobs:
       - name: Validate active grant before provider collection
         env:
           AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
         run: >-
-          python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'
+          python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'
       - name: Collect complete current-attempt provider state
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,11 +66,11 @@ jobs:
           from pathlib import Path
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_capacity_preparation_admission,
-              validate_capacity_authorization,
+              capacity_authorization_contract,
           )
           assert os.environ["GITHUB_RUN_ATTEMPT"] == "1"
           assert os.environ["CANDIDATE_SHA"] == os.environ["GITHUB_SHA"]
-          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
+          authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
           admitted = json.loads(os.environ["ADMITTED_SHARDS"])
           next_shards = json.loads(os.environ["NEXT_SHARDS"])
           accounting = account_runner_minutes(

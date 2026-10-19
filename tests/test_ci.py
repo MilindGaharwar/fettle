@@ -83,6 +83,7 @@ def test_capacity_validation_route_is_registered_dormant_and_isolated():
 
     assert "capacity-validation" in dispatch["mode"]["options"]
     assert dispatch["capacity_stage"]["options"] == ["prepare", "execute", "readback"]
+    assert dispatch["capacity_authorization_id"]["type"] == "string"
     capacity_jobs = {name: job for name, job in jobs.items() if name.startswith("capacity-")}
     assert capacity_jobs
     for job in capacity_jobs.values():
@@ -148,8 +149,8 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
         )
         assert gate["needs"] == f"capacity-enumerate-{batch}"
         assert gate["uses"] == "./.github/workflows/mutation-capacity-preparation-gate.yml"
-        assert gate["with"]["authorization_id"] == "AH-UNTIMED-DIAGNOSTIC-20261018-A"
-        assert worker["with"]["authorization_id"] == "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+        assert gate["with"]["authorization_id"] == "${{ github.event.inputs.capacity_authorization_id }}"
+        assert worker["with"]["authorization_id"] == "${{ github.event.inputs.capacity_authorization_id }}"
         assert json.loads(gate["with"]["admitted_shards"]) == list(range(batch * 16))
         assert json.loads(gate["with"]["next_shards"]) == (
             list(range(batch * 16, min(256, (batch + 1) * 16)))
@@ -171,8 +172,36 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
         "actions": "write", "contents": "read",
     }
     assert jobs["capacity-preparation-monitor"]["with"]["authorization_id"] == (
-        "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+        "${{ github.event.inputs.capacity_authorization_id }}"
     )
+
+
+def test_capacity_grant_input_reaches_every_capacity_consumer_without_historical_coupling():
+    path = Path(PLUGIN_DIR) / ".github/workflows/mutation.yml"
+    workflow = yaml.safe_load(path.read_text())
+    binding = "${{ github.event.inputs.capacity_authorization_id }}"
+    capacity_jobs = {
+        name: job for name, job in workflow["jobs"].items()
+        if name.startswith("capacity-")
+    }
+
+    assert "AH-UNTIMED-DIAGNOSTIC-20261018-A" not in path.read_text()
+    for name, job in capacity_jobs.items():
+        assert (
+            "capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'"
+            in job["if"]
+        ), name
+        if "uses" in job:
+            assert job["with"]["authorization_id"] == binding, name
+            continue
+        scripts = "\n".join(step.get("run", "") for step in job.get("steps", []))
+        if "AUTHORIZATION_ID" in scripts:
+            environments = [
+                step.get("env", {}).get("AUTHORIZATION_ID")
+                for step in job.get("steps", [])
+                if "AUTHORIZATION_ID" in step.get("run", "")
+            ]
+            assert environments and all(value == binding for value in environments), name
 
 
 def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_accounting():
@@ -223,7 +252,7 @@ def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_re
     assert workflow["permissions"] == {"actions": "write", "contents": "read"}
     assert job["timeout-minutes"] == 30
     assert "collect-stable-jobs" in scripts
-    assert "validate_capacity_authorization" in scripts
+    assert "capacity_authorization_contract" in scripts
     assert "AH-CAPACITY-BOUNDED-20261016-A" not in scripts
     assert "measurement worker appeared before admission" in scripts
     assert "len(observed) != len(set(observed))" in scripts
@@ -273,7 +302,7 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
         "CANDIDATE_SHA": "a" * 40, "EXPERIMENT_ID": "capval-local",
         "PREPARATION_RUN_ID": "123", "PLAN_SHA256": "b" * 64,
-        "AUTHORIZATION_ID": "AH-UNTIMED-DIAGNOSTIC-20261018-A",
+        "AUTHORIZATION_ID": "AH-GRANT-BINDING-20261019-B",
     }
     assert _run_actions_bash(script, cwd=tmp_path, env=valid).returncode == 0
     assert _run_actions_bash(
@@ -284,7 +313,7 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
     ).returncode == 2
     assert _run_actions_bash(
         script, cwd=tmp_path,
-        env={**valid, "AUTHORIZATION_ID": "AH-CAPACITY-BOUNDED-20261016-A"},
+        env={**valid, "AUTHORIZATION_ID": "AH-UNTIMED-DIAGNOSTIC-20261018-A"},
     ).returncode != 0
 
 
@@ -309,7 +338,7 @@ def test_capacity_validation_provider_readback_uses_terminal_exact_attempt_recor
 
     assert "capacity_stage == 'readback'" in job["if"]
     assert job["steps"][0]["uses"].startswith("actions/checkout@")
-    assert "validate_capacity_authorization" in scripts
+    assert "capacity_authorization_contract" in scripts
     assert "attempts/1/jobs" in scripts
     assert "collect-stable-jobs" in scripts
     upload = next(
@@ -1630,7 +1659,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 13
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 16
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow

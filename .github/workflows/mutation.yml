@@ -30,6 +30,10 @@ on:
           - prepare
           - execute
           - readback
+      capacity_authorization_id:
+        description: "Owner-approved immutable capacity grant identity"
+        required: false
+        type: string
       capacity_experiment_id:
         description: "Unique capval-* model-validation identity"
         required: false
@@ -521,7 +525,7 @@ jobs:
       probe_id: ${{ github.event.inputs.probe_id }}
 
   capacity-prepare:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     name: capacity validation (prepare manifests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -539,10 +543,10 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: >-
-          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           else 2)'
@@ -565,19 +569,19 @@ jobs:
           retention-days: 90
 
   capacity-preparation-admit-0:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-prepare
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[]'
       next_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 0
 
   capacity-preparation-monitor:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-0
     permissions:
       actions: write
@@ -585,11 +589,11 @@ jobs:
     uses: ./.github/workflows/mutation-capacity-preparation-monitor.yml
     with:
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
   capacity-enumerate-1:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-0
     strategy:
       fail-fast: false
@@ -601,22 +605,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-1:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-1
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]'
       next_shards: '[16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 1
 
   capacity-enumerate-2:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-1
     strategy:
       fail-fast: false
@@ -628,22 +632,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-2:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-2
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]'
       next_shards: '[32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 2
 
   capacity-enumerate-3:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-2
     strategy:
       fail-fast: false
@@ -655,22 +659,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-3:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-3
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]'
       next_shards: '[48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 3
 
   capacity-enumerate-4:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-3
     strategy:
       fail-fast: false
@@ -682,22 +686,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-4:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-4
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]'
       next_shards: '[64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 4
 
   capacity-enumerate-5:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-4
     strategy:
       fail-fast: false
@@ -709,22 +713,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-5:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-5
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79]'
       next_shards: '[80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 5
 
   capacity-enumerate-6:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-5
     strategy:
       fail-fast: false
@@ -736,22 +740,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-6:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-6
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]'
       next_shards: '[96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 6
 
   capacity-enumerate-7:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-6
     strategy:
       fail-fast: false
@@ -763,22 +767,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-7:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-7
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]'
       next_shards: '[112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 7
 
   capacity-enumerate-8:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-7
     strategy:
       fail-fast: false
@@ -790,22 +794,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-8:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-8
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127]'
       next_shards: '[128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 8
 
   capacity-enumerate-9:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-8
     strategy:
       fail-fast: false
@@ -817,22 +821,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-9:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-9
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143]'
       next_shards: '[144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 9
 
   capacity-enumerate-10:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-9
     strategy:
       fail-fast: false
@@ -844,22 +848,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-10:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-10
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]'
       next_shards: '[160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 10
 
   capacity-enumerate-11:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-10
     strategy:
       fail-fast: false
@@ -871,22 +875,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-11:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-11
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175]'
       next_shards: '[176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 11
 
   capacity-enumerate-12:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-11
     strategy:
       fail-fast: false
@@ -898,22 +902,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-12:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-12
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191]'
       next_shards: '[192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 12
 
   capacity-enumerate-13:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-12
     strategy:
       fail-fast: false
@@ -925,22 +929,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-13:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-13
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207]'
       next_shards: '[208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 13
 
   capacity-enumerate-14:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-13
     strategy:
       fail-fast: false
@@ -952,22 +956,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-14:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-14
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223]'
       next_shards: '[224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 14
 
   capacity-enumerate-15:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-14
     strategy:
       fail-fast: false
@@ -979,22 +983,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-15:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-15
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239]'
       next_shards: '[240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 15
 
   capacity-enumerate-16:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-preparation-admit-15
     strategy:
       fail-fast: false
@@ -1006,22 +1010,22 @@ jobs:
       shard: ${{ matrix.shard }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-preparation-admit-16:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-enumerate-16
     uses: ./.github/workflows/mutation-capacity-preparation-gate.yml
     with:
       admitted_shards: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255]'
       next_shards: '[]'
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       gate_id: 16
 
   capacity-freeze-plan:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'prepare' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: [capacity-prepare, capacity-preparation-admit-16, capacity-preparation-monitor]
     name: capacity validation (freeze sample)
     runs-on: ubuntu-latest
@@ -1050,9 +1054,12 @@ jobs:
           name: capacity-preparation-admission-${{ github.run_id }}-16
           path: capacity-preparation-accounting
       - name: Aggregate candidate-bound corpus
+        env:
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
         run: >-
           uv run --no-sync python -m fettle.mutation_test --root .
           --aggregate-capacity-enumeration capacity-enumeration
+          --capacity-experiment-id "$EXPERIMENT_ID"
           --shard-count ${{ needs.capacity-prepare.outputs.shard_count }}
           --json > capacity-validation-corpus.json
       - name: Freeze decision contract, selection assumptions, and exact sample
@@ -1090,7 +1097,7 @@ jobs:
           retention-days: 90
 
   capacity-execute-admission:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     name: capacity validation (execution admission)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1102,10 +1109,10 @@ jobs:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: >-
-          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and re.fullmatch(r"[1-9][0-9]*",os.environ["PREPARATION_RUN_ID"])
@@ -1125,32 +1132,35 @@ jobs:
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import os
           from pathlib import Path
           from fettle.config import load_config
           from fettle.mutation_test import validate_capacity_validation_package
-          from fettle.staged_preflight import validate_capacity_authorization
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
-          validate_capacity_validation_package(
+          plan = validate_capacity_validation_package(
               ".", load_config(".")["mutation"], Path("capacity-preparation"),
               revision=os.environ["GITHUB_SHA"],
               experiment_id=os.environ["EXPERIMENT_ID"],
               plan_file_sha256=os.environ["PLAN_SHA256"],
           )
+          if plan["authorization_id"] != os.environ["AUTHORIZATION_ID"]:
+              raise ValueError("capacity preparation authorization differs")
           PY
       - name: Record execution provenance
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import json, os
           from pathlib import Path
+          plan = json.loads(
+              Path("capacity-preparation/capacity-validation-plan.json").read_text()
+          )
           Path("capacity-validation-execution-source.json").write_text(json.dumps({
               "schema_version": "1", "kind": "capacity_validation_execution_source",
               "revision": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
@@ -1159,6 +1169,7 @@ jobs:
               "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "authorization_contract": plan["authorization_contract"],
               "preparation_run_id": os.environ["PREPARATION_RUN_ID"],
               "plan_file_sha256": os.environ["PLAN_SHA256"],
           }, sort_keys=True) + "\n")
@@ -1171,7 +1182,7 @@ jobs:
           retention-days: 90
 
   capacity-batch-1:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-execute-admission
     strategy:
       fail-fast: false
@@ -1185,10 +1196,10 @@ jobs:
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-measurement-monitor:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-execute-admission
     permissions:
       actions: write
@@ -1196,11 +1207,11 @@ jobs:
     uses: ./.github/workflows/mutation-capacity-measurement-monitor.yml
     with:
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
   capacity-admit-2:
-    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-batch-1
     name: capacity validation (admit batch 2)
     runs-on: ubuntu-latest
@@ -1216,21 +1227,31 @@ jobs:
         with:
           pattern: capacity-validation-unit-${{ github.run_id }}-*
           path: capacity-results
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}
+          path: capacity-preparation
+          run-id: ${{ github.event.inputs.capacity_preparation_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Require four terminal, distinct, restored units
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           from fettle.mutation_test import validate_capacity_validation_results
           reports = [json.loads(path.read_text()) for path in Path("capacity-results").rglob("capacity-validation-result.json")]
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
           plan_digests = {report.get("plan_digest") for report in reports if isinstance(report, dict)}
           assert len(plan_digests) == 1
           validate_capacity_validation_results(
               reports, list(range(4)), revision=__import__("os").environ["GITHUB_SHA"],
               experiment_id=__import__("os").environ["EXPERIMENT_ID"],
               plan_digest=plan_digests.pop(),
+              authorization_id=__import__("os").environ["AUTHORIZATION_ID"],
+              authorization_contract=plan["authorization_contract"],
           )
           # Four completed workers plus the next batch fit the independent worker ceiling.
           assert (4 + 4) * 20 <= 240
@@ -1239,7 +1260,7 @@ jobs:
           PY
 
   capacity-batch-2:
-    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-2.result == 'success'
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-2.result == 'success' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-admit-2
     strategy:
       fail-fast: false
@@ -1253,10 +1274,10 @@ jobs:
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-admit-3:
-    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-batch-2
     name: capacity validation (admit batch 3)
     runs-on: ubuntu-latest
@@ -1272,21 +1293,31 @@ jobs:
         with:
           pattern: capacity-validation-unit-${{ github.run_id }}-*
           path: capacity-results
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}
+          path: capacity-preparation
+          run-id: ${{ github.event.inputs.capacity_preparation_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Require eight terminal, distinct, restored units
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           from fettle.mutation_test import validate_capacity_validation_results
           reports = [json.loads(path.read_text()) for path in Path("capacity-results").rglob("capacity-validation-result.json")]
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
           plan_digests = {report.get("plan_digest") for report in reports if isinstance(report, dict)}
           assert len(plan_digests) == 1
           validate_capacity_validation_results(
               reports, list(range(8)), revision=__import__("os").environ["GITHUB_SHA"],
               experiment_id=__import__("os").environ["EXPERIMENT_ID"],
               plan_digest=plan_digests.pop(),
+              authorization_id=__import__("os").environ["AUTHORIZATION_ID"],
+              authorization_contract=plan["authorization_contract"],
           )
           assert (8 + 4) * 20 <= 240
           assert 5 + 5 + 5 + 10 <= 25
@@ -1294,7 +1325,7 @@ jobs:
           PY
 
   capacity-batch-3:
-    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-3.result == 'success'
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && needs.capacity-admit-3.result == 'success' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: capacity-admit-3
     strategy:
       fail-fast: false
@@ -1308,10 +1339,10 @@ jobs:
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
-      authorization_id: AH-UNTIMED-DIAGNOSTIC-20261018-A
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
 
   capacity-readback:
-    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute'
+    if: always() && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     needs: [capacity-batch-1, capacity-batch-2, capacity-batch-3, capacity-measurement-monitor]
     name: capacity validation (non-authoritative readback)
     runs-on: ubuntu-latest
@@ -1323,16 +1354,26 @@ jobs:
         with:
           pattern: capacity-validation-unit-${{ github.run_id }}-*
           path: capacity-results
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}
+          path: capacity-preparation
+          run-id: ${{ github.event.inputs.capacity_preparation_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Preserve exact visible state and separate accounting authorities
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import json, os
           from pathlib import Path
           from fettle.mutation_test import validate_capacity_validation_results
           reports = []
+          plan = json.loads(
+              Path("capacity-preparation/capacity-validation-plan.json").read_text()
+          )
           malformed = []
           for path in Path("capacity-results").rglob("capacity-validation-result.json"):
               try:
@@ -1365,6 +1406,8 @@ jobs:
                   reports, list(range(12)), revision=os.environ["GITHUB_SHA"],
                   experiment_id=os.environ["EXPERIMENT_ID"],
                   plan_digest=plan_digests.pop(),
+                  authorization_id=os.environ["AUTHORIZATION_ID"],
+                  authorization_contract=plan["authorization_contract"],
               )
           except (TypeError, ValueError) as exc:
               validation_error = str(exc)
@@ -1374,6 +1417,8 @@ jobs:
               "passed": False, "qualification_eligible": False,
               "billing_authority": False, "authoritative_predecessor": False,
               "experiment_id": os.environ["EXPERIMENT_ID"],
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "authorization_contract": plan["authorization_contract"],
               "revision": os.environ["GITHUB_SHA"],
               "plan_file_sha256": os.environ["PLAN_SHA256"],
               "completed_units": completed, "missing_units": missing,
@@ -1399,7 +1444,7 @@ jobs:
           retention-days: 90
 
   capacity-provider-readback:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'readback'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'readback' && github.event.inputs.capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'
     name: capacity validation (provider accounting readback)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1410,10 +1455,10 @@ jobs:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: >-
-          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and re.fullmatch(r"[1-9][0-9]*",os.environ["EXECUTION_RUN_ID"]) else 2)'
@@ -1444,7 +1489,7 @@ jobs:
           EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
           PREPARATION_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
-          AUTHORIZATION_ID: AH-UNTIMED-DIAGNOSTIC-20261018-A
+          AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -1458,6 +1503,9 @@ jobs:
           run = json.loads(Path("capacity-execution-run.json").read_text())
           pages = json.loads(Path("capacity-execution-jobs.json").read_text())
           source = json.loads(Path("capacity-execution-source/capacity-validation-execution-source.json").read_text())
+          plan = load_capacity_validation_plan(
+              Path("capacity-preparation/capacity-validation-plan.json")
+          )
           if source.get("authorization_id") != os.environ["AUTHORIZATION_ID"]:
               raise ValueError("capacity execution source authorization differs")
           ledger = reconcile_capacity_provider_accounting(
@@ -1466,13 +1514,12 @@ jobs:
               execution_run_id=os.environ["EXECUTION_RUN_ID"],
               preparation_run_id=os.environ["PREPARATION_RUN_ID"],
               plan_file_sha256=os.environ["PLAN_SHA256"],
+              authorization_id=os.environ["AUTHORIZATION_ID"],
+              authorization_contract=plan["authorization_contract"],
           )
           Path("capacity-validation-provider-accounting.json").write_text(json.dumps(ledger, indent=2) + "\n")
           evaluation_error = None
           try:
-              plan = load_capacity_validation_plan(
-                  Path("capacity-preparation/capacity-validation-plan.json")
-              )
               reports = []
               for path in Path("capacity-results").rglob("capacity-validation-result.json"):
                   value = json.loads(path.read_text())
@@ -1483,6 +1530,8 @@ jobs:
                   reports, list(range(12)), revision=os.environ["GITHUB_SHA"],
                   experiment_id=os.environ["EXPERIMENT_ID"],
                   plan_digest=plan["digest"],
+                  authorization_id=plan["authorization_id"],
+                  authorization_contract=plan["authorization_contract"],
               )
               worker_elapsed = {}
               for job in ledger["worker"]["jobs"]:
@@ -1501,6 +1550,7 @@ jobs:
                   "qualification_eligible": False, "billing_authority": False,
                   "authoritative_predecessor": False,
                   "authorization_id": os.environ["AUTHORIZATION_ID"],
+                  "authorization_contract": source.get("authorization_contract"),
                   "experiment_id": os.environ["EXPERIMENT_ID"],
                   "revision": os.environ["GITHUB_SHA"], "outcome": "inconclusive",
                   "reasons": ["terminal evidence is missing, malformed, or conflicting"],

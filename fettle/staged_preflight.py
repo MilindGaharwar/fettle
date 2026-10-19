@@ -18,14 +18,86 @@ from pathlib import Path
 from typing import Callable
 
 FROZEN_CANDIDATE = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
-ACTIVE_CAPACITY_AUTHORIZATION_ID = "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+CAPACITY_AUTHORIZATION_ID = "AH-GRANT-BINDING-20261019-B"
+CAPACITY_RESOURCE_CEILINGS = {
+    "preparation_workers": 952,
+    "preparation_support": 168,
+    "preparation_cancellation_uncertainty": 100,
+    "measurement_workers": 240,
+    "measurement_support": 25,
+    "terminal_readback": 10,
+    "measurement_cancellation_controllers": 30,
+}
 
 
-def validate_capacity_authorization(authorization_id: str) -> str:
-    """Accept only the owner-authorized active capacity diagnostic grant."""
-    if authorization_id != ACTIVE_CAPACITY_AUTHORIZATION_ID:
-        raise ValueError("capacity diagnostic authorization is missing, stale, or unauthorized")
+def validate_capacity_authorization(
+    authorization_id: str, *, expected_authorization_id: str | None = None,
+) -> str:
+    """Validate a grant identity and, for consumers, its originating binding."""
+    if (
+        not isinstance(authorization_id, str)
+        or re.fullmatch(r"AH-[A-Z0-9-]{1,61}", authorization_id) is None
+        or (
+            expected_authorization_id is not None
+            and authorization_id != expected_authorization_id
+        )
+    ):
+        raise ValueError("capacity diagnostic authorization is missing, stale, or conflicting")
     return authorization_id
+
+
+def _capacity_authorization_contract(
+    authorization_id: str, candidate_sha: str, experiment_id: str,
+) -> dict:
+    """Build an immutable run-specific capacity execution contract."""
+    authorization_id = validate_capacity_authorization(authorization_id)
+    if re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is None:
+        raise ValueError("capacity diagnostic candidate is malformed")
+    if re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}", experiment_id) is None:
+        raise ValueError("capacity diagnostic experiment ID is malformed")
+    contract = {
+        "schema_version": "1",
+        "kind": "capacity_authorization_contract",
+        "authorization_id": authorization_id,
+        "candidate_sha": candidate_sha,
+        "experiment_id": experiment_id,
+        "scope": {
+            "preparation_dispatches": 1,
+            "measurement_units": 12,
+            "measurement_attempts_per_unit": 1,
+            "terminal_readback_dispatches": 1,
+            "maximum_measurement_concurrency": 4,
+        },
+        "resource_ceiling_minutes": CAPACITY_RESOURCE_CEILINGS,
+        "resource_ceiling_total_minutes": 1525,
+        "transferable": False,
+    }
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    contract["digest"] = hashlib.sha256(encoded).hexdigest()
+    return contract
+
+
+def capacity_authorization_contract(
+    authorization_id: str, candidate_sha: str, experiment_id: str,
+) -> dict:
+    """Admit the one owner-approved grant and build its execution contract."""
+    if authorization_id != CAPACITY_AUTHORIZATION_ID:
+        raise ValueError("capacity diagnostic authorization is not approved for dispatch")
+    return _capacity_authorization_contract(
+        authorization_id, candidate_sha, experiment_id,
+    )
+
+
+def validate_capacity_authorization_contract(
+    contract: dict, *, authorization_id: str, candidate_sha: str, experiment_id: str,
+) -> dict:
+    """Require exact reproduction of the committed owner-approved contract."""
+    expected = _capacity_authorization_contract(
+        authorization_id, candidate_sha, experiment_id,
+    )
+    if contract != expected:
+        raise ValueError("capacity authorization contract is missing, stale, or conflicting")
+    return contract
 SOURCE_RUN_ID = "37464324954"
 SOURCE_ORCHESTRATION_SHA = "891562ba4909b16e6252a0eb7e8674393f43eba0"
 SOURCE_WORKFLOW_REF = (

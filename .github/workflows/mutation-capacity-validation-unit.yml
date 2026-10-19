@@ -41,8 +41,8 @@ jobs:
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
           AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: >-
-          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
-          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and re.fullmatch(r"[0-9a-f]{64}",os.environ["PLAN_SHA256"]) else 2)'
@@ -89,12 +89,14 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
           Path("capacity-validation-result.json").write_text(json.dumps({
               "schema_version": "1", "kind": "capacity_validation_unit_result",
               "status": "not_started", "passed": False,
               "qualification_eligible": False, "billing_authority": False,
               "authoritative_predecessor": False,
               "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "authorization_contract": plan["authorization_contract"],
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "revision": os.environ["GITHUB_SHA"],
               "plan_file_sha256": os.environ["PLAN_SHA256"],
@@ -121,6 +123,7 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
           path = Path("capacity-validation-checkpoint.json")
           if path.is_file():
               raw = json.loads(path.read_text())
@@ -129,7 +132,8 @@ jobs:
                   "status": raw.get("status", "unknown"), "passed": False,
                   "qualification_eligible": False, "billing_authority": False,
                   "authoritative_predecessor": False,
-                  "authorization_id": os.environ["AUTHORIZATION_ID"],
+                   "authorization_id": os.environ["AUTHORIZATION_ID"],
+                   "authorization_contract": plan["authorization_contract"],
                   "experiment_id": os.environ["EXPERIMENT_ID"],
                   "revision": os.environ["GITHUB_SHA"],
                   "unit_index": int(os.environ["UNIT"]),

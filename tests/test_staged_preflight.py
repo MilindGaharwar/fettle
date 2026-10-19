@@ -54,6 +54,7 @@ from scripts.staged_preflight import (
     build_calibration_terminal_accounting,
     combine_calibration_monitor_accounting,
     collect_stable_job_pages,
+    capacity_authorization_contract,
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
@@ -65,6 +66,7 @@ from scripts.staged_preflight import (
     validate_continuation_artifacts,
     validate_continuation_dispatches,
     validate_capacity_authorization,
+    validate_capacity_authorization_contract,
     validate_continuation_batch,
     validate_source_handoff,
 )
@@ -2184,17 +2186,38 @@ def test_stable_job_collection_rejects_valid_second_observation_after_elapsed_bo
 
 @pytest.mark.parametrize(
     "authorization_id",
-    [None, "", "AH-CAPACITY-BOUNDED-20261016-A", "AH-UNTIMED-DIAGNOSTIC-20261018-A ", 1],
+    [None, "", "AH-UNTIMED-DIAGNOSTIC-20261018-A ", "arbitrary", 1],
 )
 def test_capacity_authorization_rejects_missing_stale_and_malformed_identity(authorization_id):
-    with pytest.raises(ValueError, match="missing, stale, or unauthorized"):
+    with pytest.raises(ValueError, match="missing, stale, or conflicting"):
         validate_capacity_authorization(authorization_id)
 
 
-def test_capacity_authorization_accepts_only_active_owner_grant():
-    assert validate_capacity_authorization("AH-UNTIMED-DIAGNOSTIC-20261018-A") == (
-        "AH-UNTIMED-DIAGNOSTIC-20261018-A"
-    )
+def test_capacity_authorization_binds_approved_grant_scope_and_origin():
+    grant = "AH-GRANT-BINDING-20261019-B"
+    candidate = "a" * 40
+    experiment = "capval-local"
+    contract = capacity_authorization_contract(grant, candidate, experiment)
+
+    assert validate_capacity_authorization(grant) == grant
+    assert validate_capacity_authorization_contract(
+        contract, authorization_id=grant, candidate_sha=candidate,
+        experiment_id=experiment,
+    ) == contract
+    assert sum(contract["resource_ceiling_minutes"].values()) == 1525
+    for historical_or_unapproved in (
+        "AH-UNTIMED-DIAGNOSTIC-20261018-A", "AH-CAPACITY-BOUNDED-20261016-A",
+        "AH-OTHER-20261019-C",
+    ):
+        with pytest.raises(ValueError, match="not approved"):
+            capacity_authorization_contract(
+                historical_or_unapproved, candidate, experiment,
+            )
+    with pytest.raises(ValueError, match="conflicting"):
+        validate_capacity_authorization_contract(
+            contract, authorization_id=grant, candidate_sha="b" * 40,
+            experiment_id=experiment,
+        )
 
 
 def test_collect_stable_jobs_cli_emits_payload_consumable_by_accounting(tmp_path):

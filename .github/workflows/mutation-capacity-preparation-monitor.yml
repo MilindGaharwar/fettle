@@ -35,7 +35,7 @@ jobs:
         run: |
           set +e
           mkdir -p capacity-preparation-monitor
-          if ! python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization; validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'; then
+          if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract; capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
             printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
               > capacity-preparation-monitor/final-decision.json
             exit 2
@@ -60,10 +60,10 @@ jobs:
           from pathlib import Path
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_capacity_preparation_admission,
-              validate_capacity_authorization,
+              capacity_authorization_contract,
           )
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
-          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
+          authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
           jobs = [job for page in pages for job in page["jobs"]]
           worker = re.compile(r"^(?:[^/]+ / )?capacity validation \(enumerate (\d+)\)$")
           gate = re.compile(
