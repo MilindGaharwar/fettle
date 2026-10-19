@@ -224,6 +224,27 @@ measurement support, 10 terminal readback, and 30 measurement cancellation
 controllers: 1,525 runner-minutes total. Containment does not guarantee corpus
 completion.
 
+Under `AH-PREP-CONTAINMENT-20261019-C`, the preparation topology is narrowed to
+14 fixed batches of 16 shards followed by four fixed batches of eight. Every
+tail admission repeats stable provider collection and reserves the complete
+35-minute limit for each of its eight workers; a passing earlier tail gate does
+not imply a later gate will pass. The two added admission jobs do not expand
+routine support authority: manifest preparation (10), 19 admission jobs (95),
+and sample freeze (15) reserve 120 of the unchanged 168 minutes.
+
+The sole preparation monitor and all its setup, provider polling, terminal-gate
+artifact retrieval, evidence publication, applicable cancellation request, and
+shutdown are owned by the unchanged 100-minute preparation
+cancellation/uncertainty category. They do not consume routine support or the
+30-minute measurement cancellation-controller category. Its internal observation
+deadline is 70 minutes and job timeout is 90 minutes, leaving a 20-minute
+configured envelope for an in-flight bounded provider call, terminal retrieval,
+publication, applicable cancellation, and shutdown. These
+configuration bounds do not establish a provider billing cap. Missing, delayed,
+unreadable, stale, forged, or conflicting terminal decisions remain non-pass;
+bounded retrieval exhaustion finalizes unavailable evidence and never authorizes
+execution.
+
 ### Frozen Model Decision
 
 Investment requires all 12 exact results, median absolute relative error to the

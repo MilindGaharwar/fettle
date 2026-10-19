@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 FROZEN_CANDIDATE = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
-CAPACITY_AUTHORIZATION_ID = "AH-GRANT-BINDING-20261019-B"
+CAPACITY_AUTHORIZATION_ID = "AH-PREP-CONTAINMENT-20261019-C"
 CAPACITY_RESOURCE_CEILINGS = {
     "preparation_workers": 952,
     "preparation_support": 168,
@@ -27,6 +27,20 @@ CAPACITY_RESOURCE_CEILINGS = {
     "measurement_support": 25,
     "terminal_readback": 10,
     "measurement_cancellation_controllers": 30,
+}
+CAPACITY_RESOURCE_OWNERSHIP = {
+    "preparation_workers": ["capacity enumeration workers"],
+    "preparation_support": [
+        "manifest preparation", "preparation admission gates", "sample freeze",
+    ],
+    "preparation_cancellation_uncertainty": [
+        "preparation monitor setup", "provider polling", "terminal decision retrieval",
+        "monitor evidence publication", "preparation cancellation request", "monitor shutdown",
+    ],
+    "measurement_workers": ["capacity measurement workers"],
+    "measurement_support": ["measurement admission", "measurement batch gates", "in-run readback"],
+    "terminal_readback": ["terminal provider readback"],
+    "measurement_cancellation_controllers": ["measurement monitor and cancellation containment"],
 }
 
 
@@ -69,6 +83,7 @@ def _capacity_authorization_contract(
             "maximum_measurement_concurrency": 4,
         },
         "resource_ceiling_minutes": CAPACITY_RESOURCE_CEILINGS,
+        "resource_ownership": CAPACITY_RESOURCE_OWNERSHIP,
         "resource_ceiling_total_minutes": 1525,
         "transferable": False,
     }
@@ -212,6 +227,12 @@ CAPACITY_PREPARATION_BUDGET = {
     "operational_ceiling_minutes": 1220,
     "worker_timeout_minutes": 35,
     "batch_size": 16,
+    "tail_batch_size": 8,
+    "full_batch_count": 14,
+    "support_job_count": 21,
+    "support_reserved_minutes": 120,
+    "monitor_internal_deadline_minutes": 70,
+    "monitor_job_timeout_minutes": 90,
 }
 _CAPACITY_ENUMERATION_JOB = re.compile(
     r"^(?:[^/]+ / )?capacity validation \(enumerate (\d+)\)$"
@@ -3112,6 +3133,91 @@ def evaluate_capacity_preparation_admission(
         "notice": "Containment reservation only; it does not guarantee corpus completion.",
     }
     return result
+
+
+def capacity_preparation_batches() -> list[list[int]]:
+    """Return the fixed exact-once preparation topology."""
+    policy = CAPACITY_PREPARATION_BUDGET
+    full_stop = policy["full_batch_count"] * policy["batch_size"]
+    batches = [
+        list(range(start, start + policy["batch_size"]))
+        for start in range(0, full_stop, policy["batch_size"])
+    ]
+    batches.extend(
+        list(range(start, start + policy["tail_batch_size"]))
+        for start in range(full_stop, SHARD_COUNT, policy["tail_batch_size"])
+    )
+    if [index for batch in batches for index in batch] != list(range(SHARD_COUNT)):
+        raise ValueError("capacity preparation topology is incomplete or overlapping")
+    return batches
+
+
+def validate_capacity_preparation_terminal_decision(
+    decision: dict, *, gate_id: int, authorization_id: str, candidate_sha: str,
+    experiment_id: str, run_id: str, run_attempt: str,
+    accounting_source: Path,
+) -> dict:
+    """Validate a source-bound terminal reservation decision from one admission gate."""
+    batches = capacity_preparation_batches()
+    if type(gate_id) is not int or not 0 <= gate_id < len(batches):
+        raise ValueError("capacity preparation terminal gate identity is malformed")
+    expected_admitted = [index for batch in batches[:gate_id] for index in batch]
+    expected_next = batches[gate_id]
+    if not isinstance(decision, dict):
+        raise ValueError("capacity preparation terminal decision is malformed")
+    evidence = decision.get("evidence")
+    worker = decision.get("worker")
+    if not isinstance(accounting_source, Path) or not accounting_source.is_file():
+        raise ValueError("capacity preparation terminal accounting source is missing")
+    source_sha256 = hashlib.sha256(accounting_source.read_bytes()).hexdigest()
+    expected = {
+        "schema_version": "1",
+        "kind": "capacity_preparation_admission",
+        "billing_authority": False,
+        "completion_guaranteed": False,
+        "authorization_id": authorization_id,
+        "candidate_sha": candidate_sha,
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "run_attempt": run_attempt,
+        "admitted_shards": expected_admitted,
+        "completed_shards": expected_admitted,
+        "active_shards": [],
+        "not_yet_observed_shards": [],
+        "next_shards": expected_next,
+        "passed": False,
+        "next_permitted_action": "stop_and_reconcile",
+    }
+    if any(decision.get(key) != value for key, value in expected.items()):
+        raise ValueError("capacity preparation terminal decision is stale or conflicting")
+    replayed = evaluate_capacity_preparation_admission(
+        account_runner_minutes(
+            accounting_source,
+            expected_run_id=run_id,
+            expected_run_attempt=run_attempt,
+            job_timeout_minutes=CAPACITY_PREPARATION_BUDGET["worker_timeout_minutes"],
+        ),
+        admitted_shards=expected_admitted,
+        next_shards=expected_next,
+    )
+    for key in (
+        "completed_shards", "active_shards", "not_yet_observed_shards",
+        "worker", "support", "cancellation_uncertainty", "operational_ceiling_minutes",
+        "passed",
+    ):
+        if decision.get(key) != replayed[key]:
+            raise ValueError("capacity preparation terminal decision conflicts with its source")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("provider_jobs") != "capacity-preparation-jobs.json"
+        or evidence.get("accounting_source_sha256") != source_sha256
+        or not isinstance(worker, dict)
+        or worker.get("ceiling_minutes") != CAPACITY_PREPARATION_BUDGET["worker_ceiling_minutes"]
+    ):
+        raise ValueError("capacity preparation terminal accounting is malformed")
+    if worker["reserved_total_minutes"] <= worker["ceiling_minutes"]:
+        raise ValueError("capacity preparation terminal reservation is malformed")
+    return decision
 
 
 def build_calibration_terminal_accounting(

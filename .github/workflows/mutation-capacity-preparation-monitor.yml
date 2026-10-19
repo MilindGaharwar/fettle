@@ -21,7 +21,7 @@ jobs:
   monitor:
     name: capacity validation (monitor preparation containment)
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Monitor admitted worker exposure
@@ -35,12 +35,19 @@ jobs:
         run: |
           set +e
           mkdir -p capacity-preparation-monitor
+          observation_deadline=$(( $(date +%s) + 70 * 60 ))
           if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract; capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
             printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
               > capacity-preparation-monitor/final-decision.json
             exit 2
           fi
           for sample in $(seq 1 190); do
+            if [ "$(date +%s)" -ge "$observation_deadline" ]; then
+              printf '%s\n' '{"action":"cancel","reason":"internal monitor observation deadline expired","terminal_evidence":"unavailable"}' \
+                > capacity-preparation-monitor/final-decision.json
+              touch capacity-preparation-monitor/cancel-run
+              exit 2
+            fi
             jobs="capacity-preparation-monitor/jobs-$sample.json"
             decision="capacity-preparation-monitor/decision-$sample.json"
             attempts="capacity-preparation-monitor/collection-$sample-attempts"
@@ -51,6 +58,7 @@ jobs:
               --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2; then
               printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
               cp "$decision" capacity-preparation-monitor/final-decision.json
+              touch capacity-preparation-monitor/cancel-run
               exit 2
             fi
             OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) JOBS="$jobs" DECISION="$decision" \
@@ -60,7 +68,7 @@ jobs:
           from pathlib import Path
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_capacity_preparation_admission,
-              capacity_authorization_contract,
+              capacity_authorization_contract, capacity_preparation_batches,
           )
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
           authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
@@ -76,10 +84,27 @@ jobs:
               if (match := gate.fullmatch(str(job.get("name", "")))) is not None
               and job.get("status") == "completed" and job.get("conclusion") == "success"
           ]
-          if not completed_gates or completed_gates != sorted(set(completed_gates)):
+          completed_gates.sort()
+          failed_gates = [
+              int(match.group(1))
+              for job in jobs
+              if (match := gate.fullmatch(str(job.get("name", "")))) is not None
+              and job.get("status") == "completed" and job.get("conclusion") != "success"
+          ]
+          if failed_gates:
+              Path("capacity-preparation-monitor/terminal-gate.json").write_text(
+                  json.dumps({"gate_id": min(failed_gates)}) + "\n"
+              )
+              raise SystemExit(11)
+          if (
+              not completed_gates
+              or completed_gates != list(range(max(completed_gates) + 1))
+          ):
               raise ValueError("preparation admission lineage is missing or duplicated")
-          admitted_count = min(256, (max(completed_gates) + 1) * 16)
-          admitted = list(range(admitted_count))
+          batches = capacity_preparation_batches()
+          admitted = [
+              index for batch in batches[:max(completed_gates) + 1] for index in batch
+          ]
           terminal = []
           failed = []
           for job in jobs:
@@ -135,11 +160,81 @@ jobs:
             status=$?
             cp "$decision" capacity-preparation-monitor/final-decision.json
             if [ "$status" -eq 10 ]; then exit 0; fi
+            if [ "$status" -eq 11 ]; then
+              gate_id=$(python -c 'import json; print(json.load(open("capacity-preparation-monitor/terminal-gate.json"))["gate_id"])')
+              artifact="capacity-preparation-admission-$GITHUB_RUN_ID-$gate_id"
+              rm -rf capacity-preparation-monitor/terminal-admission
+              retrieved=false
+              for _ in 1 2 3; do
+                if timeout 10s gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                    --name "$artifact" --dir capacity-preparation-monitor/terminal-admission; then
+                  retrieved=true
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$retrieved" = true ]; then
+                GATE_ID="$gate_id" python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from fettle.staged_preflight import validate_capacity_preparation_terminal_decision
+          source = Path("capacity-preparation-monitor/terminal-admission/capacity-preparation-admission.json")
+          decision = json.loads(source.read_text())
+          validate_capacity_preparation_terminal_decision(
+              decision, gate_id=int(os.environ["GATE_ID"]),
+              authorization_id=os.environ["AUTHORIZATION_ID"],
+              candidate_sha=os.environ["CANDIDATE_SHA"],
+              experiment_id=os.environ["EXPERIMENT_ID"],
+              run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              accounting_source=Path(
+                  "capacity-preparation-monitor/terminal-admission/capacity-preparation-jobs.json"
+              ),
+          )
+          Path("capacity-preparation-monitor/final-decision.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "capacity_preparation_monitor_terminal",
+              "action": "stop_and_reconcile", "reason": "admission reservation failed",
+              "terminal_evidence": "validated", "terminal_gate_id": int(os.environ["GATE_ID"]),
+              "terminal_decision_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "next_permitted_action": "stop_and_reconcile",
+          }, indent=2) + "\n")
+          PY
+                validation_status=$?
+              else
+                validation_status=2
+              fi
+              if [ "$validation_status" -ne 0 ]; then
+                GATE_ID="$gate_id" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path("capacity-preparation-monitor/final-decision.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "capacity_preparation_monitor_terminal",
+              "action": "stop_and_reconcile",
+              "reason": "terminal admission decision unavailable or invalid",
+              "terminal_evidence": "unavailable", "terminal_gate_id": int(os.environ["GATE_ID"]),
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "next_permitted_action": "stop_and_reconcile",
+          }, indent=2) + "\n")
+          PY
+              fi
+              exit 2
+            fi
+            if [ "$status" -eq 2 ]; then
+              touch capacity-preparation-monitor/cancel-run
+              exit 2
+            fi
             if [ "$status" -ne 0 ]; then exit 2; fi
             sleep 30
           done
-          printf '%s\n' '{"action":"cancel","reason":"monitor observation deadline expired"}' \
+          printf '%s\n' '{"action":"cancel","reason":"monitor observation loop exhausted","terminal_evidence":"unavailable"}' \
             > capacity-preparation-monitor/final-decision.json
+          touch capacity-preparation-monitor/cancel-run
           exit 2
       - name: Retain monitor state before cancellation
         if: always()
@@ -150,7 +245,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Request cancellation after retaining diagnostics
-        if: steps.monitor.outcome == 'failure'
+        if: steps.monitor.outcome == 'failure' && hashFiles('capacity-preparation-monitor/cancel-run') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-

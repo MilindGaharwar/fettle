@@ -1,5 +1,116 @@
 # Audit Hardening Worklog
 
+## 2026-10-19: Preparation containment repair under grant C
+
+Authorization `AH-PREP-CONTAINMENT-20261019-C` permits one surgical repair, the
+existing one signed delivery to the two authorized branches, and then one renewed
+candidate-bound preparation. It does not reopen or grant consumption credit for
+`AH-GRANT-BINDING-20261019-B` or run `39214933118`; both remain closed non-pass
+under the entry below. If the renewed preparation produces a complete validated
+corpus and frozen plan, the same C grant conditionally permits the exact 12-unit
+measurement and one terminal provider readback. It permits no rerun, replacement
+campaign, sample substitution, calibration, qualification, host probe, acceptance,
+merge, tag, release, or unrelated work.
+
+The repair fixes preparation at 14 sequential 16-worker batches followed by four
+sequential 8-worker tail batches. Every gate recollects stable provider accounting
+and reserves each next worker's complete 35-minute limit. A prior gate's success
+does not guarantee later admission or corpus completion. The retained gate-14
+snapshot from run `39214933118` remains historical evidence: 403.23 observed plus
+560 reserved rejects 16 workers at 963.23, while 403.23 plus 280 makes eight workers
+eligible at 683.23. Later accounting may still reject any tail batch, including one
+worker, and incomplete evidence remains non-pass.
+
+The unchanged preparation categories remain non-transferable: workers 952, routine
+support 168, and cancellation/uncertainty 100 runner-minutes. Routine support
+reserves 120 configured minutes: manifest preparation 10, nineteen admission jobs
+95, and freeze 15. The sole preparation monitor owns setup, provider polling,
+terminal-decision retrieval, monitor evidence publication, any applicable
+preparation cancellation request, and shutdown within the same frozen 100-minute
+cancellation/uncertainty category. Its 70-minute observation deadline and 90-minute
+job timeout leave a 20-minute configured finalization envelope; these operational
+bounds are not provider billing statements. Measurement categories remain workers
+240, support 25, terminal readback 10, and cancellation controllers 30, preserving
+the total 1,525-minute envelope.
+
+Terminal gate failure blocks dependent workers through the static dependency chain.
+The monitor accepts a terminal admission decision only after exact grant, candidate,
+experiment, run, attempt, gate lineage, shard topology, and provider-snapshot bytes
+replay through the production accounting evaluator. Retrieval is limited to three
+10-second attempts with fixed delay. Missing, delayed, unreadable, stale, forged, or
+conflicting evidence finalizes `stop_and_reconcile` as unavailable/non-pass. A gate
+failure without a valid published decision does not blindly cancel already-terminal
+jobs; explicit live over-exposure, worker failure, provider-read exhaustion, or the
+monitor deadline retains diagnostics before requesting run cancellation.
+
+Current uncommitted implementation diff excluding this worklog has SHA-256
+`d90c2b5d79e269cd38b70dea1012c20d0d8fffa8f79d05f5d23d998b5ae79239`.
+The 805 owning staged-preflight, mutation, and parsed-workflow tests pass together.
+The final exact-diff full suite passes with 4,929 tests and 20 skips. All-file Ruff, targeted
+changed-workflow actionlint, diff hygiene, the locked changed-file Fettle check, and
+checkpoint completion validation pass. Repository-wide actionlint separately reports
+the pre-existing SC2155 warning in untouched `.github/workflows/release.yml`; it is
+not hidden or treated as changed-workflow evidence. Independent complete-diff review,
+signed delivery, literal-head CI, live provider history reconciliation, and dispatch
+remain pending. No provider workflow has been dispatched under C; all C-grant
+category consumption remains zero.
+
+Independent review bound substantive diff
+`d90c2b5d79e269cd38b70dea1012c20d0d8fffa8f79d05f5d23d998b5ae79239`,
+traced all five required focus areas, and found no concrete
+defect. Its only blocking uncertainty—whether `account_runner_minutes` accepts and
+validates the run, attempt, and timeout keywords used by the gate, monitor, and
+terminal replay—was resolved directly at the production signature. The review's
+sentinel-path residual risk prompted an additional parsed-workflow regression that
+proves terminal-artifact unavailability finalizes non-pass without blind
+cancellation, while explicit live containment paths set the cancellation sentinel.
+That affected test and the neighboring producer/consumer and source-replay tests
+pass; targeted actionlint, Ruff, and diff hygiene remain clean.
+
+## 2026-10-19: Grant-bound capacity diagnostic closed inconclusive
+
+The only preparation authorized by `AH-GRANT-BINDING-20261019-B` was dispatched
+as run [`39214933118`](https://github.com/MilindGaharwar/fettle/actions/runs/39214933118),
+attempt 1, for candidate `2d9620d1cc1a3891a26af94a58777a8b5b97b022` and
+experiment `capval-grant-binding-20261019-b`. Provider history was reconciled
+before dispatch and contained no earlier preparation for this candidate and grant.
+The run completed `failure`; it is the sole preparation and will not be rerun,
+replaced, resumed, or used for sample substitution.
+
+All 224 admitted enumeration workers for shards 0--223 completed successfully and
+published 224 retained enumeration artifacts. Admission gate 14 then failed closed:
+the stable provider snapshot measured 403.23 preparation-worker minutes and the
+required reservation for the next fixed batch, shards 224--239, was 560 minutes.
+The resulting 963.23-minute reservation exceeded the non-transferable 952-minute
+preparation-worker ceiling. Shards 224--255 were never launched. Gates 15 and 16
+subsequently rejected their static presumed lineages because the corresponding
+admitted workers were absent. The sample-freeze job then failed while aggregating
+an incomplete 224-of-256 artifact set. No complete corpus, immutable preparation
+contract, 12-unit plan, or plan SHA-256 exists.
+
+Provider terminal timestamps reconcile observed exposure as follows. These are
+elapsed operational estimates, not provider billing authority: 403.23 minutes for
+the 224 preparation workers; 9.83 minutes for manifest preparation, admission
+gates, and the failed freeze job; and 100.47 minutes for the preparation containment
+monitor, for 513.53 minutes total. The monitor retained artifact
+`capacity-preparation-monitor-39214933118` before its 100-minute job timeout, but
+provider termination completed about 0.47 minute beyond the non-transferable
+100-minute preparation cancellation/uncertainty ceiling. Its final retained decision
+still said `continue_observation`: the monitor derived admission only from successful
+gates, so it did not convert gate 14's terminal non-pass into a stop before timing
+out. This overrun and containment outcome remain non-pass and are not offset with
+unused worker or support authority. No repair or repeat is authorized. Measurement
+workers, measurement support, measurement cancellation controllers, and terminal
+readback each consumed zero minutes.
+
+Finite closure decision: **inconclusive**. The preparation did not establish a
+valid frozen sample, so neither a proposal nor a model rejection can be derived.
+The conditional 12-unit execution and terminal diagnostic readback were ineligible
+and were not dispatched. This result supplies no corpus-wide percentile,
+affordability, qualification, calibration, AH07 acceptance, merge, tag, release,
+or broader-acceptance evidence. Authorization `AH-GRANT-BINDING-20261019-B` is
+closed; no further provider action is permitted under it.
+
 ## 2026-10-19: Standing grant binding and conditional diagnostic ledger
 
 Standing authorization `AH-GRANT-BINDING-20261019-B` permits one narrow binding

@@ -59,6 +59,8 @@ from scripts.staged_preflight import (
     plan_calibration_continuation,
     evaluate_calibration_budget,
     evaluate_capacity_preparation_admission,
+    capacity_preparation_batches,
+    validate_capacity_preparation_terminal_decision,
     retain_historical_accounting_floor,
     reserve_bounded_support_minutes,
     validate_wave,
@@ -2194,7 +2196,7 @@ def test_capacity_authorization_rejects_missing_stale_and_malformed_identity(aut
 
 
 def test_capacity_authorization_binds_approved_grant_scope_and_origin():
-    grant = "AH-GRANT-BINDING-20261019-B"
+    grant = "AH-PREP-CONTAINMENT-20261019-C"
     candidate = "a" * 40
     experiment = "capval-local"
     contract = capacity_authorization_contract(grant, candidate, experiment)
@@ -2205,6 +2207,11 @@ def test_capacity_authorization_binds_approved_grant_scope_and_origin():
         experiment_id=experiment,
     ) == contract
     assert sum(contract["resource_ceiling_minutes"].values()) == 1525
+    assert contract["resource_ownership"]["preparation_cancellation_uncertainty"] == [
+        "preparation monitor setup", "provider polling", "terminal decision retrieval",
+        "monitor evidence publication", "preparation cancellation request", "monitor shutdown",
+    ]
+    assert "preparation monitor setup" not in contract["resource_ownership"]["preparation_support"]
     for historical_or_unapproved in (
         "AH-UNTIMED-DIAGNOSTIC-20261018-A", "AH-CAPACITY-BOUNDED-20261016-A",
         "AH-OTHER-20261019-C",
@@ -2367,6 +2374,64 @@ def test_capacity_preparation_admission_refuses_unsafe_or_uncertain_snapshots():
         )
 
 
+def test_capacity_preparation_gate_14_retained_exposure_rejects_16_but_allows_8():
+    # Retained aggregate from run 39214933118 gate 14. The equal per-worker split is
+    # a local replay model, not provider billing or evidence of later completion.
+    admitted = list(range(224))
+    per_worker = 403.23 / len(admitted)
+    jobs = [_capacity_worker(index, minutes=per_worker) for index in admitted]
+
+    rejected = evaluate_capacity_preparation_admission(
+        _capacity_accounting(jobs), admitted_shards=admitted,
+        next_shards=list(range(224, 240)),
+    )
+    eligible = evaluate_capacity_preparation_admission(
+        _capacity_accounting(jobs), admitted_shards=admitted,
+        next_shards=list(range(224, 232)),
+    )
+
+    assert rejected["worker"]["observed_minutes"] == 403.23
+    assert rejected["worker"]["next_batch_reservation_minutes"] == 560
+    assert rejected["worker"]["reserved_total_minutes"] == 963.23
+    assert rejected["passed"] is False
+    assert eligible["worker"]["next_batch_reservation_minutes"] == 280
+    assert eligible["worker"]["reserved_total_minutes"] == 683.23
+    assert eligible["passed"] is True
+
+
+def test_capacity_preparation_tail_scenarios_recheck_each_batch_and_can_still_stop():
+    # Explicit simulation only: each decision uses full 35-minute reservations.
+    admitted = list(range(224))
+    jobs = [_capacity_worker(index, minutes=403.23 / 224) for index in admitted]
+    for start, added_observed in ((224, 120.0), (232, 80.0), (240, 60.0)):
+        decision = evaluate_capacity_preparation_admission(
+            _capacity_accounting(jobs), admitted_shards=admitted,
+            next_shards=list(range(start, start + 8)),
+        )
+        assert decision["passed"] is True
+        jobs.extend(
+            _capacity_worker(index, minutes=added_observed / 8)
+            for index in range(start, start + 8)
+        )
+        admitted.extend(range(start, start + 8))
+
+    blocked = evaluate_capacity_preparation_admission(
+        _capacity_accounting(jobs), admitted_shards=admitted,
+        next_shards=list(range(248, 256)),
+    )
+    assert blocked["worker"]["observed_minutes"] == 663.23
+    assert blocked["worker"]["reserved_total_minutes"] == 943.23
+    assert blocked["passed"] is True
+
+    jobs = [_capacity_worker(index, minutes=918.23 / 248) for index in range(248)]
+    insufficient_for_one = evaluate_capacity_preparation_admission(
+        _capacity_accounting(jobs), admitted_shards=list(range(248)), next_shards=[248],
+    )
+    assert insufficient_for_one["worker"]["observed_minutes"] == 918.23
+    assert insufficient_for_one["worker"]["reserved_total_minutes"] == 953.23
+    assert insufficient_for_one["passed"] is False
+
+
 def test_capacity_preparation_policy_categories_are_exact_and_nontransferable():
     assert CAPACITY_PREPARATION_BUDGET == {
         "worker_ceiling_minutes": 952,
@@ -2375,7 +2440,111 @@ def test_capacity_preparation_policy_categories_are_exact_and_nontransferable():
         "operational_ceiling_minutes": 1220,
         "worker_timeout_minutes": 35,
         "batch_size": 16,
+        "tail_batch_size": 8,
+        "full_batch_count": 14,
+        "support_job_count": 21,
+        "support_reserved_minutes": 120,
+        "monitor_internal_deadline_minutes": 70,
+        "monitor_job_timeout_minutes": 90,
     }
+
+
+def test_capacity_preparation_topology_and_support_reservation_fit_frozen_categories():
+    batches = capacity_preparation_batches()
+
+    assert [len(batch) for batch in batches] == [16] * 14 + [8] * 4
+    assert [index for batch in batches for index in batch] == list(range(256))
+    assert max(len(batch) for batch in batches[-4:]) == 8
+    assert CAPACITY_PREPARATION_BUDGET["support_reserved_minutes"] == 120
+    assert CAPACITY_PREPARATION_BUDGET["support_reserved_minutes"] <= 168
+    assert CAPACITY_PREPARATION_BUDGET["monitor_internal_deadline_minutes"] == 70
+    assert 70 < CAPACITY_PREPARATION_BUDGET["monitor_job_timeout_minutes"] < 100
+
+
+def _terminal_capacity_decision(tmp_path):
+    admitted = list(range(224))
+    source = tmp_path / "capacity-preparation-jobs.json"
+    jobs = []
+    for index in admitted:
+        job = _job(
+            index + 1, run_id=42, start="2026-10-06T01:00:00Z",
+            end="2026-10-06T01:03:06Z",
+        )
+        job["name"] = f"capacity validation (enumerate {index})"
+        jobs.append(job)
+    source.write_text(json.dumps([{"total_count": len(jobs), "jobs": jobs}]))
+    result = evaluate_capacity_preparation_admission(
+        account_runner_minutes(
+            source, expected_run_id="42", expected_run_attempt="1",
+            job_timeout_minutes=35,
+        ),
+        admitted_shards=admitted, next_shards=list(range(224, 232)),
+    )
+    assert result["passed"] is False
+    result.update({
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "candidate_sha": "a" * 40,
+        "experiment_id": "capval-local",
+        "run_id": "42",
+        "run_attempt": "1",
+        "next_permitted_action": "stop_and_reconcile",
+        "evidence": {
+            "provider_jobs": "capacity-preparation-jobs.json",
+            "accounting_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        },
+    })
+    return result, source
+
+
+def test_capacity_preparation_terminal_decision_binds_source_and_rejects_conflicts(tmp_path):
+    decision, source = _terminal_capacity_decision(tmp_path)
+    kwargs = {
+        "gate_id": 14,
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "candidate_sha": "a" * 40,
+        "experiment_id": "capval-local",
+        "run_id": "42",
+        "run_attempt": "1",
+        "accounting_source": source,
+    }
+
+    assert validate_capacity_preparation_terminal_decision(decision, **kwargs) is decision
+    for key, value in (
+        ("run_id", "41"), ("authorization_id", "AH-GRANT-BINDING-20261019-B"),
+        ("candidate_sha", "c" * 40), ("passed", True),
+    ):
+        with pytest.raises(ValueError, match="stale or conflicting"):
+            validate_capacity_preparation_terminal_decision(
+                {**decision, key: value}, **kwargs,
+            )
+    with pytest.raises(ValueError, match="accounting"):
+        validate_capacity_preparation_terminal_decision(
+            {**decision, "evidence": {}}, **kwargs,
+        )
+    source.write_text(source.read_text() + "\n")
+    with pytest.raises(ValueError, match="accounting"):
+        validate_capacity_preparation_terminal_decision(decision, **kwargs)
+
+
+def test_capacity_preparation_terminal_decision_rejects_missing_or_wrong_gate_lineage(tmp_path):
+    decision, source = _terminal_capacity_decision(tmp_path)
+    kwargs = {
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "candidate_sha": "a" * 40,
+        "experiment_id": "capval-local",
+        "run_id": "42",
+        "run_attempt": "1",
+        "accounting_source": source,
+    }
+
+    with pytest.raises(ValueError, match="malformed"):
+        validate_capacity_preparation_terminal_decision(
+            decision, gate_id=19, **kwargs,
+        )
+    with pytest.raises(ValueError, match="stale or conflicting"):
+        validate_capacity_preparation_terminal_decision(
+            decision, gate_id=15, **kwargs,
+        )
 
 
 def test_calibration_budget_reserves_cancellation_lag_and_rejects_unknown_usage():

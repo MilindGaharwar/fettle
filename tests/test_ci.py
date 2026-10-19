@@ -135,13 +135,15 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
     )
     jobs = workflow["jobs"]
     selected = []
-    for batch in range(1, 17):
+    batches = [list(range(start, start + 16)) for start in range(0, 224, 16)]
+    batches.extend(list(range(start, start + 8)) for start in range(224, 256, 8))
+    admitted = []
+    for batch, indexes in enumerate(batches, start=1):
         worker = jobs[f"capacity-enumerate-{batch}"]
         gate = jobs[f"capacity-preparation-admit-{batch}"]
-        indexes = list(range((batch - 1) * 16, batch * 16))
         selected.extend(worker["strategy"]["matrix"]["shard"])
         assert worker["strategy"]["matrix"]["shard"] == indexes
-        assert worker["strategy"]["max-parallel"] == 16
+        assert worker["strategy"]["max-parallel"] == len(indexes)
         assert worker["uses"] == "./.github/workflows/mutation-capacity-preparation-unit.yml"
         assert worker["needs"] == (
             "capacity-preparation-admit-0" if batch == 1
@@ -151,9 +153,10 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
         assert gate["uses"] == "./.github/workflows/mutation-capacity-preparation-gate.yml"
         assert gate["with"]["authorization_id"] == "${{ github.event.inputs.capacity_authorization_id }}"
         assert worker["with"]["authorization_id"] == "${{ github.event.inputs.capacity_authorization_id }}"
-        assert json.loads(gate["with"]["admitted_shards"]) == list(range(batch * 16))
+        admitted.extend(indexes)
+        assert json.loads(gate["with"]["admitted_shards"]) == admitted
         assert json.loads(gate["with"]["next_shards"]) == (
-            list(range(batch * 16, min(256, (batch + 1) * 16)))
+            batches[batch] if batch < len(batches) else []
         )
     assert selected == list(range(256))
     initial = jobs["capacity-preparation-admit-0"]
@@ -161,7 +164,7 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
     assert json.loads(initial["with"]["admitted_shards"]) == []
     assert json.loads(initial["with"]["next_shards"]) == list(range(16))
     assert jobs["capacity-freeze-plan"]["needs"] == [
-        "capacity-prepare", "capacity-preparation-admit-16",
+        "capacity-prepare", "capacity-preparation-admit-18",
         "capacity-preparation-monitor",
     ]
     assert jobs["capacity-preparation-monitor"]["needs"] == "capacity-preparation-admit-0"
@@ -188,7 +191,7 @@ def test_capacity_grant_input_reaches_every_capacity_consumer_without_historical
     assert "AH-UNTIMED-DIAGNOSTIC-20261018-A" not in path.read_text()
     for name, job in capacity_jobs.items():
         assert (
-            "capacity_authorization_id == 'AH-GRANT-BINDING-20261019-B'"
+            "capacity_authorization_id == 'AH-PREP-CONTAINMENT-20261019-C'"
             in job["if"]
         ), name
         if "uses" in job:
@@ -226,13 +229,48 @@ def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_
     monitor_job = monitor["jobs"]["monitor"]
     monitor_scripts = "\n".join(step.get("run", "") for step in monitor_job["steps"])
     assert monitor["permissions"] == {"actions": "write", "contents": "read"}
-    assert monitor_job["timeout-minutes"] == 100
+    assert monitor_job["timeout-minutes"] == 90
     assert "evaluate_capacity_preparation_admission" in monitor_scripts
+    assert "capacity_preparation_batches" in monitor_scripts
+    assert "validate_capacity_preparation_terminal_decision" in monitor_scripts
+    assert "observation_deadline=$(( $(date +%s) + 70 * 60 ))" in monitor_scripts
+    assert "for _ in 1 2 3" in monitor_scripts
+    assert "timeout 10s gh run download" in monitor_scripts
+    assert "terminal admission decision unavailable or invalid" in monitor_scripts
+    assert 'job.get("conclusion") != "success"' in monitor_scripts
+    assert "accounting_source=Path(" in monitor_scripts
+    assert 'if [ "$status" -eq 2 ]; then' in monitor_scripts
     assert "enumeration worker appeared before admission" in monitor_scripts
     assert "actions/runs/$GITHUB_RUN_ID/cancel" in monitor_scripts
     assert "all 256 enumeration workers are terminal-success" in monitor_scripts
     assert "collect-stable-jobs" in monitor_scripts
     assert "AH-CAPACITY-BOUNDED-20261016-A" not in monitor_scripts
+
+
+def test_capacity_preparation_monitor_fallback_is_bounded_without_blind_cancellation():
+    path = Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-preparation-monitor.yml"
+    workflow = yaml.safe_load(path.read_text())
+    job = workflow["jobs"]["monitor"]
+    monitor = next(step for step in job["steps"] if step.get("id") == "monitor")["run"]
+    cancel = next(
+        step for step in job["steps"]
+        if step.get("name") == "Request cancellation after retaining diagnostics"
+    )
+    terminal_branch = monitor.split('if [ "$status" -eq 11 ]; then', 1)[1].split(
+        'if [ "$status" -eq 2 ]; then', 1,
+    )[0]
+
+    assert terminal_branch.count("for _ in 1 2 3") == 1
+    assert terminal_branch.count("timeout 10s gh run download") == 1
+    assert '"terminal_evidence": "unavailable"' in terminal_branch
+    assert "touch capacity-preparation-monitor/cancel-run" not in terminal_branch
+    assert "touch capacity-preparation-monitor/cancel-run" in monitor.split(
+        'if [ "$status" -eq 2 ]; then', 1,
+    )[1]
+    assert cancel["if"] == (
+        "steps.monitor.outcome == 'failure' && "
+        "hashFiles('capacity-preparation-monitor/cancel-run') != ''"
+    )
 
 
 def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_retention():
@@ -302,7 +340,7 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
         "CANDIDATE_SHA": "a" * 40, "EXPERIMENT_ID": "capval-local",
         "PREPARATION_RUN_ID": "123", "PLAN_SHA256": "b" * 64,
-        "AUTHORIZATION_ID": "AH-GRANT-BINDING-20261019-B",
+        "AUTHORIZATION_ID": "AH-PREP-CONTAINMENT-20261019-C",
     }
     assert _run_actions_bash(script, cwd=tmp_path, env=valid).returncode == 0
     assert _run_actions_bash(

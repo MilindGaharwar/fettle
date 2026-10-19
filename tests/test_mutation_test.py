@@ -125,9 +125,9 @@ def _capacity_preflight():
         "kind": "capacity_validation_corpus", "status": "enumerated", "passed": False,
         "qualification_eligible": False, "billing_authority": False,
         "authoritative_predecessor": False,
-        "authorization_id": "AH-GRANT-BINDING-20261019-B",
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
         "authorization_contract": capacity_authorization_contract(
-            "AH-GRANT-BINDING-20261019-B", "a" * 40, "capval-local",
+            "AH-PREP-CONTAINMENT-20261019-C", "a" * 40, "capval-local",
         ),
         "revision": "a" * 40,
         "shard_count": 12,
@@ -3215,7 +3215,7 @@ def test_capacity_plan_selects_whole_file_units_across_six_cost_strata(tmp_path)
     assert contract["censoring"]["shorter_timeout_never_proves_operating_target_exceeded"] is True
     assert contract["outcome_precedence"][-1] == "inconclusive"
     assert contract["substitution_allowed"] is contract["rerun_allowed"] is False
-    assert first["authorization_id"] == "AH-GRANT-BINDING-20261019-B"
+    assert first["authorization_id"] == "AH-PREP-CONTAINMENT-20261019-C"
     assert second == first
 
     path = tmp_path / "plan.json"
@@ -3239,7 +3239,7 @@ def test_capacity_enumeration_is_non_authoritative_and_rejects_canonical_input(t
         **canonical, "kind": "capacity_validation_enumeration_shard",
         "status": "enumerated", "passed": False, "qualification_eligible": False,
         "billing_authority": False, "authoritative_predecessor": False,
-        "authorization_id": "AH-GRANT-BINDING-20261019-B",
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
     }
 
     with patch("fettle.mutation_test._revision", return_value="a" * 40):
@@ -3416,8 +3416,8 @@ def test_capacity_result_validation_rejects_partial_conflicting_and_authoritativ
         "schema_version": "1", "kind": "capacity_validation_unit_result",
         "status": "completed", "passed": False, "qualification_eligible": False,
         "billing_authority": False, "authoritative_predecessor": False,
-        "authorization_id": "AH-GRANT-BINDING-20261019-B",
-        "authorization_contract": __import__("fettle.staged_preflight", fromlist=["capacity_authorization_contract"]).capacity_authorization_contract("AH-GRANT-BINDING-20261019-B", "a" * 40, "capval-local"),
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "authorization_contract": __import__("fettle.staged_preflight", fromlist=["capacity_authorization_contract"]).capacity_authorization_contract("AH-PREP-CONTAINMENT-20261019-C", "a" * 40, "capval-local"),
         "experiment_id": "capval-local", "revision": "a" * 40,
         "plan_digest": "p" * 64, "unit_index": 0,
         "unit": {"fingerprints": ["f" * 64]},
@@ -3430,7 +3430,7 @@ def test_capacity_result_validation_rejects_partial_conflicting_and_authoritativ
 
     validate_capacity_validation_results(
         [base], [0], revision="a" * 40, experiment_id="capval-local", plan_digest="p" * 64,
-        authorization_id="AH-GRANT-BINDING-20261019-B",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=base["authorization_contract"],
     )
     for mutation in (
@@ -3450,7 +3450,7 @@ def test_capacity_result_validation_rejects_partial_conflicting_and_authoritativ
             validate_capacity_validation_results(
                 [report], [0], revision="a" * 40,
                 experiment_id="capval-local", plan_digest="p" * 64,
-                authorization_id="AH-GRANT-BINDING-20261019-B",
+                authorization_id="AH-PREP-CONTAINMENT-20261019-C",
                 authorization_contract=base["authorization_contract"],
             )
 
@@ -3602,8 +3602,8 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         "kind": "capacity_validation_execution_source", "revision": "a" * 40,
         "run_id": "123", "run_attempt": "1", "experiment_id": "capval-local",
         "preparation_run_id": "100", "plan_file_sha256": "p" * 64,
-        "authorization_id": "AH-GRANT-BINDING-20261019-B",
-        "authorization_contract": __import__("fettle.staged_preflight", fromlist=["capacity_authorization_contract"]).capacity_authorization_contract("AH-GRANT-BINDING-20261019-B", "a" * 40, "capval-local"),
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "authorization_contract": __import__("fettle.staged_preflight", fromlist=["capacity_authorization_contract"]).capacity_authorization_contract("AH-PREP-CONTAINMENT-20261019-C", "a" * 40, "capval-local"),
         "workflow_sha": "a" * 40,
         "workflow_ref": "owner/repo/.github/workflows/mutation.yml@refs/heads/audit",
     }
@@ -3632,7 +3632,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         run, pages, source, repository="owner/repo",
         revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-GRANT-BINDING-20261019-B",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     failed = reconcile_capacity_provider_accounting(
@@ -3642,11 +3642,11 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         source, repository="owner/repo", revision="a" * 40,
         experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-                authorization_id="AH-GRANT-BINDING-20261019-B",
+                authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     assert valid["status"] == "completed" and valid["passed"] is False
-    assert valid["authorization_id"] == "AH-GRANT-BINDING-20261019-B"
+    assert valid["authorization_id"] == "AH-PREP-CONTAINMENT-20261019-C"
     assert failed["status"] == "non_pass"
     assert failed["cancellation_controller"]["status"] == "completed"
     for invalid_source in (
@@ -3659,7 +3659,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
                 run, pages, invalid_source, repository="owner/repo",
                 revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
                 preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-GRANT-BINDING-20261019-B",
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
             )
     with pytest.raises(ValueError, match="duplicated"):
@@ -3668,14 +3668,14 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             source, repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-GRANT-BINDING-20261019-B",
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
         )
     missing_support = reconcile_capacity_provider_accounting(
         run, [{"total_count": 12, "jobs": workers}], source, repository="owner/repo",
         revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-GRANT-BINDING-20261019-B",
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     assert missing_support["status"] == "non_pass"
@@ -3688,7 +3688,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         {**run, "conclusion": "cancelled"}, pages, source, repository="owner/repo",
         revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-GRANT-BINDING-20261019-B",
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     assert cancelled["status"] == "non_pass"
@@ -3698,7 +3698,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-GRANT-BINDING-20261019-B",
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="pagination"):
@@ -3709,7 +3709,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-GRANT-BINDING-20261019-B",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="contradictory"):
@@ -3720,7 +3720,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-GRANT-BINDING-20261019-B",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="identity"):
@@ -3729,7 +3729,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-GRANT-BINDING-20261019-B",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
         )
 
