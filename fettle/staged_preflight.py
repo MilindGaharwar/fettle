@@ -10,11 +10,22 @@ import json
 import math
 import platform
 import re
+import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Callable
 
 FROZEN_CANDIDATE = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
+ACTIVE_CAPACITY_AUTHORIZATION_ID = "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+
+
+def validate_capacity_authorization(authorization_id: str) -> str:
+    """Accept only the owner-authorized active capacity diagnostic grant."""
+    if authorization_id != ACTIVE_CAPACITY_AUTHORIZATION_ID:
+        raise ValueError("capacity diagnostic authorization is missing, stale, or unauthorized")
+    return authorization_id
 SOURCE_RUN_ID = "37464324954"
 SOURCE_ORCHESTRATION_SHA = "891562ba4909b16e6252a0eb7e8674393f43eba0"
 SOURCE_WORKFLOW_REF = (
@@ -1984,15 +1995,8 @@ def _classify_runner_identity(job: dict) -> tuple[dict, str]:
     return identity, classification
 
 
-def account_runner_minutes(
-    jobs_path: Path,
-    now: datetime | None = None,
-    *,
-    expected_run_id: str | None = None,
-    expected_run_attempt: str | None = None,
-    job_timeout_minutes: int | None = None,
-) -> dict:
-    raw = jobs_path.read_bytes()
+def _validated_job_page_ids(raw: bytes) -> tuple[list[dict], list[int]]:
+    """Validate one paginated provider response without weakening accounting."""
     pages = json.loads(raw)
     if not isinstance(pages, list):
         pages = [pages]
@@ -2001,14 +2005,13 @@ def account_runner_minutes(
         for page in pages
     ):
         raise ValueError("jobs response is missing or malformed")
-    jobs = [job for page in pages for job in page["jobs"]]
-    if not jobs:
-        raise ValueError("jobs response is empty")
     totals = {page.get("total_count") for page in pages}
-    if len(totals) != 1 or not all(
-        isinstance(value, int) and not isinstance(value, bool) for value in totals
+    if len(totals) != 1 or any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in totals
     ):
         raise ValueError("jobs response has missing or inconsistent total_count")
+    jobs = [job for page in pages for job in page["jobs"]]
     ids = [job.get("id") for job in jobs if isinstance(job, dict)]
     if len(ids) != len(jobs) or any(
         not isinstance(job_id, int) or isinstance(job_id, bool) or job_id < 1
@@ -2019,6 +2022,93 @@ def account_runner_minutes(
         raise ValueError("jobs response contains duplicate job IDs")
     if totals != {len(jobs)}:
         raise ValueError("jobs response pagination is incomplete")
+    return pages, sorted(ids)
+
+
+def collect_stable_job_pages(
+    output: Path,
+    attempts_directory: Path,
+    *,
+    fetch: Callable[[float], str | bytes],
+    max_attempts: int,
+    max_elapsed_seconds: float,
+    retry_delay_seconds: float,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    """Collect two valid consecutive observations with the same job-ID set."""
+    if (
+        type(max_attempts) is not int or max_attempts < 2
+        or not isinstance(max_elapsed_seconds, (int, float))
+        or isinstance(max_elapsed_seconds, bool) or max_elapsed_seconds <= 0
+        or not isinstance(retry_delay_seconds, (int, float))
+        or isinstance(retry_delay_seconds, bool) or retry_delay_seconds < 0
+    ):
+        raise ValueError("stable job collection bounds are malformed")
+    attempts_directory.mkdir(parents=True, exist_ok=True)
+    started = monotonic()
+    previous_ids: list[int] | None = None
+    errors = []
+    for attempt in range(1, max_attempts + 1):
+        elapsed = monotonic() - started
+        remaining = max_elapsed_seconds - elapsed
+        if remaining <= 0:
+            break
+        path = attempts_directory / f"attempt-{attempt}.json"
+        try:
+            value = fetch(remaining)
+            raw = value.encode() if isinstance(value, str) else value
+            if not isinstance(raw, bytes):
+                raise ValueError("provider response is not bytes")
+            path.write_bytes(raw)
+            _pages, ids = _validated_job_page_ids(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, subprocess.SubprocessError) as exc:
+            previous_ids = None
+            errors.append({"attempt": attempt, "error": str(exc)})
+        else:
+            if ids == previous_ids:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                temporary = output.with_name(output.name + ".tmp")
+                temporary.write_bytes(raw)
+                accepted_elapsed = monotonic() - started
+                if accepted_elapsed > max_elapsed_seconds:
+                    temporary.unlink(missing_ok=True)
+                    errors.append({"attempt": attempt, "error": "elapsed limit exceeded"})
+                    break
+                temporary.replace(output)
+                return {
+                    "schema_version": "1",
+                    "kind": "stable_provider_job_collection",
+                    "attempts": attempt,
+                    "stable_job_ids": ids,
+                    "atomic_snapshot": False,
+                    "elapsed_seconds": round(accepted_elapsed, 3),
+                    "errors": errors,
+                }
+            previous_ids = ids
+        if attempt < max_attempts:
+            elapsed = monotonic() - started
+            if elapsed >= max_elapsed_seconds:
+                break
+            sleep(min(retry_delay_seconds, max_elapsed_seconds - elapsed))
+    raise ValueError(
+        f"stable provider job collection unavailable after bounded retries: {errors}"
+    )
+
+
+def account_runner_minutes(
+    jobs_path: Path,
+    now: datetime | None = None,
+    *,
+    expected_run_id: str | None = None,
+    expected_run_attempt: str | None = None,
+    job_timeout_minutes: int | None = None,
+) -> dict:
+    raw = jobs_path.read_bytes()
+    pages, ids = _validated_job_page_ids(raw)
+    jobs = [job for page in pages for job in page["jobs"]]
+    if not jobs:
+        raise ValueError("jobs response is empty")
     total = 0.0
     current = now or datetime.now(UTC)
     observation_is_explicit = now is not None
@@ -3416,6 +3506,7 @@ def main() -> int:
     aggregation_record = sub.add_parser("aggregation-recovery-record")
     wave = sub.add_parser("validate-wave")
     budget = sub.add_parser("budget-gate")
+    stable_jobs = sub.add_parser("collect-stable-jobs")
     calibration_continuation = sub.add_parser("plan-calibration-continuation")
     calibration_budget = sub.add_parser("calibration-budget")
     source_handoff = sub.add_parser("validate-source-handoff")
@@ -3499,6 +3590,13 @@ def main() -> int:
         choices=("wave-2", "wave-3", "aggregate", "complete"),
         required=True,
     )
+    stable_jobs.add_argument("--endpoint", required=True)
+    stable_jobs.add_argument("--output", type=Path, required=True)
+    stable_jobs.add_argument("--attempts-directory", type=Path, required=True)
+    stable_jobs.add_argument("--report", type=Path, required=True)
+    stable_jobs.add_argument("--max-attempts", type=int, required=True)
+    stable_jobs.add_argument("--max-elapsed-seconds", type=float, required=True)
+    stable_jobs.add_argument("--retry-delay-seconds", type=float, required=True)
     calibration_continuation.add_argument("--jobs", type=Path, required=True)
     calibration_continuation.add_argument("--artifacts", type=Path, required=True)
     calibration_continuation.add_argument("--source-run", type=Path, required=True)
@@ -3548,6 +3646,22 @@ def main() -> int:
     batch_admission.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "collect-stable-jobs":
+            def fetch(timeout: float) -> bytes:
+                return subprocess.run(
+                    ["gh", "api", "--paginate", "--slurp", args.endpoint],
+                    check=True, capture_output=True, timeout=timeout,
+                ).stdout
+
+            result = collect_stable_job_pages(
+                args.output, args.attempts_directory, fetch=fetch,
+                max_attempts=args.max_attempts,
+                max_elapsed_seconds=args.max_elapsed_seconds,
+                retry_delay_seconds=args.retry_delay_seconds,
+            )
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            return 0
         if args.command == "validate-source-handoff":
             result = validate_source_handoff(
                 args.run, args.jobs, args.artifacts, repository=args.repository,

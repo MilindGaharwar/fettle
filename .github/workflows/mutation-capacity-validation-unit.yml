@@ -18,6 +18,9 @@ on:
       candidate_sha:
         required: true
         type: string
+      authorization_id:
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -29,18 +32,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reject reruns and bind candidate
         env:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: >-
-          python -c 'import os,re,sys; sys.exit(0 if os.environ["RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
+          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and re.fullmatch(r"[0-9a-f]{64}",os.environ["PLAN_SHA256"]) else 2)'
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
@@ -60,6 +65,7 @@ jobs:
       - name: Validate frozen plan identity
         env:
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
         run: |
           python - <<'PY'
@@ -71,12 +77,14 @@ jobs:
           assert plan["experiment_id"] == os.environ["EXPERIMENT_ID"]
           assert plan["revision"] == os.environ["GITHUB_SHA"]
           assert plan["passed"] is False and plan["qualification_eligible"] is False
+          assert plan["authorization_id"] == os.environ["AUTHORIZATION_ID"]
           PY
       - name: Initialize fail-closed unit result
         env:
           UNIT: ${{ inputs.unit }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -86,6 +94,7 @@ jobs:
               "status": "not_started", "passed": False,
               "qualification_eligible": False, "billing_authority": False,
               "authoritative_predecessor": False,
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "revision": os.environ["GITHUB_SHA"],
               "plan_file_sha256": os.environ["PLAN_SHA256"],
@@ -107,6 +116,7 @@ jobs:
         env:
           UNIT: ${{ inputs.unit }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -119,6 +129,7 @@ jobs:
                   "status": raw.get("status", "unknown"), "passed": False,
                   "qualification_eligible": False, "billing_authority": False,
                   "authoritative_predecessor": False,
+                  "authorization_id": os.environ["AUTHORIZATION_ID"],
                   "experiment_id": os.environ["EXPERIMENT_ID"],
                   "revision": os.environ["GITHUB_SHA"],
                   "unit_index": int(os.environ["UNIT"]),

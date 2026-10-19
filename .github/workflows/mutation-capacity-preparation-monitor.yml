@@ -9,6 +9,9 @@ on:
       experiment_id:
         required: true
         type: string
+      authorization_id:
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -28,15 +31,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           set +e
           mkdir -p capacity-preparation-monitor
+          if ! python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization; validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'; then
+            printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
+              > capacity-preparation-monitor/final-decision.json
+            exit 2
+          fi
           for sample in $(seq 1 190); do
             jobs="capacity-preparation-monitor/jobs-$sample.json"
             decision="capacity-preparation-monitor/decision-$sample.json"
-            if ! gh api --paginate --slurp \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
-              > "$jobs"; then
+            attempts="capacity-preparation-monitor/collection-$sample-attempts"
+            collection="capacity-preparation-monitor/collection-$sample.json"
+            if ! python -m fettle.staged_preflight collect-stable-jobs \
+              --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+              --output "$jobs" --attempts-directory "$attempts" --report "$collection" \
+              --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2; then
               printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
               cp "$decision" capacity-preparation-monitor/final-decision.json
               exit 2
@@ -48,8 +60,10 @@ jobs:
           from pathlib import Path
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_capacity_preparation_admission,
+              validate_capacity_authorization,
           )
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
+          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
           jobs = [job for page in pages for job in page["jobs"]]
           worker = re.compile(r"^(?:[^/]+ / )?capacity validation \(enumerate (\d+)\)$")
           gate = re.compile(
@@ -99,7 +113,7 @@ jobs:
           else:
               action, reason = "continue", "admitted work remains within the reserved ceiling"
           Path(os.environ["DECISION"]).write_text(json.dumps({
-              **result, "authorization_id": "AH-CAPACITY-BOUNDED-20261016-A",
+              **result, "authorization_id": authorization_id,
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "run_id": os.environ["GITHUB_RUN_ID"],

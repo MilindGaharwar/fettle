@@ -18,6 +18,9 @@ on:
       gate_id:
         required: true
         type: number
+      authorization_id:
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -30,13 +33,22 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate active grant before provider collection
+        env:
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: >-
+          python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization;
+          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'
       - name: Collect complete current-attempt provider state
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh api --paginate --slurp
-          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100"
-          > capacity-preparation-jobs.json
+        run: |
+          python -m fettle.staged_preflight collect-stable-jobs \
+            --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --output capacity-preparation-jobs.json \
+            --attempts-directory capacity-preparation-collection-attempts \
+            --report capacity-preparation-collection.json \
+            --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2
       - name: Charge observed work and reserve the next batch
         env:
           ADMITTED_SHARDS: ${{ inputs.admitted_shards }}
@@ -44,6 +56,7 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
           GATE_ID: ${{ inputs.gate_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -51,9 +64,11 @@ jobs:
           from pathlib import Path
           from fettle.staged_preflight import (
               account_runner_minutes, evaluate_capacity_preparation_admission,
+              validate_capacity_authorization,
           )
           assert os.environ["GITHUB_RUN_ATTEMPT"] == "1"
           assert os.environ["CANDIDATE_SHA"] == os.environ["GITHUB_SHA"]
+          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
           admitted = json.loads(os.environ["ADMITTED_SHARDS"])
           next_shards = json.loads(os.environ["NEXT_SHARDS"])
           accounting = account_runner_minutes(
@@ -84,7 +99,7 @@ jobs:
               accounting, admitted_shards=admitted, next_shards=next_shards,
           )
           decision.update({
-              "authorization_id": "AH-CAPACITY-BOUNDED-20261016-A",
+              "authorization_id": authorization_id,
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "run_id": os.environ["GITHUB_RUN_ID"],
@@ -112,6 +127,8 @@ jobs:
           name: capacity-preparation-admission-${{ github.run_id }}-${{ inputs.gate_id }}
           path: |
             capacity-preparation-jobs.json
+            capacity-preparation-collection.json
+            capacity-preparation-collection-attempts
             capacity-preparation-admission.json
           if-no-files-found: warn
           retention-days: 90

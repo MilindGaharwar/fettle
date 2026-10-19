@@ -12,6 +12,9 @@ on:
       candidate_sha:
         required: true
         type: string
+      authorization_id:
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -23,17 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Bind immutable preparation identity
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
           SHARD: ${{ inputs.shard }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: >-
-          python -c 'import os,re,sys; sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          python -c 'import os,re,sys; from fettle.staged_preflight import validate_capacity_authorization;
+          validate_capacity_authorization(os.environ["AUTHORIZATION_ID"]); sys.exit(0 if os.environ["GITHUB_RUN_ATTEMPT"]=="1"
           and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
           and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
           and os.environ["SHARD"].isdigit() and 0<=int(os.environ["SHARD"])<256 else 2)'
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
@@ -62,6 +67,7 @@ jobs:
               "status": "enumerated", "passed": False,
               "qualification_eligible": False, "billing_authority": False,
               "authoritative_predecessor": False,
+              "authorization_id": "${{ inputs.authorization_id }}",
           })
           Path("capacity-validation-enumeration.json").write_text(
               json.dumps(report, indent=2) + "\n"

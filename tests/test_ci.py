@@ -148,6 +148,8 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
         )
         assert gate["needs"] == f"capacity-enumerate-{batch}"
         assert gate["uses"] == "./.github/workflows/mutation-capacity-preparation-gate.yml"
+        assert gate["with"]["authorization_id"] == "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+        assert worker["with"]["authorization_id"] == "AH-UNTIMED-DIAGNOSTIC-20261018-A"
         assert json.loads(gate["with"]["admitted_shards"]) == list(range(batch * 16))
         assert json.loads(gate["with"]["next_shards"]) == (
             list(range(batch * 16, min(256, (batch + 1) * 16)))
@@ -168,6 +170,9 @@ def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
     assert jobs["capacity-preparation-monitor"]["permissions"] == {
         "actions": "write", "contents": "read",
     }
+    assert jobs["capacity-preparation-monitor"]["with"]["authorization_id"] == (
+        "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+    )
 
 
 def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_accounting():
@@ -183,11 +188,12 @@ def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_
     assert worker_job["timeout-minutes"] == 35
     assert gate["permissions"] == {"actions": "read", "contents": "read"}
     assert gate_job["timeout-minutes"] == 5
-    assert "--paginate --slurp" in gate_scripts
+    assert "collect-stable-jobs" in gate_scripts
     assert "attempts/$GITHUB_RUN_ATTEMPT/jobs" in gate_scripts
     assert "account_runner_minutes" in gate_scripts
     assert "evaluate_capacity_preparation_admission" in gate_scripts
     assert "datetime.now(UTC)" in gate_scripts
+    assert "AH-CAPACITY-BOUNDED-20261016-A" not in gate_scripts
     monitor_job = monitor["jobs"]["monitor"]
     monitor_scripts = "\n".join(step.get("run", "") for step in monitor_job["steps"])
     assert monitor["permissions"] == {"actions": "write", "contents": "read"}
@@ -196,6 +202,8 @@ def test_capacity_preparation_reusable_workflows_enforce_deadlines_and_provider_
     assert "enumeration worker appeared before admission" in monitor_scripts
     assert "actions/runs/$GITHUB_RUN_ID/cancel" in monitor_scripts
     assert "all 256 enumeration workers are terminal-success" in monitor_scripts
+    assert "collect-stable-jobs" in monitor_scripts
+    assert "AH-CAPACITY-BOUNDED-20261016-A" not in monitor_scripts
 
 
 def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_retention():
@@ -214,7 +222,9 @@ def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_re
 
     assert workflow["permissions"] == {"actions": "write", "contents": "read"}
     assert job["timeout-minutes"] == 30
-    assert "--paginate --slurp" in scripts
+    assert "collect-stable-jobs" in scripts
+    assert "validate_capacity_authorization" in scripts
+    assert "AH-CAPACITY-BOUNDED-20261016-A" not in scripts
     assert "measurement worker appeared before admission" in scripts
     assert "len(observed) != len(set(observed))" in scripts
     assert "all 12 measurement workers are terminal-success" in scripts
@@ -263,6 +273,7 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
         "CANDIDATE_SHA": "a" * 40, "EXPERIMENT_ID": "capval-local",
         "PREPARATION_RUN_ID": "123", "PLAN_SHA256": "b" * 64,
+        "AUTHORIZATION_ID": "AH-UNTIMED-DIAGNOSTIC-20261018-A",
     }
     assert _run_actions_bash(script, cwd=tmp_path, env=valid).returncode == 0
     assert _run_actions_bash(
@@ -271,6 +282,10 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
     assert _run_actions_bash(
         script, cwd=tmp_path, env={**valid, "PLAN_SHA256": "bad"},
     ).returncode == 2
+    assert _run_actions_bash(
+        script, cwd=tmp_path,
+        env={**valid, "AUTHORIZATION_ID": "AH-CAPACITY-BOUNDED-20261016-A"},
+    ).returncode != 0
 
 
 def test_capacity_validation_readback_keeps_ledgers_separate_and_non_passing():
@@ -293,12 +308,23 @@ def test_capacity_validation_provider_readback_uses_terminal_exact_attempt_recor
     scripts = "\n".join(step.get("run", "") for step in job["steps"])
 
     assert "capacity_stage == 'readback'" in job["if"]
+    assert job["steps"][0]["uses"].startswith("actions/checkout@")
+    assert "validate_capacity_authorization" in scripts
     assert "attempts/1/jobs" in scripts
+    assert "collect-stable-jobs" in scripts
+    upload = next(
+        step for step in job["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert "capacity-execution-collection.json" in upload["with"]["path"]
+    assert "capacity-execution-collection-attempts" in upload["with"]["path"]
     assert "capacity-validation-execution-source-$EXECUTION_RUN_ID" in scripts
     assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in scripts
     assert "capacity-validation-preparation-${{ github.event.inputs.capacity_preparation_run_id }}" in scripts
     assert "reconcile_capacity_provider_accounting" in scripts
     assert "evaluate_capacity_validation_decision" in scripts
+    assert "load_capacity_validation_plan" in scripts
+    assert "validate_capacity_validation_results" in scripts
     assert '"outcome": "inconclusive"' in scripts
     assert "capacity-validation-model-decision.json" in scripts
     assert 'ledger["status"] != "completed"' in scripts

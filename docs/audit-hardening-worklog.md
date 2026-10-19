@@ -1,5 +1,55 @@
 # Audit Hardening Worklog
 
+## 2026-10-19: Pagination consistency and active-grant repair checkpoint
+
+Candidate base is signed commit `ea65710ccab402fcd45f1abb6c113ff935431120`.
+The current uncommitted repair diff SHA-256 is
+`ab3a04cdf8f79c72aab86fedbe36972849f8ef6795531c65cb57dbf87246258f`
+when this checkpoint file is excluded;
+this identity must be refreshed after any further edit. The single authorized repair
+commit and both fast-forward deliveries remain unconsumed. No provider workflow,
+diagnostic, preparation rerun, mutation replay, calibration, qualification, host
+probe, or other paid work has been dispatched.
+
+The provider collector now retains every raw attempt and accepts an accounting input
+only after two consecutive, individually valid collections expose the same complete,
+unique job-ID set. Mutable job state comes from the later collection. Collection is
+bounded to four attempts and 45 elapsed seconds at each capacity observation point.
+Malformed, inconsistent, duplicate, omitted, interrupted, or exhausted collections
+remain non-pass; the prior accepted output is not overwritten and existing monitor
+cancellation remains in force. The retained collection report explicitly records
+`atomic_snapshot: false`. Strict `account_runner_minutes` validation remains intact,
+and accounting uses an observation time taken after collection.
+
+The active owner grant is fixed to `AH-UNTIMED-DIAGNOSTIC-20261018-A`, validated
+before provider collection or costly capacity work, and carried through preparation
+shards, corpus, plan, execution admission, unit results, and preparation/measurement
+monitor decisions. Missing, malformed, stale, or arbitrary identities are rejected.
+Historical artifacts and run `39124624939` are unchanged.
+
+Focused evidence at this checkpoint: all 390 staged-preflight tests, 277 mutation
+tests, and 131 parsed-workflow tests passed on the final reviewed implementation;
+the invocation-scoped full suite passed with 4,921 tests and 20 skips in 640.82
+seconds under Python 3.12.13 and pytest 9.1.1. Ruff 0.17.1, actionlint 1.7.12,
+`git diff --check`, normal changed/all-file Fettle checks, and
+`fettle completion validate --checkpoint` passed. Boundary-inclusive changed and
+all-file Fettle checks each reported the same eight known synthetic fixture strings
+(six secret fixtures and two path-safety fixtures); no boundary rule or fixture was
+changed to conceal them. Astra advice was requested with a
+no-tools prompt but the consultation aborted without a response; it supplied no
+authority or recommendation. Independent review then found and the implementation
+closed four blockers: terminal readback now checks out before local imports and
+validates the grant before collection, strict plan/result validators now bind the
+terminal decision, and a stable collection completing after the elapsed limit is
+rejected without replacing prior output; terminal collection reports and raw retry
+attempts are retained. Final independent review bound implementation diff
+`ab3a04cdf8f79c72aab86fedbe36972849f8ef6795531c65cb57dbf87246258f`
+and reported no concrete findings after tracing live expected-worker and full-reserve
+invariants. Remaining before delivery: create at
+most one signed commit, fast-forward it to the two already authorized branches, and
+observe literal-head CI. Any review-driven edit requires affected revalidation and
+final review rebinding.
+
 ## 2026-10-18: Mutation Scheduling Diagnosis And Bounded Next Step
 
 PR #46 remains blocked at signed head

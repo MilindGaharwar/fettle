@@ -53,6 +53,7 @@ from scripts.staged_preflight import (
     bind_calibration_observer_evidence,
     build_calibration_terminal_accounting,
     combine_calibration_monitor_accounting,
+    collect_stable_job_pages,
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
@@ -63,6 +64,7 @@ from scripts.staged_preflight import (
     validate_continuation_topology,
     validate_continuation_artifacts,
     validate_continuation_dispatches,
+    validate_capacity_authorization,
     validate_continuation_batch,
     validate_source_handoff,
 )
@@ -2075,6 +2077,156 @@ def test_accounting_accepts_complete_pagination_and_rejects_duplicate_jobs(tmp_p
     path.write_text(json.dumps(pages))
     with pytest.raises(ValueError, match="duplicate"):
         account_runner_minutes(path, expected_run_id="7", expected_run_attempt="1")
+
+
+def test_stable_job_collection_recovers_from_jobs_added_during_pagination(tmp_path):
+    changing = [
+        [{"total_count": 1, "jobs": [_job(1)]}, {"total_count": 2, "jobs": [_job(2)]}],
+        [{"total_count": 2, "jobs": [_job(1), _job(2)]}],
+        [{"total_count": 2, "jobs": [_job(1), _job(2, status="in_progress", conclusion=None, end=None)]}],
+    ]
+    calls = iter(changing)
+
+    result = collect_stable_job_pages(
+        tmp_path / "jobs.json", tmp_path / "attempts",
+        fetch=lambda _timeout: json.dumps(next(calls)), max_attempts=3,
+        max_elapsed_seconds=10, retry_delay_seconds=0,
+    )
+
+    assert result["attempts"] == 3
+    assert result["stable_job_ids"] == [1, 2]
+    assert result["atomic_snapshot"] is False
+    assert json.loads((tmp_path / "jobs.json").read_text())[0]["jobs"][1]["status"] == "in_progress"
+    accounting = account_runner_minutes(
+        tmp_path / "jobs.json", datetime(2026, 10, 6, 1, 3, tzinfo=UTC),
+        expected_run_id="7", expected_run_attempt="1",
+    )
+    assert accounting["job_count"] == 2
+
+
+def test_stable_job_collection_recovers_after_interrupted_provider_call(tmp_path):
+    calls = iter([
+        subprocess.TimeoutExpired(["gh", "api"], 1),
+        json.dumps([{"total_count": 1, "jobs": [_job(1)]}]),
+        json.dumps([{"total_count": 1, "jobs": [_job(1, status="in_progress", conclusion=None, end=None)]}]),
+    ])
+
+    def fetch(_timeout):
+        value = next(calls)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    result = collect_stable_job_pages(
+        tmp_path / "jobs.json", tmp_path / "attempts", fetch=fetch,
+        max_attempts=3, max_elapsed_seconds=10, retry_delay_seconds=0,
+    )
+
+    assert result["attempts"] == 3
+    assert result["errors"][0]["attempt"] == 1
+    assert json.loads((tmp_path / "jobs.json").read_text())[0]["jobs"][0]["status"] == "in_progress"
+
+
+@pytest.mark.parametrize("fault", ["inconsistent", "duplicate", "omitted", "malformed"])
+def test_stable_job_collection_rejects_persistent_bad_evidence(tmp_path, fault):
+    first = _job(1)
+    if fault == "inconsistent":
+        pages = [{"total_count": 1, "jobs": [first]}, {"total_count": 2, "jobs": [_job(2)]}]
+    elif fault == "duplicate":
+        pages = [{"total_count": 2, "jobs": [first, first]}]
+    elif fault == "omitted":
+        pages = [{"total_count": 2, "jobs": [first]}]
+    else:
+        pages = [{"total_count": 1, "jobs": [{"id": "bad"}]}]
+
+    with pytest.raises(ValueError, match="stable provider job collection unavailable"):
+        collect_stable_job_pages(
+            tmp_path / "jobs.json", tmp_path / "attempts",
+            fetch=lambda _timeout: json.dumps(pages), max_attempts=2,
+            max_elapsed_seconds=10, retry_delay_seconds=0,
+        )
+
+    assert not (tmp_path / "jobs.json").exists()
+    assert len(list((tmp_path / "attempts").glob("attempt-*.json"))) == 2
+
+
+def test_stable_job_collection_stops_at_elapsed_bound_and_preserves_prior_output(tmp_path):
+    output = tmp_path / "jobs.json"
+    output.write_text("prior-floor\n")
+    moments = iter([0.0, 0.0, 2.0, 2.0])
+
+    with pytest.raises(ValueError, match="stable provider job collection unavailable"):
+        collect_stable_job_pages(
+            output, tmp_path / "attempts", fetch=lambda _timeout: "not-json",
+            max_attempts=5, max_elapsed_seconds=1, retry_delay_seconds=0,
+            monotonic=lambda: next(moments),
+        )
+
+    assert output.read_text() == "prior-floor\n"
+
+
+def test_stable_job_collection_rejects_valid_second_observation_after_elapsed_bound(tmp_path):
+    output = tmp_path / "jobs.json"
+    output.write_text("prior-floor\n")
+    moments = iter([0.0, 0.0, 0.4, 0.4, 1.2])
+    response = json.dumps([{"total_count": 1, "jobs": [_job(1)]}])
+
+    with pytest.raises(ValueError, match="stable provider job collection unavailable"):
+        collect_stable_job_pages(
+            output, tmp_path / "attempts", fetch=lambda _timeout: response,
+            max_attempts=2, max_elapsed_seconds=1, retry_delay_seconds=0,
+            monotonic=lambda: next(moments),
+        )
+
+    assert output.read_text() == "prior-floor\n"
+    assert not output.with_name("jobs.json.tmp").exists()
+
+
+@pytest.mark.parametrize(
+    "authorization_id",
+    [None, "", "AH-CAPACITY-BOUNDED-20261016-A", "AH-UNTIMED-DIAGNOSTIC-20261018-A ", 1],
+)
+def test_capacity_authorization_rejects_missing_stale_and_malformed_identity(authorization_id):
+    with pytest.raises(ValueError, match="missing, stale, or unauthorized"):
+        validate_capacity_authorization(authorization_id)
+
+
+def test_capacity_authorization_accepts_only_active_owner_grant():
+    assert validate_capacity_authorization("AH-UNTIMED-DIAGNOSTIC-20261018-A") == (
+        "AH-UNTIMED-DIAGNOSTIC-20261018-A"
+    )
+
+
+def test_collect_stable_jobs_cli_emits_payload_consumable_by_accounting(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    response = json.dumps([{"total_count": 1, "jobs": [_job(1)]}])
+    gh = bin_dir / "gh"
+    gh.write_text(f"#!/bin/sh\nprintf '%s' '{response}'\n")
+    gh.chmod(0o755)
+    output = tmp_path / "jobs.json"
+    report = tmp_path / "collection.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable, "-m", "fettle.staged_preflight", "collect-stable-jobs",
+            "--endpoint", "repos/example/actions/runs/7/attempts/1/jobs?per_page=100",
+            "--output", str(output), "--attempts-directory", str(tmp_path / "attempts"),
+            "--report", str(report), "--max-attempts", "2",
+            "--max-elapsed-seconds", "10", "--retry-delay-seconds", "0",
+        ],
+        cwd=Path(__file__).parents[1],
+        env={"PATH": f"{bin_dir}:{__import__('os').environ['PATH']}"},
+        capture_output=True, text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(report.read_text())["atomic_snapshot"] is False
+    accounting = account_runner_minutes(
+        output, datetime(2026, 10, 6, 1, 3, tzinfo=UTC),
+        expected_run_id="7", expected_run_attempt="1",
+    )
+    assert accounting["job_count"] == 1
 
 
 def test_accounting_rejects_wrong_run_or_attempt(tmp_path):

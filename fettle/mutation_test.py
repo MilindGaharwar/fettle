@@ -1304,6 +1304,9 @@ def build_capacity_validation_plan(
     prediction_seconds: dict[str, float],
 ) -> dict:
     """Freeze low/high whole-file units across six mapped-test-cost strata."""
+    from fettle.staged_preflight import validate_capacity_authorization
+
+    authorization_id = validate_capacity_authorization(preflight.get("authorization_id"))
     if re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}", experiment_id) is None:
         raise ValueError("capacity validation experiment ID is malformed")
     if (
@@ -1438,6 +1441,7 @@ def build_capacity_validation_plan(
         "qualification_eligible": False,
         "billing_authority": False,
         "authoritative_predecessor": False,
+        "authorization_id": authorization_id,
         "experiment_id": experiment_id,
         "revision": revision,
         "preflight_digest": _canonical_digest(preflight),
@@ -1468,7 +1472,8 @@ def load_capacity_validation_plan(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
     required = {
         "schema_version", "kind", "status", "passed", "qualification_eligible",
-        "billing_authority", "authoritative_predecessor", "experiment_id", "revision",
+        "billing_authority", "authoritative_predecessor", "authorization_id",
+        "experiment_id", "revision",
         "preflight_digest", "preflight_corpus_digest", "manifest_digests",
         "selection_policy", "prediction_seconds_per_unobserved_fingerprint",
         "historical_measured_files", "coverage", "units", "digest",
@@ -1488,6 +1493,9 @@ def load_capacity_validation_plan(path: Path) -> dict:
         or value.get("decision_contract") != capacity_validation_decision_contract()
     ):
         raise ValueError("capacity validation plan is not non-authoritative and complete")
+    from fettle.staged_preflight import validate_capacity_authorization
+
+    validate_capacity_authorization(value.get("authorization_id"))
     payload = {key: item for key, item in value.items() if key != "digest"}
     if value["digest"] != _canonical_digest(payload):
         raise ValueError("capacity validation plan digest differs")
@@ -1639,17 +1647,26 @@ def validate_capacity_validation_results(
     plan_digest: str,
 ) -> None:
     """Require complete, distinct, digest-valid unit results before later admission."""
+    from fettle.staged_preflight import validate_capacity_authorization
+
     if len(reports) != len(expected_indexes):
         raise ValueError("capacity validation result count differs")
     if sorted(report.get("unit_index") for report in reports if isinstance(report, dict)) != expected_indexes:
         raise ValueError("capacity validation result indexes differ")
     required = {
         "schema_version", "kind", "status", "passed", "qualification_eligible",
-        "billing_authority", "authoritative_predecessor", "experiment_id", "revision",
+        "billing_authority", "authoritative_predecessor", "authorization_id",
+        "experiment_id", "revision",
         "plan_digest", "unit_index", "unit", "environment_digest", "outcomes",
         "attempts", "pending", "elapsed_ms", "source_restoration", "digest",
     }
     for report in reports:
+        try:
+            validate_capacity_authorization(report.get("authorization_id"))
+        except (AttributeError, ValueError) as exc:
+            raise ValueError(
+                "capacity validation result authorization is missing, stale, or unauthorized"
+            ) from exc
         if (
             set(report) != required
             or report.get("schema_version") != _CAPACITY_RESULT_SCHEMA_VERSION
@@ -1807,6 +1824,7 @@ def evaluate_capacity_validation_decision(
         "schema_version": "1", "kind": "capacity_validation_model_decision",
         "status": "completed", "passed": False, "qualification_eligible": False,
         "billing_authority": False, "authoritative_predecessor": False,
+        "authorization_id": plan["authorization_id"],
         "experiment_id": plan["experiment_id"], "revision": plan["revision"],
         "plan_digest": plan["digest"], "outcome": outcome, "reasons": reasons,
         "exact_units": sorted(item["unit_index"] for item in exact),
@@ -1835,6 +1853,9 @@ def reconcile_capacity_provider_accounting(
     plan_file_sha256: str,
 ) -> dict:
     """Reconcile exact terminal provider records into separate non-authoritative ledgers."""
+    from fettle.staged_preflight import validate_capacity_authorization
+
+    authorization_id = validate_capacity_authorization(source.get("authorization_id"))
     if (
         not isinstance(run, dict) or not isinstance(source, dict)
         or str(run.get("id")) != execution_run_id
@@ -1934,6 +1955,7 @@ def reconcile_capacity_provider_accounting(
         "status": "completed" if passed else "non_pass", "passed": False,
         "qualification_eligible": False, "billing_authority": False,
         "authoritative_predecessor": False, "experiment_id": experiment_id,
+        "authorization_id": authorization_id,
         "revision": revision, "execution_run_id": execution_run_id,
         "worker": {"ceiling_minutes": 240, "observed_minutes": worker_minutes,
                    "transferable": False, "jobs": worker},
@@ -2028,6 +2050,7 @@ def run_capacity_validation_unit(
             "qualification_eligible": False,
             "billing_authority": False,
             "authoritative_predecessor": False,
+            "authorization_id": plan["authorization_id"],
             "experiment_id": plan["experiment_id"],
             "revision": plan["revision"],
             "plan_digest": plan["digest"],
@@ -3826,8 +3849,16 @@ def aggregate_capacity_validation_shards(
     shard_count: int,
 ) -> dict:
     """Validate isolated enumeration shards without publishing qualification input."""
+    from fettle.staged_preflight import validate_capacity_authorization
+
     canonical = []
     for report in reports:
+        if not isinstance(report, dict):
+            return _error("unknown", "Capacity enumeration shard is malformed")
+        try:
+            validate_capacity_authorization(report.get("authorization_id"))
+        except ValueError as exc:
+            return _error("unknown", str(exc))
         if (
             not isinstance(report, dict)
             or report.get("kind") != "capacity_validation_enumeration_shard"
@@ -3842,7 +3873,7 @@ def aggregate_capacity_validation_shards(
             key: value for key, value in report.items()
             if key not in {
                 "kind", "qualification_eligible", "billing_authority",
-                "authoritative_predecessor",
+                "authoritative_predecessor", "authorization_id",
             }
         }
         converted["status"] = "completed"
@@ -3859,6 +3890,7 @@ def aggregate_capacity_validation_shards(
         "qualification_eligible": False,
         "billing_authority": False,
         "authoritative_predecessor": False,
+        "authorization_id": validate_capacity_authorization(reports[0]["authorization_id"]),
     }
 
 

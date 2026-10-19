@@ -9,6 +9,9 @@ on:
       experiment_id:
         required: true
         type: string
+      authorization_id:
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -20,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Monitor exact-once measurement exposure
         id: monitor
         continue-on-error: true
@@ -27,9 +31,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           set +e
           mkdir -p capacity-measurement-monitor
+          if ! python -c 'import os; from fettle.staged_preflight import validate_capacity_authorization; validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])'; then
+            printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
+              > capacity-measurement-monitor/final-decision.json
+            exit 2
+          fi
           if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; then
             printf '%s\n' '{"action":"cancel","reason":"measurement identity differs"}' \
               > capacity-measurement-monitor/final-decision.json
@@ -38,9 +48,12 @@ jobs:
           for sample in $(seq 1 56); do
             jobs="capacity-measurement-monitor/jobs-$sample.json"
             decision="capacity-measurement-monitor/decision-$sample.json"
-            if ! gh api --paginate --slurp \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
-              > "$jobs"; then
+            attempts="capacity-measurement-monitor/collection-$sample-attempts"
+            collection="capacity-measurement-monitor/collection-$sample.json"
+            if ! python -m fettle.staged_preflight collect-stable-jobs \
+              --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+              --output "$jobs" --attempts-directory "$attempts" --report "$collection" \
+              --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2; then
               printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
               cp "$decision" capacity-measurement-monitor/final-decision.json
               exit 2
@@ -48,8 +61,10 @@ jobs:
             JOBS="$jobs" DECISION="$decision" python - <<'PY'
           import json, os, re
           from pathlib import Path
+          from fettle.staged_preflight import validate_capacity_authorization
 
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
+          authorization_id = validate_capacity_authorization(os.environ["AUTHORIZATION_ID"])
           if (
               not isinstance(pages, list) or not pages
               or any(not isinstance(page, dict) or not isinstance(page.get("jobs"), list)
@@ -102,7 +117,7 @@ jobs:
               action, reason = "continue", "measurement remains exact-once and admitted"
           Path(os.environ["DECISION"]).write_text(json.dumps({
               "schema_version": "1", "kind": "capacity_measurement_monitor_decision",
-              "authorization_id": "AH-CAPACITY-BOUNDED-20261016-A",
+              "authorization_id": authorization_id,
               "experiment_id": os.environ["EXPERIMENT_ID"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "run_id": os.environ["GITHUB_RUN_ID"],
