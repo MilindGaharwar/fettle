@@ -35,17 +35,17 @@ jobs:
         run: |
           set +e
           mkdir -p capacity-measurement-monitor
-          if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract; capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
+          if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract,capacity_recovery_authorization_contract; f=capacity_recovery_authorization_contract if os.environ["AUTHORIZATION_ID"]=="AH-CORPUS-RECOVERY-20261020-A" else capacity_authorization_contract; f(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
             printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
               > capacity-measurement-monitor/final-decision.json
             exit 2
           fi
-          if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; then
+          if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || { [ "$AUTHORIZATION_ID" != AH-CORPUS-RECOVERY-20261020-A ] && [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; } || { [ "$AUTHORIZATION_ID" = AH-CORPUS-RECOVERY-20261020-A ] && [ "$CANDIDATE_SHA" != 65e63d953b45d3672c24df74d0a1364b83a0157b ]; }; then
             printf '%s\n' '{"action":"cancel","reason":"measurement identity differs"}' \
               > capacity-measurement-monitor/final-decision.json
             exit 2
           fi
-          for sample in $(seq 1 56); do
+          for sample in $(seq 1 20); do
             jobs="capacity-measurement-monitor/jobs-$sample.json"
             decision="capacity-measurement-monitor/decision-$sample.json"
             attempts="capacity-measurement-monitor/collection-$sample-attempts"
@@ -53,7 +53,7 @@ jobs:
             if ! python -m fettle.staged_preflight collect-stable-jobs \
               --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
               --output "$jobs" --attempts-directory "$attempts" --report "$collection" \
-              --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2; then
+              --max-attempts 4 --max-elapsed-seconds 30 --retry-delay-seconds 2; then
               printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
               cp "$decision" capacity-measurement-monitor/final-decision.json
               exit 2
@@ -61,10 +61,11 @@ jobs:
             JOBS="$jobs" DECISION="$decision" python - <<'PY'
           import json, os, re
           from pathlib import Path
-          from fettle.staged_preflight import capacity_authorization_contract
+          from fettle.staged_preflight import capacity_authorization_contract, capacity_recovery_authorization_contract
 
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
-          authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
+          factory = capacity_recovery_authorization_contract if os.environ["AUTHORIZATION_ID"] == "AH-CORPUS-RECOVERY-20261020-A" else capacity_authorization_contract
+          authorization_id = factory(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
           if (
               not isinstance(pages, list) or not pages
               or any(not isinstance(page, dict) or not isinstance(page.get("jobs"), list)
@@ -81,8 +82,9 @@ jobs:
           ):
               raise ValueError("measurement provider pagination is incomplete or duplicated")
 
-          worker = re.compile(r"^(?:[^/]+ / )?capacity validation unit (\d+)$")
-          admitted = {0, 1, 2, 3}
+          recovery = authorization_id == "AH-CORPUS-RECOVERY-20261020-A"
+          worker = re.compile(r"^(?:[^/]+ / )?capacity (?:recovery )?validation unit (\d+)$")
+          admitted = set(range(12)) if recovery else {0, 1, 2, 3}
           successful_names = {
               str(job.get("name", "")) for job in jobs
               if job.get("status") == "completed" and job.get("conclusion") == "success"
@@ -140,11 +142,11 @@ jobs:
             cp "$decision" capacity-measurement-monitor/final-decision.json
             if [ "$status" -eq 10 ]; then exit 0; fi
             if [ "$status" -ne 0 ]; then exit 2; fi
-            sleep 30
+            sleep 20
           done
-          printf '%s\n' '{"action":"cancel","reason":"measurement controller deadline expired"}' \
+          printf '%s\n' '{"action":"transfer_containment","reason":"exact-once workers remain bounded by their hard job deadlines","next_permitted_action":"await_terminal_workers"}' \
             > capacity-measurement-monitor/final-decision.json
-          exit 2
+          exit 0
       - name: Retain measurement monitor state before cancellation
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

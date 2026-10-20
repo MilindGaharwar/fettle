@@ -55,6 +55,7 @@ from scripts.staged_preflight import (
     combine_calibration_monitor_accounting,
     collect_stable_job_pages,
     capacity_authorization_contract,
+    capacity_recovery_authorization_contract,
     observed_runner_minutes,
     plan_calibration_continuation,
     evaluate_calibration_budget,
@@ -69,6 +70,7 @@ from scripts.staged_preflight import (
     validate_continuation_dispatches,
     validate_capacity_authorization,
     validate_capacity_authorization_contract,
+    validate_capacity_recovery_authorization_contract,
     validate_continuation_batch,
     validate_source_handoff,
 )
@@ -2197,7 +2199,7 @@ def test_capacity_authorization_rejects_missing_stale_and_malformed_identity(aut
 
 def test_capacity_authorization_binds_approved_grant_scope_and_origin():
     grant = "AH-PREP-CONTAINMENT-20261019-C"
-    candidate = "a" * 40
+    candidate = "65e63d953b45d3672c24df74d0a1364b83a0157b"
     experiment = "capval-local"
     contract = capacity_authorization_contract(grant, candidate, experiment)
 
@@ -2222,6 +2224,49 @@ def test_capacity_authorization_binds_approved_grant_scope_and_origin():
             )
     with pytest.raises(ValueError, match="conflicting"):
         validate_capacity_authorization_contract(
+            contract, authorization_id=grant, candidate_sha="b" * 40,
+            experiment_id=experiment,
+        )
+
+
+def test_capacity_recovery_authorization_is_diagnostic_only_and_totals_335():
+    grant = "AH-CORPUS-RECOVERY-20261020-A"
+    candidate = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+    experiment = "capval-corpus-recovery-20261020-a"
+
+    contract = capacity_recovery_authorization_contract(grant, candidate, experiment)
+
+    assert validate_capacity_recovery_authorization_contract(
+        contract, authorization_id=grant, candidate_sha=candidate,
+        experiment_id=experiment,
+    ) == contract
+    assert contract["scope"] == {
+        "recovery_dispatches": 1,
+        "enumeration_dispatches": 0,
+        "measurement_units": 12,
+        "measurement_attempts_per_unit": 1,
+        "terminal_readback_dispatches": 1,
+        "maximum_measurement_concurrency": 4,
+    }
+    assert contract["resource_ceiling_minutes"] == {
+        "recovery_freeze": 30,
+        "measurement_workers": 240,
+        "execution_support": 25,
+        "terminal_readback": 10,
+        "cancellation_controllers": 30,
+    }
+    assert sum(contract["resource_ceiling_minutes"].values()) == 335
+    assert contract["transferable"] is False
+    with pytest.raises(ValueError, match="not approved"):
+        capacity_recovery_authorization_contract(
+            "AH-PREP-CONTAINMENT-20261019-C", candidate, experiment,
+        )
+    with pytest.raises(ValueError, match="candidate"):
+        capacity_recovery_authorization_contract(grant, "a" * 40, experiment)
+    with pytest.raises(ValueError, match="experiment"):
+        capacity_recovery_authorization_contract(grant, candidate, "foreign-recovery")
+    with pytest.raises(ValueError, match="candidate"):
+        validate_capacity_recovery_authorization_contract(
             contract, authorization_id=grant, candidate_sha="b" * 40,
             experiment_id=experiment,
         )

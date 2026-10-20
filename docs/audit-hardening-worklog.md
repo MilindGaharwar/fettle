@@ -12,6 +12,85 @@ measurement and one terminal provider readback. It permits no rerun, replacement
 campaign, sample substitution, calibration, qualification, host probe, acceptance,
 merge, tag, release, or unrelated work.
 
+### Provider outcome and finite closure
+
+The signed candidate is commit
+`65e63d953b45d3672c24df74d0a1364b83a0157b`, tree
+`d8ac64521ab678a9d90de0e997e0aff779e5ee25`. It was fast-forwarded unchanged to
+`repair/calibration-monitor-observation-20261016` and
+`audit/hardening-integration-20261005`; literal-head CI run
+[`39261380248`](https://github.com/MilindGaharwar/fettle/actions/runs/39261380248)
+passed every blocking job. Provider history reconciliation found no earlier C-grant
+preparation for this candidate. The sole preparation authorized by C was then
+dispatched as run
+[`39263581356`](https://github.com/MilindGaharwar/fettle/actions/runs/39263581356),
+attempt 1, with experiment `capval-prep-containment-20261019-c`. It completed
+`failure` and will not be rerun or replaced.
+
+The fixed topology ran as authorized: fourteen sequential 16-worker batches for
+shards 0--223, followed by four sequential 8-worker batches for shards 224--255.
+All 256 enumeration workers eventually completed successfully, and the run retains
+exactly 256 uniquely named enumeration artifacts covering shards 0--255 plus all 19
+admission artifacts. The terminal gate nevertheless failed closed. Its two stable
+provider collections still reported shard 249, job `118127166658`, as `in_progress`.
+The admission evaluator therefore raised `capacity preparation admitted workers are
+not complete and terminal` before it could publish a gate-18 decision. The provider's
+eventual terminal inventory reports that worker successful at `2026-10-19T14:50:02Z`,
+35 seconds before gate 18 started, but that later evidence cannot replace the exact
+snapshot on which admission was required to decide.
+
+The monitor made the bounded terminal-artifact retrieval and retained
+`capacity-preparation-monitor-39263581356`. Because no valid gate-18 decision existed,
+its final record correctly says `stop_and_reconcile`, reason `terminal admission
+decision unavailable or invalid`, terminal evidence `unavailable`, and next action
+`stop_and_reconcile`. The dependent freeze path did not produce a retained frozen-plan
+artifact or plan digest. Its attempted aggregation of the enumeration artifacts does
+not cure the missing terminal admission decision and supplies no execution contract.
+
+Provider terminal timestamps reconcile elapsed operational exposure as follows.
+These values are estimates from job timestamps, not provider billing authority:
+475.89 minutes for 256 preparation workers; 10.27 minutes for manifest preparation,
+19 admission jobs, and the failed freeze path; and 56.88 minutes for the preparation
+monitor, for 543.04 minutes total. Each non-transferable preparation category stayed
+within its ceiling of 952, 168, and 100 minutes respectively. Measurement workers,
+measurement support, terminal readback, and measurement cancellation controllers each
+consumed zero minutes, so the seven-category total remains 543.04 of 1,525 minutes.
+Unused authority is not transferable and does not cure the failed preparation gate.
+
+Finite hardening-closure recommendation: **close inconclusive**. The complete retained
+enumeration set is not an authorized substitute for a valid terminal admission
+decision and frozen plan. The conditional 12-unit execution and terminal readback are
+therefore ineligible and were not dispatched. This outcome supports neither a proposal
+nor a model rejection and grants no calibration, qualification, probe, acceptance,
+merge, tag, release, or broader-work authority. Authorization
+`AH-PREP-CONTAINMENT-20261019-C` is exhausted and closed; the only permitted follow-up
+is preservation and reconciliation of this evidence under a separately issued grant,
+not an automatic repair or retry.
+
+### 2026-10-19 terminal reconciliation and recovery assessment
+
+Read-only later reconciliation was recorded at `2026-10-19T23:32:02Z` in the retained
+evidence bundle
+`capacity-reconciliation-20261019T232618Z/reconciliation-record-20261019T233202Z.md`
+(SHA-256 `aafc1e51cdba591a39dff94b419e96ca76235f5cc2c10152d489a0f96ec943f3`).
+It preserves the failed gate and monitor outcome. All 329 provider jobs and associated
+watchers are now terminal. All 256 enumeration ZIPs match their provider SHA-256
+digests, all report contents validate, and the production aggregator reconstructs a
+complete 52,609-fingerprint candidate-bound corpus. Exact retained timestamps establish
+delayed provider job-state visibility for shard 249: the worker and artifact were
+complete before gate collection, while both retained API snapshots still reported the
+worker in progress. Local production-path replay distinguishes that valid pending
+snapshot from malformed evidence and from the later terminal state.
+
+Recovery without re-enumeration is defensible in principle but unsupported by current
+consumers. No current workflow can issue a separately authorized recovery package, and
+execution accepts only the original C-bound preparation artifact. The actual plan
+builder also exposes an independent mapped-test ordering mismatch and cannot reproduce
+the 12-unit plan until test identity is canonicalized. The finite recommendation is a
+bounded, separately authorized recovery/freeze over the retained corpus after those
+narrow contract/consumer changes—not a rerun. Grant C remains closed, the original
+run remains failed, and measurement remains ineligible.
+
 The repair fixes preparation at 14 sequential 16-worker batches followed by four
 sequential 8-worker tail batches. Every gate recollects stable provider accounting
 and reserves each next worker's complete 35-minute limit. A prior gate's success
@@ -43,7 +122,7 @@ failure without a valid published decision does not blindly cancel already-termi
 jobs; explicit live over-exposure, worker failure, provider-read exhaustion, or the
 monitor deadline retains diagnostics before requesting run cancellation.
 
-Current uncommitted implementation diff excluding this worklog has SHA-256
+The reviewed implementation diff excluding this worklog had SHA-256
 `d90c2b5d79e269cd38b70dea1012c20d0d8fffa8f79d05f5d23d998b5ae79239`.
 The 805 owning staged-preflight, mutation, and parsed-workflow tests pass together.
 The final exact-diff full suite passes with 4,929 tests and 20 skips. All-file Ruff, targeted
@@ -51,9 +130,9 @@ changed-workflow actionlint, diff hygiene, the locked changed-file Fettle check,
 checkpoint completion validation pass. Repository-wide actionlint separately reports
 the pre-existing SC2155 warning in untouched `.github/workflows/release.yml`; it is
 not hidden or treated as changed-workflow evidence. Independent complete-diff review,
-signed delivery, literal-head CI, live provider history reconciliation, and dispatch
-remain pending. No provider workflow has been dispatched under C; all C-grant
-category consumption remains zero.
+signed delivery, literal-head CI, live provider history reconciliation, and the sole
+authorized preparation dispatch are complete. Their terminal disposition is recorded
+above; no measurement or readback dispatch occurred.
 
 Independent review bound substantive diff
 `d90c2b5d79e269cd38b70dea1012c20d0d8fffa8f79d05f5d23d998b5ae79239`,

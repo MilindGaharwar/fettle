@@ -268,3 +268,113 @@ Any case not meeting a frozen investment or rejection rule is inconclusive.
 
 The repository has no `FEATURES.md`; behavior ownership is recorded in
 `docs/behavior-map.md` and the two route contracts above.
+
+## 2026-10-20 Corpus Recovery Plan
+
+**Authorization:** `AH-CORPUS-RECOVERY-20261020-A`.
+
+**User story:** As the diagnostic operator, I want to freeze and execute the complete
+retained source corpus without enumerating again, so later provider reconciliation can
+be used honestly without erasing the failed source attempt or qualifying a successor.
+
+### Fixed identities and assumptions
+
+- Source candidate: `65e63d953b45d3672c24df74d0a1364b83a0157b`.
+- Source run/attempt/gate/grant: `39263581356/1`, gate 18,
+  `AH-PREP-CONTAINMENT-20261019-C`, permanently failed/closed.
+- Source corpus digest:
+  `bec653555a4bdbd32159699f3c0bd3826403b326a287a5bf0cc97b157dee6ccf`.
+- Recovery grant: `AH-CORPUS-RECOVERY-20261020-A`; the delivered controller SHA is a
+  separate identity and cannot become the source candidate.
+- Historical operational floors are workers 475.89, support 10.27, and
+  cancellation/uncertainty 56.88 minutes. They are compatibility evidence, not billing
+  authority or spending credit.
+- The durable local packet is
+  durable evidence packet `ah-corpus-recovery-20261020-a`.
+
+### Chosen design and tradeoff
+
+Add one explicit `recover` stage and recovery-lineage package to the existing route.
+Recovery validates provider inventory, raw artifact ZIP digests, report contents,
+manifests, terminal jobs, source history, corpus, and accounting before building the
+same 12-unit plan. Execution checks out the delivered controller and frozen source into
+separate directories. The controller validates lineage and invokes the mutation
+executor imported from the source checkout through a digest-bound adapter that corrects
+only duplicate-free mapped-test representation order; it records adapter,
+module/blob/dependency identity and source hashes before and after.
+
+This is chosen over editing/rebuilding the source candidate, which would invalidate the
+corpus, and over importing controller-head mutation execution, which would silently
+change measured behavior. It adds explicit lineage complexity but keeps enumeration and
+the mutation engine frozen. Mapped-test comparison validates unique membership while
+retaining `_mapped_tests()` owner-first execution order; no global runner-input sort is
+introduced.
+
+### Blast radius
+
+- `fettle/staged_preflight.py`: one grant-specific 335-minute authorization and strict
+  recovery lineage/accounting validation.
+- `fettle/mutation_test.py`: mapped-test membership helper, recovery corpus/package
+  validation, deterministic plan construction, and source-executor identity checks.
+- `.github/workflows/mutation.yml`: bounded recovery dispatch, recovery-aware execution
+  and readback admission, source/controller checkout separation, and reservations.
+- `.github/workflows/mutation-capacity-recovery-unit.yml`: execute against the source
+  checkout while retaining controller/source provenance and restoration evidence.
+- `tests/test_staged_preflight.py`, `tests/test_mutation_test.py`, `tests/test_ci.py`:
+  contract, adversarial artifact, deterministic selection, identity-separation,
+  budget, and parsed-workflow evidence.
+- `docs/behavior-map.md`, route UX spec, this plan, and audit worklog: operator and
+  ownership contract.
+
+`kgraph impact` is stale and identified only the three queried owners, so repository
+search, focused tests, and the full suite remain required evidence.
+
+### Work packages and checks
+
+1. Preserve and checksum the source packet outside the repository; verify the copied
+   reconciliation digest and full packet manifest.
+2. Add strict source/recovery identity and 335-minute category contracts; run focused
+   staged-preflight tests.
+3. Correct mapped-test comparison using duplicate rejection plus set equality while
+   retaining canonical owner-first execution order; run focused mutation tests.
+4. Add retained-artifact recovery validation and deterministic package construction;
+   replay all 256 retained ZIPs and reject missing, foreign, duplicate, and substituted
+   fixtures.
+5. Add source/controller-separated recovery and execution workflow paths; parse actual
+   scripts and run actionlint.
+6. Prove the source executor imports from the source checkout, dependencies come from
+   the source lock, source candidate stays clean, and repeated plan construction is
+   byte-identical.
+7. Re-evaluate the four stale completion scopes from their current criteria; do not
+   update digests unless their required evidence is actually current.
+8. Run focused and full tests, Ruff, whitespace, changed-workflow actionlint, locked
+   Fettle, completion validation, and independent complete-diff review.
+9. If all delivery gates pass, create one signed commit, fast-forward both authorized
+   branches, and require substantive literal-head CI before provider recovery.
+10. Reserve recovery 30, workers 240, support 25, readback 10, controllers 30; only
+    then dispatch one recover, one execute, and one readback with no retry.
+
+Each stage claims a fixed retained grant marker and also rejects any second fresh
+workflow dispatch with the same stage/experiment run title. The measurement monitor
+may transfer containment at its 30-minute ceiling to already-created exact-once worker
+jobs and their hard 20-minute limits; it never authorizes a continuation or new wave.
+Terminal readback is required even for cancellation, timeout, partial, missing, or
+malformed unit evidence and records those states as explicit non-pass.
+
+### Success criteria
+
+- Exact 52,609-fingerprint corpus and digest reproduce from 256 provider-digest-bound
+  ZIPs; no enumeration job exists in recovery or execution graphs.
+- Repeated recovery emits byte-identical 12-unit selection and package identity.
+- Foreign, missing, duplicate, conflicting, substituted, stale, or malformed source
+  evidence starts no measurement worker.
+- Equal unique mapped-test membership is accepted despite representation order, but
+  duplicates or membership changes reject; execution order remains owner-first.
+- Every measurement result binds source candidate, source executor identity,
+  controller SHA, source failed lineage, and recovery grant, with all authority flags
+  false.
+- Configured maxima total exactly 335 and remain non-transferable. Historical floors
+  are carried separately and never reduce new reservations.
+- The failed source run/gate/monitor remain immutable non-pass history.
+- No calibration, qualification, scheduler redesign, rerun, substitution, merge, tag,
+  release, or unrelated provider work occurs.

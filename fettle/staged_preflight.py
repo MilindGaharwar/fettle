@@ -19,6 +19,9 @@ from typing import Callable
 
 FROZEN_CANDIDATE = "0fc41fdfee13e09f4bda3dc5eee177030882aa36"
 CAPACITY_AUTHORIZATION_ID = "AH-PREP-CONTAINMENT-20261019-C"
+CAPACITY_RECOVERY_AUTHORIZATION_ID = "AH-CORPUS-RECOVERY-20261020-A"
+CAPACITY_RECOVERY_EXPERIMENT_ID = "capval-corpus-recovery-20261020-a"
+CAPACITY_RECOVERY_CANDIDATE = "65e63d953b45d3672c24df74d0a1364b83a0157b"
 CAPACITY_RESOURCE_CEILINGS = {
     "preparation_workers": 952,
     "preparation_support": 168,
@@ -41,6 +44,20 @@ CAPACITY_RESOURCE_OWNERSHIP = {
     "measurement_support": ["measurement admission", "measurement batch gates", "in-run readback"],
     "terminal_readback": ["terminal provider readback"],
     "measurement_cancellation_controllers": ["measurement monitor and cancellation containment"],
+}
+CAPACITY_RECOVERY_RESOURCE_CEILINGS = {
+    "recovery_freeze": 30,
+    "measurement_workers": 240,
+    "execution_support": 25,
+    "terminal_readback": 10,
+    "cancellation_controllers": 30,
+}
+CAPACITY_RECOVERY_RESOURCE_OWNERSHIP = {
+    "recovery_freeze": ["retained artifact validation", "corpus recovery", "sample freeze"],
+    "measurement_workers": ["frozen source capacity measurement workers"],
+    "execution_support": ["execution admission", "measurement batch gates", "in-run readback"],
+    "terminal_readback": ["terminal provider readback"],
+    "cancellation_controllers": ["measurement monitor and cancellation containment"],
 }
 
 
@@ -101,6 +118,49 @@ def capacity_authorization_contract(
     return _capacity_authorization_contract(
         authorization_id, candidate_sha, experiment_id,
     )
+
+
+def capacity_recovery_authorization_contract(
+    authorization_id: str, candidate_sha: str, experiment_id: str,
+) -> dict:
+    """Build the one approved corpus-recovery diagnostic contract."""
+    if authorization_id != CAPACITY_RECOVERY_AUTHORIZATION_ID:
+        raise ValueError("capacity recovery authorization is not approved for dispatch")
+    if candidate_sha != CAPACITY_RECOVERY_CANDIDATE:
+        raise ValueError("capacity recovery candidate is not approved for dispatch")
+    if experiment_id != CAPACITY_RECOVERY_EXPERIMENT_ID:
+        raise ValueError("capacity recovery experiment is not approved for dispatch")
+    contract = _capacity_authorization_contract(
+        authorization_id, candidate_sha, experiment_id,
+    )
+    contract["scope"] = {
+        "recovery_dispatches": 1,
+        "enumeration_dispatches": 0,
+        "measurement_units": 12,
+        "measurement_attempts_per_unit": 1,
+        "terminal_readback_dispatches": 1,
+        "maximum_measurement_concurrency": 4,
+    }
+    contract["resource_ceiling_minutes"] = CAPACITY_RECOVERY_RESOURCE_CEILINGS
+    contract["resource_ownership"] = CAPACITY_RECOVERY_RESOURCE_OWNERSHIP
+    contract["resource_ceiling_total_minutes"] = 335
+    payload = {key: value for key, value in contract.items() if key != "digest"}
+    contract["digest"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return contract
+
+
+def validate_capacity_recovery_authorization_contract(
+    contract: dict, *, authorization_id: str, candidate_sha: str, experiment_id: str,
+) -> dict:
+    """Require exact reproduction of the recovery-only resource contract."""
+    expected = capacity_recovery_authorization_contract(
+        authorization_id, candidate_sha, experiment_id,
+    )
+    if contract != expected:
+        raise ValueError("capacity recovery authorization contract is missing, stale, or conflicting")
+    return contract
 
 
 def validate_capacity_authorization_contract(

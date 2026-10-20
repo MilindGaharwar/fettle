@@ -26,6 +26,13 @@ so I can obtain bounded modeling evidence without creating qualification input.
 | Read back | Downloads non-authoritative experiment artifacts | Complete, partial, censored, missing, and conflicting states plus separate ledgers | Oriented | Incomplete evidence interpreted as pass |
 | Decide | Compares frozen predictions with observations | Model-validation conclusion only | Informed | Validation mistaken for qualification |
 
+Under `AH-CORPUS-RECOVERY-20261020-A`, recovery adds one bounded operator stage
+between Prepare and Review. It displays both immutable identities: the failed source
+candidate/run/grant that owns the corpus and the delivered controller SHA/new grant
+that validates recovery. A successful recovery never relabels the source preparation
+as successful. Execution remains against a separate checkout of the frozen source
+candidate; controller-head mutation source is not measured.
+
 Interaction budget: three dispatches and one digest transfer. Preparation and
 execution remain separate so enumeration cost is visible and execution requires
 an immutable reviewed sample; terminal provider readback remains separate so it
@@ -52,11 +59,18 @@ can observe the execution attempt after its final timestamp exists.
   provider execution is not implied.
 - Stale: candidate, environment, mappings, plan, preparation run, or workflow
   identity mismatch rejects execution before workers start.
+- Recovered: complete retained artifacts reproduce the exact source corpus and plan,
+  with source and controller identities shown separately and diagnostic authority only.
+- Partial recovery execution: retained provider accounting and an explicit unknown
+  non-pass decision remain available after cancellation, timeout, or missing unit
+  artifacts; the operator is not shown a blank or falsely successful readback.
 
 ## Information Architecture
 
 - Entry: existing registered `.github/workflows/mutation.yml`.
 - Mode: `capacity-validation`; stage: `prepare`, `execute`, or terminal `readback`.
+- Recovery stage: `recover`; consumes only run `39263581356` attempt 1 under
+  `AH-CORPUS-RECOVERY-20261020-A` and emits a separately named recovery package.
 - Preparation outputs: `capacity-validation-preparation-*` only.
 - Execution outputs: `capacity-validation-unit-*`, accounting, and readback
   only. Names never match mutation calibration, checkpoint, report, or preflight
@@ -158,3 +172,19 @@ Given complete exact sample results
 When the frozen numerical contract is evaluated
 Then the outcome is invest, reject ranking, reject granularity, or inconclusive,
 and no outcome becomes mutation qualification.
+
+### Scenario: Recovery preserves failed source history
+
+Given failed source run 39263581356/1 and its complete later-reconciled artifacts
+When the recovery controller validates and freezes them
+Then the package names the failed source grant and gate separately from the recovery
+grant and controller SHA, and the historical preparation remains failed/non-pass.
+
+### Scenario: Measurement uses the frozen source implementation
+
+Given a recovery package created by a newer controller
+When a measurement unit starts
+Then mutation source, tests, configuration, dependencies, and
+`execute_pending_mutations` load from a clean checkout of source candidate
+`65e63d953b45d3672c24df74d0a1364b83a0157b`, and their identities are retained before
+any mutation executes.

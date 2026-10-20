@@ -82,7 +82,7 @@ def test_capacity_validation_route_is_registered_dormant_and_isolated():
     jobs = workflow["jobs"]
 
     assert "capacity-validation" in dispatch["mode"]["options"]
-    assert dispatch["capacity_stage"]["options"] == ["prepare", "execute", "readback"]
+    assert dispatch["capacity_stage"]["options"] == ["prepare", "recover", "execute", "readback"]
     assert dispatch["capacity_authorization_id"]["type"] == "string"
     capacity_jobs = {name: job for name, job in jobs.items() if name.startswith("capacity-")}
     assert capacity_jobs
@@ -126,6 +126,78 @@ def test_capacity_validation_measurement_batches_are_exact_once_and_bounded():
     )
     assert jobs["capacity-measurement-monitor"]["permissions"] == {
         "actions": "write", "contents": "read",
+    }
+
+
+def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
+    root = Path(PLUGIN_DIR)
+    workflow = yaml.safe_load((root / ".github/workflows/mutation.yml").read_text())
+    jobs = workflow["jobs"]
+    recovery = jobs["capacity-recover"]
+    workers = jobs["capacity-recovery-units"]
+
+    assert recovery["timeout-minutes"] == 30
+    scripts = "\n".join(step.get("run", "") for step in recovery["steps"])
+    assert "39263581356" in scripts
+    assert "65e63d953b45d3672c24df74d0a1364b83a0157b" in scripts
+    assert "enumeration_dispatches\"]==0" in scripts
+    assert "actions/artifacts/$artifact_id/zip" in scripts
+    assert "--source-python source/.venv/bin/python" in scripts
+    assert "capacity-recovery-grant-A-recover" in yaml.safe_dump(recovery)
+    assert "capacity-recovery-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
+    assert "capacity-recovery-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
+    assert workers["strategy"]["matrix"]["unit"] == list(range(12))
+    assert workers["strategy"]["max-parallel"] == 4
+    assert workers["uses"] == "./.github/workflows/mutation-capacity-recovery-unit.yml"
+    assert jobs["capacity-recovery-finalize"]["needs"] == [
+        "capacity-recovery-units", "capacity-recovery-measurement-monitor",
+    ]
+    assert jobs["capacity-recovery-provider-readback"]["timeout-minutes"] == 10
+    readback_scripts = "\n".join(
+        step.get("run", "") for step in jobs["capacity-recovery-provider-readback"]["steps"]
+    )
+    assert "unknown_non_pass" in readback_scripts
+    assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in readback_scripts
+    assert "|| true" in readback_scripts
+
+    unit = yaml.safe_load(
+        (root / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
+    )["jobs"]["execute"]
+    assert unit["timeout-minutes"] == 20
+    checkouts = [step for step in unit["steps"] if step.get("uses", "").startswith("actions/checkout")]
+    assert [step["with"]["path"] for step in checkouts] == ["controller", "source"]
+    execute = next(step for step in unit["steps"] if step.get("name") == "Execute source-owned bounded capacity unit")
+    validation = next(
+        step for step in unit["steps"]
+        if step.get("name") == "Validate immutable recovery package before source execution"
+    )
+    assert "validate_capacity_recovery_lineage" in validation["run"]
+    assert "plan_sha != os.environ[\"PLAN_SHA256\"]" in validation["run"]
+    assert "candidate_sha\") != os.environ[\"SOURCE_SHA\"]" in validation["run"]
+    assert "authorization_id\") != os.environ[\"AUTHORIZATION_ID\"]" in validation["run"]
+    assert unit["env"]["PYTHONNOUSERSITE"] == "1"
+    assert "source/.venv/bin/python -I" in execute["run"]
+    assert "controller/.github/scripts/capacity_recovery_execute.py" in execute["run"]
+    assert "env -u PYTHONPATH" in execute["run"]
+    assert execute["timeout-minutes"] == 14
+
+    monitor = yaml.safe_load(
+        (root / ".github/workflows/mutation-capacity-measurement-monitor.yml").read_text()
+    )["jobs"]["monitor"]
+    monitor_script = next(
+        step["run"] for step in monitor["steps"]
+        if step.get("name") == "Monitor exact-once measurement exposure"
+    )
+    assert "for sample in $(seq 1 20)" in monitor_script
+    assert "--max-elapsed-seconds 30" in monitor_script
+    assert "sleep 20" in monitor_script
+    assert '"action":"transfer_containment"' in monitor_script
+    assert '"next_permitted_action":"await_terminal_workers"' in monitor_script
+
+    accounting = json.loads((root / ".github/capacity-recovery-accounting.json").read_text())
+    assert accounting["billing_authority"] is False
+    assert accounting["historical_operational_floor_minutes"] == {
+        "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
     }
 
 
@@ -190,8 +262,13 @@ def test_capacity_grant_input_reaches_every_capacity_consumer_without_historical
 
     assert "AH-UNTIMED-DIAGNOSTIC-20261018-A" not in path.read_text()
     for name, job in capacity_jobs.items():
+        expected_grant = (
+            "AH-CORPUS-RECOVERY-20261020-A"
+            if name.startswith("capacity-recovery") or name == "capacity-recover"
+            else "AH-PREP-CONTAINMENT-20261019-C"
+        )
         assert (
-            "capacity_authorization_id == 'AH-PREP-CONTAINMENT-20261019-C'"
+            f"capacity_authorization_id == '{expected_grant}'"
             in job["if"]
         ), name
         if "uses" in job:
@@ -1697,7 +1774,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 16
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 18
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow

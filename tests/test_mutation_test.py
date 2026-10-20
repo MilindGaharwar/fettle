@@ -17,6 +17,7 @@ from fettle.mutation_test import (
     build_mutation_cache_identity,
     build_mutation_report_artifact,
     build_capacity_validation_plan,
+    build_capacity_recovery_lineage,
     collect_mutation_dependency_identities,
     restore_mutation_native_cache,
     save_mutation_native_cache,
@@ -71,7 +72,9 @@ from fettle.mutation_test import (
     run_capacity_validation_unit,
     validate_capacity_validation_results,
     validate_capacity_validation_package,
+    validate_capacity_recovery_lineage,
     reconcile_capacity_provider_accounting,
+    reconcile_capacity_recovery_provider_accounting,
     write_changed_partition_manifests,
 )
 
@@ -3223,6 +3226,233 @@ def test_capacity_plan_selects_whole_file_units_across_six_cost_strata(tmp_path)
     assert load_capacity_validation_plan(path) == first
 
 
+def test_capacity_plan_accepts_equal_mapping_membership_and_preserves_execution_order():
+    preflight, manifests = _capacity_preflight()
+    recorded = preflight["corpus"][0]["mapped_tests"]
+    assert len(recorded) == 1
+    preflight["corpus"][0]["mapped_tests"] = list(reversed(recorded))
+    actual = _capacity_mapping()
+    target = next(iter(actual))
+    actual[target] = ["tests/test_secondary.py", *actual[target]]
+    for record in preflight["corpus"]:
+        if record["file"] == target:
+            record["mapped_tests"] = sorted(actual[target])
+    preflight["corpus_digest"] = _canonical_digest(preflight["corpus"])
+
+    with (
+        patch("fettle.mutation_test._mapped_tests", side_effect=lambda _root, files, _mapping: {
+            file: actual[file] for file in files
+        }),
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={"environment": "fixture"}),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
+    ):
+        plan = build_capacity_validation_plan(
+            ".", {"test_mappings": actual}, preflight, manifests,
+            experiment_id="capval-local", revision="a" * 40,
+            historical_measured_files=set(), historical_source=_capacity_historical_source(),
+            prediction_seconds={"optimistic": 10, "central": 20, "conservative": 30, "stress": 40},
+        )
+
+    selected = [unit for unit in plan["units"] if unit["file"] == target]
+    assert all(unit["mapped_tests"] == actual[target] for unit in selected)
+
+
+@pytest.mark.parametrize(
+    "recorded,actual",
+    [
+        (["tests/test_a.py", "tests/test_a.py"], ["tests/test_a.py"]),
+        (["tests/test_a.py"], ["tests/test_a.py", "tests/test_a.py"]),
+        (["tests/test_a.py"], ["tests/test_b.py"]),
+    ],
+)
+def test_capacity_mapping_membership_rejects_duplicates_and_substitution(recorded, actual):
+    from fettle.mutation_test import _validated_mapped_test_order
+
+    with pytest.raises(ValueError, match="mapping"):
+        _validated_mapped_test_order(recorded, actual)
+
+
+def _capacity_recovery_fixture():
+    source_sha = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+    corpus = {
+        "kind": "capacity_validation_corpus",
+        "revision": source_sha,
+        "corpus_digest": "bec653555a4bdbd32159699f3c0bd3826403b326a287a5bf0cc97b157dee6ccf",
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "shard_count": 256,
+        "manifest_digests": [f"{index:064x}" for index in range(256)],
+        "fingerprints": [f"{index:064x}" for index in range(52609)],
+        "corpus": [],
+    }
+    plan = {
+        "kind": "capacity_validation_plan",
+        "revision": source_sha,
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "preflight_corpus_digest": corpus["corpus_digest"],
+        "manifest_digests": corpus["manifest_digests"],
+        "units": [{"unit_index": index} for index in range(12)],
+        "digest": "d" * 64,
+    }
+    artifacts = [{"artifacts": [{
+        "name": f"capacity-validation-enumeration-39263581356-{index}",
+        "digest": f"sha256:{index + 1000:064x}",
+        "expired": False,
+        "workflow_run": {"id": 39263581356, "head_sha": source_sha},
+    } for index in range(256)]}]
+    jobs = [{"jobs": [{
+        "id": index + 1,
+        "name": f"capacity-enumerate-18 ({index}) / capacity validation (enumerate {index})",
+        "run_id": 39263581356,
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+    } for index in range(256)]}]
+    accounting = {
+        "billing_authority": False,
+        "historical_operational_floor_minutes": {
+            "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
+        },
+        "observed_operational_minutes": {
+            "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
+        },
+    }
+    historical = {
+        "gate_18": {
+            "artifact_sha256": "6215c9dd61fe67deaacee09958177115782de2acaf4b80dbd02b0c4928b616ca",
+            "collection_sha256": "08092c3d8d3e293a769741ad69026736aefcb6c1582cbf0dc7ce932fee2d9b96",
+            "jobs_sha256": "81696980bb48b8493928507db0260338b133bf902348dede279934061726c3a4",
+            "observed_nonterminal_job_id": 118127166658,
+            "observed_nonterminal_shard": 249,
+            "observed_status": "in_progress",
+            "observed_conclusion": None,
+            "disposition": "failed_closed_non_pass",
+        },
+        "monitor": {
+            "artifact_sha256": "cefe007d9ff958e4c7c504176544f439e8fb03d63d85b62b5b87391c5ae0f8f4",
+            "final_decision_sha256": "be85db0399088309da689f8196dad1efd7efe8aacb775c64993ed66996c19a3a",
+            "action": "stop_and_reconcile",
+            "terminal_evidence": "unavailable",
+            "next_permitted_action": "stop_and_reconcile",
+        },
+    }
+    artifacts[0]["artifacts"].extend([
+        {
+            "name": "capacity-preparation-admission-39263581356-18",
+            "digest": f"sha256:{historical['gate_18']['artifact_sha256']}",
+            "expired": False,
+            "workflow_run": {"id": 39263581356, "head_sha": source_sha},
+        },
+        {
+            "name": "capacity-preparation-monitor-39263581356",
+            "digest": f"sha256:{historical['monitor']['artifact_sha256']}",
+            "expired": False,
+            "workflow_run": {"id": 39263581356, "head_sha": source_sha},
+        },
+    ])
+    return corpus, plan, artifacts, jobs, accounting, historical
+
+
+def test_capacity_recovery_lineage_preserves_failed_source_and_separate_controller():
+    corpus, plan, artifacts, jobs, accounting, historical = _capacity_recovery_fixture()
+    controller = "b" * 40
+    experiment = "capval-corpus-recovery-20261020-a"
+
+    lineage = build_capacity_recovery_lineage(
+        corpus, plan, artifacts, jobs, accounting, historical, controller_sha=controller,
+        source_executor_sha256="e" * 64,
+        recovery_experiment_id=experiment, plan_file_sha256="f" * 64,
+    )
+
+    assert validate_capacity_recovery_lineage(
+        lineage, corpus, plan, controller_sha=controller,
+        recovery_experiment_id=experiment, plan_file_sha256="f" * 64,
+    ) == lineage
+    assert lineage["source"]["historical_disposition"] == "failed_closed_non_pass"
+    assert lineage["source"]["historical_evidence"] == historical
+    assert lineage["source"]["authorization_id"] == "AH-PREP-CONTAINMENT-20261019-C"
+    assert lineage["recovery"]["authorization_id"] == "AH-CORPUS-RECOVERY-20261020-A"
+    assert lineage["source"]["candidate_sha"] != lineage["recovery"]["controller_sha"]
+    assert lineage["source"]["executor_module_sha256"] == "e" * 64
+    assert lineage["source"]["operational_floor_minutes"] == {
+        "workers": 475.89,
+        "support": 10.27,
+        "cancellation_uncertainty": 56.88,
+    }
+    assert lineage["enumeration_repeated"] is False
+    assert lineage["qualification_eligible"] is False
+
+
+@pytest.mark.parametrize("defect", ["missing", "foreign", "substituted", "nonterminal"])
+def test_capacity_recovery_lineage_rejects_artifact_and_worker_defects(defect):
+    corpus, plan, artifacts, jobs, accounting, historical = _capacity_recovery_fixture()
+    if defect == "missing":
+        artifacts[0]["artifacts"].pop()
+    elif defect == "foreign":
+        artifacts[0]["artifacts"][0]["workflow_run"]["head_sha"] = "c" * 40
+    elif defect == "substituted":
+        artifacts[0]["artifacts"][1]["digest"] = artifacts[0]["artifacts"][0]["digest"]
+    else:
+        jobs[0]["jobs"][0]["status"] = "in_progress"
+        jobs[0]["jobs"][0]["conclusion"] = None
+
+    with pytest.raises(ValueError, match="capacity recovery"):
+        build_capacity_recovery_lineage(
+            corpus, plan, artifacts, jobs, accounting, historical, controller_sha="b" * 40,
+            source_executor_sha256="e" * 64,
+            recovery_experiment_id="capval-corpus-recovery-20261020-a",
+            plan_file_sha256="f" * 64,
+        )
+
+
+def test_capacity_recovery_lineage_rejects_rewritten_historical_non_pass():
+    corpus, plan, artifacts, jobs, accounting, historical = _capacity_recovery_fixture()
+    historical["gate_18"]["observed_status"] = "completed"
+
+    with pytest.raises(ValueError, match="historical non-pass"):
+        build_capacity_recovery_lineage(
+            corpus, plan, artifacts, jobs, accounting, historical,
+            controller_sha="b" * 40,
+            source_executor_sha256="e" * 64,
+            recovery_experiment_id="capval-corpus-recovery-20261020-a",
+            plan_file_sha256="f" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", "999"),
+        ("run_attempt", "2"),
+        ("gate_id", 17),
+        ("authorization_id", "AH-FOREIGN"),
+        ("historical_evidence", {}),
+        ("operational_floor_minutes", {"workers": 0, "support": 0, "cancellation_uncertainty": 0}),
+        ("artifact_zip_sha256", []),
+        ("worker_job_ids", []),
+        ("executor_module_sha256", "f" * 63),
+    ],
+)
+def test_capacity_recovery_lineage_consumer_rejects_recomputed_source_substitution(field, value):
+    corpus, plan, artifacts, jobs, accounting, historical = _capacity_recovery_fixture()
+    lineage = build_capacity_recovery_lineage(
+        corpus, plan, artifacts, jobs, accounting, historical,
+        controller_sha="b" * 40, source_executor_sha256="e" * 64,
+        recovery_experiment_id="capval-corpus-recovery-20261020-a",
+        plan_file_sha256="f" * 64,
+    )
+    lineage["source"][field] = value
+    lineage["digest"] = _canonical_digest({
+        key: item for key, item in lineage.items() if key != "digest"
+    })
+
+    with pytest.raises(ValueError, match="stale or conflicting"):
+        validate_capacity_recovery_lineage(
+            lineage, corpus, plan, controller_sha="b" * 40,
+            recovery_experiment_id="capval-corpus-recovery-20261020-a",
+            plan_file_sha256="f" * 64,
+        )
+
+
 def test_capacity_enumeration_is_non_authoritative_and_rejects_canonical_input(tmp_path):
     source = tmp_path / "src/a.py"
     source.parent.mkdir()
@@ -3675,7 +3905,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         run, [{"total_count": 12, "jobs": workers}], source, repository="owner/repo",
         revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     assert missing_support["status"] == "non_pass"
@@ -3688,7 +3918,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
         {**run, "conclusion": "cancelled"}, pages, source, repository="owner/repo",
         revision="a" * 40, experiment_id="capval-local", execution_run_id="123",
         preparation_run_id="100", plan_file_sha256="p" * 64,
-            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
+        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
         authorization_contract=source["authorization_contract"],
     )
     assert cancelled["status"] == "non_pass"
@@ -3699,7 +3929,7 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
             authorization_id="AH-PREP-CONTAINMENT-20261019-C",
-        authorization_contract=source["authorization_contract"],
+            authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="pagination"):
         malformed_ids = [{**item} for item in all_jobs]
@@ -3709,8 +3939,8 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
-        authorization_contract=source["authorization_contract"],
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
+            authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="contradictory"):
         contradictory = [{**item} for item in all_jobs]
@@ -3720,8 +3950,8 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
-        authorization_contract=source["authorization_contract"],
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
+            authorization_contract=source["authorization_contract"],
         )
     with pytest.raises(ValueError, match="identity"):
         reconcile_capacity_provider_accounting(
@@ -3729,8 +3959,86 @@ def test_capacity_provider_accounting_rejects_foreign_failed_and_duplicate_jobs(
             repository="owner/repo", revision="a" * 40,
             experiment_id="capval-local", execution_run_id="123",
             preparation_run_id="100", plan_file_sha256="p" * 64,
-        authorization_id="AH-PREP-CONTAINMENT-20261019-C",
-        authorization_contract=source["authorization_contract"],
+            authorization_id="AH-PREP-CONTAINMENT-20261019-C",
+            authorization_contract=source["authorization_contract"],
+        )
+
+
+def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_authoritative():
+    from fettle.staged_preflight import capacity_recovery_authorization_contract
+
+    source_sha = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+    controller = "b" * 40
+    authorization = "AH-CORPUS-RECOVERY-20261020-A"
+    experiment = "capval-corpus-recovery-20261020-a"
+    contract = capacity_recovery_authorization_contract(authorization, source_sha, experiment)
+    source = {
+        "schema_version": "1", "kind": "capacity_validation_recovery_execution_source",
+        "source_candidate_sha": source_sha, "controller_sha": controller,
+        "recovery_experiment_id": experiment, "recovery_run_id": "100",
+        "plan_file_sha256": "p" * 64, "authorization_id": authorization,
+        "authorization_contract": contract,
+    }
+    run = {
+        "id": 123, "run_attempt": 1, "head_sha": controller,
+        "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+        "path": ".github/workflows/mutation.yml",
+    }
+    recovery_run = {**run, "id": 100}
+
+    def job(name, job_id):
+        return {
+            "id": job_id, "name": name, "status": "completed", "conclusion": "success",
+            "started_at": "2026-10-20T10:00:00Z", "completed_at": "2026-10-20T10:01:00Z",
+        }
+
+    workers = [job(f"capacity recovery validation unit {index}", index + 1) for index in range(12)]
+    support = [
+        job("capacity recovery (execution admission)", 13),
+        job("capacity recovery (execution finalization)", 14),
+    ]
+    controller_job = job(
+        "capacity-recovery-measurement-monitor / capacity validation (monitor measurement containment)", 15,
+    )
+    jobs = [*workers, *support, controller_job]
+    freeze_jobs = [job("capacity validation (recover retained corpus)", 16)]
+
+    ledger = reconcile_capacity_recovery_provider_accounting(
+        run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
+        [{"total_count": 1, "jobs": freeze_jobs}], source,
+        repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+        recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+        plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+        recovery_authorization_contract=contract,
+    )
+
+    assert ledger["status"] == "completed" and ledger["passed"] is False
+    assert ledger["billing_authority"] is False
+    assert ledger["worker"]["ceiling_minutes"] == 240
+    assert ledger["recovery_freeze"]["ceiling_minutes"] == 30
+    assert ledger["support"]["ceiling_minutes"] == 25
+    assert ledger["cancellation_controller"]["ceiling_minutes"] == 30
+    assert ledger["terminal_readback"]["ceiling_minutes"] == 10
+    assert ledger["terminal_readback"]["charged_minutes"] == 10
+    assert ledger["historical_non_billing_floor_minutes"]["workers"] == 475.89
+    with pytest.raises(ValueError, match="stale"):
+        reconcile_capacity_recovery_provider_accounting(
+            {**run, "head_sha": source_sha}, [{"total_count": len(jobs), "jobs": jobs}],
+            recovery_run, [{"total_count": 1, "jobs": freeze_jobs}], source,
+            repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+            recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+            plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+            recovery_authorization_contract=contract,
+        )
+    with pytest.raises(ValueError, match="freeze provider identity"):
+        reconcile_capacity_recovery_provider_accounting(
+            run, [{"total_count": len(jobs), "jobs": jobs}],
+            {**recovery_run, "conclusion": "failure"},
+            [{"total_count": 1, "jobs": freeze_jobs}], source,
+            repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+            recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+            plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+            recovery_authorization_contract=contract,
         )
 
 
