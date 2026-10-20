@@ -14,6 +14,11 @@ FAILED_RECOVERY_HEAD_SHA = "276ac10bb7b2ec7b80346e821c2324d12bfab73f"
 MISSING_INPUT_RUN_ID = 39378451442
 MISSING_INPUT_HEAD_SHA = "8e46125ff7d0e6f7d3a845faed32fb14336a5185"
 WORKFLOW_PATH = ".github/workflows/mutation.yml"
+ADMITTED_RECOVERY_RUN_ID = 39391306615
+ADMITTED_RECOVERY_HEAD_SHA = "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8"
+ADMITTED_MARKER_ID = 12250220498
+ADMITTED_MARKER_DIGEST = "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280"
+ADMITTED_RECOVERY_JOB_ID = 118523223941
 
 
 def _pages(path: Path, collection: str) -> list[dict]:
@@ -100,7 +105,9 @@ def validate_admission(
             if retry_predecessor_run_id in {FAILED_RECOVERY_RUN_ID, MISSING_INPUT_RUN_ID}:
                 raise ValueError("conditional retry predecessor is duplicated")
             predecessors.append((
-                retry_predecessor_run_id, controller_sha,
+                retry_predecessor_run_id,
+                (ADMITTED_RECOVERY_HEAD_SHA
+                 if retry_predecessor_run_id == ADMITTED_RECOVERY_RUN_ID else controller_sha),
                 retry_predecessor_artifacts_path, retry_predecessor_jobs_path,
             ))
         for run_id, head_sha, artifacts_path, jobs_path in predecessors:
@@ -114,7 +121,25 @@ def validate_admission(
                 or predecessor.get("conclusion") != "failure"
             ):
                 raise ValueError("authorized failed recovery predecessor differs")
-            if artifacts_path is None or _pages(artifacts_path, "artifacts"):
+            artifacts = _pages(artifacts_path, "artifacts") if artifacts_path is not None else None
+            if run_id == ADMITTED_RECOVERY_RUN_ID:
+                if len(artifacts or []) != 1 or any(
+                    artifacts[0].get(key) != value for key, value in {
+                        "id": ADMITTED_MARKER_ID,
+                        "name": "capacity-recovery-grant-A-recover",
+                        "expired": False,
+                        "digest": ADMITTED_MARKER_DIGEST,
+                    }.items()
+                ):
+                    raise ValueError("admitted recovery predecessor marker differs")
+                marker_run = artifacts[0].get("workflow_run")
+                if (
+                    not isinstance(marker_run, dict)
+                    or marker_run.get("id") != ADMITTED_RECOVERY_RUN_ID
+                    or marker_run.get("head_sha") != ADMITTED_RECOVERY_HEAD_SHA
+                ):
+                    raise ValueError("admitted recovery predecessor marker lineage differs")
+            elif artifacts:
                 raise ValueError("authorized failed recovery predecessor published artifacts")
             if jobs_path is None:
                 raise ValueError("authorized failed recovery predecessor jobs are missing")
@@ -134,7 +159,15 @@ def validate_admission(
                 )
             ):
                 raise ValueError("authorized failed recovery predecessor jobs differ")
-            if run_id == retry_predecessor_run_id and _charged_minutes(recovery_jobs[0]) > 1:
+            if run_id == ADMITTED_RECOVERY_RUN_ID:
+                if (
+                    recovery_jobs[0].get("id") != ADMITTED_RECOVERY_JOB_ID
+                    or recovery_jobs[0].get("started_at") != "2026-10-20T08:08:56Z"
+                    or recovery_jobs[0].get("completed_at") != "2026-10-20T08:10:03Z"
+                    or _charged_minutes(recovery_jobs[0]) != 2
+                ):
+                    raise ValueError("admitted recovery predecessor execution differs")
+            elif run_id == retry_predecessor_run_id and _charged_minutes(recovery_jobs[0]) > 1:
                 raise ValueError("conditional retry predecessor leaves insufficient recovery headroom")
 
     markers = _pages(markers_path, "artifacts")

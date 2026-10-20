@@ -1687,6 +1687,7 @@ def build_capacity_recovery_lineage(
     source_executor_sha256: str,
     recovery_experiment_id: str,
     plan_file_sha256: str,
+    continuation_run_id: str,
 ) -> dict:
     """Bind a recovered source package without changing its failed source history."""
     from fettle.staged_preflight import capacity_recovery_authorization_contract
@@ -1876,6 +1877,13 @@ def build_capacity_recovery_lineage(
             "authorization_contract": recovery_contract,
             "experiment_id": recovery_experiment_id,
             "controller_sha": controller_sha,
+            "continuation": {
+                "failed_admitted_run_id": continuation_run_id,
+                "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+                "marker_artifact_id": 12250220498,
+                "marker_digest": "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280",
+                "disposition": "failed_closed_non_pass",
+            },
         },
         "package": {
             "plan_digest": plan["digest"],
@@ -1964,6 +1972,13 @@ def validate_capacity_recovery_lineage(
         or source.get("corpus_digest") != corpus.get("corpus_digest")
         or source.get("manifest_digests") != corpus.get("manifest_digests")
         or recovery.get("controller_sha") != controller_sha
+        or recovery.get("continuation") != {
+            "failed_admitted_run_id": "39391306615",
+            "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+            "marker_artifact_id": 12250220498,
+            "marker_digest": "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280",
+            "disposition": "failed_closed_non_pass",
+        }
         or recovery.get("experiment_id") != recovery_experiment_id
         or package.get("plan_digest") != plan.get("digest")
         or package.get("plan_file_sha256") != plan_file_sha256
@@ -2441,11 +2456,16 @@ def reconcile_capacity_recovery_provider_accounting(
         raise ValueError("missing-input recovery predecessor job pages are unavailable")
     retry_jobs: list[dict] = []
     if retry_recovery_run is not None or retry_recovery_job_pages is not None:
+        retry_id = str(retry_recovery_run.get("id")) if isinstance(retry_recovery_run, dict) else ""
+        expected_retry_sha = (
+            "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8"
+            if retry_id == "39391306615" else controller_sha
+        )
         if (
             not isinstance(retry_recovery_run, dict)
-            or str(retry_recovery_run.get("id")) in {"39369184372", "39378451442", recovery_run_id}
+            or retry_id in {"39369184372", "39378451442", recovery_run_id}
             or retry_recovery_run.get("run_attempt") != 1
-            or retry_recovery_run.get("head_sha") != controller_sha
+            or retry_recovery_run.get("head_sha") != expected_retry_sha
             or retry_recovery_run.get("event") != "workflow_dispatch"
             or retry_recovery_run.get("status") != "completed"
             or retry_recovery_run.get("conclusion") != "failure"
@@ -2592,6 +2612,13 @@ def reconcile_capacity_recovery_provider_accounting(
         )
     ):
         raise ValueError("conditional retry recovery predecessor jobs differ")
+    if retry_jobs and str(retry_recovery_run.get("id")) == "39391306615" and (
+        retry_freeze[0]["job_id"] != 118523223941
+        or retry_freeze[0]["started_at"] != "2026-10-20T08:08:56Z"
+        or retry_freeze[0]["completed_at"] != "2026-10-20T08:10:03Z"
+        or retry_freeze[0]["charged_minutes_ceiling"] != 2
+    ):
+        raise ValueError("admitted recovery predecessor execution differs")
     indexes = [item["unit_index"] for item in workers]
     worker_minutes = sum(item["charged_minutes_ceiling"] for item in workers)
     support_minutes = sum(item["charged_minutes_ceiling"] for item in support)

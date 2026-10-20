@@ -44,7 +44,7 @@ on:
         required: false
         type: string
       capacity_recovery_retry_run_id:
-        description: "One authorized failed pre-admission recovery predecessor"
+        description: "One explicitly authorized failed recovery predecessor"
         required: false
         type: string
       capacity_plan_sha256:
@@ -1244,7 +1244,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'recover' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
     name: capacity validation (recover retained corpus)
     runs-on: ubuntu-latest
-    timeout-minutes: 27
+    timeout-minutes: 26
     permissions:
       actions: read
       contents: read
@@ -1288,7 +1288,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           expected="Capacity recovery recover ${{ github.event.inputs.capacity_experiment_id }}"
-          marker=capacity-recovery-grant-A-recover
+          marker=capacity-recovery-grant-A-recover-continuation-39391306615
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/artifacts?per_page=100" > failed-recovery-artifacts.json
@@ -1315,7 +1315,7 @@ jobs:
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-grant-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: capacity-recovery-grant-A-recover
+          name: capacity-recovery-grant-A-recover-continuation-39391306615
           path: recovery-grant-marker/run-id
           if-no-files-found: error
           retention-days: 90
@@ -1330,7 +1330,7 @@ jobs:
             --output provider/final-jobs.json --attempts-directory provider/job-attempts \
             --report provider/final-collection.json --max-attempts 4 \
             --max-elapsed-seconds 45 --retry-delay-seconds 2
-          gh run download 39263581356 --name capacity-validation-manifests-39263581356 --dir capacity-manifests
+          gh run download 39263581356 --repo "$GITHUB_REPOSITORY" --name capacity-validation-manifests-39263581356 --dir capacity-manifests
           controller/.venv/bin/python - <<'PY' > enumeration-artifacts.tsv
           import json
           pages=json.load(open("provider/artifacts.json"))
@@ -1364,6 +1364,7 @@ jobs:
             --accounting controller/.github/capacity-recovery-accounting.json \
             --gate-18-zip gate-18.zip --monitor-zip monitor.zip \
             --controller-sha "$GITHUB_SHA" --recovery-experiment-id "$EXPERIMENT_ID" \
+            --continuation-run-id "${{ github.event.inputs.capacity_recovery_retry_run_id }}" \
             --output capacity-recovery > capacity-recovery-command.json
       - name: Retain recovery package and provider bindings
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1454,14 +1455,52 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  capacity-recovery-units:
+  capacity-recovery-batch-1:
     if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
     needs: capacity-recovery-execute-admission
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        unit: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        unit: [0, 1, 2, 3]
+    uses: ./.github/workflows/mutation-capacity-recovery-unit.yml
+    with:
+      unit: ${{ matrix.unit }}
+      recovery_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
+      experiment_id: capval-prep-containment-20261019-c
+      recovery_experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
+      source_candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
+      controller_sha: ${{ github.sha }}
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
+
+  capacity-recovery-batch-2:
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    needs: capacity-recovery-batch-1
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        unit: [4, 5, 6, 7]
+    uses: ./.github/workflows/mutation-capacity-recovery-unit.yml
+    with:
+      unit: ${{ matrix.unit }}
+      recovery_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
+      experiment_id: capval-prep-containment-20261019-c
+      recovery_experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
+      plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
+      source_candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
+      controller_sha: ${{ github.sha }}
+      authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
+
+  capacity-recovery-batch-3:
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    needs: capacity-recovery-batch-2
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        unit: [8, 9, 10, 11]
     uses: ./.github/workflows/mutation-capacity-recovery-unit.yml
     with:
       unit: ${{ matrix.unit }}
@@ -1487,7 +1526,7 @@ jobs:
 
   capacity-recovery-finalize:
     if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
-    needs: [capacity-recovery-units, capacity-recovery-measurement-monitor]
+    needs: [capacity-recovery-batch-1, capacity-recovery-batch-2, capacity-recovery-batch-3, capacity-recovery-measurement-monitor]
     name: capacity recovery (execution finalization)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1548,7 +1587,7 @@ jobs:
           from pathlib import Path
           failed=[39369184372,39378451442]
           if os.environ.get("RETRY_RECOVERY_RUN_ID"): failed.append(int(os.environ["RETRY_RECOVERY_RUN_ID"]))
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":4 if 39391306615 in failed else len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           Path("capacity-recovery-provider-accounting.json").write_text(json.dumps(ledger,indent=2,sort_keys=True)+"\n")
           Path("capacity-recovery-model-decision.json").write_text(json.dumps(decision,indent=2,sort_keys=True)+"\n")
@@ -1588,9 +1627,9 @@ jobs:
             --output capacity-execution-jobs.json --attempts-directory capacity-execution-attempts \
             --report capacity-execution-collection.json --max-attempts 4 \
             --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
-          gh run download "$EXECUTION_RUN_ID" --name "capacity-validation-recovery-execution-source-$EXECUTION_RUN_ID" --dir capacity-execution-source || true
-          gh run download "$EXECUTION_RUN_ID" --pattern "capacity-validation-unit-$EXECUTION_RUN_ID-*" --dir capacity-results || true
-          gh run download "$RECOVERY_RUN_ID" --name "capacity-validation-recovery-$RECOVERY_RUN_ID" --dir recovered || true
+          gh run download "$EXECUTION_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "capacity-validation-recovery-execution-source-$EXECUTION_RUN_ID" --dir capacity-execution-source || true
+          gh run download "$EXECUTION_RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern "capacity-validation-unit-$EXECUTION_RUN_ID-*" --dir capacity-results || true
+          gh run download "$RECOVERY_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "capacity-validation-recovery-$RECOVERY_RUN_ID" --dir recovered || true
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID" > capacity-recovery-run.json || true
           python -m fettle.staged_preflight collect-stable-jobs \
             --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID/attempts/1/jobs?per_page=100" \
@@ -1636,7 +1675,7 @@ jobs:
           )
           failed=[39369184372,39378451442]
           if os.environ.get("RETRY_RECOVERY_RUN_ID"): failed.append(int(os.environ["RETRY_RECOVERY_RUN_ID"]))
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":4 if 39391306615 in failed else len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           try:
               package=Path("recovered/capacity-recovery")

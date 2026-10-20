@@ -1,5 +1,51 @@
 # Audit Hardening Worklog
 
+## 2026-10-20: Admitted recovery continuation repair
+
+Owner continuation authorization preserves run `39391306615` as failed/non-pass and
+retains its sole artifact, admission marker `12250220498`, digest
+`sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280`.
+Provider readback confirmed all jobs terminal, the recovery job failed after admission,
+all package and downstream jobs were skipped, and no recovery package named for that
+run exists. The three failed recovery jobs remain charged conservatively at four
+minutes, leaving at most 26 additional recovery minutes. No category is refilled or
+transferred.
+
+The successor is represented by the existing retry-predecessor input fixed to
+`39391306615`, plus an explicit continuation lineage record. Admission requires the
+exact failed run/controller, marker ID/name/digest/origin, recovery job ID and
+timestamps, skipped downstream graph, and no package artifact. It claims a distinct
+`capacity-recovery-grant-A-recover-continuation-39391306615` marker and rejects any
+existing successor marker or unexpected matching dispatch. The recovery timeout is 26
+minutes. Measurement is split into dependency-gated batches `0--3`, `4--7`, and
+`8--11`, each with maximum parallelism four and one workflow attempt per unit.
+
+Every authorized `gh run download` boundary now supplies explicit repository identity;
+the retained dispatch helper also passes `--repo MilindGaharwar/fettle`. Installed
+GitHub CLI `2.97.0` successfully downloaded both the admitted marker and the source
+manifest artifact from a directory without `.git`. This was a live, read-only provider
+check. Offline command-boundary tests separately cover provider failure, malformed and
+incomplete pagination, missing artifacts, wrong marker metadata, conflicting lineage,
+and duplicate dispatch history; those fixtures are not presented as live-provider
+proof.
+
+The full retained producer replay, without mutation execution, rebuilt 52,609 corpus
+fingerprints, 12 selected units, and 869 selected fingerprints. It retained plan digest
+`a522756cbe5fa0c9463e9bd04ef15e0eb26256985016b6cb6bafe882d4b1c105` and plan-file
+SHA-256 `c27716a212c2e71ebafed68592e314f9589b1c2fb052f8795fefbb5d2125ac53`.
+The continuation-bound lineage digest is
+`2cb2438f4bc8dd0dc7e570af180a57e86aca02663209aa8f92e35e5048f9c1de`.
+Focused recovery tests pass, followed by the full `4,960 passed, 20 skipped` suite,
+all-file Ruff, actionlint, Python compilation, whitespace checks, locked changed-file
+Fettle, and scoped completion validation. Completion validation covers registered
+milestones only and is not mutation qualification. Independent bounded review found no
+in-scope blocker across explicit repository identity, exact admitted lineage, duplicate
+prevention, producer/consumer compatibility, frozen-source isolation, three sequential
+batches, or conservative accounting. Its out-of-scope note concerned unrelated resume
+commands outside this authorized route; they were not changed. Signed delivery and
+literal-head CI remain pending. No successor, measurement, or readback has been
+dispatched at this checkpoint.
+
 ## 2026-10-20: Sustained recovery launch hardening
 
 The sustained authorization retains failed runs `39369184372` and `39378451442` as

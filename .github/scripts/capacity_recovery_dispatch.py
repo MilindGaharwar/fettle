@@ -18,7 +18,7 @@ REQUIRED_INPUTS = {
     "capacity_authorization_id": "AH-CORPUS-RECOVERY-20261020-A",
     "capacity_experiment_id": "capval-corpus-recovery-20261020-a",
     "capacity_preparation_run_id": "39263581356",
-    "capacity_recovery_retry_run_id": "",
+    "capacity_recovery_retry_run_id": "39391306615",
     "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
 }
 
@@ -75,7 +75,8 @@ def main() -> int:
         if args.validate_only:
             return 0
         result = subprocess.run(
-            ["gh", "workflow", "run", envelope["workflow"], "--ref", envelope["ref"], "--json"],
+            ["gh", "workflow", "run", envelope["workflow"],
+             "--repo", "MilindGaharwar/fettle", "--ref", envelope["ref"], "--json"],
             input=inputs, check=False,
         )
     except ValueError as exc:

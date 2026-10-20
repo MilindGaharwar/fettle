@@ -3361,6 +3361,7 @@ def test_capacity_recovery_lineage_preserves_failed_source_and_separate_controll
         corpus, plan, artifacts, jobs, accounting, historical, controller_sha=controller,
         source_executor_sha256="e" * 64,
         recovery_experiment_id=experiment, plan_file_sha256="f" * 64,
+        continuation_run_id="39391306615",
     )
 
     assert validate_capacity_recovery_lineage(
@@ -3371,6 +3372,7 @@ def test_capacity_recovery_lineage_preserves_failed_source_and_separate_controll
     assert lineage["source"]["historical_evidence"] == historical
     assert lineage["source"]["authorization_id"] == "AH-PREP-CONTAINMENT-20261019-C"
     assert lineage["recovery"]["authorization_id"] == "AH-CORPUS-RECOVERY-20261020-A"
+    assert lineage["recovery"]["continuation"]["failed_admitted_run_id"] == "39391306615"
     assert lineage["source"]["candidate_sha"] != lineage["recovery"]["controller_sha"]
     assert lineage["source"]["executor_module_sha256"] == "e" * 64
     assert lineage["source"]["operational_floor_minutes"] == {
@@ -3401,6 +3403,7 @@ def test_capacity_recovery_lineage_rejects_artifact_and_worker_defects(defect):
             source_executor_sha256="e" * 64,
             recovery_experiment_id="capval-corpus-recovery-20261020-a",
             plan_file_sha256="f" * 64,
+            continuation_run_id="39391306615",
         )
 
 
@@ -3415,6 +3418,7 @@ def test_capacity_recovery_lineage_rejects_rewritten_historical_non_pass():
             source_executor_sha256="e" * 64,
             recovery_experiment_id="capval-corpus-recovery-20261020-a",
             plan_file_sha256="f" * 64,
+            continuation_run_id="39391306615",
         )
 
 
@@ -3439,6 +3443,7 @@ def test_capacity_recovery_lineage_consumer_rejects_recomputed_source_substituti
         controller_sha="b" * 40, source_executor_sha256="e" * 64,
         recovery_experiment_id="capval-corpus-recovery-20261020-a",
         plan_file_sha256="f" * 64,
+        continuation_run_id="39391306615",
     )
     lineage["source"][field] = value
     lineage["digest"] = _canonical_digest({
@@ -4041,10 +4046,16 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
     assert ledger["terminal_readback"]["charged_minutes"] == 10
     assert ledger["historical_non_billing_floor_minutes"]["workers"] == 475.89
     retry_recovery_run = {
-        **run, "id": 39380000000, "conclusion": "failure",
+        **run, "id": 39391306615,
+        "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+        "conclusion": "failure",
     }
     retry_freeze_jobs = [
-        {**job("capacity validation (recover retained corpus)", 19), "conclusion": "failure"},
+        {
+            **job("capacity validation (recover retained corpus)", 118523223941),
+            "conclusion": "failure", "started_at": "2026-10-20T08:08:56Z",
+            "completed_at": "2026-10-20T08:10:03Z",
+        },
     ]
     retry_ledger = reconcile_capacity_recovery_provider_accounting(
         run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
@@ -4057,7 +4068,7 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         recovery_authorization_contract=contract, retry_recovery_run=retry_recovery_run,
         retry_recovery_job_pages=[{"total_count": 1, "jobs": retry_freeze_jobs}],
     )
-    assert retry_ledger["recovery_freeze"]["minutes"] == 4
+    assert retry_ledger["recovery_freeze"]["minutes"] == 5
     nonterminal_predecessor = [{
         "total_count": 1,
         "jobs": [{**failed_freeze_jobs[0], "status": "in_progress", "conclusion": None}],

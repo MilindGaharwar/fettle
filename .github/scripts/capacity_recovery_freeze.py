@@ -50,8 +50,11 @@ def main() -> int:
     parser.add_argument("--controller-sha", required=True)
     parser.add_argument("--source-python", required=True)
     parser.add_argument("--recovery-experiment-id", required=True)
+    parser.add_argument("--continuation-run-id", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    if args.continuation_run_id != "39391306615":
+        raise ValueError("capacity recovery continuation lineage differs")
 
     source = Path(args.source_root).resolve()
     source_python = Path(os.path.abspath(args.source_python))
@@ -193,6 +196,7 @@ print(json.dumps({f:_runtime_cache_identity(root,[f],_mapped_tests(root,[f],cfg.
         source_executor_sha256=source_executor_sha,
         recovery_experiment_id=args.recovery_experiment_id,
         plan_file_sha256=plan_sha,
+        continuation_run_id=args.continuation_run_id,
     )
     validate_capacity_recovery_lineage(
         lineage, corpus, plan, controller_sha=args.controller_sha,

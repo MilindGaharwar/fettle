@@ -134,16 +134,18 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     workflow = yaml.safe_load((root / ".github/workflows/mutation.yml").read_text())
     jobs = workflow["jobs"]
     recovery = jobs["capacity-recover"]
-    workers = jobs["capacity-recovery-units"]
+    batches = [jobs[f"capacity-recovery-batch-{index}"] for index in range(1, 4)]
 
-    assert recovery["timeout-minutes"] == 27
+    assert recovery["timeout-minutes"] == 26
     scripts = "\n".join(step.get("run", "") for step in recovery["steps"])
     assert "39263581356" in scripts
     assert "65e63d953b45d3672c24df74d0a1364b83a0157b" in scripts
     assert "enumeration_dispatches\"]==0" in scripts
     assert "actions/artifacts/$artifact_id/zip" in scripts
     assert "--source-python source/.venv/bin/python" in scripts
-    assert "capacity-recovery-grant-A-recover" in yaml.safe_dump(recovery)
+    assert "capacity-recovery-grant-A-recover-continuation-39391306615" in yaml.safe_dump(recovery)
+    assert '--repo "$GITHUB_REPOSITORY"' in scripts
+    assert '--continuation-run-id "${{ github.event.inputs.capacity_recovery_retry_run_id }}"' in scripts
     admission = next(
         step["run"] for step in recovery["steps"]
         if step.get("name") == "Admit the one authorized replacement recovery"
@@ -155,11 +157,16 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "39378451442" in admission
     assert "capacity-recovery-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
     assert "capacity-recovery-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
-    assert workers["strategy"]["matrix"]["unit"] == list(range(12))
-    assert workers["strategy"]["max-parallel"] == 4
-    assert workers["uses"] == "./.github/workflows/mutation-capacity-recovery-unit.yml"
+    for index, batch in enumerate(batches):
+        assert batch["strategy"]["matrix"]["unit"] == list(range(index * 4, index * 4 + 4))
+        assert batch["strategy"]["max-parallel"] == 4
+        assert batch["uses"] == "./.github/workflows/mutation-capacity-recovery-unit.yml"
+    assert batches[0]["needs"] == "capacity-recovery-execute-admission"
+    assert batches[1]["needs"] == "capacity-recovery-batch-1"
+    assert batches[2]["needs"] == "capacity-recovery-batch-2"
     assert jobs["capacity-recovery-finalize"]["needs"] == [
-        "capacity-recovery-units", "capacity-recovery-measurement-monitor",
+        "capacity-recovery-batch-1", "capacity-recovery-batch-2",
+        "capacity-recovery-batch-3", "capacity-recovery-measurement-monitor",
     ]
     assert jobs["capacity-recovery-provider-readback"]["timeout-minutes"] == 10
     readback_scripts = "\n".join(
@@ -167,9 +174,10 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     )
     assert "unknown_non_pass" in readback_scripts
     assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in readback_scripts
+    assert readback_scripts.count('--repo "$GITHUB_REPOSITORY"') == 3
     assert "|| true" in readback_scripts
     assert "failed=[39369184372,39378451442]" in readback_scripts
-    assert '"minutes":len(failed),"ceiling_minutes":30' in readback_scripts
+    assert readback_scripts.count('"minutes":4 if 39391306615 in failed else len(failed)') == 2
 
     unit = yaml.safe_load(
         (root / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
@@ -302,16 +310,26 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
     incomplete = write("incomplete.json", "workflow_runs", [predecessor, missing_input, current], total=4)
     assert invoke(runs_path=incomplete).returncode == 2
     retry = {
-        **current, "id": 402, "status": "completed", "conclusion": "failure",
+        **current, "id": 39391306615,
+        "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+        "status": "completed", "conclusion": "failure",
     }
     retry_runs = write(
         "retry-runs.json", "workflow_runs", [predecessor, missing_input, retry, current],
     )
-    retry_artifacts = write("retry-artifacts.json", "artifacts", [])
+    retry_artifacts = write("retry-artifacts.json", "artifacts", [{
+        "id": 12250220498, "name": "capacity-recovery-grant-A-recover",
+        "expired": False,
+        "digest": "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280",
+        "workflow_run": {
+            "id": 39391306615,
+            "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+        },
+    }])
     retry_jobs = write("retry-jobs.json", "jobs", [
-        {"id": 5, "name": "capacity validation (recover retained corpus)",
+        {"id": 118523223941, "name": "capacity validation (recover retained corpus)",
          "status": "completed", "conclusion": "failure",
-         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:00:59Z"},
+         "started_at": "2026-10-20T08:08:56Z", "completed_at": "2026-10-20T08:10:03Z"},
         {"id": 6, "name": "capacity recovery (execution admission)",
          "status": "completed", "conclusion": "skipped"},
     ])
@@ -323,7 +341,7 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         "--predecessor-jobs", str(predecessor_jobs),
         "--missing-input-artifacts", str(missing_input_artifacts),
         "--missing-input-jobs", str(missing_input_jobs),
-        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-run-id", "39391306615",
         "--retry-predecessor-artifacts", str(retry_artifacts),
         "--retry-predecessor-jobs", str(retry_jobs),
     ], capture_output=True, text=True)
@@ -337,13 +355,13 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         "--predecessor-jobs", str(predecessor_jobs),
         "--missing-input-artifacts", str(missing_input_artifacts),
         "--missing-input-jobs", str(missing_input_jobs),
-        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-run-id", "39391306615",
         "--retry-predecessor-artifacts", str(admitted),
         "--retry-predecessor-jobs", str(retry_jobs),
     ], capture_output=True, text=True)
     assert retry_result.returncode == 2
     long_retry_jobs = write("long-retry-jobs.json", "jobs", [
-        {"id": 8, "name": "capacity validation (recover retained corpus)",
+        {"id": 118523223941, "name": "capacity validation (recover retained corpus)",
          "status": "completed", "conclusion": "failure",
          "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:01:01Z"},
     ])
@@ -355,7 +373,7 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         "--predecessor-jobs", str(predecessor_jobs),
         "--missing-input-artifacts", str(missing_input_artifacts),
         "--missing-input-jobs", str(missing_input_jobs),
-        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-run-id", "39391306615",
         "--retry-predecessor-artifacts", str(retry_artifacts),
         "--retry-predecessor-jobs", str(long_retry_jobs),
     ], capture_output=True, text=True)
@@ -452,7 +470,7 @@ def test_recovery_dispatch_validates_and_sends_the_same_json_payload(tmp_path):
             "capacity_authorization_id": "AH-CORPUS-RECOVERY-20261020-A",
             "capacity_experiment_id": "capval-corpus-recovery-20261020-a",
             "capacity_preparation_run_id": "39263581356",
-            "capacity_recovery_retry_run_id": "",
+            "capacity_recovery_retry_run_id": "39391306615",
             "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
         },
     }))
@@ -477,7 +495,8 @@ exit "${GH_EXIT:-0}"
     result = subprocess.run(command, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "args").read_text() == (
-        "workflow run mutation.yml --ref audit/hardening-integration-20261005 --json"
+        "workflow run mutation.yml --repo MilindGaharwar/fettle "
+        "--ref audit/hardening-integration-20261005 --json"
     )
     assert json.loads((tmp_path / "stdin").read_text()) == json.loads(payload.read_text())["inputs"]
     missing = json.loads(payload.read_text())
