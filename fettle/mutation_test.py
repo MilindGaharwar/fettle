@@ -2366,10 +2366,13 @@ def reconcile_capacity_provider_accounting(
 def reconcile_capacity_recovery_provider_accounting(
     run: dict, job_pages: list[dict], recovery_run: dict,
     recovery_job_pages: list[dict], failed_recovery_run: dict,
-    failed_recovery_job_pages: list[dict], source: dict, *, repository: str,
+    failed_recovery_job_pages: list[dict], missing_input_recovery_run: dict,
+    missing_input_recovery_job_pages: list[dict], source: dict, *, repository: str,
     source_revision: str, controller_sha: str, recovery_experiment_id: str,
     execution_run_id: str, recovery_run_id: str, plan_file_sha256: str,
     recovery_authorization_id: str, recovery_authorization_contract: dict,
+    retry_recovery_run: dict | None = None,
+    retry_recovery_job_pages: list[dict] | None = None,
 ) -> dict:
     """Reconcile the exact recovery graph without granting billing authority."""
     if (
@@ -2422,6 +2425,46 @@ def reconcile_capacity_recovery_provider_accounting(
         not isinstance(page, dict) for page in failed_recovery_job_pages
     ):
         raise ValueError("failed recovery predecessor job pages are unavailable")
+    if (
+        str(missing_input_recovery_run.get("id")) != "39378451442"
+        or missing_input_recovery_run.get("run_attempt") != 1
+        or missing_input_recovery_run.get("head_sha") != "8e46125ff7d0e6f7d3a845faed32fb14336a5185"
+        or missing_input_recovery_run.get("event") != "workflow_dispatch"
+        or missing_input_recovery_run.get("status") != "completed"
+        or missing_input_recovery_run.get("conclusion") != "failure"
+        or missing_input_recovery_run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("missing-input recovery predecessor identity is stale")
+    if not missing_input_recovery_job_pages or any(
+        not isinstance(page, dict) for page in missing_input_recovery_job_pages
+    ):
+        raise ValueError("missing-input recovery predecessor job pages are unavailable")
+    retry_jobs: list[dict] = []
+    if retry_recovery_run is not None or retry_recovery_job_pages is not None:
+        if (
+            not isinstance(retry_recovery_run, dict)
+            or str(retry_recovery_run.get("id")) in {"39369184372", "39378451442", recovery_run_id}
+            or retry_recovery_run.get("run_attempt") != 1
+            or retry_recovery_run.get("head_sha") != controller_sha
+            or retry_recovery_run.get("event") != "workflow_dispatch"
+            or retry_recovery_run.get("status") != "completed"
+            or retry_recovery_run.get("conclusion") != "failure"
+            or retry_recovery_run.get("path") != ".github/workflows/mutation.yml"
+        ):
+            raise ValueError("conditional retry recovery predecessor identity is stale")
+        if not retry_recovery_job_pages or any(
+            not isinstance(page, dict) for page in retry_recovery_job_pages
+        ):
+            raise ValueError("conditional retry recovery predecessor job pages are unavailable")
+        retry_totals = {page.get("total_count") for page in retry_recovery_job_pages}
+        retry_jobs = [job for page in retry_recovery_job_pages for job in page.get("jobs", [])]
+        retry_ids = [job.get("id") for job in retry_jobs]
+        if (
+            len(retry_totals) != 1 or retry_totals.pop() != len(retry_jobs)
+            or len(retry_ids) != len(set(retry_ids))
+            or any(type(job_id) is not int or job_id < 1 for job_id in retry_ids)
+        ):
+            raise ValueError("conditional retry recovery predecessor pagination differs")
     totals = {page.get("total_count") for page in job_pages}
     jobs = [job for page in job_pages for job in page.get("jobs", [])]
     ids = [job.get("id") for job in jobs]
@@ -2449,6 +2492,17 @@ def reconcile_capacity_recovery_provider_accounting(
         or any(type(job_id) is not int or job_id < 1 for job_id in failed_ids)
     ):
         raise ValueError("failed recovery predecessor pagination differs")
+    missing_totals = {page.get("total_count") for page in missing_input_recovery_job_pages}
+    missing_jobs = [
+        job for page in missing_input_recovery_job_pages for job in page.get("jobs", [])
+    ]
+    missing_ids = [job.get("id") for job in missing_jobs]
+    if (
+        len(missing_totals) != 1 or missing_totals.pop() != len(missing_jobs)
+        or len(missing_ids) != len(set(missing_ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in missing_ids)
+    ):
+        raise ValueError("missing-input recovery predecessor pagination differs")
 
     def record(job: dict) -> dict:
         try:
@@ -2488,6 +2542,14 @@ def reconcile_capacity_recovery_provider_accounting(
         record(job) for job in failed_jobs
         if job.get("name") == "capacity validation (recover retained corpus)"
     ]
+    missing_input_freeze = [
+        record(job) for job in missing_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
+    retry_freeze = [
+        record(job) for job in retry_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
     if (
         len(failed_freeze) != 1
         or failed_freeze[0]["status"] != "completed"
@@ -2502,12 +2564,41 @@ def reconcile_capacity_recovery_provider_accounting(
         )
     ):
         raise ValueError("failed recovery predecessor jobs differ")
+    if (
+        len(missing_input_freeze) != 1
+        or missing_input_freeze[0]["status"] != "completed"
+        or missing_input_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in missing_jobs
+        )
+    ):
+        raise ValueError("missing-input recovery predecessor jobs differ")
+    if retry_jobs and (
+        len(retry_freeze) != 1
+        or retry_freeze[0]["status"] != "completed"
+        or retry_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in retry_jobs
+        )
+    ):
+        raise ValueError("conditional retry recovery predecessor jobs differ")
     indexes = [item["unit_index"] for item in workers]
     worker_minutes = sum(item["charged_minutes_ceiling"] for item in workers)
     support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
     controller_minutes = sum(item["charged_minutes_ceiling"] for item in controllers)
     freeze_minutes = sum(
-        item["charged_minutes_ceiling"] for item in freeze + failed_freeze
+        item["charged_minutes_ceiling"]
+        for item in freeze + failed_freeze + missing_input_freeze + retry_freeze
     )
     terminal_success = all(
         item["status"] == "completed" and item["conclusion"] == "success"
@@ -2534,7 +2625,7 @@ def reconcile_capacity_recovery_provider_accounting(
         "historical_non_billing_floor_minutes": {
             "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
         },
-        "recovery_freeze": {"jobs": failed_freeze + freeze, "minutes": freeze_minutes, "ceiling_minutes": 30, "transferable": False},
+        "recovery_freeze": {"jobs": failed_freeze + missing_input_freeze + retry_freeze + freeze, "minutes": freeze_minutes, "ceiling_minutes": 30, "transferable": False},
         "worker": {"jobs": workers, "minutes": worker_minutes, "ceiling_minutes": 240, "transferable": False},
         "support": {"jobs": support, "minutes": support_minutes, "ceiling_minutes": 25, "transferable": False},
         "cancellation_controller": {"jobs": controllers, "minutes": controller_minutes, "ceiling_minutes": 30, "transferable": False},

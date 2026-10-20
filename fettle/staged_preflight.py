@@ -134,9 +134,11 @@ def capacity_recovery_authorization_contract(
         authorization_id, candidate_sha, experiment_id,
     )
     contract["scope"] = {
-        "recovery_dispatches": 2,
+        "recovery_dispatches": 4,
+        "additional_recovery_dispatches": 2,
         "successful_recovery_freezes": 1,
-        "replacement_for_failed_run_id": "39369184372",
+        "fixed_failed_recovery_run_ids": ["39369184372", "39378451442"],
+        "conditional_pre_admission_retries": 1,
         "enumeration_dispatches": 0,
         "measurement_units": 12,
         "measurement_attempts_per_unit": 1,

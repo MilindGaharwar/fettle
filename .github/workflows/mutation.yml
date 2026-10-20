@@ -43,6 +43,10 @@ on:
         description: "Capacity preparation or recovery run (execute/readback)"
         required: false
         type: string
+      capacity_recovery_retry_run_id:
+        description: "One authorized failed pre-admission recovery predecessor"
+        required: false
+        type: string
       capacity_plan_sha256:
         description: "Exact frozen capacity plan file SHA-256 (execute/readback)"
         required: false
@@ -1240,7 +1244,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'recover' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
     name: capacity validation (recover retained corpus)
     runs-on: ubuntu-latest
-    timeout-minutes: 29
+    timeout-minutes: 27
     permissions:
       actions: read
       contents: read
@@ -1289,12 +1293,24 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/artifacts?per_page=100" > failed-recovery-artifacts.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/attempts/1/jobs?per_page=100" > failed-recovery-jobs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39378451442/artifacts?per_page=100" > missing-input-recovery-artifacts.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39378451442/attempts/1/jobs?per_page=100" > missing-input-recovery-jobs.json
+          retry_predecessor="${{ github.event.inputs.capacity_recovery_retry_run_id }}"
+          retry_args=()
+          if [ -n "$retry_predecessor" ]; then
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$retry_predecessor/artifacts?per_page=100" > retry-recovery-artifacts.json
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$retry_predecessor/attempts/1/jobs?per_page=100" > retry-recovery-jobs.json
+            retry_args=(--retry-predecessor-run-id "$retry_predecessor" --retry-predecessor-artifacts retry-recovery-artifacts.json --retry-predecessor-jobs retry-recovery-jobs.json)
+          fi
           controller/.venv/bin/python controller/.github/scripts/capacity_recovery_admission.py \
             --stage recover --current-run-id "$GITHUB_RUN_ID" --controller-sha "$GITHUB_SHA" \
             --expected-title "$expected" --runs recovery-runs.json \
             --markers recovery-markers.json \
             --predecessor-artifacts failed-recovery-artifacts.json \
-            --predecessor-jobs failed-recovery-jobs.json
+            --predecessor-jobs failed-recovery-jobs.json \
+            --missing-input-artifacts missing-input-recovery-artifacts.json \
+            --missing-input-jobs missing-input-recovery-jobs.json \
+            "${retry_args[@]}"
           mkdir recovery-grant-marker
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-grant-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1524,11 +1540,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize fail-closed readback records
+        env:
+          RETRY_RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_recovery_retry_run_id }}
         run: |
           python - <<'PY'
-          import json
+          import json,os
           from pathlib import Path
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_id":39369184372,"jobs":[],"minutes":1,"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          failed=[39369184372,39378451442]
+          if os.environ.get("RETRY_RECOVERY_RUN_ID"): failed.append(int(os.environ["RETRY_RECOVERY_RUN_ID"]))
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           Path("capacity-recovery-provider-accounting.json").write_text(json.dumps(ledger,indent=2,sort_keys=True)+"\n")
           Path("capacity-recovery-model-decision.json").write_text(json.dumps(decision,indent=2,sort_keys=True)+"\n")
@@ -1583,6 +1603,21 @@ jobs:
             --output failed-recovery-jobs.json --attempts-directory failed-recovery-attempts \
             --report failed-recovery-collection.json --max-attempts 4 \
             --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39378451442" > missing-input-recovery-run.json || true
+          python -m fettle.staged_preflight collect-stable-jobs \
+            --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/39378451442/attempts/1/jobs?per_page=100" \
+            --output missing-input-recovery-jobs.json --attempts-directory missing-input-recovery-attempts \
+            --report missing-input-recovery-collection.json --max-attempts 4 \
+            --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
+          RETRY_RECOVERY_RUN_ID="${{ github.event.inputs.capacity_recovery_retry_run_id }}"
+          if [ -n "$RETRY_RECOVERY_RUN_ID" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RETRY_RECOVERY_RUN_ID" > retry-recovery-run.json || true
+            python -m fettle.staged_preflight collect-stable-jobs \
+              --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$RETRY_RECOVERY_RUN_ID/attempts/1/jobs?per_page=100" \
+              --output retry-recovery-jobs.json --attempts-directory retry-recovery-attempts \
+              --report retry-recovery-collection.json --max-attempts 4 \
+              --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
+          fi
       - name: Reconcile diagnostic result and bounded exposure
         env:
           EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
@@ -1590,6 +1625,7 @@ jobs:
           RECOVERY_EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
           AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
+          RETRY_RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_recovery_retry_run_id }}
         run: |
           python - <<'PY'
           import json,os
@@ -1598,7 +1634,9 @@ jobs:
               evaluate_capacity_validation_decision,reconcile_capacity_recovery_provider_accounting,
               validate_capacity_recovery_results,
           )
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_id":39369184372,"jobs":[],"minutes":1,"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          failed=[39369184372,39378451442]
+          if os.environ.get("RETRY_RECOVERY_RUN_ID"): failed.append(int(os.environ["RETRY_RECOVERY_RUN_ID"]))
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_ids":failed,"jobs":[],"minutes":len(failed),"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           try:
               package=Path("recovered/capacity-recovery")
@@ -1613,12 +1651,16 @@ jobs:
                   json.loads(Path("capacity-recovery-run.json").read_text()),
                   json.loads(Path("capacity-recovery-jobs.json").read_text()),
                   json.loads(Path("failed-recovery-run.json").read_text()),
-                  json.loads(Path("failed-recovery-jobs.json").read_text()),source,
+                  json.loads(Path("failed-recovery-jobs.json").read_text()),
+                  json.loads(Path("missing-input-recovery-run.json").read_text()),
+                  json.loads(Path("missing-input-recovery-jobs.json").read_text()),source,
                   repository=os.environ["GITHUB_REPOSITORY"],source_revision=lineage["source"]["candidate_sha"],
                   controller_sha=os.environ["GITHUB_SHA"],recovery_experiment_id=os.environ["RECOVERY_EXPERIMENT_ID"],
                   execution_run_id=os.environ["EXECUTION_RUN_ID"],recovery_run_id=os.environ["RECOVERY_RUN_ID"],
                   plan_file_sha256=os.environ["PLAN_SHA256"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],
                   recovery_authorization_contract=lineage["recovery"]["authorization_contract"],
+                  retry_recovery_run=(json.loads(Path("retry-recovery-run.json").read_text()) if Path("retry-recovery-run.json").exists() else None),
+                  retry_recovery_job_pages=(json.loads(Path("retry-recovery-jobs.json").read_text()) if Path("retry-recovery-jobs.json").exists() else None),
               )
               if ledger["status"] != "completed": raise ValueError("provider accounting is non-pass")
               validate_capacity_recovery_results(reports,provenances,list(range(12)),revision=lineage["source"]["candidate_sha"],experiment_id=plan["experiment_id"],plan_digest=plan["digest"],authorization_id=plan["authorization_id"],authorization_contract=plan["authorization_contract"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=os.environ["GITHUB_SHA"],lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest())
@@ -1650,6 +1692,14 @@ jobs:
             failed-recovery-jobs.json
             failed-recovery-collection.json
             failed-recovery-attempts
+            missing-input-recovery-run.json
+            missing-input-recovery-jobs.json
+            missing-input-recovery-collection.json
+            missing-input-recovery-attempts
+            retry-recovery-run.json
+            retry-recovery-jobs.json
+            retry-recovery-collection.json
+            retry-recovery-attempts
             capacity-recovery-provider-accounting.json
             capacity-recovery-model-decision.json
           if-no-files-found: error

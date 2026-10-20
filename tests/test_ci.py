@@ -136,7 +136,7 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     recovery = jobs["capacity-recover"]
     workers = jobs["capacity-recovery-units"]
 
-    assert recovery["timeout-minutes"] == 29
+    assert recovery["timeout-minutes"] == 27
     scripts = "\n".join(step.get("run", "") for step in recovery["steps"])
     assert "39263581356" in scripts
     assert "65e63d953b45d3672c24df74d0a1364b83a0157b" in scripts
@@ -152,6 +152,7 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "--arg" not in admission
     assert "capacity_recovery_admission.py" in admission
     assert "39369184372" in admission
+    assert "39378451442" in admission
     assert "capacity-recovery-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
     assert "capacity-recovery-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
     assert workers["strategy"]["matrix"]["unit"] == list(range(12))
@@ -167,8 +168,8 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "unknown_non_pass" in readback_scripts
     assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in readback_scripts
     assert "|| true" in readback_scripts
-    assert '"failed_predecessor_run_id":39369184372,"jobs":[]' in readback_scripts
-    assert '"minutes":1,"ceiling_minutes":30' in readback_scripts
+    assert "failed=[39369184372,39378451442]" in readback_scripts
+    assert '"minutes":len(failed),"ceiling_minutes":30' in readback_scripts
 
     unit = yaml.safe_load(
         (root / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
@@ -225,6 +226,10 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
         "status": "completed", "conclusion": "failure", "display_title": title,
     }
+    missing_input = {
+        **predecessor, "id": 39378451442,
+        "head_sha": "8e46125ff7d0e6f7d3a845faed32fb14336a5185",
+    }
 
     def write(name, collection, records, *, total=None):
         path = tmp_path / name
@@ -234,13 +239,22 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         }]))
         return path
 
-    runs = write("runs.json", "workflow_runs", [predecessor, current])
+    runs = write("runs.json", "workflow_runs", [predecessor, missing_input, current])
     markers = write("markers.json", "artifacts", [])
     predecessor_artifacts = write("predecessor.json", "artifacts", [])
     predecessor_jobs = write("predecessor-jobs.json", "jobs", [
         {"id": 1, "name": "capacity validation (recover retained corpus)",
-         "status": "completed", "conclusion": "failure"},
+         "status": "completed", "conclusion": "failure",
+         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:00:24Z"},
         {"id": 2, "name": "capacity recovery (execution admission)",
+         "status": "completed", "conclusion": "skipped"},
+    ])
+    missing_input_artifacts = write("missing-input-artifacts.json", "artifacts", [])
+    missing_input_jobs = write("missing-input-jobs.json", "jobs", [
+        {"id": 3, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure",
+         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:00:19Z"},
+        {"id": 4, "name": "capacity recovery (execution admission)",
          "status": "completed", "conclusion": "skipped"},
     ])
 
@@ -252,13 +266,15 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
             "--markers", str(markers_path),
             "--predecessor-artifacts", str(artifacts_path),
             "--predecessor-jobs", str(predecessor_jobs),
+            "--missing-input-artifacts", str(missing_input_artifacts),
+            "--missing-input-jobs", str(missing_input_jobs),
         ], capture_output=True, text=True)
 
     assert invoke().returncode == 0
-    extra = write("extra.json", "workflow_runs", [predecessor, current, {**current, "id": 401}])
+    extra = write("extra.json", "workflow_runs", [predecessor, missing_input, current, {**current, "id": 401}])
     assert invoke(runs_path=extra).returncode == 2
     active_predecessor = write(
-        "active.json", "workflow_runs", [{**predecessor, "status": "in_progress", "conclusion": None}, current],
+        "active.json", "workflow_runs", [{**predecessor, "status": "in_progress", "conclusion": None}, missing_input, current],
     )
     assert invoke(runs_path=active_predecessor).returncode == 2
     unexpected_jobs = write("unexpected-jobs.json", "jobs", [
@@ -274,6 +290,8 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
         "--markers", str(markers),
         "--predecessor-artifacts", str(predecessor_artifacts),
         "--predecessor-jobs", str(unexpected_jobs),
+        "--missing-input-artifacts", str(missing_input_artifacts),
+        "--missing-input-jobs", str(missing_input_jobs),
     ], capture_output=True, text=True)
     assert result.returncode == 2
     existing = write("existing.json", "artifacts", [{"id": 1, "expired": False}])
@@ -281,8 +299,67 @@ def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
     malformed = tmp_path / "malformed.json"
     malformed.write_text("{")
     assert invoke(runs_path=malformed).returncode == 2
-    incomplete = write("incomplete.json", "workflow_runs", [predecessor, current], total=3)
+    incomplete = write("incomplete.json", "workflow_runs", [predecessor, missing_input, current], total=4)
     assert invoke(runs_path=incomplete).returncode == 2
+    retry = {
+        **current, "id": 402, "status": "completed", "conclusion": "failure",
+    }
+    retry_runs = write(
+        "retry-runs.json", "workflow_runs", [predecessor, missing_input, retry, current],
+    )
+    retry_artifacts = write("retry-artifacts.json", "artifacts", [])
+    retry_jobs = write("retry-jobs.json", "jobs", [
+        {"id": 5, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure",
+         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:00:59Z"},
+        {"id": 6, "name": "capacity recovery (execution admission)",
+         "status": "completed", "conclusion": "skipped"},
+    ])
+    retry_result = subprocess.run([
+        sys.executable, str(script), "--stage", "recover",
+        "--current-run-id", "400", "--controller-sha", "c" * 40,
+        "--expected-title", title, "--runs", str(retry_runs),
+        "--markers", str(markers), "--predecessor-artifacts", str(predecessor_artifacts),
+        "--predecessor-jobs", str(predecessor_jobs),
+        "--missing-input-artifacts", str(missing_input_artifacts),
+        "--missing-input-jobs", str(missing_input_jobs),
+        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-artifacts", str(retry_artifacts),
+        "--retry-predecessor-jobs", str(retry_jobs),
+    ], capture_output=True, text=True)
+    assert retry_result.returncode == 0, retry_result.stderr
+    admitted = write("admitted.json", "artifacts", [{"id": 7, "expired": False}])
+    retry_result = subprocess.run([
+        sys.executable, str(script), "--stage", "recover",
+        "--current-run-id", "400", "--controller-sha", "c" * 40,
+        "--expected-title", title, "--runs", str(retry_runs),
+        "--markers", str(markers), "--predecessor-artifacts", str(predecessor_artifacts),
+        "--predecessor-jobs", str(predecessor_jobs),
+        "--missing-input-artifacts", str(missing_input_artifacts),
+        "--missing-input-jobs", str(missing_input_jobs),
+        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-artifacts", str(admitted),
+        "--retry-predecessor-jobs", str(retry_jobs),
+    ], capture_output=True, text=True)
+    assert retry_result.returncode == 2
+    long_retry_jobs = write("long-retry-jobs.json", "jobs", [
+        {"id": 8, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure",
+         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:01:01Z"},
+    ])
+    retry_result = subprocess.run([
+        sys.executable, str(script), "--stage", "recover",
+        "--current-run-id", "400", "--controller-sha", "c" * 40,
+        "--expected-title", title, "--runs", str(retry_runs),
+        "--markers", str(markers), "--predecessor-artifacts", str(predecessor_artifacts),
+        "--predecessor-jobs", str(predecessor_jobs),
+        "--missing-input-artifacts", str(missing_input_artifacts),
+        "--missing-input-jobs", str(missing_input_jobs),
+        "--retry-predecessor-run-id", "402",
+        "--retry-predecessor-artifacts", str(retry_artifacts),
+        "--retry-predecessor-jobs", str(long_retry_jobs),
+    ], capture_output=True, text=True)
+    assert retry_result.returncode == 2
 
 
 def test_actual_recovery_admission_shell_uses_supported_gh_syntax_and_propagates_failure(
@@ -300,15 +377,20 @@ def test_actual_recovery_admission_shell_uses_supported_gh_syntax_and_propagates
         "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
         "status": "completed", "conclusion": "failure", "display_title": title,
     }
+    missing_input = {
+        **predecessor, "id": 39378451442,
+        "head_sha": "8e46125ff7d0e6f7d3a845faed32fb14336a5185",
+    }
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
     (fixtures / "runs.json").write_text(json.dumps([{
-        "total_count": 2, "workflow_runs": [predecessor, current],
+        "total_count": 3, "workflow_runs": [predecessor, missing_input, current],
     }]))
     (fixtures / "empty.json").write_text(json.dumps([{"total_count": 0, "artifacts": []}]))
     (fixtures / "jobs.json").write_text(json.dumps([{"total_count": 2, "jobs": [
         {"id": 1, "name": "capacity validation (recover retained corpus)",
-         "status": "completed", "conclusion": "failure"},
+         "status": "completed", "conclusion": "failure",
+         "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:00:24Z"},
         {"id": 2, "name": "capacity recovery (execution admission)",
          "status": "completed", "conclusion": "skipped"},
     ]}]))
@@ -324,7 +406,7 @@ esac
 if [ "${GH_FAIL:-0}" = 1 ]; then exit 42; fi
 case "$*" in
   *workflows/mutation.yml/runs*) cat "$GH_FIXTURES/runs.json" ;;
-  *39369184372/attempts/1/jobs*) cat "$GH_FIXTURES/jobs.json" ;;
+  *39369184372/attempts/1/jobs*|*39378451442/attempts/1/jobs*) cat "$GH_FIXTURES/jobs.json" ;;
   *artifacts*) cat "$GH_FIXTURES/empty.json" ;;
   *) exit 43 ;;
 esac
@@ -336,6 +418,8 @@ esac
     script = script.replace(
         "${{ github.event.inputs.capacity_experiment_id }}",
         "capval-corpus-recovery-20261020-a",
+    ).replace(
+        "${{ github.event.inputs.capacity_recovery_retry_run_id }}", "",
     ).replace(
         "controller/.venv/bin/python controller/.github/scripts/capacity_recovery_admission.py",
         f"{sys.executable} {Path(PLUGIN_DIR) / '.github/scripts/capacity_recovery_admission.py'}",
@@ -353,6 +437,59 @@ esac
     shutil.rmtree(tmp_path / "recovery-grant-marker")
     failed = _run_actions_bash(script, cwd=tmp_path, env={**env, "GH_FAIL": "1"})
     assert failed.returncode == 42
+
+
+def test_recovery_dispatch_validates_and_sends_the_same_json_payload(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/capacity_recovery_dispatch.py"
+    workflow = Path(PLUGIN_DIR) / ".github/workflows/mutation.yml"
+    payload = tmp_path / "dispatch.json"
+    payload.write_text(json.dumps({
+        "controller_sha": "c" * 40,
+        "workflow": "mutation.yml",
+        "ref": "audit/hardening-integration-20261005",
+        "inputs": {
+            "mode": "capacity-validation", "capacity_stage": "recover",
+            "capacity_authorization_id": "AH-CORPUS-RECOVERY-20261020-A",
+            "capacity_experiment_id": "capval-corpus-recovery-20261020-a",
+            "capacity_preparation_run_id": "39263581356",
+            "capacity_recovery_retry_run_id": "",
+            "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        },
+    }))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("""#!/bin/bash
+set -eu
+printf '%s' "$*" > "$GH_ARGS"
+cat > "$GH_STDIN"
+exit "${GH_EXIT:-0}"
+""")
+    gh.chmod(0o755)
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_ARGS": str(tmp_path / "args"), "GH_STDIN": str(tmp_path / "stdin"),
+    }
+    command = [
+        sys.executable, str(script), "--payload", str(payload),
+        "--workflow-file", str(workflow), "--expected-controller-sha", "c" * 40,
+    ]
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "args").read_text() == (
+        "workflow run mutation.yml --ref audit/hardening-integration-20261005 --json"
+    )
+    assert json.loads((tmp_path / "stdin").read_text()) == json.loads(payload.read_text())["inputs"]
+    missing = json.loads(payload.read_text())
+    del missing["inputs"]["capacity_preparation_run_id"]
+    payload.write_text(json.dumps(missing))
+    assert subprocess.run(command, env=env, capture_output=True).returncode == 2
+    payload.write_text(json.dumps({**missing, "inputs": {
+        **missing["inputs"], "capacity_preparation_run_id": "39263581356",
+    }}))
+    assert subprocess.run(
+        command, env={**env, "GH_EXIT": "42"}, capture_output=True,
+    ).returncode == 42
 
 
 def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():

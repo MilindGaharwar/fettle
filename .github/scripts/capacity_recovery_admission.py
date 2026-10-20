@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+from datetime import datetime
 from pathlib import Path
 
 FAILED_RECOVERY_RUN_ID = 39369184372
 FAILED_RECOVERY_HEAD_SHA = "276ac10bb7b2ec7b80346e821c2324d12bfab73f"
+MISSING_INPUT_RUN_ID = 39378451442
+MISSING_INPUT_HEAD_SHA = "8e46125ff7d0e6f7d3a845faed32fb14336a5185"
 WORKFLOW_PATH = ".github/workflows/mutation.yml"
 
 
@@ -40,17 +44,37 @@ def _pages(path: Path, collection: str) -> list[dict]:
     return records
 
 
+def _charged_minutes(job: dict) -> int:
+    try:
+        seconds = (
+            datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+            - datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+        ).total_seconds()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("authorized failed recovery predecessor timing is unavailable") from exc
+    if seconds < 0:
+        raise ValueError("authorized failed recovery predecessor timing is contradictory")
+    return math.ceil(seconds / 60)
+
+
 def validate_admission(
     *, stage: str, current_run_id: int, controller_sha: str, expected_title: str,
     runs_path: Path, markers_path: Path, predecessor_artifacts_path: Path | None = None,
     predecessor_jobs_path: Path | None = None,
+    missing_input_artifacts_path: Path | None = None,
+    missing_input_jobs_path: Path | None = None,
+    retry_predecessor_run_id: int | None = None,
+    retry_predecessor_artifacts_path: Path | None = None,
+    retry_predecessor_jobs_path: Path | None = None,
 ) -> None:
-    """Validate the sole fresh stage, with one fixed failed recovery exception."""
+    """Validate one fresh stage against the explicitly authorized closed history."""
     runs = _pages(runs_path, "workflow_runs")
     matching = [run for run in runs if run.get("display_title") == expected_title]
     expected_ids = {current_run_id}
     if stage == "recover":
-        expected_ids.add(FAILED_RECOVERY_RUN_ID)
+        expected_ids.update((FAILED_RECOVERY_RUN_ID, MISSING_INPUT_RUN_ID))
+        if retry_predecessor_run_id is not None:
+            expected_ids.add(retry_predecessor_run_id)
     if {run.get("id") for run in matching} != expected_ids or len(matching) != len(expected_ids):
         raise ValueError("recovery dispatch history is unexpected or conflicting")
 
@@ -66,38 +90,52 @@ def validate_admission(
         raise ValueError("current recovery dispatch identity is stale or conflicting")
 
     if stage == "recover":
-        predecessor = next(run for run in matching if run.get("id") == FAILED_RECOVERY_RUN_ID)
-        if (
-            predecessor.get("run_attempt") != 1
-            or predecessor.get("head_sha") != FAILED_RECOVERY_HEAD_SHA
-            or predecessor.get("event") != "workflow_dispatch"
-            or predecessor.get("path") != WORKFLOW_PATH
-            or predecessor.get("status") != "completed"
-            or predecessor.get("conclusion") != "failure"
-        ):
-            raise ValueError("authorized failed recovery predecessor differs")
-        if predecessor_artifacts_path is None or _pages(
-            predecessor_artifacts_path, "artifacts",
-        ):
-            raise ValueError("authorized failed recovery predecessor published artifacts")
-        if predecessor_jobs_path is None:
-            raise ValueError("authorized failed recovery predecessor jobs are missing")
-        predecessor_jobs = _pages(predecessor_jobs_path, "jobs")
-        recovery_jobs = [
-            job for job in predecessor_jobs
-            if job.get("name") == "capacity validation (recover retained corpus)"
+        predecessors = [
+            (FAILED_RECOVERY_RUN_ID, FAILED_RECOVERY_HEAD_SHA,
+             predecessor_artifacts_path, predecessor_jobs_path),
+            (MISSING_INPUT_RUN_ID, MISSING_INPUT_HEAD_SHA,
+             missing_input_artifacts_path, missing_input_jobs_path),
         ]
-        if (
-            len(recovery_jobs) != 1
-            or recovery_jobs[0].get("status") != "completed"
-            or recovery_jobs[0].get("conclusion") != "failure"
-            or any(job.get("status") != "completed" for job in predecessor_jobs)
-            or any(
-                job.get("conclusion") != "skipped"
-                for job in predecessor_jobs if job not in recovery_jobs
-            )
-        ):
-            raise ValueError("authorized failed recovery predecessor jobs differ")
+        if retry_predecessor_run_id is not None:
+            if retry_predecessor_run_id in {FAILED_RECOVERY_RUN_ID, MISSING_INPUT_RUN_ID}:
+                raise ValueError("conditional retry predecessor is duplicated")
+            predecessors.append((
+                retry_predecessor_run_id, controller_sha,
+                retry_predecessor_artifacts_path, retry_predecessor_jobs_path,
+            ))
+        for run_id, head_sha, artifacts_path, jobs_path in predecessors:
+            predecessor = next(run for run in matching if run.get("id") == run_id)
+            if (
+                predecessor.get("run_attempt") != 1
+                or predecessor.get("head_sha") != head_sha
+                or predecessor.get("event") != "workflow_dispatch"
+                or predecessor.get("path") != WORKFLOW_PATH
+                or predecessor.get("status") != "completed"
+                or predecessor.get("conclusion") != "failure"
+            ):
+                raise ValueError("authorized failed recovery predecessor differs")
+            if artifacts_path is None or _pages(artifacts_path, "artifacts"):
+                raise ValueError("authorized failed recovery predecessor published artifacts")
+            if jobs_path is None:
+                raise ValueError("authorized failed recovery predecessor jobs are missing")
+            predecessor_jobs = _pages(jobs_path, "jobs")
+            recovery_jobs = [
+                job for job in predecessor_jobs
+                if job.get("name") == "capacity validation (recover retained corpus)"
+            ]
+            if (
+                len(recovery_jobs) != 1
+                or recovery_jobs[0].get("status") != "completed"
+                or recovery_jobs[0].get("conclusion") != "failure"
+                or any(job.get("status") != "completed" for job in predecessor_jobs)
+                or any(
+                    job.get("conclusion") != "skipped"
+                    for job in predecessor_jobs if job not in recovery_jobs
+                )
+            ):
+                raise ValueError("authorized failed recovery predecessor jobs differ")
+            if run_id == retry_predecessor_run_id and _charged_minutes(recovery_jobs[0]) > 1:
+                raise ValueError("conditional retry predecessor leaves insufficient recovery headroom")
 
     markers = _pages(markers_path, "artifacts")
     if markers:
@@ -114,6 +152,11 @@ def main() -> int:
     parser.add_argument("--markers", type=Path, required=True)
     parser.add_argument("--predecessor-artifacts", type=Path)
     parser.add_argument("--predecessor-jobs", type=Path)
+    parser.add_argument("--missing-input-artifacts", type=Path)
+    parser.add_argument("--missing-input-jobs", type=Path)
+    parser.add_argument("--retry-predecessor-run-id", type=int)
+    parser.add_argument("--retry-predecessor-artifacts", type=Path)
+    parser.add_argument("--retry-predecessor-jobs", type=Path)
     args = parser.parse_args()
     try:
         validate_admission(
@@ -122,6 +165,11 @@ def main() -> int:
             runs_path=args.runs, markers_path=args.markers,
             predecessor_artifacts_path=args.predecessor_artifacts,
             predecessor_jobs_path=args.predecessor_jobs,
+            missing_input_artifacts_path=args.missing_input_artifacts,
+            missing_input_jobs_path=args.missing_input_jobs,
+            retry_predecessor_run_id=args.retry_predecessor_run_id,
+            retry_predecessor_artifacts_path=args.retry_predecessor_artifacts,
+            retry_predecessor_jobs_path=args.retry_predecessor_jobs,
         )
     except ValueError as exc:
         parser.exit(2, f"capacity recovery admission rejected: {exc}\n")

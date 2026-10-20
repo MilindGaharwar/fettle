@@ -4010,11 +4010,20 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         "head_sha": "276ac10bb7b2ec7b80346e821c2324d12bfab73f",
         "conclusion": "failure",
     }
+    missing_input_recovery_run = {
+        **run, "id": 39378451442,
+        "head_sha": "8e46125ff7d0e6f7d3a845faed32fb14336a5185",
+        "conclusion": "failure",
+    }
+    missing_input_freeze_jobs = [
+        {**job("capacity validation (recover retained corpus)", 18), "conclusion": "failure"},
+    ]
 
     ledger = reconcile_capacity_recovery_provider_accounting(
         run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
         [{"total_count": 1, "jobs": freeze_jobs}], failed_recovery_run,
-        [{"total_count": 1, "jobs": failed_freeze_jobs}], source,
+        [{"total_count": 1, "jobs": failed_freeze_jobs}], missing_input_recovery_run,
+        [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
         repository="owner/repo", source_revision=source_sha, controller_sha=controller,
         recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
         plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
@@ -4025,12 +4034,30 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
     assert ledger["billing_authority"] is False
     assert ledger["worker"]["ceiling_minutes"] == 240
     assert ledger["recovery_freeze"]["ceiling_minutes"] == 30
-    assert ledger["recovery_freeze"]["minutes"] == 2
+    assert ledger["recovery_freeze"]["minutes"] == 3
     assert ledger["support"]["ceiling_minutes"] == 25
     assert ledger["cancellation_controller"]["ceiling_minutes"] == 30
     assert ledger["terminal_readback"]["ceiling_minutes"] == 10
     assert ledger["terminal_readback"]["charged_minutes"] == 10
     assert ledger["historical_non_billing_floor_minutes"]["workers"] == 475.89
+    retry_recovery_run = {
+        **run, "id": 39380000000, "conclusion": "failure",
+    }
+    retry_freeze_jobs = [
+        {**job("capacity validation (recover retained corpus)", 19), "conclusion": "failure"},
+    ]
+    retry_ledger = reconcile_capacity_recovery_provider_accounting(
+        run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
+        [{"total_count": 1, "jobs": freeze_jobs}], failed_recovery_run,
+        [{"total_count": 1, "jobs": failed_freeze_jobs}], missing_input_recovery_run,
+        [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
+        repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+        recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+        plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+        recovery_authorization_contract=contract, retry_recovery_run=retry_recovery_run,
+        retry_recovery_job_pages=[{"total_count": 1, "jobs": retry_freeze_jobs}],
+    )
+    assert retry_ledger["recovery_freeze"]["minutes"] == 4
     nonterminal_predecessor = [{
         "total_count": 1,
         "jobs": [{**failed_freeze_jobs[0], "status": "in_progress", "conclusion": None}],
@@ -4039,7 +4066,8 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         reconcile_capacity_recovery_provider_accounting(
             run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
             [{"total_count": 1, "jobs": freeze_jobs}], failed_recovery_run,
-            nonterminal_predecessor, source,
+            nonterminal_predecessor, missing_input_recovery_run,
+            [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
             repository="owner/repo", source_revision=source_sha, controller_sha=controller,
             recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
             plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
@@ -4049,7 +4077,8 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         reconcile_capacity_recovery_provider_accounting(
             {**run, "head_sha": source_sha}, [{"total_count": len(jobs), "jobs": jobs}],
             recovery_run, [{"total_count": 1, "jobs": freeze_jobs}], failed_recovery_run,
-            [{"total_count": 1, "jobs": failed_freeze_jobs}], source,
+            [{"total_count": 1, "jobs": failed_freeze_jobs}], missing_input_recovery_run,
+            [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
             repository="owner/repo", source_revision=source_sha, controller_sha=controller,
             recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
             plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
@@ -4060,7 +4089,8 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
             run, [{"total_count": len(jobs), "jobs": jobs}],
             {**recovery_run, "conclusion": "failure"},
             [{"total_count": 1, "jobs": freeze_jobs}], failed_recovery_run,
-            [{"total_count": 1, "jobs": failed_freeze_jobs}], source,
+            [{"total_count": 1, "jobs": failed_freeze_jobs}], missing_input_recovery_run,
+            [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
             repository="owner/repo", source_revision=source_sha, controller_sha=controller,
             recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
             plan_file_sha256="p" * 64, recovery_authorization_id=authorization,

@@ -1,5 +1,50 @@
 # Audit Hardening Worklog
 
+## 2026-10-20: Sustained recovery launch hardening
+
+The sustained authorization retains failed runs `39369184372` and `39378451442` as
+closed non-pass. Both are terminal attempt 1, each has one failed recovery job and
+only skipped downstream jobs, and each published zero artifacts. No recovery marker,
+package, measurement, or readback exists. Their observed 24-second and 19-second jobs
+are charged as two recovery-category minutes total. The retained closure record is
+`reconciliation/replacement-39378451442/closure.json`, SHA-256
+`094d021429e6b63173434101c5bbe635e6bd71bdf7f57d1791a6cfaa40ad1e13`;
+the evidence manifest was `3ae0efe5256449c4af33d2943ddf23f3109074de8ce2b03116ee16db52558c5a`
+before this authorization's new records.
+
+The delivered controller `8e46125ff7d0e6f7d3a845faed32fb14336a5185` cannot admit a corrected
+payload because its exact-history parser recognizes only the first failed run.
+Surgical repair therefore extends that parser to the two fixed predecessors and at
+most one explicitly named conditional pre-admission failure. It adds a retained JSON
+dispatch-envelope validator and uses the validated input bytes directly with
+`gh workflow run --json`; missing `capacity_preparation_run_id=39263581356`, unknown
+inputs, wrong values/types/ref/controller, and CLI failures all reject. Terminal
+accounting charges both fixed predecessors and any conditional failed attempt. The
+recovery timeout is reduced from 29 to 27 minutes so the two charged minutes plus a
+minimum one-minute failed first additional attempt still leave a safe 27-minute final
+reservation inside the unchanged 30-minute category. No measurement timeout, selection, mutation
+policy, or qualification requirement changes.
+The conditional retry admission computes that failed attempt's conservative charge from
+its provider timestamps and rejects any attempt above one minute, as well as missing,
+malformed, active, admitted, packaged, downstream-active, or contradictory evidence.
+
+Verification reproduced the retained 52,609-fingerprint corpus, 12 units, 869 selected
+fingerprints, plan digest `a522756cbe5fa0c9463e9bd04ef15e0eb26256985016b6cb6bafe882d4b1c105`,
+and plan-file SHA-256 `c27716a212c2e71ebafed68592e314f9589b1c2fb052f8795fefbb5d2125ac53`
+without mutation execution. The sustained-authorization lineage digest is
+`b2ad0079f3263c08dfc4b6b413f325694201fc6cd7f9832e472078316688d666`.
+The full suite passes with 4,960 tests and 20 skips; Ruff, actionlint, compilation,
+whitespace, changed-file Fettle, and scoped completion validation pass. Independent
+review confirmed payload-byte reuse, fixed and conditional predecessor constraints,
+the 27-minute cap, unchanged category ceilings, unchanged measurement scope, and the
+readback function-call arity. Delivery and literal-head CI remain pending.
+The final review's sole proposed blocker was resolved as a parser-model false positive:
+this repository uses PyYAML `safe_load`, whose YAML 1.1 resolution parses the top-level
+`on` key as boolean `True`. Direct inspection returned keys `['name', 'run-name', True]`,
+`workflow.get(True)` as a mapping, and its `workflow_dispatch` member present. The
+real-workflow dispatch-validator regression also passes, so the intentional
+`workflow.get(True, {})` access validates the exact checked-in workflow.
+
 ## 2026-10-20: Corpus recovery replacement admission
 
 Amended authorization `AH-CORPUS-RECOVERY-20261020-A` preserves failed recovery

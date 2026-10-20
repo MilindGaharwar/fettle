@@ -394,3 +394,22 @@ charged conservatively as one recovery-freeze minute from provider timestamps,
 leaving a 29-minute replacement timeout within the unchanged 30-minute category.
 Terminal accounting includes both recovery jobs. All other category limits remain
 workers 240, support 25, readback 10, and controllers 30 minutes.
+
+### 2026-10-20 Sustained Recovery Authorization
+
+The later authorization preserves both closed failed attempts, `39369184372` and
+`39378451442`, and permits at most two additional recovery dispatches with at most
+one successful freeze. A second additional dispatch is conditional on the first being
+terminal failure before marker admission/package construction with no downstream
+execution and complete provider evidence. Any marker, package, active/unknown state,
+additional attempt, or contradictory evidence consumes or blocks that path.
+
+Dispatch is driven from one retained JSON envelope. The validator requires the exact
+workflow/ref/controller and string-valued input set, including source preparation run
+`39263581356`, then sends those same validated input bytes to supported GitHub CLI
+`gh workflow run --json`. The two prior jobs consume two conservatively rounded
+recovery minutes. Each new recovery job is contained by a 27-minute timeout so a
+minimum one-minute charge from a failed first additional dispatch still leaves the
+full final-attempt reservation inside the unchanged non-transferable 30-minute category.
+The conditional retry parser derives that charge from terminal provider timestamps and
+rejects a predecessor whose conservative charge exceeds one minute.
