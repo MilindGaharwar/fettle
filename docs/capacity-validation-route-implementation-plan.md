@@ -378,3 +378,19 @@ malformed unit evidence and records those states as explicit non-pass.
 - The failed source run/gate/monitor remain immutable non-pass history.
 - No calibration, qualification, scheduler redesign, rerun, substitution, merge, tag,
   release, or unrelated provider work occurs.
+
+### 2026-10-20 Replacement Admission Amendment
+
+Authorization `AH-CORPUS-RECOVERY-20261020-A` is amended only to replace failed
+recovery run `39369184372`. That run remains a failed, terminal predecessor at
+controller `276ac10bb7b2ec7b80346e821c2324d12bfab73f`; it published no artifact,
+froze no package, and launched no measurement or readback work. The replacement
+exception admits exactly that predecessor plus one fresh recovery dispatch. Any
+other matching run, active predecessor, marker, malformed or incomplete provider
+response, conflicting identity, or consumed replacement permission fails closed.
+
+The 335-minute ceiling is not renewed. The failed predecessor's recovery job is
+charged conservatively as one recovery-freeze minute from provider timestamps,
+leaving a 29-minute replacement timeout within the unchanged 30-minute category.
+Terminal accounting includes both recovery jobs. All other category limits remain
+workers 240, support 25, readback 10, and controllers 30 minutes.

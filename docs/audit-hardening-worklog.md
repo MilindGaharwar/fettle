@@ -1,5 +1,65 @@
 # Audit Hardening Worklog
 
+## 2026-10-20: Corpus recovery replacement admission
+
+Amended authorization `AH-CORPUS-RECOVERY-20261020-A` preserves failed recovery
+run [`39369184372`](https://github.com/MilindGaharwar/fettle/actions/runs/39369184372),
+attempt 1, at controller `276ac10bb7b2ec7b80346e821c2324d12bfab73f`.
+All its jobs are terminal. Its sole active job, `118452931581`, failed at the
+grant-admission step because GitHub CLI rejected jq-style `--arg`; all execution,
+monitor, finalization, and readback jobs were skipped. The provider artifact API
+returned zero artifacts, so no marker or recovery package exists.
+
+Provider timestamps for that failed job are `2026-10-20T04:22:02Z` through
+`04:22:26Z`: 0.40 observed minutes and one conservatively rounded recovery-category
+minute. The original non-transferable 30-minute recovery ceiling therefore leaves a
+29-minute replacement timeout. Workers, support, readback, and controllers remain
+unconsumed and reserved at 240, 25, 10, and 30 minutes. Historical non-billing floors
+remain workers 475.89, support 10.27, and cancellation/uncertainty 56.88 minutes.
+
+The amended repair replaces unsupported `gh api --jq --arg` calls only in the three
+directly related recovery admissions with raw paginated JSON plus a strict parser.
+The recovery exception recognizes only failed run `39369184372`; execute and readback
+retain ordinary single-dispatch admission. API, pagination, parser, identity, marker,
+active-run, or contradictory evidence failures propagate as non-pass. Current phase:
+implementation and executable-boundary verification; no replacement has been
+dispatched and all downstream work remains ineligible.
+
+Executable-boundary verification used installed GitHub CLI `2.97.0`. Its actual
+`gh api --paginate --slurp` parser accepted the repaired argument form; an API 404
+returned nonzero before admission parsing. The extracted workflow shell passed with
+a strict `gh` boundary stub that rejects `--arg`, checks quoted arguments, and
+propagates injected API exit 42 unchanged. Regression cases reject the fixed failed
+predecessor when active or altered, an unexpected third attempt, existing marker,
+malformed JSON, and incomplete pagination.
+
+The complete retained-corpus replay validated all 256 ZIPs and manifests without
+running mutation execution. It reproduced 52,609 corpus fingerprints and the fixed
+12-unit/869-fingerprint selection: plan digest
+`a522756cbe5fa0c9463e9bd04ef15e0eb26256985016b6cb6bafe882d4b1c105` and plan-file
+SHA-256 `c27716a212c2e71ebafed68592e314f9589b1c2fb052f8795fefbb5d2125ac53`.
+The amendment-bound lineage digest is
+`bd562fbb7e5949d6cbf90988c415f4c23c1803edaa7819d969cda4e996b5ad57`.
+
+Focused recovery, admission, accounting, adapter, and authorization tests pass. The
+final full suite passes with 4,959 tests and 20 skips. All-file Ruff, changed-workflow
+actionlint, Python compilation, whitespace checks, locked changed-file Fettle, and
+completion validation pass. Completion validation covers existing registered scopes;
+it is not evidence of unexecuted recovery, measurement, or mutation qualification.
+Independent final review, signed delivery, literal-head CI, and replacement dispatch
+remain pending at this checkpoint.
+
+Independent staged-diff review identified one useful fallback-schema hardening: the
+known-floor recovery record now includes an explicit empty `jobs` list. A focused
+regression also proves that any unexpectedly successful downstream job in failed run
+`39369184372` rejects admission. The remaining suggestions were checked against the
+executable predicates and workflow: non-recovery predecessor jobs must be terminal
+and skipped; current execute/readback workflows are necessarily in progress during
+their admission steps; readback collection is deliberately best-effort so unavailable
+provider evidence is retained and uploaded as explicit non-pass; and its reconciliation
+handler already catches file, JSON, and validation failures. No unresolved concrete
+review finding remains.
+
 ## 2026-10-19: Preparation containment repair under grant C
 
 Authorization `AH-PREP-CONTAINMENT-20261019-C` permits one surgical repair, the

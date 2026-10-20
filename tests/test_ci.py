@@ -136,7 +136,7 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     recovery = jobs["capacity-recover"]
     workers = jobs["capacity-recovery-units"]
 
-    assert recovery["timeout-minutes"] == 30
+    assert recovery["timeout-minutes"] == 29
     scripts = "\n".join(step.get("run", "") for step in recovery["steps"])
     assert "39263581356" in scripts
     assert "65e63d953b45d3672c24df74d0a1364b83a0157b" in scripts
@@ -144,6 +144,14 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "actions/artifacts/$artifact_id/zip" in scripts
     assert "--source-python source/.venv/bin/python" in scripts
     assert "capacity-recovery-grant-A-recover" in yaml.safe_dump(recovery)
+    admission = next(
+        step["run"] for step in recovery["steps"]
+        if step.get("name") == "Admit the one authorized replacement recovery"
+    )
+    assert "gh api --paginate --slurp" in admission
+    assert "--arg" not in admission
+    assert "capacity_recovery_admission.py" in admission
+    assert "39369184372" in admission
     assert "capacity-recovery-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
     assert "capacity-recovery-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
     assert workers["strategy"]["matrix"]["unit"] == list(range(12))
@@ -159,6 +167,8 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "unknown_non_pass" in readback_scripts
     assert "capacity-validation-unit-$EXECUTION_RUN_ID-*" in readback_scripts
     assert "|| true" in readback_scripts
+    assert '"failed_predecessor_run_id":39369184372,"jobs":[]' in readback_scripts
+    assert '"minutes":1,"ceiling_minutes":30' in readback_scripts
 
     unit = yaml.safe_load(
         (root / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
@@ -199,6 +209,150 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert accounting["historical_operational_floor_minutes"] == {
         "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
     }
+
+
+def test_capacity_recovery_admission_parser_is_fail_closed(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/capacity_recovery_admission.py"
+    title = "Capacity recovery recover capval-corpus-recovery-20261020-a"
+    current = {
+        "id": 400, "run_attempt": 1, "head_sha": "c" * 40,
+        "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
+        "status": "in_progress", "conclusion": None, "display_title": title,
+    }
+    predecessor = {
+        "id": 39369184372, "run_attempt": 1,
+        "head_sha": "276ac10bb7b2ec7b80346e821c2324d12bfab73f",
+        "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
+        "status": "completed", "conclusion": "failure", "display_title": title,
+    }
+
+    def write(name, collection, records, *, total=None):
+        path = tmp_path / name
+        path.write_text(json.dumps([{
+            "total_count": len(records) if total is None else total,
+            collection: records,
+        }]))
+        return path
+
+    runs = write("runs.json", "workflow_runs", [predecessor, current])
+    markers = write("markers.json", "artifacts", [])
+    predecessor_artifacts = write("predecessor.json", "artifacts", [])
+    predecessor_jobs = write("predecessor-jobs.json", "jobs", [
+        {"id": 1, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure"},
+        {"id": 2, "name": "capacity recovery (execution admission)",
+         "status": "completed", "conclusion": "skipped"},
+    ])
+
+    def invoke(*, runs_path=runs, markers_path=markers, artifacts_path=predecessor_artifacts):
+        return subprocess.run([
+            sys.executable, str(script), "--stage", "recover",
+            "--current-run-id", "400", "--controller-sha", "c" * 40,
+            "--expected-title", title, "--runs", str(runs_path),
+            "--markers", str(markers_path),
+            "--predecessor-artifacts", str(artifacts_path),
+            "--predecessor-jobs", str(predecessor_jobs),
+        ], capture_output=True, text=True)
+
+    assert invoke().returncode == 0
+    extra = write("extra.json", "workflow_runs", [predecessor, current, {**current, "id": 401}])
+    assert invoke(runs_path=extra).returncode == 2
+    active_predecessor = write(
+        "active.json", "workflow_runs", [{**predecessor, "status": "in_progress", "conclusion": None}, current],
+    )
+    assert invoke(runs_path=active_predecessor).returncode == 2
+    unexpected_jobs = write("unexpected-jobs.json", "jobs", [
+        {"id": 1, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure"},
+        {"id": 2, "name": "capacity recovery (execution admission)",
+         "status": "completed", "conclusion": "success"},
+    ])
+    result = subprocess.run([
+        sys.executable, str(script), "--stage", "recover",
+        "--current-run-id", "400", "--controller-sha", "c" * 40,
+        "--expected-title", title, "--runs", str(runs),
+        "--markers", str(markers),
+        "--predecessor-artifacts", str(predecessor_artifacts),
+        "--predecessor-jobs", str(unexpected_jobs),
+    ], capture_output=True, text=True)
+    assert result.returncode == 2
+    existing = write("existing.json", "artifacts", [{"id": 1, "expired": False}])
+    assert invoke(markers_path=existing).returncode == 2
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{")
+    assert invoke(runs_path=malformed).returncode == 2
+    incomplete = write("incomplete.json", "workflow_runs", [predecessor, current], total=3)
+    assert invoke(runs_path=incomplete).returncode == 2
+
+
+def test_actual_recovery_admission_shell_uses_supported_gh_syntax_and_propagates_failure(
+    tmp_path,
+):
+    title = "Capacity recovery recover capval-corpus-recovery-20261020-a"
+    current = {
+        "id": 400, "run_attempt": 1, "head_sha": "c" * 40,
+        "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
+        "status": "in_progress", "conclusion": None, "display_title": title,
+    }
+    predecessor = {
+        "id": 39369184372, "run_attempt": 1,
+        "head_sha": "276ac10bb7b2ec7b80346e821c2324d12bfab73f",
+        "event": "workflow_dispatch", "path": ".github/workflows/mutation.yml",
+        "status": "completed", "conclusion": "failure", "display_title": title,
+    }
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "runs.json").write_text(json.dumps([{
+        "total_count": 2, "workflow_runs": [predecessor, current],
+    }]))
+    (fixtures / "empty.json").write_text(json.dumps([{"total_count": 0, "artifacts": []}]))
+    (fixtures / "jobs.json").write_text(json.dumps([{"total_count": 2, "jobs": [
+        {"id": 1, "name": "capacity validation (recover retained corpus)",
+         "status": "completed", "conclusion": "failure"},
+        {"id": 2, "name": "capacity recovery (execution admission)",
+         "status": "completed", "conclusion": "skipped"},
+    ]}]))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("""#!/bin/bash
+set -eu
+printf '%s\\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  *--arg*) exit 91 ;;
+esac
+if [ "${GH_FAIL:-0}" = 1 ]; then exit 42; fi
+case "$*" in
+  *workflows/mutation.yml/runs*) cat "$GH_FIXTURES/runs.json" ;;
+  *39369184372/attempts/1/jobs*) cat "$GH_FIXTURES/jobs.json" ;;
+  *artifacts*) cat "$GH_FIXTURES/empty.json" ;;
+  *) exit 43 ;;
+esac
+""")
+    gh.chmod(0o755)
+    script = _workflow_step_script(
+        "capacity-recover", "Admit the one authorized replacement recovery",
+    )
+    script = script.replace(
+        "${{ github.event.inputs.capacity_experiment_id }}",
+        "capval-corpus-recovery-20261020-a",
+    ).replace(
+        "controller/.venv/bin/python controller/.github/scripts/capacity_recovery_admission.py",
+        f"{sys.executable} {Path(PLUGIN_DIR) / '.github/scripts/capacity_recovery_admission.py'}",
+    )
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_CALLS": str(tmp_path / "gh-calls"), "GH_FIXTURES": str(fixtures),
+        "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "400",
+        "GITHUB_SHA": "c" * 40,
+    }
+    result = _run_actions_bash(script, cwd=tmp_path, env=env)
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "gh-calls").read_text()
+    assert "--paginate --slurp" in calls and "--arg" not in calls
+    shutil.rmtree(tmp_path / "recovery-grant-marker")
+    failed = _run_actions_bash(script, cwd=tmp_path, env={**env, "GH_FAIL": "1"})
+    assert failed.returncode == 42
 
 
 def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():

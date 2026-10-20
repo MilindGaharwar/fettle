@@ -2365,7 +2365,8 @@ def reconcile_capacity_provider_accounting(
 
 def reconcile_capacity_recovery_provider_accounting(
     run: dict, job_pages: list[dict], recovery_run: dict,
-    recovery_job_pages: list[dict], source: dict, *, repository: str,
+    recovery_job_pages: list[dict], failed_recovery_run: dict,
+    failed_recovery_job_pages: list[dict], source: dict, *, repository: str,
     source_revision: str, controller_sha: str, recovery_experiment_id: str,
     execution_run_id: str, recovery_run_id: str, plan_file_sha256: str,
     recovery_authorization_id: str, recovery_authorization_contract: dict,
@@ -2407,6 +2408,20 @@ def reconcile_capacity_recovery_provider_accounting(
         raise ValueError("capacity recovery freeze provider identity is stale")
     if not recovery_job_pages or any(not isinstance(page, dict) for page in recovery_job_pages):
         raise ValueError("capacity recovery freeze provider job pages are unavailable")
+    if (
+        str(failed_recovery_run.get("id")) != "39369184372"
+        or failed_recovery_run.get("run_attempt") != 1
+        or failed_recovery_run.get("head_sha") != "276ac10bb7b2ec7b80346e821c2324d12bfab73f"
+        or failed_recovery_run.get("event") != "workflow_dispatch"
+        or failed_recovery_run.get("status") != "completed"
+        or failed_recovery_run.get("conclusion") != "failure"
+        or failed_recovery_run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("failed recovery predecessor identity is stale")
+    if not failed_recovery_job_pages or any(
+        not isinstance(page, dict) for page in failed_recovery_job_pages
+    ):
+        raise ValueError("failed recovery predecessor job pages are unavailable")
     totals = {page.get("total_count") for page in job_pages}
     jobs = [job for page in job_pages for job in page.get("jobs", [])]
     ids = [job.get("id") for job in jobs]
@@ -2425,6 +2440,15 @@ def reconcile_capacity_recovery_provider_accounting(
         or any(type(job_id) is not int or job_id < 1 for job_id in recovery_ids)
     ):
         raise ValueError("capacity recovery freeze provider pagination differs")
+    failed_totals = {page.get("total_count") for page in failed_recovery_job_pages}
+    failed_jobs = [job for page in failed_recovery_job_pages for job in page.get("jobs", [])]
+    failed_ids = [job.get("id") for job in failed_jobs]
+    if (
+        len(failed_totals) != 1 or failed_totals.pop() != len(failed_jobs)
+        or len(failed_ids) != len(set(failed_ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in failed_ids)
+    ):
+        raise ValueError("failed recovery predecessor pagination differs")
 
     def record(job: dict) -> dict:
         try:
@@ -2460,18 +2484,39 @@ def reconcile_capacity_recovery_provider_accounting(
         }:
             support.append(record(job))
     freeze = [record(job) for job in recovery_jobs if job.get("name") == "capacity validation (recover retained corpus)"]
+    failed_freeze = [
+        record(job) for job in failed_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
+    if (
+        len(failed_freeze) != 1
+        or failed_freeze[0]["status"] != "completed"
+        or failed_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in failed_jobs
+        )
+    ):
+        raise ValueError("failed recovery predecessor jobs differ")
     indexes = [item["unit_index"] for item in workers]
     worker_minutes = sum(item["charged_minutes_ceiling"] for item in workers)
     support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
     controller_minutes = sum(item["charged_minutes_ceiling"] for item in controllers)
-    freeze_minutes = sum(item["charged_minutes_ceiling"] for item in freeze)
+    freeze_minutes = sum(
+        item["charged_minutes_ceiling"] for item in freeze + failed_freeze
+    )
     terminal_success = all(
         item["status"] == "completed" and item["conclusion"] == "success"
         for item in workers + support + controllers + freeze
     )
     passed = (
         sorted(indexes) == list(range(12)) and len(indexes) == len(set(indexes))
-        and len(support) == 2 and len(controllers) == 1 and len(freeze) == 1 and terminal_success
+        and len(support) == 2 and len(controllers) == 1
+        and len(freeze) == 1 and terminal_success
         and run.get("conclusion") == "success"
         and freeze_minutes <= 30 and worker_minutes <= 240
         and support_minutes <= 25 and controller_minutes <= 30
@@ -2489,7 +2534,7 @@ def reconcile_capacity_recovery_provider_accounting(
         "historical_non_billing_floor_minutes": {
             "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
         },
-        "recovery_freeze": {"jobs": freeze, "minutes": freeze_minutes, "ceiling_minutes": 30, "transferable": False},
+        "recovery_freeze": {"jobs": failed_freeze + freeze, "minutes": freeze_minutes, "ceiling_minutes": 30, "transferable": False},
         "worker": {"jobs": workers, "minutes": worker_minutes, "ceiling_minutes": 240, "transferable": False},
         "support": {"jobs": support, "minutes": support_minutes, "ceiling_minutes": 25, "transferable": False},
         "cancellation_controller": {"jobs": controllers, "minutes": controller_minutes, "ceiling_minutes": 30, "transferable": False},

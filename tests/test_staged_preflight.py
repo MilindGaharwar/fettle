@@ -2241,7 +2241,9 @@ def test_capacity_recovery_authorization_is_diagnostic_only_and_totals_335():
         experiment_id=experiment,
     ) == contract
     assert contract["scope"] == {
-        "recovery_dispatches": 1,
+        "recovery_dispatches": 2,
+        "successful_recovery_freezes": 1,
+        "replacement_for_failed_run_id": "39369184372",
         "enumeration_dispatches": 0,
         "measurement_units": 12,
         "measurement_attempts_per_unit": 1,

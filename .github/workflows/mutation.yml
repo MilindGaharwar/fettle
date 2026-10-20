@@ -1240,7 +1240,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'recover' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
     name: capacity validation (recover retained corpus)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 29
     permissions:
       actions: read
       contents: read
@@ -1279,16 +1279,22 @@ jobs:
           test "$(git -C controller rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_SHA" != 65e63d953b45d3672c24df74d0a1364b83a0157b
           controller/.venv/bin/python -c 'import os; from fettle.staged_preflight import capacity_recovery_authorization_contract as c; x=c(os.environ["AUTHORIZATION_ID"],"65e63d953b45d3672c24df74d0a1364b83a0157b",os.environ["EXPERIMENT_ID"]); assert sum(x["resource_ceiling_minutes"].values())==335 and x["scope"]["enumeration_dispatches"]==0'
-      - name: Reject prior recovery dispatch and claim the grant
+      - name: Admit the one authorized replacement recovery
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           expected="Capacity recovery recover ${{ github.event.inputs.capacity_experiment_id }}"
-          runs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" --jq --arg expected "$expected" "[.[].workflow_runs[] | select(.display_title == \$expected) | .id]")
-          test "$runs" = "[$GITHUB_RUN_ID]"
           marker=capacity-recovery-grant-A-recover
-          matches=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" --jq '[.[].artifacts[] | select(.expired == false)] | length')
-          test "$matches" = 0
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/artifacts?per_page=100" > failed-recovery-artifacts.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/attempts/1/jobs?per_page=100" > failed-recovery-jobs.json
+          controller/.venv/bin/python controller/.github/scripts/capacity_recovery_admission.py \
+            --stage recover --current-run-id "$GITHUB_RUN_ID" --controller-sha "$GITHUB_SHA" \
+            --expected-title "$expected" --runs recovery-runs.json \
+            --markers recovery-markers.json \
+            --predecessor-artifacts failed-recovery-artifacts.json \
+            --predecessor-jobs failed-recovery-jobs.json
           mkdir recovery-grant-marker
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-grant-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1397,11 +1403,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           expected="Capacity recovery execute ${{ github.event.inputs.capacity_experiment_id }}"
-          runs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" --jq --arg expected "$expected" "[.[].workflow_runs[] | select(.display_title == \$expected) | .id]")
-          test "$runs" = "[$GITHUB_RUN_ID]"
           marker=capacity-recovery-grant-A-execute
-          matches=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" --jq '[.[].artifacts[] | select(.expired == false)] | length')
-          test "$matches" = 0
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
+          python .github/scripts/capacity_recovery_admission.py \
+            --stage execute --current-run-id "$GITHUB_RUN_ID" --controller-sha "$GITHUB_SHA" \
+            --expected-title "$expected" --runs recovery-runs.json --markers recovery-markers.json
           mkdir recovery-execution-marker
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-execution-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1521,7 +1528,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_id":39369184372,"jobs":[],"minutes":1,"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           Path("capacity-recovery-provider-accounting.json").write_text(json.dumps(ledger,indent=2,sort_keys=True)+"\n")
           Path("capacity-recovery-model-decision.json").write_text(json.dumps(decision,indent=2,sort_keys=True)+"\n")
@@ -1536,10 +1543,11 @@ jobs:
           test "${{ github.event.inputs.capacity_experiment_id }}" = capval-corpus-recovery-20261020-a
           marker=capacity-recovery-grant-A-readback
           expected="Capacity recovery readback ${{ github.event.inputs.capacity_experiment_id }}"
-          runs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" --jq --arg expected "$expected" "[.[].workflow_runs[] | select(.display_title == \$expected) | .id]")
-          test "$runs" = "[$GITHUB_RUN_ID]"
-          matches=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" --jq '[.[].artifacts[] | select(.expired == false)] | length')
-          test "$matches" = 0
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
+          python .github/scripts/capacity_recovery_admission.py \
+            --stage readback --current-run-id "$GITHUB_RUN_ID" --controller-sha "$GITHUB_SHA" \
+            --expected-title "$expected" --runs recovery-runs.json --markers recovery-markers.json
           mkdir recovery-readback-marker
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-readback-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1569,6 +1577,12 @@ jobs:
             --output capacity-recovery-jobs.json --attempts-directory capacity-recovery-attempts \
             --report capacity-recovery-collection.json --max-attempts 4 \
             --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39369184372" > failed-recovery-run.json || true
+          python -m fettle.staged_preflight collect-stable-jobs \
+            --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/39369184372/attempts/1/jobs?per_page=100" \
+            --output failed-recovery-jobs.json --attempts-directory failed-recovery-attempts \
+            --report failed-recovery-collection.json --max-attempts 4 \
+            --max-elapsed-seconds 45 --retry-delay-seconds 2 || true
       - name: Reconcile diagnostic result and bounded exposure
         env:
           EXECUTION_RUN_ID: ${{ github.event.inputs.capacity_execution_run_id }}
@@ -1584,7 +1598,7 @@ jobs:
               evaluate_capacity_validation_decision,reconcile_capacity_recovery_provider_accounting,
               validate_capacity_recovery_results,
           )
-          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
+          ledger={"schema_version":"1","kind":"capacity_validation_recovery_provider_accounting","status":"non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable","recovery_freeze":{"failed_predecessor_run_id":39369184372,"jobs":[],"minutes":1,"ceiling_minutes":30,"transferable":False,"status":"known_floor_only"},"worker":{"ceiling_minutes":240,"transferable":False},"support":{"ceiling_minutes":25,"transferable":False},"cancellation_controller":{"ceiling_minutes":30,"transferable":False},"terminal_readback":{"ceiling_minutes":10,"transferable":False}}
           decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":"terminal evidence unavailable"}
           try:
               package=Path("recovered/capacity-recovery")
@@ -1597,7 +1611,9 @@ jobs:
                   json.loads(Path("capacity-execution-run.json").read_text()),
                   json.loads(Path("capacity-execution-jobs.json").read_text()),
                   json.loads(Path("capacity-recovery-run.json").read_text()),
-                  json.loads(Path("capacity-recovery-jobs.json").read_text()),source,
+                  json.loads(Path("capacity-recovery-jobs.json").read_text()),
+                  json.loads(Path("failed-recovery-run.json").read_text()),
+                  json.loads(Path("failed-recovery-jobs.json").read_text()),source,
                   repository=os.environ["GITHUB_REPOSITORY"],source_revision=lineage["source"]["candidate_sha"],
                   controller_sha=os.environ["GITHUB_SHA"],recovery_experiment_id=os.environ["RECOVERY_EXPERIMENT_ID"],
                   execution_run_id=os.environ["EXECUTION_RUN_ID"],recovery_run_id=os.environ["RECOVERY_RUN_ID"],
@@ -1630,6 +1646,10 @@ jobs:
             capacity-recovery-jobs.json
             capacity-recovery-collection.json
             capacity-recovery-attempts
+            failed-recovery-run.json
+            failed-recovery-jobs.json
+            failed-recovery-collection.json
+            failed-recovery-attempts
             capacity-recovery-provider-accounting.json
             capacity-recovery-model-decision.json
           if-no-files-found: error
