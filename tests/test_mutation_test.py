@@ -4082,9 +4082,10 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
     }
     recovery_run = {**run, "id": 100}
 
-    def job(name, job_id):
+    def job(name, job_id, *, run_id=123):
         return {
             "id": job_id, "name": name, "status": "completed", "conclusion": "success",
+            "run_id": run_id, "run_attempt": 1,
             "started_at": "2026-10-20T10:00:00Z", "completed_at": "2026-10-20T10:01:00Z",
         }
 
@@ -4097,9 +4098,9 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         "capacity-recovery-measurement-monitor / capacity validation (monitor measurement containment)", 15,
     )
     jobs = [*workers, *support, controller_job]
-    freeze_jobs = [job("capacity validation (recover retained corpus)", 16)]
+    freeze_jobs = [job("capacity validation (recover retained corpus)", 16, run_id=100)]
     failed_freeze_jobs = [
-        {**job("capacity validation (recover retained corpus)", 17), "conclusion": "failure"},
+        {**job("capacity validation (recover retained corpus)", 17, run_id=39369184372), "conclusion": "failure"},
     ]
     failed_recovery_run = {
         **run, "id": 39369184372,
@@ -4112,7 +4113,7 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         "conclusion": "failure",
     }
     missing_input_freeze_jobs = [
-        {**job("capacity validation (recover retained corpus)", 18), "conclusion": "failure"},
+        {**job("capacity validation (recover retained corpus)", 18, run_id=39378451442), "conclusion": "failure"},
     ]
 
     ledger = reconcile_capacity_recovery_provider_accounting(
@@ -4136,6 +4137,24 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
     assert ledger["terminal_readback"]["ceiling_minutes"] == 10
     assert ledger["terminal_readback"]["charged_minutes"] == 10
     assert ledger["historical_non_billing_floor_minutes"]["workers"] == 475.89
+    exhausted_workers = [
+        {**item, "completed_at": "2026-10-20T10:21:00Z"} for item in workers
+    ]
+    exhausted_ledger = reconcile_capacity_recovery_provider_accounting(
+        run, [{"total_count": len(jobs), "jobs": [
+            *exhausted_workers, *support, controller_job,
+        ]}], recovery_run, [{"total_count": 1, "jobs": freeze_jobs}],
+        failed_recovery_run, [{"total_count": 1, "jobs": failed_freeze_jobs}],
+        missing_input_recovery_run,
+        [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
+        repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+        recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+        plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+        recovery_authorization_contract=contract,
+    )
+    assert exhausted_ledger["worker"]["minutes"] == 252
+    assert exhausted_ledger["worker"]["ceiling_minutes"] == 240
+    assert exhausted_ledger["status"] == "non_pass"
     retry_recovery_run = {
         **run, "id": 39391306615,
         "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
@@ -4143,7 +4162,7 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
     }
     retry_freeze_jobs = [
         {
-            **job("capacity validation (recover retained corpus)", 118523223941),
+            **job("capacity validation (recover retained corpus)", 118523223941, run_id=39391306615),
             "conclusion": "failure", "started_at": "2026-10-20T08:08:56Z",
             "completed_at": "2026-10-20T08:10:03Z",
         },
@@ -4160,6 +4179,31 @@ def test_capacity_recovery_provider_accounting_is_separate_bounded_and_non_autho
         retry_recovery_job_pages=[{"total_count": 1, "jobs": retry_freeze_jobs}],
     )
     assert retry_ledger["recovery_freeze"]["minutes"] == 5
+    with pytest.raises(ValueError, match="execution job identity"):
+        reconcile_capacity_recovery_provider_accounting(
+            run, [{"total_count": len(jobs), "jobs": [
+                {**workers[0], "run_id": 999}, *workers[1:], *support, controller_job,
+            ]}], recovery_run, [{"total_count": 1, "jobs": freeze_jobs}],
+            failed_recovery_run, [{"total_count": 1, "jobs": failed_freeze_jobs}],
+            missing_input_recovery_run,
+            [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
+            repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+            recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+            plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+            recovery_authorization_contract=contract,
+        )
+    with pytest.raises(ValueError, match="recovery freeze job identity"):
+        reconcile_capacity_recovery_provider_accounting(
+            run, [{"total_count": len(jobs), "jobs": jobs}], recovery_run,
+            [{"total_count": 1, "jobs": [{**freeze_jobs[0], "run_attempt": 2}]}],
+            failed_recovery_run, [{"total_count": 1, "jobs": failed_freeze_jobs}],
+            missing_input_recovery_run,
+            [{"total_count": 1, "jobs": missing_input_freeze_jobs}], source,
+            repository="owner/repo", source_revision=source_sha, controller_sha=controller,
+            recovery_experiment_id=experiment, execution_run_id="123", recovery_run_id="100",
+            plan_file_sha256="p" * 64, recovery_authorization_id=authorization,
+            recovery_authorization_contract=contract,
+        )
     nonterminal_predecessor = [{
         "total_count": 1,
         "jobs": [{**failed_freeze_jobs[0], "status": "in_progress", "conclusion": None}],

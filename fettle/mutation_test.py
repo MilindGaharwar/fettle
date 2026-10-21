@@ -2499,8 +2499,10 @@ def reconcile_capacity_recovery_provider_accounting(
     ):
         raise ValueError("missing-input recovery predecessor job pages are unavailable")
     retry_jobs: list[dict] = []
+    retry_run_id = ""
     if retry_recovery_run is not None or retry_recovery_job_pages is not None:
         retry_id = str(retry_recovery_run.get("id")) if isinstance(retry_recovery_run, dict) else ""
+        retry_run_id = retry_id
         expected_retry_sha = (
             "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8"
             if retry_id == "39391306615" else controller_sha
@@ -2567,6 +2569,20 @@ def reconcile_capacity_recovery_provider_accounting(
         or any(type(job_id) is not int or job_id < 1 for job_id in missing_ids)
     ):
         raise ValueError("missing-input recovery predecessor pagination differs")
+
+    for records, expected_run_id, label in (
+        (jobs, execution_run_id, "execution"),
+        (recovery_jobs, recovery_run_id, "recovery freeze"),
+        (failed_jobs, "39369184372", "failed recovery predecessor"),
+        (missing_jobs, "39378451442", "missing-input recovery predecessor"),
+        (retry_jobs, retry_run_id, "conditional retry recovery predecessor"),
+    ):
+        if any(
+            str(job.get("run_id")) != expected_run_id
+            or str(job.get("run_attempt")) != "1"
+            for job in records
+        ):
+            raise ValueError(f"capacity recovery {label} job identity differs")
 
     def record(job: dict) -> dict:
         try:

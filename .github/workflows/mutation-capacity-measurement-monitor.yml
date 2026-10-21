@@ -12,6 +12,9 @@ on:
       authorization_id:
         required: true
         type: string
+      execution_controller_sha:
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -29,18 +32,21 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXECUTION_CONTROLLER_SHA: ${{ inputs.execution_controller_sha }}
           EXPERIMENT_ID: ${{ inputs.experiment_id }}
           AUTHORIZATION_ID: ${{ inputs.authorization_id }}
         run: |
           set +e
           mkdir -p capacity-measurement-monitor
-          if ! python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract,capacity_recovery_authorization_contract; f=capacity_recovery_authorization_contract if os.environ["AUTHORIZATION_ID"]=="AH-CORPUS-RECOVERY-20261020-A" else capacity_authorization_contract; f(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'; then
+          if ! python -c 'import os; from fettle.staged_preflight import capacity_measurement_authorization_contract; c=capacity_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["EXECUTION_CONTROLLER_SHA"]); source=c.get("source_candidate_sha",c.get("candidate_sha")); assert source==os.environ["CANDIDATE_SHA"]; assert os.environ["EXECUTION_CONTROLLER_SHA"]==os.environ["GITHUB_SHA"]; assert c.get("execution_controller_sha",os.environ["GITHUB_SHA"])==os.environ["GITHUB_SHA"]'; then
             printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
               > capacity-measurement-monitor/final-decision.json
             exit 2
           fi
-          if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || { [ "$AUTHORIZATION_ID" != AH-CORPUS-RECOVERY-20261020-A ] && [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; } || { [ "$AUTHORIZATION_ID" = AH-CORPUS-RECOVERY-20261020-A ] && [ "$CANDIDATE_SHA" != 65e63d953b45d3672c24df74d0a1364b83a0157b ]; }; then
+          if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || { [ "$AUTHORIZATION_ID" = AH-PREP-CONTAINMENT-20261019-C ] && [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; }; then
             printf '%s\n' '{"action":"cancel","reason":"measurement identity differs"}' \
               > capacity-measurement-monitor/final-decision.json
             exit 2
@@ -61,11 +67,15 @@ jobs:
             JOBS="$jobs" DECISION="$decision" python - <<'PY'
           import json, os, re
           from pathlib import Path
-          from fettle.staged_preflight import capacity_authorization_contract, capacity_recovery_authorization_contract
+          from fettle.staged_preflight import capacity_measurement_authorization_contract
 
           pages = json.loads(Path(os.environ["JOBS"]).read_text())
-          factory = capacity_recovery_authorization_contract if os.environ["AUTHORIZATION_ID"] == "AH-CORPUS-RECOVERY-20261020-A" else capacity_authorization_contract
-          authorization_id = factory(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
+          contract = capacity_measurement_authorization_contract(
+              os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"],
+              os.environ["EXPERIMENT_ID"],
+              execution_controller_sha=os.environ["EXECUTION_CONTROLLER_SHA"],
+          )
+          authorization_id = contract["authorization_id"]
           if (
               not isinstance(pages, list) or not pages
               or any(not isinstance(page, dict) or not isinstance(page.get("jobs"), list)
@@ -79,10 +89,13 @@ jobs:
               len(totals) != 1 or totals.pop() != len(jobs)
               or len(ids) != len(set(ids))
               or any(type(job_id) is not int or job_id < 1 for job_id in ids)
+              or any(str(job.get("run_id")) != os.environ["EXPECTED_RUN_ID"] for job in jobs)
+              or any(str(job.get("run_attempt")) != os.environ["EXPECTED_RUN_ATTEMPT"] for job in jobs)
           ):
               raise ValueError("measurement provider pagination is incomplete or duplicated")
 
           recovery = authorization_id == "AH-CORPUS-RECOVERY-20261020-A"
+          linux_measurement = authorization_id == "AH-LINUX-MEASUREMENT-20261021-A"
           worker = re.compile(r"^(?:[^/]+ / )?capacity (?:recovery )?validation unit (\d+)$")
           admitted = set(range(12)) if recovery else {0, 1, 2, 3}
           successful_names = {
@@ -94,20 +107,46 @@ jobs:
           if "capacity validation (admit batch 3)" in successful_names:
               admitted.update(range(8, 12))
 
+          worker_states = {
+              int(match.group(1)): (job.get("status"), job.get("conclusion"))
+              for job in jobs
+              if (match := worker.fullmatch(str(job.get("name", "")))) is not None
+          }
+          if linux_measurement and all(
+              worker_states.get(index) == ("completed", "success") for index in range(4)
+          ):
+              admitted.update(range(4, 8))
+          if linux_measurement and all(
+              worker_states.get(index) == ("completed", "success") for index in range(4, 8)
+          ):
+              admitted.update(range(8, 12))
+
           observed = []
           terminal = []
           failed = []
+          terminal_conclusions = {
+              "success", "failure", "cancelled", "timed_out", "action_required",
+              "neutral", "skipped", "stale", "startup_failure",
+          }
           for job in jobs:
               match = worker.fullmatch(str(job.get("name", "")))
               if match is None:
                   continue
+              status = job.get("status")
+              conclusion = job.get("conclusion")
+              if (
+                  status not in {"queued", "in_progress", "completed"}
+                  or (status != "completed" and conclusion is not None)
+                  or (status == "completed" and conclusion not in terminal_conclusions)
+              ):
+                  raise ValueError("measurement worker lifecycle is malformed or contradictory")
               index = int(match.group(1))
               if index not in admitted:
                   raise ValueError("measurement worker appeared before admission")
               observed.append(index)
-              if job.get("status") == "completed":
+              if status == "completed":
                   terminal.append(index)
-                  if job.get("conclusion") != "success":
+                  if conclusion != "success":
                       failed.append(index)
           if len(observed) != len(set(observed)) or len(observed) > 12:
               raise ValueError("measurement worker identity is duplicated or excessive")

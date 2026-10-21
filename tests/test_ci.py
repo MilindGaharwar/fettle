@@ -579,6 +579,24 @@ def test_linux_measurement_workflow_captures_environment_before_mutation_and_val
     assert 'assert lineage["digest"]' not in workflow
 
 
+def test_linux_measurement_readback_keeps_execution_and_readback_controllers_distinct():
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    reconcile = next(
+        step["run"] for step in workflow["jobs"]["capacity-recovery-provider-readback"]["steps"]
+        if step.get("name") == "Reconcile diagnostic result and bounded exposure"
+    )
+    consumer = _python_heredoc(reconcile)
+
+    assert 'execution_controller_sha=execution_run.get("head_sha")' in consumer
+    assert 'controller_sha=execution_controller_sha' in consumer
+    assert 'controller_sha=os.environ["GITHUB_SHA"]' not in consumer
+    assert 'source.get("execution_controller_sha") != execution_controller_sha' in consumer
+    assert '"execution_controller_sha"' in consumer
+    assert '"readback_controller_sha"' in consumer
+
+
 def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -746,12 +764,218 @@ def test_capacity_measurement_monitor_is_bounded_exact_once_and_cancels_after_re
     assert workflow["permissions"] == {"actions": "write", "contents": "read"}
     assert job["timeout-minutes"] == 30
     assert "collect-stable-jobs" in scripts
-    assert "capacity_authorization_contract" in scripts
+    assert "capacity_measurement_authorization_contract" in scripts
+    assert "linux_measurement_authorization_contract" not in scripts
     assert "AH-CAPACITY-BOUNDED-20261016-A" not in scripts
     assert "measurement worker appeared before admission" in scripts
     assert "len(observed) != len(set(observed))" in scripts
     assert "all 12 measurement workers are terminal-success" in scripts
     assert artifact_index < cancel_index
+
+    recovery_worker = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
+    )["jobs"]["execute"]
+    assert recovery_worker["timeout-minutes"] * 12 == 240
+    assert '"worker_ceiling_minutes": 240' in scripts
+
+
+def test_linux_measurement_monitor_routes_authorization_and_binds_distinct_identities(tmp_path):
+    root = Path(PLUGIN_DIR)
+    reusable = yaml.safe_load(
+        (root / ".github/workflows/mutation-capacity-measurement-monitor.yml").read_text()
+    )
+    workflow = yaml.safe_load((root / ".github/workflows/mutation.yml").read_text())
+    monitor_job = reusable["jobs"]["monitor"]
+    monitor = next(step["run"] for step in monitor_job["steps"] if step.get("id") == "monitor")
+    preamble = monitor.split("for sample in $(seq 1 20); do", 1)[0]
+    source = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+    controller = "c" * 40
+    valid = {
+        **os.environ,
+        "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_SHA": controller,
+        "CANDIDATE_SHA": source,
+        "EXECUTION_CONTROLLER_SHA": controller,
+        "AUTHORIZATION_ID": "AH-LINUX-MEASUREMENT-20261021-A",
+        "EXPERIMENT_ID": "capval-linux-measurement-20261021-a",
+    }
+
+    assert _run_actions_bash(preamble, cwd=tmp_path, env=valid).returncode == 0
+    for altered in (
+        {"CANDIDATE_SHA": "a" * 40},
+        {"EXECUTION_CONTROLLER_SHA": "b" * 40},
+        {"AUTHORIZATION_ID": "AH-UNKNOWN"},
+    ):
+        result = _run_actions_bash(preamble, cwd=tmp_path, env={**valid, **altered})
+        assert result.returncode == 2
+        decision = json.loads(
+            (tmp_path / "capacity-measurement-monitor/final-decision.json").read_text()
+        )
+        assert decision["action"] == "cancel"
+
+    call = workflow["jobs"]["capacity-recovery-measurement-monitor"]
+    assert call["with"] == {
+        "candidate_sha": source,
+        "execution_controller_sha": "${{ github.sha }}",
+        "authorization_id": "${{ github.event.inputs.capacity_authorization_id }}",
+        "experiment_id": "${{ github.event.inputs.capacity_experiment_id }}",
+    }
+
+
+@pytest.mark.parametrize(
+    "worker_status,worker_conclusion,expected_action",
+    [
+        ("queued", None, "continue"),
+        ("in_progress", None, "continue"),
+        ("completed", "success", "complete"),
+        ("completed", "failure", "cancel"),
+    ],
+)
+def test_linux_measurement_monitor_consumes_real_provider_states(
+    tmp_path, worker_status, worker_conclusion, expected_action,
+):
+    monitor = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-measurement-monitor.yml").read_text()
+    )
+    script = next(
+        step["run"] for step in monitor["jobs"]["monitor"]["steps"]
+        if step.get("id") == "monitor"
+    )
+    consumer = _python_heredoc(script)
+    indexes = range(12) if worker_status == "completed" and worker_conclusion == "success" else range(4)
+    jobs = [
+        {
+            "id": index + 1, "name": f"capacity recovery validation unit {index}",
+            "status": worker_status, "conclusion": worker_conclusion,
+            "run_id": 123, "run_attempt": 1,
+        }
+        for index in indexes
+    ]
+    jobs_path = tmp_path / "jobs.json"
+    decision_path = tmp_path / "decision.json"
+    jobs_path.write_text(json.dumps([{"total_count": len(jobs), "jobs": jobs}]))
+    env = {
+        **os.environ,
+        "JOBS": str(jobs_path), "DECISION": str(decision_path),
+        "AUTHORIZATION_ID": "AH-LINUX-MEASUREMENT-20261021-A",
+        "CANDIDATE_SHA": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        "EXECUTION_CONTROLLER_SHA": "c" * 40,
+        "EXPERIMENT_ID": "capval-linux-measurement-20261021-a",
+        "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+        "EXPECTED_RUN_ID": "123", "EXPECTED_RUN_ATTEMPT": "1",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-c", consumer], cwd=tmp_path, env=env,
+        capture_output=True, text=True,
+    )
+    assert result.returncode == {"continue": 0, "complete": 10, "cancel": 2}[expected_action]
+    decision = json.loads(decision_path.read_text())
+    assert decision["action"] == expected_action
+    assert decision["candidate_sha"] != env["EXECUTION_CONTROLLER_SHA"]
+    assert decision["worker_ceiling_minutes"] == 240
+    assert decision["controller_ceiling_minutes"] == 30
+
+
+def test_linux_measurement_monitor_rejects_worker_before_previous_batch_succeeds(tmp_path):
+    monitor = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-measurement-monitor.yml").read_text()
+    )
+    script = next(
+        step["run"] for step in monitor["jobs"]["monitor"]["steps"]
+        if step.get("id") == "monitor"
+    )
+    consumer = _python_heredoc(script)
+    jobs = [
+        {"id": index + 1, "name": f"capacity recovery validation unit {index}",
+         "status": "in_progress", "conclusion": None,
+         "run_id": 123, "run_attempt": 1}
+        for index in range(5)
+    ]
+    jobs_path = tmp_path / "jobs.json"
+    jobs_path.write_text(json.dumps([{"total_count": len(jobs), "jobs": jobs}]))
+    result = subprocess.run(
+        [sys.executable, "-c", consumer], cwd=tmp_path,
+        env={
+            **os.environ, "JOBS": str(jobs_path),
+            "DECISION": str(tmp_path / "decision.json"),
+            "AUTHORIZATION_ID": "AH-LINUX-MEASUREMENT-20261021-A",
+            "CANDIDATE_SHA": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+            "EXECUTION_CONTROLLER_SHA": "c" * 40,
+                "EXPERIMENT_ID": "capval-linux-measurement-20261021-a",
+                "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                "EXPECTED_RUN_ID": "123", "EXPECTED_RUN_ATTEMPT": "1",
+        }, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "appeared before admission" in result.stderr
+
+
+def test_linux_measurement_monitor_rejects_missing_malformed_or_conflicting_provider_evidence(tmp_path):
+    monitor = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-capacity-measurement-monitor.yml").read_text()
+    )
+    script = next(
+        step["run"] for step in monitor["jobs"]["monitor"]["steps"]
+        if step.get("id") == "monitor"
+    )
+    consumer = _python_heredoc(script)
+    jobs_path = tmp_path / "jobs.json"
+    decision_path = tmp_path / "decision.json"
+    env = {
+        **os.environ,
+        "JOBS": str(jobs_path), "DECISION": str(decision_path),
+        "AUTHORIZATION_ID": "AH-LINUX-MEASUREMENT-20261021-A",
+        "CANDIDATE_SHA": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        "EXECUTION_CONTROLLER_SHA": "c" * 40,
+        "EXPERIMENT_ID": "capval-linux-measurement-20261021-a",
+        "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+        "EXPECTED_RUN_ID": "123", "EXPECTED_RUN_ATTEMPT": "1",
+    }
+    fixtures = (
+        [],
+        [{"jobs": []}],
+        [{"total_count": 2, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "queued", "conclusion": None, "run_id": 123, "run_attempt": 1},
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "queued", "conclusion": None, "run_id": 123, "run_attempt": 1},
+        ]}],
+        [{"total_count": 1, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 4",
+             "status": "queued", "conclusion": None, "run_id": 123, "run_attempt": 1},
+        ]}],
+        [{"total_count": 1, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "garbage", "conclusion": "success",
+             "run_id": 123, "run_attempt": 1},
+        ]}],
+        [{"total_count": 1, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "queued", "conclusion": "failure",
+             "run_id": 123, "run_attempt": 1},
+        ]}],
+        [{"total_count": 1, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "queued", "conclusion": None,
+             "run_id": 999, "run_attempt": 1},
+        ]}],
+        [{"total_count": 1, "jobs": [
+            {"id": 1, "name": "capacity recovery validation unit 0",
+             "status": "queued", "conclusion": None,
+             "run_id": 123, "run_attempt": 2},
+        ]}],
+    )
+    for fixture in fixtures:
+        jobs_path.write_text(json.dumps(fixture))
+        decision_path.unlink(missing_ok=True)
+        result = subprocess.run(
+            [sys.executable, "-c", consumer], cwd=tmp_path, env=env,
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert not decision_path.exists()
 
 
 def test_capacity_validation_worker_has_containment_and_non_authoritative_namespace():

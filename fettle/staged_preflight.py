@@ -233,6 +233,27 @@ def linux_measurement_authorization_contract(
     return contract
 
 
+def capacity_measurement_authorization_contract(
+    authorization_id: str, candidate_sha: str, experiment_id: str, *,
+    execution_controller_sha: str,
+) -> dict:
+    """Route a measurement monitor to the authorization contract that owns it."""
+    if authorization_id == LINUX_MEASUREMENT_AUTHORIZATION_ID:
+        return linux_measurement_authorization_contract(
+            authorization_id, candidate_sha, experiment_id,
+            execution_controller_sha=execution_controller_sha,
+        )
+    if authorization_id == CAPACITY_RECOVERY_AUTHORIZATION_ID:
+        return capacity_recovery_authorization_contract(
+            authorization_id, candidate_sha, experiment_id,
+        )
+    if authorization_id == CAPACITY_AUTHORIZATION_ID:
+        return capacity_authorization_contract(
+            authorization_id, candidate_sha, experiment_id,
+        )
+    raise ValueError("capacity measurement authorization is not approved for dispatch")
+
+
 def validate_linux_measurement_authorization_contract(
     contract: dict, *, authorization_id: str, candidate_sha: str,
     experiment_id: str, execution_controller_sha: str,

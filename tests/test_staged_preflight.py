@@ -77,6 +77,7 @@ from scripts.staged_preflight import (
 from fettle.staged_preflight import (
     build_calibration_accounting_log_envelope,
     calibration_accounting_log_records,
+    capacity_measurement_authorization_contract,
     linux_measurement_authorization_contract,
     recover_calibration_accounting_log_envelope,
     validate_linux_measurement_authorization_contract,
@@ -2308,6 +2309,11 @@ def test_linux_measurement_authorization_binds_retained_package_and_execution_co
     assert contract["scope"]["recovery_dispatches"] == 0
     assert contract["resource_ceiling_minutes"]["historical_recovery_charged"] == 8
     assert contract["transferable"] is False
+    assert capacity_measurement_authorization_contract(
+        contract["authorization_id"], contract["source_candidate_sha"],
+        contract["experiment_id"],
+        execution_controller_sha=contract["execution_controller_sha"],
+    ) == contract
 
     for changed in (
         {"authorization_id": "AH-CORPUS-RECOVERY-20261020-A"},
@@ -2324,6 +2330,12 @@ def test_linux_measurement_authorization_binds_retained_package_and_execution_co
         }
         with pytest.raises(ValueError):
             validate_linux_measurement_authorization_contract(contract, **arguments)
+
+    with pytest.raises(ValueError, match="not approved"):
+        capacity_measurement_authorization_contract(
+            "AH-UNKNOWN", contract["source_candidate_sha"], contract["experiment_id"],
+            execution_controller_sha=contract["execution_controller_sha"],
+        )
 
 
 def test_linux_measurement_package_binding_rejects_plan_environment_and_lineage_drift():

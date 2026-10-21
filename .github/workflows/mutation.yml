@@ -1570,6 +1570,7 @@ jobs:
     uses: ./.github/workflows/mutation-capacity-measurement-monitor.yml
     with:
       candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
+      execution_controller_sha: ${{ github.sha }}
       authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
@@ -1743,13 +1744,16 @@ jobs:
               plan=json.loads((package/"capacity-validation-plan.json").read_text())
               lineage=json.loads((package/"capacity-validation-recovery-lineage.json").read_text())
               from fettle.staged_preflight import linux_measurement_authorization_contract,validate_linux_measurement_package_binding
-              contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],lineage["source"]["candidate_sha"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
-              validate_linux_measurement_package_binding(plan,lineage,contract,plan_file_sha256=__import__("hashlib").sha256((package/"capacity-validation-plan.json").read_bytes()).hexdigest(),authorization_id=os.environ["AUTHORIZATION_ID"],candidate_sha=lineage["source"]["candidate_sha"],experiment_id=os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+              execution_run=json.loads(Path("capacity-execution-run.json").read_text())
+              execution_controller_sha=execution_run.get("head_sha")
+              contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],lineage["source"]["candidate_sha"],os.environ["EXPERIMENT_ID"],execution_controller_sha=execution_controller_sha)
+              validate_linux_measurement_package_binding(plan,lineage,contract,plan_file_sha256=__import__("hashlib").sha256((package/"capacity-validation-plan.json").read_bytes()).hexdigest(),authorization_id=os.environ["AUTHORIZATION_ID"],candidate_sha=lineage["source"]["candidate_sha"],experiment_id=os.environ["EXPERIMENT_ID"],execution_controller_sha=execution_controller_sha)
               source=json.loads(Path("capacity-execution-source/capacity-validation-recovery-execution-source.json").read_text())
+              if source.get("execution_controller_sha") != execution_controller_sha or source.get("authorization_contract",{}).get("execution_controller_sha") != execution_controller_sha: raise ValueError("execution controller evidence differs")
               reports=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-result.json")]
               provenances=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-recovery-provenance.json")]
               ledger=reconcile_capacity_recovery_provider_accounting(
-                  json.loads(Path("capacity-execution-run.json").read_text()),
+                  execution_run,
                   json.loads(Path("capacity-execution-jobs.json").read_text()),
                   json.loads(Path("capacity-recovery-run.json").read_text()),
                   json.loads(Path("capacity-recovery-jobs.json").read_text()),
@@ -1758,7 +1762,7 @@ jobs:
                   json.loads(Path("missing-input-recovery-run.json").read_text()),
                   json.loads(Path("missing-input-recovery-jobs.json").read_text()),source,
                   repository=os.environ["GITHUB_REPOSITORY"],source_revision=lineage["source"]["candidate_sha"],
-                  controller_sha=os.environ["GITHUB_SHA"],recovery_experiment_id=os.environ["RECOVERY_EXPERIMENT_ID"],
+                  controller_sha=execution_controller_sha,recovery_experiment_id=os.environ["RECOVERY_EXPERIMENT_ID"],
                   execution_run_id=os.environ["EXECUTION_RUN_ID"],recovery_run_id=os.environ["RECOVERY_RUN_ID"],
                   plan_file_sha256=os.environ["PLAN_SHA256"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],
                   recovery_authorization_contract=source["authorization_contract"],
@@ -1767,11 +1771,12 @@ jobs:
                   retry_recovery_job_pages=(json.loads(Path("retry-recovery-jobs.json").read_text()) if Path("retry-recovery-jobs.json").exists() else None),
               )
               if ledger["status"] != "completed": raise ValueError("provider accounting is non-pass")
-              validate_capacity_recovery_results(reports,provenances,list(range(12)),revision=lineage["source"]["candidate_sha"],experiment_id=plan["experiment_id"],plan_digest=plan["digest"],authorization_id=plan["authorization_id"],authorization_contract=plan["authorization_contract"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=os.environ["GITHUB_SHA"],lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest(),approved_environment_digest=os.environ["ENVIRONMENT_DIGEST"])
+              validate_capacity_recovery_results(reports,provenances,list(range(12)),revision=lineage["source"]["candidate_sha"],experiment_id=plan["experiment_id"],plan_digest=plan["digest"],authorization_id=plan["authorization_id"],authorization_contract=plan["authorization_contract"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=execution_controller_sha,lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest(),approved_environment_digest=os.environ["ENVIRONMENT_DIGEST"])
               elapsed={item["unit_index"]:item["elapsed_seconds"] for item in ledger["worker"]["jobs"]}
               decision=evaluate_capacity_validation_decision(plan,reports,elapsed)
               decision["recovery_lineage_digest"]=lineage["digest"]
-              decision["controller_sha"]=os.environ["GITHUB_SHA"]
+              decision["execution_controller_sha"]=execution_controller_sha
+              decision["readback_controller_sha"]=os.environ["GITHUB_SHA"]
           except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
               ledger["reason"]=str(exc)
               decision={"schema_version":"1","kind":"capacity_validation_recovery_model_decision","outcome":"unknown_non_pass","passed":False,"qualification_eligible":False,"billing_authority":False,"reason":str(exc)}
@@ -1835,6 +1840,7 @@ jobs:
     uses: ./.github/workflows/mutation-capacity-measurement-monitor.yml
     with:
       candidate_sha: ${{ github.event.inputs.candidate_sha }}
+      execution_controller_sha: ${{ github.sha }}
       authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
