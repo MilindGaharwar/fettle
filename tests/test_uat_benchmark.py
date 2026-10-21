@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from fettle.uat.benchmark import load_seed_manifest, score_benchmark
+from fettle.evidence import EvidenceValidationResult, ResultState, Validity
+from fettle.uat.benchmark import _canonical_digest, load_seed_manifest, score_benchmark
 
 
 def _write_evidence(root: Path, seed_ids: list[str], actors=("agent", "human")) -> Path:
@@ -35,6 +36,46 @@ def _write_evidence(root: Path, seed_ids: list[str], actors=("agent", "human")) 
     path = root / "evidence.json"
     path.write_text(json.dumps({"schema_version": 1, "runs": runs}))
     return path
+
+
+def _write_controller_evidence(root: Path, states: list[str]) -> tuple[Path, Path]:
+    manifest = {
+        "seeds": [
+            {"id": f"case-{index}", "expected_state": "violation"}
+            for index in range(10)
+        ],
+        "discovery_threshold": None,
+    }
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    runs = []
+    for index, state in enumerate(states):
+        product_root = root / f"product-{index}"
+        evidence_root = product_root / ".fettle"
+        evidence_root.mkdir(parents=True)
+        report = {
+            "test_state": state,
+            "verdicts": [{"scenario_id": "scenario", "verdict": "CONFIRMED"}],
+        }
+        report_path = evidence_root / "uat-report.json"
+        report_path.write_text(json.dumps(report))
+        (evidence_root / "uat-session.json").write_text(json.dumps({
+            "capture_mode": "independent",
+            "session_id": f"session-{index}",
+            "scenario_ids": ["scenario"],
+        }))
+        runs.append({
+            "seed_id": f"case-{index}",
+            "product_root": str(product_root),
+            "report_digest": "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest(),
+        })
+    evidence = root / "controller-evidence.json"
+    evidence.write_text(json.dumps({
+        "schema_version": 2,
+        "manifest_digest": _canonical_digest(manifest),
+        "runs": runs,
+    }))
+    return evidence, manifest_path
 
 
 def test_canonical_manifest_has_ten_unique_seeds():
@@ -143,8 +184,6 @@ def test_cli_rejects_malformed_evidence(tmp_path):
 
 @pytest.mark.parametrize("change", ["missing-report", "manifest-drift", "asserted-metrics", "duplicate-seed"])
 def test_controller_calibration_rejects_unverified_evidence(tmp_path, change):
-    from fettle.uat.benchmark import _canonical_digest
-
     manifest = {"seeds": [{"id": f"case-{index}", "expected_state": "violation"}
                           for index in range(10)], "discovery_threshold": None}
     manifest_path = tmp_path / "manifest.json"
@@ -163,3 +202,28 @@ def test_controller_calibration_rejects_unverified_evidence(tmp_path, change):
     assert result["status"] == "invalid"
     assert result["errors"]
     assert not result["graduation"]["ready"]
+
+
+@pytest.mark.parametrize(
+    ("states", "status"),
+    [
+        (["violation"], "incomplete"),
+        (["pass"] + ["violation"] * 9, "complete"),
+    ],
+)
+def test_controller_acceptance_requires_complete_matching_evidence(tmp_path, monkeypatch, states, status):
+    evidence, manifest = _write_controller_evidence(tmp_path, states)
+
+    def validate(_root, report):
+        return EvidenceValidationResult(
+            Validity.VALID, ResultState(report["test_state"]), "",
+        )
+
+    monkeypatch.setattr("fettle.uat.reconcile.validate_canonical_evidence", validate)
+
+    result = score_benchmark(evidence, manifest_path=manifest)
+
+    assert result["status"] == status
+    assert result["metrics"]["controller"]["false_verdicts"] == (states[0] == "pass")
+    assert result["expected_states_matched"] is False
+    assert result["calibration_passed"] is False

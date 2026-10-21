@@ -149,6 +149,37 @@ class TestQualityScan:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_explicit_files_report_only_findings_for_requested_targets(self, tmp_path, monkeypatch):
+        requested = tmp_path / "app.py"
+        requested.write_text(CLEAN)
+        outside = tmp_path / "other.py"
+        outside.write_text(CLEAN)
+        findings = [
+            {
+                "file": str(path), "line": 1, "rule": "BLE001",
+                "message": message, "severity": "ERROR", "tool": "ruff",
+            }
+            for path, message in ((requested, "requested"), (outside, "outside"))
+        ]
+        monkeypatch.setattr(
+            quality_scan, "execute_ruff",
+            lambda _targets: quality_scan.ToolScanResult(
+                "ruff", ResultStatus.VIOLATION, findings,
+            ),
+        )
+        monkeypatch.setattr(
+            quality_scan, "execute_semgrep",
+            lambda _targets: quality_scan.ToolScanResult("semgrep", ResultStatus.PASS),
+        )
+        monkeypatch.setattr(quality_scan, "scan_spec_audit", lambda *_args: [])
+
+        result = quality_scan.scan_project(str(tmp_path), files=[str(requested)])
+
+        assert result["status"] == ResultStatus.VIOLATION.value
+        assert result["file_count"] == 1
+        assert [finding["file"] for finding in result["findings"]] == ["app.py"]
+        assert [finding["message"] for finding in result["findings"]] == ["requested"]
+
     def test_fettle_ignore_filters_findings(self):
         root = make_project({
             "app.py": CLEAN,

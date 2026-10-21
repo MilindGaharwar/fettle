@@ -1,5 +1,88 @@
 # Audit Hardening Worklog
 
+## 2026-10-22: Readiness repair verified; narrow replay blocked before dispatch
+
+Owner approved completeness-based advisory acceptance for execution integrity only.
+It requires one valid terminal outcome for every required fingerprint plus exact
+identity, environment, clean baseline, restoration, retention, and evidence validity.
+It does not approve mutation test strength, waive survivors, or change full
+qualification from `CLOSED_NON_PASS`.
+
+Added behavioral regressions for full fingerprints `021e07ea4299c8b8e62fefc460828ee1d2f78af035d3d7d7f3934a0933ab0900`,
+`0e26705938892df6af5fd802fbe2c51285fd12da9947692c78e59e6f14cdefeb`,
+`12aeccd25f18e735950ea5fe951eba375f85e2da79e9b5c50b04eb5ae0d6fef7`,
+`a7f907e22e7e446906d81ef4afe049a52987d155b5f17010155560c9f4411747`,
+and `affdd4cb46ba0c47c9ac8f4c9cc6bb7c7704003bb67073cd41affe290fbd0546`.
+No production defect was demonstrated and no production code changed. Exact clean
+mapped baselines passed 15 canary, 19 benchmark, and 181 combined scanner-owner tests
+on CPython 3.12.13/pytest 9.1.1. Focused tests passed 66; the full suite passed 4,983
+with 20 skips in 637.33 seconds. Ruff, the 426-file Fettle scan, completion checkpoint,
+and diff hygiene passed. Repository-wide actionlint retained the pre-existing
+`.github/workflows/release.yml:50` SC2155 warning outside this diff.
+
+Independent preliminary review concerns about the exact canary definition, benchmark
+boundaries, and scanner oracle did not reproduce against retained definitions and
+test inputs. The valid workflow concern was confirmed: existing replay selects
+hard-coded ranges and whole shards, permits matrix parallelism, requires a successful
+same-commit 256-shard preflight, and has no separate 30+10 minute accounting or
+60-minute containment contract. It cannot run exactly seven canonical fingerprints
+sequentially without forbidden enumeration and extra outcomes. Provider dispatch was
+therefore stopped before execution; no runner budget was consumed. Controls
+`08975ae51c0ca010b851493975b33ee53a37ef706ff13f4feb2bb6506012c911` and
+`2cfa4d6fe64956741bd48a5148212e73a657f2e70d43b3e130252be0105658f9`
+remain historical expectations only. All seven current replay outcomes are unmeasured.
+
+The proposal now records the exact infrastructure incompatibility, current acceptance
+meaning, compatibility limits, unknown current corpus/survivor workload, required
+256-manifest topology and continuation identity, obsolete 8,100 ±25% planning range,
+and preconditions for a future narrow replay and full-campaign authorization. No
+enumeration, replay, provider dispatch, budget refill, waiver, numeric-policy change,
+full qualification, merge, or release occurred.
+
+## 2026-10-21: Mutation readiness investigation and bounded proposal
+
+Completed the authorized read-only investigation at clean delivery head
+`1e4213aad608fca7bbac02df14db420bbb852b13`, with zero branch divergence. The
+measured source `65e63d9…`, OpenCode candidate `d342de4…`, package controller
+`2347767…`, execution controller `2921b47…`, and maintenance head `1e4213a…` remain
+distinct. AH00--AH07 closure for `d342de4…` is unchanged and is not mutation
+qualification.
+
+Campaign `39592379015` remains terminal `CLOSED_NON_PASS`: 489/869 fingerprints
+terminal, 380 pending or unmeasured, units 0--6 complete, unit 7 incomplete, and
+units 8--11 unstarted. Readback `39595844326` remains an intentional non-pass. Its
+ten-minute `conservative_ceiling_charged` entry and all other campaign charges are
+non-transferable. No old outcome, 49.1 baseline, survivor set, or resource remainder
+transfers to this head; the historical 12,000-minute authority is expired.
+
+Effective configuration is advisory over `fettle/`, with mutmut 2.5.1, exact mapped
+pytest commands, 600/1,800-second timeouts, and 256 full shards. No ratified numeric
+qualification threshold exists. Enumeration's `python -c pass` survivor labels are
+not execution outcomes. Missing, partial, stale, incompatible, contradictory, or
+indeterminate evidence remains non-pass.
+
+Read-only collection succeeded for all selected mapped commands: eight installed
+canary tests, the UAT benchmark module, and the assurance/CI/quality-scan set. All
+three selected modules imported from checkout source. Representative review found
+five test gaps and no demonstrated production defect: canary `021e07ea…`, benchmark
+`0e267059…`, and scanner `12aeccd…`, `a7f907e…`, and `affdd4c…`. Scanner controls
+`08975ae…` and `2cfa4d6…` were killed in four retained calibrations and are not
+unresolved survivors. Canary and benchmark corpus states came from enumeration and
+must not be promoted to executed results.
+
+Unit 7's 745-second job decomposes into about four seconds external setup, 454.497
+seconds of completed attempts, 266.892 seconds of unsplit baseline/regeneration plus
+censored work, and residual wrapper/teardown time. It supports intrinsic mapped-test
+cost but does not identify its cause or authorize narrower mappings or concurrency.
+
+The updated proposal requests only direct regressions, a fail-closed exact-command
+baseline gate, and a sequential seven-fingerprint replay. Proposed planning ceiling:
+30 worker plus 10 support/readback runner-minutes and a 60-minute elapsed stop. This
+is not execution authority. A full-run ceiling must wait for fresh preflight and
+narrow-replay measurement. Owner decisions remain required for the acceptance rule
+and new resource authority. No repair, replay, provider dispatch, qualification,
+merge, tag, release, scope-digest regeneration, or criterion change occurred.
+
 ## 2026-10-20: Admitted recovery continuation repair
 
 Owner continuation authorization preserves run `39391306615` as failed/non-pass and

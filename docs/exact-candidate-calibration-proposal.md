@@ -1,5 +1,285 @@
 # Final Acceptance Contract and Closure Proposal
 
+## 2026-10-22 readiness-repair outcome and dispatch decision
+
+The owner approved completeness-based advisory acceptance for **execution integrity
+only**. A diagnostic execution is complete only when every required canonical
+fingerprint has one valid terminal outcome and exact identity, environment, clean
+baseline, restoration, retention, and evidence validation pass. Missing, malformed,
+incompatible, contradictory, stale, or indeterminate evidence is non-pass. Execution
+completeness is not mutation-policy acceptance: no survivor is waived, no test-strength
+threshold is approved, and full qualification remains `CLOSED_NON_PASS`.
+
+The scoped repair started from signed head `1e4213aad608fca7bbac02df14db420bbb852b13`
+and preserved the 2026-10-21 planning edits. It changes tests and documentation only:
+
+- `tests/test_installed_artifact_canary.py` now proves the exact interpreter,
+  `-m`, and `fettle.dispatcher` command shape and rejects the retained
+  `021e07ea4299c8b8e62fefc460828ee1d2f78af035d3d7d7f3934a0933ab0900`
+  mutation (`'-m'` to `'XX-mXX'`) plus malformed, extra-argument, wrong-module,
+  and wrong-interpreter commands;
+- `tests/test_uat_benchmark.py` now proves both operands of the retained
+  `0e26705938892df6af5fd802fbe2c51285fd12da9947692c78e59e6f14cdefeb`
+  mutation (`complete and false_verdicts == 0` to `complete or …`): matching but
+  incomplete evidence and complete but mismatching evidence both remain non-pass;
+- `tests/test_quality_scan.py` now supplies one requested and one off-target
+  finding and asserts the requested-file outcome. This behavioral oracle covers
+  `12aeccd25f18e735950ea5fe951eba375f85e2da79e9b5c50b04eb5ae0d6fef7`,
+  `a7f907e22e7e446906d81ef4afe049a52987d155b5f17010155560c9f4411747`,
+  and `affdd4cb46ba0c47c9ac8f4c9cc6bb7c7704003bb67073cd41affe290fbd0546`
+  without asserting private intermediate implementation state.
+
+No production defect was demonstrated and no production code changed. A new shared
+baseline gate was not justified: before replay, the exact existing mapped commands
+were run against clean source and all passed while importing checkout modules. The
+existing executor continues to let mutmut classify mutation-induced collection or
+import failures; it does not add a blanket nonzero-exit-to-killed rule.
+
+### Verification and review
+
+- exact mapped baselines: canary 15/15, benchmark 19/19, and combined
+  assurance/CI/scanner 181/181 passed under CPython 3.12.13 and pytest 9.1.1;
+- focused repair suite: 66 passed;
+- full suite: 4,983 passed and 20 skipped in 637.33 seconds;
+- Ruff and the 426-file Fettle scan passed; completion checkpoint validation passed;
+- `git diff --check` passed;
+- repository-wide `actionlint` retained one pre-existing SC2155 warning at
+  `.github/workflows/release.yml:50`, outside this test-only scope.
+
+Independent preliminary review raised no reproducible defect in the assertions after
+reconciliation. Its canary concern contradicted the retained exact definition
+(`'XX-mXX'` is exact); its benchmark concern overlooked that the two cases exercise
+the two OR-danger boundaries; and splitting the scanner test would couple assertions
+to private intermediates rather than strengthen the external result. The review's
+valid timing/accounting concern is the dispatch blocker below.
+
+### Seven-fingerprint replay: blocked before execution
+
+Execution was identified as **provider execution** because the authorized limits are
+runner-minute ceilings and retained readback is required. No provider run started and
+no approved minutes were consumed. The existing `.github/workflows/mutation.yml`
+`replay` route cannot represent this authorization:
+
+1. it derives replay shards from hard-coded historical line ranges, not an exact
+   canonical-fingerprint allowlist;
+2. it executes every pending fingerprint in each selected whole shard, so it cannot
+   guarantee exactly these seven fingerprints or one attempt each;
+3. it uses a matrix with configurable parallelism rather than mandatory sequential
+   execution;
+4. it requires a successful same-commit 256-shard retained preflight, which would
+   require the expressly forbidden full enumeration; and
+5. it exposes neither separate 30-worker/10-support-readback ceilings nor a 60-minute
+   overall containment deadline with an early restoration reserve.
+
+Using that route would violate the frozen scope and accounting contract. The required
+stop condition therefore fired before dispatch. The historical killed controls
+`08975ae51c0ca010b851493975b33ee53a37ef706ff13f4feb2bb6506012c911`
+and `2cfa4d6fe64956741bd48a5148212e73a657f2e70d43b3e130252be0105658f9`
+remain diagnostic controls only; no outcome transfers. All seven replay outcomes are
+unmeasured for the repair candidate.
+
+### Full-qualification decision boundary
+
+The final delivered repair commit, once signed and pushed, is the replay candidate;
+its literal SHA and exact-head CI run are delivery evidence and replace `1e4213a…`.
+Historical evidence remains useful only for definitions, killed-control expectations,
+runtime planning, and regression fixtures. It supplies no current outcome credit.
+
+Remaining workload is not just seven fingerprints: the prior campaign left 380/869
+assigned fingerprints pending or unmeasured, while the repair candidate's complete
+current corpus and survivor population are unknown without fresh enumeration. Known
+risk clusters include installed-artifact canary, UAT benchmark, scanner scope, and
+the incomplete staged-preflight unit; they must not be extrapolated to each other or
+to the whole corpus.
+
+A future full dispatch requires all of the following:
+
+1. separately authorized infrastructure that accepts an exact canonical-fingerprint
+   allowlist, proves membership after fresh local-ID resolution, runs sequentially,
+   enforces separate worker/support/readback accounting and early containment, and
+   retains baseline, restoration, terminal outcomes, and checksummed readback;
+2. a successful seven-fingerprint replay through that route under a new exact
+   candidate and environment, with disagreements investigated but not retried;
+3. a fresh exact-candidate full preflight with zero rejected details/collisions,
+   complete current mappings and source digests, and all 256 manifests;
+4. full coverage of every current canonical fingerprint, using sequential independent
+   authoritative calibrations and continuation only within one exact calibration ID
+   and completely equal candidate/runtime/dependency/policy/manifest/corpus identity;
+5. no missing, skipped, untested, timed-out, suspicious, conflicting, stale, or
+   indeterminate required outcome; exact source byte/mode restoration after every
+   attempt; and independently checksummed retention/readback; and
+6. separate reporting of execution completeness and advisory mutation debt. Full
+   acceptance requires a later owner decision; it cannot be inferred from completeness.
+
+No full resource ceiling is authorized. For decision planning only, the obsolete
+45,432-mutant estimate was about 8,100 runner-minutes with ±25% uncertainty
+(approximately 6,075--10,125), and 6--10 elapsed hours assumed 8/16/32 concurrency
+with no shard timeout. Source growth, heterogeneous mappings, queue delay, and the
+unit-7 censoring make that range non-authoritative. Fresh preflight topology and the
+blocked narrow replay must be measured before proposing a new ceiling. Seven results
+must not be used to claim full-corpus feasibility.
+
+## 2026-10-21 mutation-readiness addendum
+
+Status: **repair proposal only; no repair, replay, provider dispatch, qualification,
+merge, tag, or release is authorized**.
+
+This addendum supersedes this document's 2026-10-07 candidate and cost assumptions
+where they conflict. The verified delivery head is
+`1e4213aad608fca7bbac02df14db420bbb852b13`; the measured diagnostic source was
+`65e63d953b45d3672c24df74d0a1364b83a0157b`. Keep these intervening identities
+distinct:
+
+| Identity | Role; qualification consequence |
+|---|---|
+| `d342de4…` | OpenCode v2 candidate. AH00--AH07 closure is retained for this candidate only; it is not mutation qualification. |
+| `2347767…` | Capacity-recovery package controller. It changed mutation execution and workflow behavior. |
+| `2921b47…` | Linux diagnostic execution controller. It repaired campaign identity flow. |
+| `1e4213a…` | Maintenance delivery head. It only made hook Python setup deterministic, but it remains the source identity a new run must bind. |
+
+Campaign `39592379015` is terminal and `CLOSED_NON_PASS`: 489 of 869 assigned
+fingerprints reached terminal outcomes, 380 remained pending or unmeasured, units
+0--6 completed, unit 7 was incomplete, and units 8--11 did not start. Readback
+`39595844326` intentionally failed closed. Its ten minutes remain
+`conservative_ceiling_charged`; the campaign's 42 worker, two support, nine monitor,
+and ten readback minutes are non-transferable. Neither run may be resumed, refilled,
+or reinterpreted. The historical 12,000 runner-minute ceiling is expired authority.
+
+### Effective contract before execution
+
+`.fettle.toml` enables mutation over `fettle/`, uses mutmut 2.5.1, a 600-second
+changed-run timeout, a 1,800-second full timeout, 256 full shards, and
+`python -m pytest -x --assert=plain {mapped_tests}`. Its mutation mode is
+`advisory`. `evaluate_policy()` therefore reports survivor limits and score as debt,
+but still fails malformed or incomplete required evidence. No current decision
+ratifies a numeric qualification score. The committed 49.1 baseline is bound to
+`9eef2fa…`, not this head. It and its survivor set cannot transfer.
+
+The rebuilt corpus labels generated mutants `survived` because enumeration used the
+deliberate `python -c pass` runner. Those labels are enumeration metadata, not test
+outcomes. Canonical fingerprints are authoritative; mutmut numeric IDs are only
+run-local locators.
+
+### Read-only findings and classification
+
+The exact mapped commands collect cleanly at `1e4213a…`: eight canary tests, the UAT
+benchmark test module, and the combined assurance/CI/quality-scan set. Imports of
+`fettle.installed_artifact_canary`, `fettle.uat.benchmark`, and
+`fettle.quality_scan` resolve to this checkout. This rules out a current static
+collection or checkout-import error for these commands. It does not prove per-mutant
+execution.
+
+| Fingerprint | Finding | Classification and proposed disposition |
+|---|---|---|
+| `021e07ea…` | Canary `_command_binds_python`: `'-m'` → `'XX-mXX'` | **Test gap.** Existing canary tests stub transport probing and never assert accepted and rejected command shapes. Add a direct table test; no production change proposed. |
+| `0e267059…` | Benchmark `_score_controller_reports`: `complete and false_verdicts == 0` → `complete or …` | **Test gap.** Add valid-but-incomplete and complete-with-mismatch cases proving both `expected_states_matched` and `calibration_passed` stay false. No production change proposed. |
+| `12aeccd…` | Scanner explicit target set → `None` | **Test gap.** Retained as survived in four calibrations. Current explicit-file test yields no normalized in-scope finding, so target-set use is not observed. |
+| `a7f907e…` | Scanner in-scope predicate inverted | **Test gap.** Retained as survived in four calibrations for the same missing mixed-finding oracle. |
+| `affdd4c…` | Scanner finding key `'file'` changed | **Test gap.** Retained as survived in four calibrations; no non-empty explicit-file finding reaches this lookup. |
+| `08975ae…` | Scanner ignore predicate inverted | **Killed control, not an unresolved survivor.** Four retained checkpoints killed it (78.787--113.540 seconds). Keep the existing ignore regression. |
+| `2cfa4d6…` | Scanner filtered finding list → `None` | **Killed control, not an unresolved survivor.** Four retained checkpoints killed it (4.047--4.749 seconds). Keep it as a replay control. |
+
+Do not generalize these records to either whole cluster. The two selected canary and
+benchmark fingerprints have enumeration records but no retained executed outcome.
+No reviewed-equivalent waiver or production defect is established. The waiver file
+remains empty.
+
+The execution adapter accepts mutmut's documented bit-mask outcomes and reconstructs
+state from `mutmut results`; it does not independently identify why pytest returned
+nonzero. A pre-existing mapped-test collection/import failure could therefore make
+mutants look killed. The clean read-only collections reduce that risk at this head,
+but a future executable package must add an exact pre-mutation baseline gate. A
+mutation-induced syntax/import/collection failure is a valid kill only after that
+same mapped command has passed against restored unmutated source.
+
+### Unit 7 cost evidence
+
+Unit 7 covered `fettle/staged_preflight.py:181--240`, three mapped test files, and 158
+fingerprints. Its 745-second job is not 745 seconds of mutant attempts: about four
+seconds was external setup, 454.497 seconds belongs to completed attempts, and
+266.892 seconds combines baseline/regeneration with censored work and cannot be split
+further from retained evidence. The remaining interval is wrapper/teardown overhead.
+This supports intrinsic mapped-command cost, but does not isolate collection,
+regeneration, test, or mutation cost. It does not authorize concurrency or narrower
+mappings as a remedy.
+
+### Bounded repair package
+
+Implement only after owner approval:
+
+1. Add direct canary command-shape regressions in
+   `tests/test_installed_artifact_canary.py` for exact interpreter, `-m`, module,
+   malformed quoting, extra arguments, and a different interpreter.
+2. Add benchmark regressions in `tests/test_uat_benchmark.py` for a valid partial
+   controller corpus with zero false verdicts and a complete corpus containing a
+   mismatch. Both acceptance booleans must remain fail closed.
+3. Add one scanner regression in `tests/test_quality_scan.py` whose scanner result
+   contains one requested-file finding and one off-target finding. Assert only the
+   requested finding survives normalization. This single behavioral oracle targets
+   the set construction, membership direction, and `'file'` lookup without changing
+   scanner behavior.
+4. Add a baseline validation seam in `fettle/mutation_test.py` before any canonical
+   mutant execution: run each distinct exact mapped pytest command once against
+   restored source; require exit 0, successful collection, and checkout-source import
+   identity. Retain command, exit, bounded diagnostics, collection identity, source
+   digest, and restoration digest. Missing, nonzero, stale, or conflicting baseline
+   evidence is an execution error and cannot become a kill.
+5. Add fixtures in `tests/test_mutation_test.py` proving pytest exit 0 admits mutation
+   attempts, baseline exits 1--5 admit none, collection/import failure remains
+   non-pass, mutated-source collection failure can be recorded as killed only after a
+   matching clean baseline, and source bytes/mode are restored on every path.
+
+Do not change scope, mappings, timeout, score calculation, advisory mode, survivor
+limits, or completion criteria in this repair.
+
+### Validation funnel and stop conditions
+
+Use fixtures first, then baseline preflight, then narrow replay, then a separately
+authorized held-out full run:
+
+1. Run focused unit tests and the three exact mapped commands without mutation.
+2. Run a fresh local preflight for the repaired exact SHA and require exact corpus,
+   mapping, policy, dependency, environment, and source identities; zero rejected
+   details and fingerprint collisions; clean restoration; and no cache reuse unless
+   its complete compatibility identity matches.
+3. Narrowly replay exactly the seven fingerprints in the table, sequentially, by
+   canonical fingerprint. Require the five test-gap mutants and both killed controls
+   to be killed, baseline evidence to pass, no untested/skipped/timeout/suspicious
+   state, and exact source restoration after every attempt. A numeric mutmut ID may be
+   used only after fresh fingerprint-to-ID resolution.
+4. Stop immediately on baseline failure, fingerprint drift, incompatible cache,
+   corpus mismatch, tool error, timeout, missing outcome, contradictory outcome,
+   restoration mismatch, accounting breach, or any unexpected survivor. Retain the
+   non-pass package; do not retry it into a pass.
+5. Only after the narrow replay passes may an owner consider a fresh authoritative
+   qualification. Run independent calibrations sequentially and never share terminal
+   outcomes. Read back retained checksums independently before acceptance.
+
+For planning only, the narrow package should receive a new ceiling of **30 worker
+runner-minutes plus 10 support/readback runner-minutes**, with one worker at a time
+and a **60-minute elapsed stop**. This is conservative relative to the retained five
+scanner durations (9.3 runner-minutes at their observed maxima) and complete canary
+and benchmark diagnostic units (6 and 9 charged minutes). It is a requested ceiling,
+not authority, and unused minutes do not transfer. No full-qualification ceiling can
+be responsibly proposed until fresh preflight and narrow-replay timings exist.
+
+### Owner decisions required
+
+Before any execution, the owner must select both:
+
+1. **Acceptance rule.** Recommended: preserve effective advisory policy and define
+   qualification as complete, compatible, determinate evidence with all required
+   fingerprints accounted for; survivors remain explicit advisory debt and do not
+   satisfy a numeric threshold. Alternative: ratify a numeric score/survivor rule in
+   a separate policy decision before freezing the candidate. Do not infer one from
+   49.1 or from prose.
+2. **Resource authority.** Approve, reduce, or reject the proposed 30+10-minute narrow
+   ceiling. Authorize any later full run separately after measured re-estimation.
+
+Until both choices and the bounded repair are approved, mutation qualification stays
+`CLOSED_NON_PASS`. Advisory reporting, AH00--AH07 closure, exact-head CI, completion
+validation, and mutation qualification remain separate decisions.
+
 Date: 2026-10-07
 
 Status: **bounded implementation authorized and completed locally; mutation execution remains unauthorized**
