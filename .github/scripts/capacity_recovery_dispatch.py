@@ -10,7 +10,12 @@ from pathlib import Path
 
 import yaml
 
-from fettle.staged_preflight import capacity_recovery_authorization_contract
+from fettle.staged_preflight import (
+    LINUX_MEASUREMENT_ARTIFACT_SHA256,
+    LINUX_MEASUREMENT_ENVIRONMENT_DIGEST,
+    LINUX_MEASUREMENT_LINEAGE_DIGEST,
+    linux_measurement_authorization_contract,
+)
 
 REQUIRED_INPUTS = {
     "mode": "capacity-validation",
@@ -19,6 +24,21 @@ REQUIRED_INPUTS = {
     "capacity_experiment_id": "capval-corpus-recovery-20261020-a",
     "capacity_preparation_run_id": "39263581356",
     "capacity_recovery_retry_run_id": "39391306615",
+    "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+}
+
+LINUX_REQUIRED_INPUTS = {
+    "mode": "capacity-validation",
+    "capacity_stage": "execute",
+    "capacity_authorization_id": "AH-LINUX-MEASUREMENT-20261021-A",
+    "capacity_experiment_id": "capval-linux-measurement-20261021-a",
+    "capacity_preparation_run_id": "39406688602",
+    "capacity_recovery_retry_run_id": "39391306615",
+    "capacity_plan_sha256": "6a91a68c3e038e7d54f5ac5864d99f1e7fc3338355155e0ff41ac619152407b6",
+    "capacity_environment_digest": LINUX_MEASUREMENT_ENVIRONMENT_DIGEST,
+    "capacity_artifact_id": "12257307851",
+    "capacity_artifact_sha256": LINUX_MEASUREMENT_ARTIFACT_SHA256,
+    "capacity_lineage_digest": LINUX_MEASUREMENT_LINEAGE_DIGEST,
     "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
 }
 
@@ -42,22 +62,34 @@ def validate_payload(path: Path, workflow_path: Path) -> tuple[dict, bytes]:
     if not isinstance(controller_sha, str) or len(controller_sha) != 40:
         raise ValueError("dispatch controller identity differs")
     inputs = envelope["inputs"]
-    if not isinstance(inputs, dict) or set(inputs) != set(REQUIRED_INPUTS):
+    if not isinstance(inputs, dict):
         raise ValueError("dispatch input names differ")
-    expected = dict(REQUIRED_INPUTS)
-    retry_id = inputs.get("capacity_recovery_retry_run_id")
-    if not isinstance(retry_id, str) or (retry_id and not retry_id.isdecimal()):
-        raise ValueError("conditional retry predecessor differs")
-    expected["capacity_recovery_retry_run_id"] = retry_id
+    if inputs.get("capacity_authorization_id") == LINUX_REQUIRED_INPUTS["capacity_authorization_id"]:
+        expected = dict(LINUX_REQUIRED_INPUTS)
+    else:
+        expected = dict(REQUIRED_INPUTS)
+        retry_id = inputs.get("capacity_recovery_retry_run_id")
+        if not isinstance(retry_id, str) or (retry_id and not retry_id.isdecimal()):
+            raise ValueError("conditional retry predecessor differs")
+        expected["capacity_recovery_retry_run_id"] = retry_id
+    if set(inputs) != set(expected):
+        raise ValueError("dispatch input names differ")
     if inputs != expected or any(not isinstance(value, str) for value in inputs.values()):
         raise ValueError("dispatch input values or types differ")
     declared = workflow.get(True, {}).get("workflow_dispatch", {}).get("inputs", {})
     if not isinstance(declared, dict) or not set(inputs).issubset(declared):
         raise ValueError("dispatch inputs are absent from the exact workflow")
-    capacity_recovery_authorization_contract(
-        inputs["capacity_authorization_id"], inputs["candidate_sha"],
-        inputs["capacity_experiment_id"],
-    )
+    if inputs.get("capacity_authorization_id") == LINUX_REQUIRED_INPUTS["capacity_authorization_id"]:
+        linux_measurement_authorization_contract(
+            inputs["capacity_authorization_id"], inputs["candidate_sha"],
+            inputs["capacity_experiment_id"], execution_controller_sha=controller_sha,
+        )
+    else:
+        from fettle.staged_preflight import capacity_recovery_authorization_contract
+        capacity_recovery_authorization_contract(
+            inputs["capacity_authorization_id"], inputs["candidate_sha"],
+            inputs["capacity_experiment_id"],
+        )
     return envelope, (json.dumps(inputs, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 

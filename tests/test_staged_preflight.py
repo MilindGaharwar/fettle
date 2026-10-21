@@ -77,7 +77,10 @@ from scripts.staged_preflight import (
 from fettle.staged_preflight import (
     build_calibration_accounting_log_envelope,
     calibration_accounting_log_records,
+    linux_measurement_authorization_contract,
     recover_calibration_accounting_log_envelope,
+    validate_linux_measurement_authorization_contract,
+    validate_linux_measurement_package_binding,
 )
 
 INCIDENT_ROOT = Path(__file__).parent / "fixtures/calibration-terminal-incident"
@@ -2274,6 +2277,95 @@ def test_capacity_recovery_authorization_is_diagnostic_only_and_totals_335():
             contract, authorization_id=grant, candidate_sha="b" * 40,
             experiment_id=experiment,
         )
+
+
+def test_linux_measurement_authorization_binds_retained_package_and_execution_controller():
+    contract = linux_measurement_authorization_contract(
+        "AH-LINUX-MEASUREMENT-20261021-A",
+        "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        "capval-linux-measurement-20261021-a",
+        execution_controller_sha="c" * 40,
+    )
+
+    assert validate_linux_measurement_authorization_contract(
+        contract,
+        authorization_id="AH-LINUX-MEASUREMENT-20261021-A",
+        candidate_sha="65e63d953b45d3672c24df74d0a1364b83a0157b",
+        experiment_id="capval-linux-measurement-20261021-a",
+        execution_controller_sha="c" * 40,
+    ) == contract
+    assert contract["binding"] == {
+        "environment_digest": "4d3eae737ee23ffa53b58c9b1c401ff311bf5d59d05aed60182ddc9d116a7f01",
+        "plan_digest": "2aa89d8f0e2a8e81df01e8cb8ca7567a7571253f3dcc1e302ab5d67fc94ef5e6",
+        "plan_file_sha256": "6a91a68c3e038e7d54f5ac5864d99f1e7fc3338355155e0ff41ac619152407b6",
+    }
+    assert contract["retained_package"]["artifact_id"] == "12257307851"
+    assert contract["retained_package"]["artifact_sha256"] == (
+        "5d2d62bb3157befdc8b2c581a817613b6ee5b6eb4323e8753478e7cb9ddf3726"
+    )
+    assert contract["package_controller_sha"] == "23477676416ce5548c5f86c1938cacda0674cc05"
+    assert contract["execution_controller_sha"] == "c" * 40
+    assert contract["scope"]["recovery_dispatches"] == 0
+    assert contract["resource_ceiling_minutes"]["historical_recovery_charged"] == 8
+    assert contract["transferable"] is False
+
+    for changed in (
+        {"authorization_id": "AH-CORPUS-RECOVERY-20261020-A"},
+        {"candidate_sha": "a" * 40},
+        {"experiment_id": "capval-foreign"},
+        {"execution_controller_sha": "b" * 40},
+    ):
+        arguments = {
+            "authorization_id": "AH-LINUX-MEASUREMENT-20261021-A",
+            "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+            "experiment_id": "capval-linux-measurement-20261021-a",
+            "execution_controller_sha": "c" * 40,
+            **changed,
+        }
+        with pytest.raises(ValueError):
+            validate_linux_measurement_authorization_contract(contract, **arguments)
+
+
+def test_linux_measurement_package_binding_rejects_plan_environment_and_lineage_drift():
+    contract = linux_measurement_authorization_contract(
+        "AH-LINUX-MEASUREMENT-20261021-A",
+        "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        "capval-linux-measurement-20261021-a",
+        execution_controller_sha="c" * 40,
+    )
+    plan = {
+        "revision": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+        "digest": contract["binding"]["plan_digest"],
+        "units": [
+            {"environment_digest": contract["binding"]["environment_digest"]}
+            for _ in range(12)
+        ],
+    }
+    lineage = {
+        "digest": contract["retained_package"]["lineage_digest"],
+        "recovery": {"controller_sha": contract["package_controller_sha"]},
+    }
+    arguments = {
+        "plan_file_sha256": contract["binding"]["plan_file_sha256"],
+        "authorization_id": contract["authorization_id"],
+        "candidate_sha": contract["source_candidate_sha"],
+        "experiment_id": contract["experiment_id"],
+        "execution_controller_sha": contract["execution_controller_sha"],
+    }
+    assert validate_linux_measurement_package_binding(
+        plan, lineage, contract, **arguments,
+    ) == contract
+
+    for altered_plan, altered_lineage in (
+        ({**plan, "digest": "0" * 64}, lineage),
+        ({**plan, "units": [{"environment_digest": "0" * 64}] * 12}, lineage),
+        (plan, {**lineage, "digest": "0" * 64}),
+        (plan, {**lineage, "recovery": {"controller_sha": "b" * 40}}),
+    ):
+        with pytest.raises(ValueError, match="package binding"):
+            validate_linux_measurement_package_binding(
+                altered_plan, altered_lineage, contract, **arguments,
+            )
 
 
 def test_collect_stable_jobs_cli_emits_payload_consumable_by_accounting(tmp_path):

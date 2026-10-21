@@ -38,6 +38,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, required=True)
     parser.add_argument("--result", required=True)
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--environment-evidence", required=True)
     args = parser.parse_args()
 
     source = Path(args.source_root).resolve()
@@ -61,6 +62,31 @@ def main() -> int:
     corpus_digest = _canonical_digest(corpus)
     plan["preflight_digest"] = corpus_digest
     plan["digest"] = _canonical_digest({key: value for key, value in plan.items() if key != "digest"})
+    from fettle.mutation_test import _checkpoint_environment_digest, _runtime_cache_identity
+    identity = _runtime_cache_identity(str(source), [unit["file"]], {unit["file"]: actual}, cfg)
+    if identity is None:
+        raise ValueError("capacity recovery runtime environment identity is unavailable")
+    inputs = identity["inputs"]
+    envelope = {
+        "engine": inputs["engine"],
+        "environment": inputs["environment"],
+        "dependencies": [
+            {"name": dependency["name"], "version": dependency["version"]}
+            for dependency in inputs["dependencies"]
+        ],
+    }
+    evidence = {
+        "schema_version": "1",
+        "kind": "capacity_validation_runtime_environment",
+        "captured_before_mutation": True,
+        "envelope": envelope,
+        "digest": _checkpoint_environment_digest(identity),
+    }
+    Path(args.environment_evidence).write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+    )
+    if evidence["digest"] != unit["environment_digest"]:
+        raise ValueError("capacity recovery runtime environment differs")
     with tempfile.TemporaryDirectory(prefix="capacity-recovery-") as directory:
         temporary = Path(directory)
         plan_path = temporary / "plan.json"

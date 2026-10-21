@@ -41,11 +41,13 @@ def test_adapter_reorders_temporary_corpus_and_rebinds_source_result(tmp_path):
     corpus_path = tmp_path / "corpus.json"
     result_path = tmp_path / "result.json"
     checkpoint_path = tmp_path / "checkpoint.json"
+    environment_path = tmp_path / "environment.json"
     original_plan = {
         "digest": "a" * 64,
         "units": [{
             "file": "fettle/a.py", "fingerprints": ["f" * 64],
             "mapped_tests": ["tests/a.py", "tests/b.py"],
+            "environment_digest": "e" * 64,
         }],
     }
     original_corpus = {
@@ -72,6 +74,7 @@ def test_adapter_reorders_temporary_corpus_and_rebinds_source_result(tmp_path):
         "--plan", str(plan_path), "--corpus", str(corpus_path), "--unit", "0",
         "--timeout", "720", "--result", str(result_path),
         "--checkpoint", str(checkpoint_path),
+        "--environment-evidence", str(environment_path),
     ]
     with (
         patch.object(sys, "argv", argv),
@@ -80,6 +83,14 @@ def test_adapter_reorders_temporary_corpus_and_rebinds_source_result(tmp_path):
             "fettle/a.py": ["tests/a.py", "tests/b.py"],
         }),
         patch.object(MODULE, "run_capacity_validation_unit", side_effect=frozen_runner),
+        patch("fettle.mutation_test._runtime_cache_identity", return_value={
+            "inputs": {
+                "engine": {"name": "mutmut", "version": "2.5.1"},
+                "environment": {"python": "3.12.13", "platform": "Linux-x86_64"},
+                "dependencies": [{"name": "example", "version": "1"}],
+            },
+        }),
+        patch("fettle.mutation_test._checkpoint_environment_digest", return_value="e" * 64),
     ):
         assert MODULE.main() == 0
 
@@ -89,3 +100,6 @@ def test_adapter_reorders_temporary_corpus_and_rebinds_source_result(tmp_path):
         key: value for key, value in result.items() if key != "digest"
     })
     assert json.loads(corpus_path.read_text()) == original_corpus
+    evidence = json.loads(environment_path.read_text())
+    assert evidence["captured_before_mutation"] is True
+    assert evidence["digest"] == "e" * 64

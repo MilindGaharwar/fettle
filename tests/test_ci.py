@@ -155,8 +155,8 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "capacity_recovery_admission.py" in admission
     assert "39369184372" in admission
     assert "39378451442" in admission
-    assert "capacity-recovery-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
-    assert "capacity-recovery-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
+    assert "capacity-linux-measurement-grant-A-execute" in yaml.safe_dump(jobs["capacity-recovery-execute-admission"])
+    assert "capacity-linux-measurement-grant-A-readback" in yaml.safe_dump(jobs["capacity-recovery-provider-readback"])
     for index, batch in enumerate(batches):
         assert batch["strategy"]["matrix"]["unit"] == list(range(index * 4, index * 4 + 4))
         assert batch["strategy"]["max-parallel"] == 4
@@ -193,7 +193,7 @@ def test_capacity_recovery_route_is_exact_once_source_separated_and_bounded():
     assert "validate_capacity_recovery_lineage" in validation["run"]
     assert "plan_sha != os.environ[\"PLAN_SHA256\"]" in validation["run"]
     assert "candidate_sha\") != os.environ[\"SOURCE_SHA\"]" in validation["run"]
-    assert "authorization_id\") != os.environ[\"AUTHORIZATION_ID\"]" in validation["run"]
+    assert "controller_sha=os.environ[\"PACKAGE_CONTROLLER_SHA\"]" in validation["run"]
     assert unit["env"]["PYTHONNOUSERSITE"] == "1"
     assert "source/.venv/bin/python -I" in execute["run"]
     assert "controller/.github/scripts/capacity_recovery_execute.py" in execute["run"]
@@ -511,6 +511,74 @@ exit "${GH_EXIT:-0}"
     ).returncode == 42
 
 
+def test_linux_measurement_dispatch_binds_exact_retained_package_and_plan(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/capacity_recovery_dispatch.py"
+    workflow = Path(PLUGIN_DIR) / ".github/workflows/mutation.yml"
+    payload = tmp_path / "dispatch.json"
+    inputs = {
+        "mode": "capacity-validation", "capacity_stage": "execute",
+        "capacity_authorization_id": "AH-LINUX-MEASUREMENT-20261021-A",
+        "capacity_experiment_id": "capval-linux-measurement-20261021-a",
+        "capacity_preparation_run_id": "39406688602",
+        "capacity_recovery_retry_run_id": "39391306615",
+        "capacity_plan_sha256": "6a91a68c3e038e7d54f5ac5864d99f1e7fc3338355155e0ff41ac619152407b6",
+        "capacity_environment_digest": "4d3eae737ee23ffa53b58c9b1c401ff311bf5d59d05aed60182ddc9d116a7f01",
+        "capacity_artifact_id": "12257307851",
+        "capacity_artifact_sha256": "5d2d62bb3157befdc8b2c581a817613b6ee5b6eb4323e8753478e7cb9ddf3726",
+        "capacity_lineage_digest": "ffe7af1695d04f0b0e72ab5eeb3cd13e2f8e4777c89eb1e514f4cb917201fd4e",
+        "candidate_sha": "65e63d953b45d3672c24df74d0a1364b83a0157b",
+    }
+    envelope = {
+        "controller_sha": "c" * 40, "workflow": "mutation.yml",
+        "ref": "audit/hardening-integration-20261005", "inputs": inputs,
+    }
+    payload.write_text(json.dumps(envelope))
+    command = [
+        sys.executable, str(script), "--payload", str(payload),
+        "--workflow-file", str(workflow), "--expected-controller-sha", "c" * 40,
+        "--validate-only",
+    ]
+    assert subprocess.run(command, capture_output=True).returncode == 0
+
+    for key, value in (
+        ("capacity_artifact_id", "1"),
+        ("capacity_environment_digest", "0" * 64),
+        ("candidate_sha", "a" * 40),
+        ("capacity_authorization_id", "AH-CORPUS-RECOVERY-20261020-A"),
+    ):
+        altered = json.loads(json.dumps(envelope))
+        altered["inputs"][key] = value
+        payload.write_text(json.dumps(altered))
+        assert subprocess.run(command, capture_output=True).returncode == 2
+
+
+def test_linux_measurement_workflow_captures_environment_before_mutation_and_validates_twice():
+    root = Path(PLUGIN_DIR)
+    worker = (root / ".github/workflows/mutation-capacity-recovery-unit.yml").read_text()
+    workflow = (root / ".github/workflows/mutation.yml").read_text()
+    adapter = (root / ".github/scripts/capacity_recovery_execute.py").read_text()
+
+    execution_call = adapter.index("result = run_capacity_validation_unit")
+    assert adapter.index("identity = _runtime_cache_identity") < execution_call
+    assert adapter.index("Path(args.environment_evidence).write_text") < execution_call
+    assert "--environment-evidence capacity-validation-runtime-environment.json" in worker
+    assert "runtime_environment" in worker
+    assert workflow.count("approved_environment_digest=os.environ[\"ENVIRONMENT_DIGEST\"]") == 2
+    assert "AH-LINUX-MEASUREMENT-20261021-A" in workflow
+    assert "capacity-linux-measurement-grant-A-execute" in workflow
+    assert "capacity-linux-measurement-grant-A-readback" in workflow
+    assert "retained-artifact.zip" in workflow
+    assert "downloaded retained artifact digest differs" in workflow
+    assert "linux-measurement-execute-A" in workflow
+    assert "linux-measurement-readback-A" in workflow
+    assert "mutation-authoritative-${{ github.repository }}" in workflow
+    assert "capval-prep-containment-20261019-c" not in "\n".join(
+        line for line in workflow.splitlines()
+        if "capacity-recovery-batch" in line or "experiment_id:" in line
+    )
+    assert 'assert lineage["digest"]' not in workflow
+
+
 def test_capacity_preparation_batches_are_sequential_exact_once_and_reserved():
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -573,7 +641,8 @@ def test_capacity_grant_input_reaches_every_capacity_consumer_without_historical
     assert "AH-UNTIMED-DIAGNOSTIC-20261018-A" not in path.read_text()
     for name, job in capacity_jobs.items():
         expected_grant = (
-            "AH-CORPUS-RECOVERY-20261020-A"
+            ("AH-CORPUS-RECOVERY-20261020-A" if name == "capacity-recover"
+             else "AH-LINUX-MEASUREMENT-20261021-A")
             if name.startswith("capacity-recovery") or name == "capacity-recover"
             else "AH-PREP-CONTAINMENT-20261019-C"
         )
@@ -2084,7 +2153,7 @@ def test_mutation_execution_reuses_explicit_sha_bound_preflight():
 
     assert "preflight_run_id:" in workflow
     assert workflow.count("run-id: ${{ github.event.inputs.preflight_run_id }}") == 4
-    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 18
+    assert workflow.count("github-token: ${{ secrets.GITHUB_TOKEN }}") == 17
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "candidate_sha:" in workflow
     assert 'candidate == os.environ["GITHUB_SHA"]' in workflow

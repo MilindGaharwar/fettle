@@ -73,6 +73,8 @@ from fettle.mutation_test import (
     validate_capacity_validation_results,
     validate_capacity_validation_package,
     validate_capacity_recovery_lineage,
+    validate_capacity_recovery_results,
+    validate_captured_runtime_environment,
     reconcile_capacity_provider_accounting,
     reconcile_capacity_recovery_provider_accounting,
     write_changed_partition_manifests,
@@ -3688,6 +3690,95 @@ def test_capacity_result_validation_rejects_partial_conflicting_and_authoritativ
                 authorization_id="AH-PREP-CONTAINMENT-20261019-C",
                 authorization_contract=base["authorization_contract"],
             )
+
+
+def test_recovery_result_validation_requires_exact_captured_runtime_environment():
+    digest = "e" * 64
+    envelope = {
+        "engine": {"name": "mutmut", "version": "2.5.1"},
+        "environment": {"python": "3.12.13", "platform": "Linux-x86_64"},
+        "dependencies": [{"name": "example", "version": "1"}],
+    }
+    digest = _canonical_digest(envelope)
+    evidence = {
+        "schema_version": "1",
+        "kind": "capacity_validation_runtime_environment",
+        "captured_before_mutation": True,
+        "envelope": envelope,
+        "digest": digest,
+    }
+    assert validate_captured_runtime_environment(evidence, digest) == evidence
+
+    for altered in (
+        None,
+        {**evidence, "digest": "0" * 64},
+        {**evidence, "captured_before_mutation": False},
+        {key: value for key, value in evidence.items() if key != "envelope"},
+        {**evidence, "envelope": {**envelope, "environment": {
+            "python": "3.12.13", "platform": "Darwin-arm64",
+        }}},
+    ):
+        with pytest.raises(ValueError, match="runtime environment"):
+            validate_captured_runtime_environment(altered, digest)
+
+    base = {
+        "schema_version": "1", "kind": "capacity_validation_unit_result",
+        "status": "completed", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+        "authorization_id": "AH-PREP-CONTAINMENT-20261019-C",
+        "authorization_contract": __import__("fettle.staged_preflight", fromlist=["capacity_authorization_contract"]).capacity_authorization_contract("AH-PREP-CONTAINMENT-20261019-C", "a" * 40, "capval-local"),
+        "experiment_id": "capval-local", "revision": "a" * 40,
+        "plan_digest": "p" * 64, "unit_index": 0,
+        "unit": {"fingerprints": ["f" * 64], "mapped_tests": ["tests/test_a.py"]},
+        "environment_digest": digest,
+        "outcomes": {"f" * 64: {"state": "killed", "duration_ms": 1}},
+        "attempts": [], "pending": 0, "elapsed_ms": 1,
+        "source_restoration": {"before_sha256": "s" * 64, "after_sha256": "s" * 64, "restored": True},
+    }
+    base["digest"] = _canonical_digest(base)
+    provenance = {
+        "schema_version": "1", "kind": "capacity_validation_recovery_execution_provenance",
+        "authorization_id": "AH-LINUX-MEASUREMENT-20261021-A",
+        "lineage_digest": "l" * 64, "controller_sha": "c" * 40,
+        "source_candidate_sha": "a" * 40, "executor_module": "fettle/mutation_test.py",
+        "executor_module_sha256": "x" * 64, "adapter_sha256": "y" * 64,
+        "unit_index": 0, "interpreter": "/python", "python": "3.12.13",
+        "platform": "Linux-x86_64", "sys_path": ["/source"],
+        "ordered_tests": ["tests/test_a.py"], "dependencies": [["example", "1"]],
+        "runtime_environment": evidence,
+    }
+    provenance["digest"] = _canonical_digest(provenance)
+    validate_capacity_recovery_results(
+        [base], [provenance], [0], revision="a" * 40, experiment_id="capval-local",
+        plan_digest="p" * 64, authorization_id=base["authorization_id"],
+        authorization_contract=base["authorization_contract"],
+        recovery_authorization_id="AH-LINUX-MEASUREMENT-20261021-A",
+        controller_sha="c" * 40, lineage_digest="l" * 64,
+        source_executor_sha256="x" * 64, adapter_sha256="y" * 64,
+        approved_environment_digest=digest,
+    )
+    provenance.pop("runtime_environment")
+    provenance["digest"] = _canonical_digest(provenance)
+    with pytest.raises(ValueError, match="provenance"):
+        validate_capacity_recovery_results(
+            [base], [provenance], [0], revision="a" * 40, experiment_id="capval-local",
+            plan_digest="p" * 64, authorization_id=base["authorization_id"],
+            authorization_contract=base["authorization_contract"],
+            recovery_authorization_id="AH-LINUX-MEASUREMENT-20261021-A",
+            controller_sha="c" * 40, lineage_digest="l" * 64,
+            source_executor_sha256="x" * 64, adapter_sha256="y" * 64,
+            approved_environment_digest=digest,
+        )
+    with pytest.raises(ValueError, match="provenance"):
+        validate_capacity_recovery_results(
+            [base], [provenance], [0], revision="a" * 40, experiment_id="capval-local",
+            plan_digest="p" * 64, authorization_id=base["authorization_id"],
+            authorization_contract=base["authorization_contract"],
+            recovery_authorization_id="AH-LINUX-MEASUREMENT-20261021-A",
+            controller_sha="c" * 40, lineage_digest="l" * 64,
+            source_executor_sha256="x" * 64, adapter_sha256="y" * 64,
+            approved_environment_digest=None,
+        )
 
 
 def _capacity_decision_fixture(tmp_path):

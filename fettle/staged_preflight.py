@@ -22,6 +22,16 @@ CAPACITY_AUTHORIZATION_ID = "AH-PREP-CONTAINMENT-20261019-C"
 CAPACITY_RECOVERY_AUTHORIZATION_ID = "AH-CORPUS-RECOVERY-20261020-A"
 CAPACITY_RECOVERY_EXPERIMENT_ID = "capval-corpus-recovery-20261020-a"
 CAPACITY_RECOVERY_CANDIDATE = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+LINUX_MEASUREMENT_AUTHORIZATION_ID = "AH-LINUX-MEASUREMENT-20261021-A"
+LINUX_MEASUREMENT_EXPERIMENT_ID = "capval-linux-measurement-20261021-a"
+LINUX_MEASUREMENT_ENVIRONMENT_DIGEST = "4d3eae737ee23ffa53b58c9b1c401ff311bf5d59d05aed60182ddc9d116a7f01"
+LINUX_MEASUREMENT_PLAN_DIGEST = "2aa89d8f0e2a8e81df01e8cb8ca7567a7571253f3dcc1e302ab5d67fc94ef5e6"
+LINUX_MEASUREMENT_PLAN_SHA256 = "6a91a68c3e038e7d54f5ac5864d99f1e7fc3338355155e0ff41ac619152407b6"
+LINUX_MEASUREMENT_ARTIFACT_ID = "12257307851"
+LINUX_MEASUREMENT_ARTIFACT_SHA256 = "5d2d62bb3157befdc8b2c581a817613b6ee5b6eb4323e8753478e7cb9ddf3726"
+LINUX_MEASUREMENT_RECOVERY_RUN_ID = "39406688602"
+LINUX_MEASUREMENT_LINEAGE_DIGEST = "ffe7af1695d04f0b0e72ab5eeb3cd13e2f8e4777c89eb1e514f4cb917201fd4e"
+LINUX_MEASUREMENT_PACKAGE_CONTROLLER_SHA = "23477676416ce5548c5f86c1938cacda0674cc05"
 CAPACITY_RESOURCE_CEILINGS = {
     "preparation_workers": 952,
     "preparation_support": 168,
@@ -164,6 +174,104 @@ def validate_capacity_recovery_authorization_contract(
     )
     if contract != expected:
         raise ValueError("capacity recovery authorization contract is missing, stale, or conflicting")
+    return contract
+
+
+def linux_measurement_authorization_contract(
+    authorization_id: str, candidate_sha: str, experiment_id: str, *,
+    execution_controller_sha: str,
+) -> dict:
+    """Build the exact retained-package Linux measurement authorization."""
+    if authorization_id != LINUX_MEASUREMENT_AUTHORIZATION_ID:
+        raise ValueError("Linux measurement authorization is not approved for dispatch")
+    if candidate_sha != CAPACITY_RECOVERY_CANDIDATE:
+        raise ValueError("Linux measurement source candidate differs")
+    if experiment_id != LINUX_MEASUREMENT_EXPERIMENT_ID:
+        raise ValueError("Linux measurement experiment differs")
+    if re.fullmatch(r"[0-9a-f]{40}", execution_controller_sha) is None:
+        raise ValueError("Linux measurement execution controller differs")
+    contract = {
+        "schema_version": "1",
+        "kind": "linux_measurement_authorization_contract",
+        "authorization_id": authorization_id,
+        "experiment_id": experiment_id,
+        "source_candidate_sha": candidate_sha,
+        "package_controller_sha": LINUX_MEASUREMENT_PACKAGE_CONTROLLER_SHA,
+        "execution_controller_sha": execution_controller_sha,
+        "retained_package": {
+            "run_id": LINUX_MEASUREMENT_RECOVERY_RUN_ID,
+            "artifact_id": LINUX_MEASUREMENT_ARTIFACT_ID,
+            "artifact_sha256": LINUX_MEASUREMENT_ARTIFACT_SHA256,
+            "lineage_digest": LINUX_MEASUREMENT_LINEAGE_DIGEST,
+        },
+        "binding": {
+            "environment_digest": LINUX_MEASUREMENT_ENVIRONMENT_DIGEST,
+            "plan_digest": LINUX_MEASUREMENT_PLAN_DIGEST,
+            "plan_file_sha256": LINUX_MEASUREMENT_PLAN_SHA256,
+        },
+        "scope": {
+            "recovery_dispatches": 0,
+            "enumeration_dispatches": 0,
+            "measurement_units": 12,
+            "measurement_attempts_per_unit": 1,
+            "measurement_batches": [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]],
+            "terminal_readback_dispatches": 1,
+            "maximum_measurement_concurrency": 4,
+        },
+        "resource_ceiling_minutes": {
+            "historical_recovery_charged": 8,
+            "measurement_workers": 240,
+            "execution_support": 25,
+            "terminal_readback": 10,
+            "cancellation_controllers": 30,
+        },
+        "transferable": False,
+    }
+    contract["digest"] = hashlib.sha256(
+        json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return contract
+
+
+def validate_linux_measurement_authorization_contract(
+    contract: dict, *, authorization_id: str, candidate_sha: str,
+    experiment_id: str, execution_controller_sha: str,
+) -> dict:
+    """Require exact reproduction of the Linux measurement authorization."""
+    expected = linux_measurement_authorization_contract(
+        authorization_id, candidate_sha, experiment_id,
+        execution_controller_sha=execution_controller_sha,
+    )
+    if contract != expected:
+        raise ValueError("Linux measurement authorization contract is missing, stale, or conflicting")
+    return contract
+
+
+def validate_linux_measurement_package_binding(
+    plan: dict, lineage: dict, contract: dict, *, plan_file_sha256: str,
+    authorization_id: str, candidate_sha: str, experiment_id: str,
+    execution_controller_sha: str,
+) -> dict:
+    """Bind the retained historical package to the distinct Linux execution grant."""
+    validate_linux_measurement_authorization_contract(
+        contract, authorization_id=authorization_id, candidate_sha=candidate_sha,
+        experiment_id=experiment_id, execution_controller_sha=execution_controller_sha,
+    )
+    units = plan.get("units") if isinstance(plan, dict) else None
+    recovery = lineage.get("recovery") if isinstance(lineage, dict) else None
+    if (
+        not isinstance(units, list)
+        or len(units) != 12
+        or plan.get("revision") != candidate_sha
+        or plan.get("digest") != LINUX_MEASUREMENT_PLAN_DIGEST
+        or plan_file_sha256 != LINUX_MEASUREMENT_PLAN_SHA256
+        or {unit.get("environment_digest") for unit in units if isinstance(unit, dict)}
+        != {LINUX_MEASUREMENT_ENVIRONMENT_DIGEST}
+        or lineage.get("digest") != LINUX_MEASUREMENT_LINEAGE_DIGEST
+        or not isinstance(recovery, dict)
+        or recovery.get("controller_sha") != LINUX_MEASUREMENT_PACKAGE_CONTROLLER_SHA
+    ):
+        raise ValueError("Linux measurement retained package binding differs")
     return contract
 
 

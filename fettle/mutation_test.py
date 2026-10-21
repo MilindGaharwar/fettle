@@ -2049,7 +2049,7 @@ def validate_capacity_recovery_results(
     experiment_id: str, plan_digest: str, authorization_id: str,
     authorization_contract: dict, recovery_authorization_id: str,
     controller_sha: str, lineage_digest: str, source_executor_sha256: str,
-    adapter_sha256: str,
+    adapter_sha256: str, approved_environment_digest: str | None = None,
 ) -> None:
     """Require source-valid results plus immutable recovery provenance."""
     provenance_by_index = {
@@ -2074,6 +2074,15 @@ def validate_capacity_recovery_results(
             or not isinstance(provenance.get("sys_path"), list)
             or any("controller" in path for path in provenance["sys_path"] if isinstance(path, str))
             or provenance.get("ordered_tests") != report.get("unit", {}).get("mapped_tests")
+            or (
+                recovery_authorization_id == "AH-LINUX-MEASUREMENT-20261021-A"
+                and (
+                    approved_environment_digest is None
+                    or not _valid_captured_runtime_environment(
+                        provenance.get("runtime_environment"), approved_environment_digest,
+                    )
+                )
+            )
             or provenance.get("digest") != _canonical_digest({
                 key: value for key, value in provenance.items() if key != "digest"
             })
@@ -2085,6 +2094,32 @@ def validate_capacity_recovery_results(
         authorization_id=authorization_id,
         authorization_contract=authorization_contract,
     )
+
+
+def _valid_captured_runtime_environment(evidence: object, approved_digest: str) -> bool:
+    """Validate an exact pre-mutation checkpoint projection against its binding."""
+    if not isinstance(evidence, dict) or set(evidence) != {
+        "schema_version", "kind", "captured_before_mutation", "envelope", "digest",
+    }:
+        return False
+    envelope = evidence.get("envelope")
+    return (
+        evidence.get("schema_version") == "1"
+        and evidence.get("kind") == "capacity_validation_runtime_environment"
+        and evidence.get("captured_before_mutation") is True
+        and isinstance(envelope, dict)
+        and set(envelope) == {"engine", "environment", "dependencies"}
+        and isinstance(envelope.get("dependencies"), list)
+        and evidence.get("digest") == approved_digest
+        and _canonical_digest(envelope) == approved_digest
+    )
+
+
+def validate_captured_runtime_environment(evidence: object, approved_digest: str) -> dict:
+    """Fail closed on missing, altered, or mismatched runtime evidence."""
+    if not _valid_captured_runtime_environment(evidence, approved_digest):
+        raise ValueError("captured runtime environment evidence differs")
+    return evidence
 
 
 def evaluate_capacity_validation_decision(
@@ -2386,23 +2421,32 @@ def reconcile_capacity_recovery_provider_accounting(
     source_revision: str, controller_sha: str, recovery_experiment_id: str,
     execution_run_id: str, recovery_run_id: str, plan_file_sha256: str,
     recovery_authorization_id: str, recovery_authorization_contract: dict,
+    package_controller_sha: str | None = None,
     retry_recovery_run: dict | None = None,
     retry_recovery_job_pages: list[dict] | None = None,
 ) -> dict:
     """Reconcile the exact recovery graph without granting billing authority."""
+    package_controller_sha = package_controller_sha or controller_sha
+    source_identity = {
+        "schema_version": "1",
+        "kind": "capacity_validation_recovery_execution_source",
+        "source_candidate_sha": source_revision,
+        "package_controller_sha": package_controller_sha,
+        "execution_controller_sha": controller_sha,
+        "recovery_experiment_id": recovery_experiment_id,
+        "recovery_run_id": recovery_run_id,
+        "plan_file_sha256": plan_file_sha256,
+        "authorization_id": recovery_authorization_id,
+        "authorization_contract": recovery_authorization_contract,
+    }
+    legacy_source_identity = {
+        **source_identity,
+        "controller_sha": controller_sha,
+    }
+    legacy_source_identity.pop("package_controller_sha")
+    legacy_source_identity.pop("execution_controller_sha")
     if (
-        source != {
-            **source,
-            "schema_version": "1",
-            "kind": "capacity_validation_recovery_execution_source",
-            "source_candidate_sha": source_revision,
-            "controller_sha": controller_sha,
-            "recovery_experiment_id": recovery_experiment_id,
-            "recovery_run_id": recovery_run_id,
-            "plan_file_sha256": plan_file_sha256,
-            "authorization_id": recovery_authorization_id,
-            "authorization_contract": recovery_authorization_contract,
-        }
+        source not in (source_identity, legacy_source_identity)
         or str(run.get("id")) != execution_run_id
         or str(run.get("run_attempt")) != "1"
         or run.get("head_sha") != controller_sha
@@ -2417,7 +2461,7 @@ def reconcile_capacity_recovery_provider_accounting(
     if (
         str(recovery_run.get("id")) != recovery_run_id
         or recovery_run.get("run_attempt") != 1
-        or recovery_run.get("head_sha") != controller_sha
+        or recovery_run.get("head_sha") != package_controller_sha
         or recovery_run.get("event") != "workflow_dispatch"
         or recovery_run.get("status") != "completed"
         or recovery_run.get("conclusion") != "success"

@@ -1,5 +1,5 @@
 name: Mutation evidence
-run-name: ${{ inputs.mode == 'readback-probe' && format('Mutation readback probe {0}', inputs.probe_id) || inputs.mode == 'capacity-validation' && inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A' && format('Capacity recovery {0} {1}', inputs.capacity_stage, inputs.capacity_experiment_id) || 'Mutation evidence' }}
+run-name: ${{ inputs.mode == 'readback-probe' && format('Mutation readback probe {0}', inputs.probe_id) || inputs.mode == 'capacity-validation' && (inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A' || inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A') && format('Capacity recovery {0} {1}', inputs.capacity_stage, inputs.capacity_experiment_id) || 'Mutation evidence' }}
 
 on:
   schedule:
@@ -49,6 +49,22 @@ on:
         type: string
       capacity_plan_sha256:
         description: "Exact frozen capacity plan file SHA-256 (execute/readback)"
+        required: false
+        type: string
+      capacity_environment_digest:
+        description: "Exact approved execution environment digest"
+        required: false
+        type: string
+      capacity_artifact_id:
+        description: "Exact retained recovery artifact ID"
+        required: false
+        type: string
+      capacity_artifact_sha256:
+        description: "Exact provider-advertised retained artifact SHA-256"
+        required: false
+        type: string
+      capacity_lineage_digest:
+        description: "Exact retained recovery lineage digest"
         required: false
         type: string
       capacity_execution_run_id:
@@ -1381,46 +1397,74 @@ jobs:
           retention-days: 90
 
   capacity-recovery-execute-admission:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     name: capacity recovery (execution admission)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: linux-measurement-execute-A
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: capacity-validation-recovery-${{ github.event.inputs.capacity_preparation_run_id }}
-          path: recovered
-          run-id: ${{ github.event.inputs.capacity_preparation_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download and verify exact retained artifact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ github.event.inputs.capacity_artifact_id }}
+          ARTIFACT_SHA256: ${{ github.event.inputs.capacity_artifact_sha256 }}
+          RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" > retained-artifact.json
+          gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > retained-artifact.zip
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          artifact=json.loads(Path("retained-artifact.json").read_text())
+          if artifact.get("id") != int(os.environ["ARTIFACT_ID"]): raise ValueError("retained artifact ID differs")
+          if artifact.get("digest") != "sha256:"+os.environ["ARTIFACT_SHA256"]: raise ValueError("retained artifact digest differs")
+          if artifact.get("expired") is not False: raise ValueError("retained artifact is unavailable")
+          run=artifact.get("workflow_run",{})
+          if str(run.get("id")) != os.environ["RECOVERY_RUN_ID"]: raise ValueError("retained artifact run differs")
+          if hashlib.sha256(Path("retained-artifact.zip").read_bytes()).hexdigest() != os.environ["ARTIFACT_SHA256"]: raise ValueError("downloaded retained artifact digest differs")
+          PY
+          mkdir recovered
+          unzip -q retained-artifact.zip -d recovered
       - name: Validate both lineage contracts before fan-out
         env:
           EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
+          ENVIRONMENT_DIGEST: ${{ github.event.inputs.capacity_environment_digest }}
+          LINEAGE_DIGEST: ${{ github.event.inputs.capacity_lineage_digest }}
           AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
         run: |
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$CANDIDATE_SHA" = 65e63d953b45d3672c24df74d0a1364b83a0157b
           python - <<'PY'
-          import json,os
+          import hashlib,json,os
           from pathlib import Path
           from fettle.mutation_test import validate_capacity_recovery_lineage
+          from fettle.staged_preflight import linux_measurement_authorization_contract,validate_linux_measurement_package_binding
           package=Path("recovered/capacity-recovery")
           corpus=json.loads((package/"capacity-validation-corpus.json").read_text())
           plan=json.loads((package/"capacity-validation-plan.json").read_text())
           lineage=json.loads((package/"capacity-validation-recovery-lineage.json").read_text())
-          validate_capacity_recovery_lineage(lineage,corpus,plan,controller_sha=os.environ["GITHUB_SHA"],recovery_experiment_id=os.environ["EXPERIMENT_ID"],plan_file_sha256=os.environ["PLAN_SHA256"])
-          assert lineage["recovery"]["authorization_id"] == os.environ["AUTHORIZATION_ID"]
-          assert lineage["source"]["historical_disposition"] == "failed_closed_non_pass"
-          assert len(plan["units"]) == 12
+          if hashlib.sha256((package/"capacity-validation-plan.json").read_bytes()).hexdigest() != os.environ["PLAN_SHA256"]: raise ValueError("retained plan file digest differs")
+          validate_capacity_recovery_lineage(lineage,corpus,plan,controller_sha="23477676416ce5548c5f86c1938cacda0674cc05",recovery_experiment_id=lineage["recovery"]["experiment_id"],plan_file_sha256=os.environ["PLAN_SHA256"])
+          contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+          validate_linux_measurement_package_binding(plan,lineage,contract,plan_file_sha256=os.environ["PLAN_SHA256"],authorization_id=os.environ["AUTHORIZATION_ID"],candidate_sha=os.environ["CANDIDATE_SHA"],experiment_id=os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+          if lineage["digest"] != os.environ["LINEAGE_DIGEST"]: raise ValueError("retained lineage input differs")
+          if plan["digest"] != contract["binding"]["plan_digest"]: raise ValueError("retained plan input differs")
+          if contract["binding"]["environment_digest"] != os.environ["ENVIRONMENT_DIGEST"]: raise ValueError("approved environment input differs")
+          if lineage["source"]["historical_disposition"] != "failed_closed_non_pass": raise ValueError("historical disposition differs")
+          if len(plan["units"]) != 12: raise ValueError("retained unit count differs")
+          Path("linux-measurement-authorization.json").write_text(json.dumps(contract,indent=2,sort_keys=True)+"\n")
           PY
       - name: Reject prior execution dispatch and claim the grant
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           expected="Capacity recovery execute ${{ github.event.inputs.capacity_experiment_id }}"
-          marker=capacity-recovery-grant-A-execute
+          marker=capacity-linux-measurement-grant-A-execute
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
           python .github/scripts/capacity_recovery_admission.py \
@@ -1430,7 +1474,7 @@ jobs:
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-execution-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: capacity-recovery-grant-A-execute
+          name: capacity-linux-measurement-grant-A-execute
           path: recovery-execution-marker/run-id
           if-no-files-found: error
           retention-days: 90
@@ -1445,7 +1489,9 @@ jobs:
           import json,os
           from pathlib import Path
           lineage=json.loads(Path("recovered/capacity-recovery/capacity-validation-recovery-lineage.json").read_text())
-          source={"schema_version":"1","kind":"capacity_validation_recovery_execution_source","source_candidate_sha":lineage["source"]["candidate_sha"],"controller_sha":os.environ["GITHUB_SHA"],"recovery_experiment_id":os.environ["RECOVERY_EXPERIMENT_ID"],"recovery_run_id":os.environ["RECOVERY_RUN_ID"],"plan_file_sha256":os.environ["PLAN_SHA256"],"authorization_id":os.environ["AUTHORIZATION_ID"],"authorization_contract":lineage["recovery"]["authorization_contract"]}
+          from fettle.staged_preflight import linux_measurement_authorization_contract
+          contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],lineage["source"]["candidate_sha"],os.environ["RECOVERY_EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+          source={"schema_version":"1","kind":"capacity_validation_recovery_execution_source","source_candidate_sha":lineage["source"]["candidate_sha"],"package_controller_sha":lineage["recovery"]["controller_sha"],"execution_controller_sha":os.environ["GITHUB_SHA"],"recovery_experiment_id":os.environ["RECOVERY_EXPERIMENT_ID"],"recovery_run_id":os.environ["RECOVERY_RUN_ID"],"plan_file_sha256":os.environ["PLAN_SHA256"],"authorization_id":os.environ["AUTHORIZATION_ID"],"authorization_contract":contract}
           Path("capacity-validation-recovery-execution-source.json").write_text(json.dumps(source,indent=2,sort_keys=True)+"\n")
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1456,7 +1502,7 @@ jobs:
           retention-days: 90
 
   capacity-recovery-batch-1:
-    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     needs: capacity-recovery-execute-admission
     strategy:
       fail-fast: false
@@ -1467,15 +1513,16 @@ jobs:
     with:
       unit: ${{ matrix.unit }}
       recovery_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
-      experiment_id: capval-prep-containment-20261019-c
       recovery_experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       source_candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
       controller_sha: ${{ github.sha }}
       authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
+      environment_digest: ${{ github.event.inputs.capacity_environment_digest }}
+      package_controller_sha: 23477676416ce5548c5f86c1938cacda0674cc05
 
   capacity-recovery-batch-2:
-    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     needs: capacity-recovery-batch-1
     strategy:
       fail-fast: false
@@ -1486,15 +1533,16 @@ jobs:
     with:
       unit: ${{ matrix.unit }}
       recovery_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
-      experiment_id: capval-prep-containment-20261019-c
       recovery_experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       source_candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
       controller_sha: ${{ github.sha }}
       authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
+      environment_digest: ${{ github.event.inputs.capacity_environment_digest }}
+      package_controller_sha: 23477676416ce5548c5f86c1938cacda0674cc05
 
   capacity-recovery-batch-3:
-    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     needs: capacity-recovery-batch-2
     strategy:
       fail-fast: false
@@ -1505,15 +1553,16 @@ jobs:
     with:
       unit: ${{ matrix.unit }}
       recovery_run_id: ${{ github.event.inputs.capacity_preparation_run_id }}
-      experiment_id: capval-prep-containment-20261019-c
       recovery_experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
       plan_sha256: ${{ github.event.inputs.capacity_plan_sha256 }}
       source_candidate_sha: 65e63d953b45d3672c24df74d0a1364b83a0157b
       controller_sha: ${{ github.sha }}
       authorization_id: ${{ github.event.inputs.capacity_authorization_id }}
+      environment_digest: ${{ github.event.inputs.capacity_environment_digest }}
+      package_controller_sha: 23477676416ce5548c5f86c1938cacda0674cc05
 
   capacity-recovery-measurement-monitor:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     needs: capacity-recovery-execute-admission
     permissions:
       actions: write
@@ -1525,7 +1574,7 @@ jobs:
       experiment_id: ${{ github.event.inputs.capacity_experiment_id }}
 
   capacity-recovery-finalize:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'execute' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     needs: [capacity-recovery-batch-1, capacity-recovery-batch-2, capacity-recovery-batch-3, capacity-recovery-measurement-monitor]
     name: capacity recovery (execution finalization)
     runs-on: ubuntu-latest
@@ -1548,14 +1597,20 @@ jobs:
           RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
           AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
+          ENVIRONMENT_DIGEST: ${{ github.event.inputs.capacity_environment_digest }}
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
         run: |
           python - <<'PY'
-          import json,os
+          import hashlib,json,os
           from pathlib import Path
           from fettle.mutation_test import validate_capacity_recovery_results
+          from fettle.staged_preflight import linux_measurement_authorization_contract,validate_linux_measurement_package_binding
           package=Path("recovered/capacity-recovery")
           plan=json.loads((package/"capacity-validation-plan.json").read_text())
           lineage=json.loads((package/"capacity-validation-recovery-lineage.json").read_text())
+          contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],lineage["source"]["candidate_sha"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+          validate_linux_measurement_package_binding(plan,lineage,contract,plan_file_sha256=hashlib.sha256((package/"capacity-validation-plan.json").read_bytes()).hexdigest(),authorization_id=os.environ["AUTHORIZATION_ID"],candidate_sha=lineage["source"]["candidate_sha"],experiment_id=os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+          if os.environ["PLAN_SHA256"] != contract["binding"]["plan_file_sha256"]: raise ValueError("Linux measurement plan file input differs")
           reports=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-result.json")]
           provenances=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-recovery-provenance.json")]
           validate_capacity_recovery_results(
@@ -1565,14 +1620,18 @@ jobs:
               recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=os.environ["GITHUB_SHA"],
               lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],
               adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest(),
+              approved_environment_digest=os.environ["ENVIRONMENT_DIGEST"],
           )
           PY
 
   capacity-recovery-provider-readback:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'readback' && github.event.inputs.capacity_authorization_id == 'AH-CORPUS-RECOVERY-20261020-A'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'capacity-validation' && github.event.inputs.capacity_stage == 'readback' && github.event.inputs.capacity_authorization_id == 'AH-LINUX-MEASUREMENT-20261021-A'
     name: capacity recovery (terminal provider readback)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: linux-measurement-readback-A
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
@@ -1599,8 +1658,8 @@ jobs:
           RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_preparation_run_id }}
         run: |
           test "$GITHUB_RUN_ATTEMPT" = 1
-          test "${{ github.event.inputs.capacity_experiment_id }}" = capval-corpus-recovery-20261020-a
-          marker=capacity-recovery-grant-A-readback
+          test "${{ github.event.inputs.capacity_experiment_id }}" = capval-linux-measurement-20261021-a
+          marker=capacity-linux-measurement-grant-A-readback
           expected="Capacity recovery readback ${{ github.event.inputs.capacity_experiment_id }}"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/mutation.yml/runs?event=workflow_dispatch&per_page=100" > recovery-runs.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" > recovery-markers.json
@@ -1611,7 +1670,7 @@ jobs:
           printf '%s\n' "$GITHUB_RUN_ID" > recovery-readback-marker/run-id
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: capacity-recovery-grant-A-readback
+          name: capacity-linux-measurement-grant-A-readback
           path: recovery-readback-marker/run-id
           if-no-files-found: error
           retention-days: 90
@@ -1664,6 +1723,8 @@ jobs:
           RECOVERY_EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           PLAN_SHA256: ${{ github.event.inputs.capacity_plan_sha256 }}
           AUTHORIZATION_ID: ${{ github.event.inputs.capacity_authorization_id }}
+          ENVIRONMENT_DIGEST: ${{ github.event.inputs.capacity_environment_digest }}
+          EXPERIMENT_ID: ${{ github.event.inputs.capacity_experiment_id }}
           RETRY_RECOVERY_RUN_ID: ${{ github.event.inputs.capacity_recovery_retry_run_id }}
         run: |
           python - <<'PY'
@@ -1681,6 +1742,9 @@ jobs:
               package=Path("recovered/capacity-recovery")
               plan=json.loads((package/"capacity-validation-plan.json").read_text())
               lineage=json.loads((package/"capacity-validation-recovery-lineage.json").read_text())
+              from fettle.staged_preflight import linux_measurement_authorization_contract,validate_linux_measurement_package_binding
+              contract=linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],lineage["source"]["candidate_sha"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
+              validate_linux_measurement_package_binding(plan,lineage,contract,plan_file_sha256=__import__("hashlib").sha256((package/"capacity-validation-plan.json").read_bytes()).hexdigest(),authorization_id=os.environ["AUTHORIZATION_ID"],candidate_sha=lineage["source"]["candidate_sha"],experiment_id=os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["GITHUB_SHA"])
               source=json.loads(Path("capacity-execution-source/capacity-validation-recovery-execution-source.json").read_text())
               reports=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-result.json")]
               provenances=[json.loads(p.read_text()) for p in Path("capacity-results").rglob("capacity-validation-recovery-provenance.json")]
@@ -1697,12 +1761,13 @@ jobs:
                   controller_sha=os.environ["GITHUB_SHA"],recovery_experiment_id=os.environ["RECOVERY_EXPERIMENT_ID"],
                   execution_run_id=os.environ["EXECUTION_RUN_ID"],recovery_run_id=os.environ["RECOVERY_RUN_ID"],
                   plan_file_sha256=os.environ["PLAN_SHA256"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],
-                  recovery_authorization_contract=lineage["recovery"]["authorization_contract"],
+                  recovery_authorization_contract=source["authorization_contract"],
+                  package_controller_sha=lineage["recovery"]["controller_sha"],
                   retry_recovery_run=(json.loads(Path("retry-recovery-run.json").read_text()) if Path("retry-recovery-run.json").exists() else None),
                   retry_recovery_job_pages=(json.loads(Path("retry-recovery-jobs.json").read_text()) if Path("retry-recovery-jobs.json").exists() else None),
               )
               if ledger["status"] != "completed": raise ValueError("provider accounting is non-pass")
-              validate_capacity_recovery_results(reports,provenances,list(range(12)),revision=lineage["source"]["candidate_sha"],experiment_id=plan["experiment_id"],plan_digest=plan["digest"],authorization_id=plan["authorization_id"],authorization_contract=plan["authorization_contract"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=os.environ["GITHUB_SHA"],lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest())
+              validate_capacity_recovery_results(reports,provenances,list(range(12)),revision=lineage["source"]["candidate_sha"],experiment_id=plan["experiment_id"],plan_digest=plan["digest"],authorization_id=plan["authorization_id"],authorization_contract=plan["authorization_contract"],recovery_authorization_id=os.environ["AUTHORIZATION_ID"],controller_sha=os.environ["GITHUB_SHA"],lineage_digest=lineage["digest"],source_executor_sha256=lineage["source"]["executor_module_sha256"],adapter_sha256=__import__("hashlib").sha256(Path(".github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest(),approved_environment_digest=os.environ["ENVIRONMENT_DIGEST"])
               elapsed={item["unit_index"]:item["elapsed_seconds"] for item in ledger["worker"]["jobs"]}
               decision=evaluate_capacity_validation_decision(plan,reports,elapsed)
               decision["recovery_lineage_digest"]=lineage["digest"]
