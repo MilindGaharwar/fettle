@@ -1,5 +1,43 @@
 # Audit Hardening Worklog
 
+## 2026-10-22: Staged-preflight allocation repair
+
+Run `39697422660/1` remains `CLOSED_NON_PASS`. It produced 40 of 256 shard
+reports and did not launch wave 3, so none of its reports or corpus state transfer
+to a successor candidate. Its terminal reconciliation was 125.74 runner-minutes,
+the final jobs inventory replayed as 125.93, and the retained conservative
+high-water floor remains 231.69. The higher floor came from dispatch-to-observation
+exposure for queued jobs whose reported `started_at` lacked execution evidence; it
+is not proof that 231.69 minutes executed and it must not be reduced by later
+provider metadata.
+
+The run failed correctly against the former 152-minute wave-3 launch gate. The
+repair changes allocation only. Accounting, historical-floor retention, malformed
+or conflicting evidence rejection, containment, and the separate capacity-validation
+contract remain unchanged. The staged-preflight envelope is now:
+
+| Reservation or gate | Derivation | Runner-minutes |
+|---|---:|---:|
+| Wave 1 | retained allowance | 32 |
+| Wave 2 | queued-acquisition exposure allowance | 500 |
+| Wave 3 | retained allowance | 800 |
+| Orchestration and aggregation | retained allowance | 168 |
+| Cancellation headroom | retained allowance | 100 |
+| Launch wave 2 | wave 1 | 32 |
+| Launch wave 3 | waves 1–2 | 532 |
+| Launch aggregate | waves 1–3 | 1,332 |
+| Complete | workers + orchestration/aggregation | 1,500 |
+| Absolute operational ceiling | complete + cancellation | 1,600 |
+
+The additional 380 minutes belong to wave 2 because that is where the retained run
+demonstrated conservative queued-acquisition exposure. No amount was taken from the
+800-minute wave-3 reservation, 168-minute support reservation, or 100-minute
+cancellation reserve. Production derives every cumulative gate from these owning
+reservations. Replaying the retained jobs inventory and 231.69 historical floor
+through the real `budget-gate` command admits wave 3 at the derived 532-minute gate;
+replaying terminal metadata without the floor remains only 125.93 and does not replace
+the authoritative high-water observation.
+
 ## 2026-10-22: Readiness repair verified; narrow replay blocked before dispatch
 
 Owner approved completeness-based advisory acceptance for execution integrity only.

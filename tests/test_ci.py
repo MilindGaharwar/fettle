@@ -2222,7 +2222,7 @@ def test_staged_monitor_budget_crossing_requests_cancellation(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "control").symlink_to(PLUGIN_DIR, target_is_directory=True)
-    started = (datetime.now(UTC) - timedelta(minutes=36)).isoformat().replace("+00:00", "Z")
+    started = (datetime.now(UTC) - timedelta(minutes=47)).isoformat().replace("+00:00", "Z")
     jobs = [{
             "id": index + 1, "run_id": 37, "run_attempt": 1,
         "name": f"mutation (staged preflight wave 2 shard {index})",
@@ -2254,7 +2254,7 @@ def test_staged_monitor_budget_crossing_requests_cancellation(tmp_path):
     assert result.returncode == 0
     assert (workspace / "monitor-final-status.txt").read_text() == "operational-cutoff\n"
     budget = json.loads((workspace / "monitor-budget.json").read_text())
-    assert budget["launch_ceiling"] == 1120
+    assert budget["launch_ceiling"] == 1500
     assert budget["passed"] is False
     assert (workspace / "cancellation-requested.txt").is_file()
 
@@ -2299,7 +2299,7 @@ def test_continuation_monitor_reuses_validated_source_snapshot(tmp_path):
             expected_prior_run_id="36", expected_prior_run_attempt="1",
             expected_current_run_id="37", expected_current_run_attempt="1",
         ),
-        "launch_ceiling": 1120,
+        "launch_ceiling": 1500,
         "next_wave": "complete",
         "passed": True,
     }

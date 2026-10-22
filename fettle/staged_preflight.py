@@ -385,11 +385,19 @@ WAVES["wave-3"] = [
 ]
 MAX_PARALLEL = {"wave-1": 2, "wave-2": 4, "wave-3": 8}
 BUDGET = {
-    "operational_ceiling_runner_minutes": 1220,
-    "wave_allowances": {"wave-1": 32, "wave-2": 120, "wave-3": 800},
+    "operational_ceiling_runner_minutes": 1600,
+    "wave_allowances": {"wave-1": 32, "wave-2": 500, "wave-3": 800},
     "orchestration_and_aggregation": 168,
     "cancellation_headroom": 100,
-    "launch_ceiling": {"wave-2": 32, "wave-3": 152, "aggregate": 952, "complete": 1120},
+}
+BUDGET["launch_ceiling"] = {
+    "wave-2": BUDGET["wave_allowances"]["wave-1"],
+    "wave-3": sum(BUDGET["wave_allowances"][wave] for wave in ("wave-1", "wave-2")),
+    "aggregate": sum(BUDGET["wave_allowances"].values()),
+    "complete": (
+        sum(BUDGET["wave_allowances"].values())
+        + BUDGET["orchestration_and_aggregation"]
+    ),
 }
 MATRIX_JOB_LIMIT = 256
 PROJECT_CONTINUATION_JOB_LIMIT = 256

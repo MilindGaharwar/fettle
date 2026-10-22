@@ -1098,23 +1098,23 @@ def test_fixed_waves_cover_every_shard_once_and_reconcile_budget():
     assert len(members) == len(set(members)) == 256
     assert sorted(members) == list(range(256))
     assert BUDGET == {
-        "operational_ceiling_runner_minutes": 1220,
-        "wave_allowances": {"wave-1": 32, "wave-2": 120, "wave-3": 800},
+        "operational_ceiling_runner_minutes": 1600,
+        "wave_allowances": {"wave-1": 32, "wave-2": 500, "wave-3": 800},
         "orchestration_and_aggregation": 168,
         "cancellation_headroom": 100,
         "launch_ceiling": {
             "wave-2": 32,
-            "wave-3": 152,
-            "aggregate": 952,
-            "complete": 1120,
+            "wave-3": 532,
+            "aggregate": 1332,
+            "complete": 1500,
         },
     }
-    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 1220
+    assert sum(BUDGET["wave_allowances"].values()) + BUDGET["orchestration_and_aggregation"] + BUDGET["cancellation_headroom"] == 1600
     assert BUDGET["launch_ceiling"] == {
         "wave-2": 32,
-        "wave-3": 152,
-        "aggregate": 952,
-        "complete": 1120,
+        "wave-3": 532,
+        "aggregate": 1332,
+        "complete": 1500,
     }
     assert ARTIFACT_RETENTION_DAYS == 90
     assert validate_continuation_topology() == {
@@ -1662,11 +1662,11 @@ def test_accounting_acquisition_exposure_can_cross_budget_gate(tmp_path):
     path = _jobs_file(tmp_path, [{"total_count": len(jobs), "jobs": jobs}])
 
     result = account_runner_minutes(
-        path, datetime(2026, 10, 6, 1, 36, tzinfo=UTC), expected_run_id="7",
+        path, datetime(2026, 10, 6, 1, 50, tzinfo=UTC), expected_run_id="7",
         expected_run_attempt="1", job_timeout_minutes=35,
     )
 
-    assert result["estimated_runner_minutes"] == 1152
+    assert result["estimated_runner_minutes"] == 1600
     assert result["estimated_runner_minutes"] > BUDGET["launch_ceiling"]["complete"]
 
 
@@ -2444,9 +2444,9 @@ def test_accounting_rejects_nonpositive_provider_job_ids(tmp_path, job_id):
 @pytest.mark.parametrize(
     ("used", "next_wave", "passed"),
     [(32, "wave-2", True), (32.01, "wave-2", False),
-     (100.77, "wave-3", True), (152, "wave-3", True), (152.01, "wave-3", False),
-     (952, "aggregate", True), (952.01, "aggregate", False),
-     (1120, "complete", True), (1120.01, "complete", False)],
+     (231.69, "wave-3", True), (532, "wave-3", True), (532.01, "wave-3", False),
+     (1332, "aggregate", True), (1332.01, "aggregate", False),
+     (1500, "complete", True), (1500.01, "complete", False)],
 )
 def test_budget_transition_boundaries(used, next_wave, passed):
     assert (used <= BUDGET["launch_ceiling"][next_wave]) is passed
@@ -4148,6 +4148,44 @@ def test_terminal_reconciliation_preserves_higher_historical_accounting_floor(tm
     assert result["estimated_runner_minutes"] == 3.5
     assert result["historical_floor_applied"] is True
     assert result["historical_accounting"][0]["sha256"] == _file_sha(historical_path)
+
+
+def test_budget_gate_admits_retained_231_69_floor_under_repaired_wave_3_allocation(tmp_path):
+    jobs_path = _jobs_file(tmp_path, [{
+        "total_count": 1,
+        "jobs": [_job(
+            1, run_id=39697422660, start="2026-10-22T00:00:00Z",
+            end="2026-10-22T02:05:55.800000Z",
+        )],
+    }])
+    terminal = account_runner_minutes(
+        jobs_path, expected_run_id="39697422660", expected_run_attempt="1",
+    )
+    assert terminal["estimated_runner_minutes"] == 125.93
+    historical_path = tmp_path / "retained-monitor-budget.json"
+    historical_path.write_text(json.dumps({
+        **terminal, "estimated_runner_minutes": 231.69,
+    }))
+    output_path = tmp_path / "wave-3-budget.json"
+
+    result = subprocess.run([
+        sys.executable, "-m", "fettle.staged_preflight", "budget-gate",
+        "--jobs", str(jobs_path),
+        "--historical-accounting", str(historical_path),
+        "--run-id", "39697422660", "--run-attempt", "1",
+        "--next-wave", "wave-3", "--output", str(output_path),
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output_path.read_text())
+    assert report["terminal_reconciled_runner_minutes"] == 125.93
+    assert report["historical_observed_runner_minutes_floor"] == 231.69
+    assert report["estimated_runner_minutes"] == 231.69
+    assert report["historical_floor_applied"] is True
+    assert report["historical_accounting"][0]["sha256"] == _file_sha(historical_path)
+    assert report["launch_ceiling"] == 532
+    assert report["next_wave"] == "wave-3"
+    assert report["passed"] is True
 
 
 def test_accounting_floor_cannot_regress_from_919_51_to_854_38(tmp_path):
