@@ -1456,39 +1456,43 @@ def test_mutation_workflow_uses_dynamic_blocking_evidence_authority():
     assert "if: always()" in workflow
 
 
-def test_pr_containment_is_separate_from_authoritative_check_producer():
+def test_pr_advisory_publishes_the_protected_check_context():
     authoritative = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
-    containment = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    advisory = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
     assert "pull_request:" not in authoritative
-    assert "pull_request:" in containment
-    assert "name: mutation evidence" not in containment
-    assert containment.count("name: mutation qualification pending") == 1
+    assert "pull_request:" in advisory
+    assert "name: ${{ 'mutation evidence' }}" in advisory
 
 
-def test_changed_mutation_workflow_prepares_scope_without_pr_execution_fanout():
+def test_changed_mutation_workflow_executes_one_bounded_attempt_per_shard():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
     assert "--prepare-changed-manifests mutation-changed-manifests" in workflow
-    assert "fromJSON(needs.changed-prepare.outputs.matrix)" not in workflow
-    assert "mutmut run" not in workflow
+    assert "fromJSON(needs.changed-prepare.outputs.matrix)" in workflow
+    assert "max-parallel: 20" in workflow
+    assert "timeout-minutes: 360" in workflow
+    assert "--timeout 21300" in workflow
+    assert "--manifest-scope mutation-pr-source/mutation-changed-manifests" in workflow
     assert "needs: changed-prepare" in workflow
-    assert "Mutation execution requires explicit maintainer dispatch" in workflow
-    assert '\"status\":\"unknown\"' in workflow
-    assert '\"passed\":false' in workflow
-    assert "if: needs.changed-prepare.result != 'success'" in workflow
-    assert "needs.changed-prepare.outputs.shard_count != '0'" in workflow
+    assert "fail-fast: false" in workflow
+    assert "--resume-manifest" not in workflow
+    assert "mutation-pr-shard-${{ github.run_id }}-${{ matrix.shard }}" in workflow
 
 
-def test_changed_mutation_workflow_retains_truthful_nonpass_summary():
+def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
-    assert '\"qualification_executed\":false' in workflow
     assert '\"status\":\"not_applicable\"' in workflow
     assert '\"status\":\"unknown\"' in workflow
+    assert "--aggregate mutation-pr-reports" in workflow
+    assert '--base "$BASE_SHA" --shard-count "$SHARD_COUNT"' in workflow
+    assert "Aggregate mutation evidence is missing or malformed" in workflow
     assert "--github-summary mutation-report.json" in workflow
-    assert "mutation-pr-containment-${{ github.run_id }}" in workflow
+    assert "mutation-pr-advisory-${{ github.run_id }}" in workflow
+    assert "retention-days: 90" in workflow
     assert "if-no-files-found: error" in workflow
+    assert "historical shard 71 projects to 6.38 hours" in workflow
 
 
 def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():
@@ -1502,17 +1506,18 @@ def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():
     assert "--timeout 1740" in workflow
 
 
-def test_mutation_workflows_have_one_authoritative_check_producer():
-    workflows = [
-        yaml.safe_load(path.read_text())
-        for path in (Path(PLUGIN_DIR) / ".github/workflows").glob("*.yml")
-    ]
+def test_mutation_workflows_have_one_check_producer_per_event_route():
+    authoritative = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
+    )
+    advisory = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
 
-    assert sum(
-        job.get("name") == "mutation evidence"
-        for workflow in workflows
-        for job in workflow.get("jobs", {}).values()
-    ) == 1
+    assert sum(job.get("name") == "mutation evidence" for job in authoritative["jobs"].values()) == 1
+    assert sum(job.get("name") == "${{ 'mutation evidence' }}" for job in advisory["jobs"].values()) == 1
+    assert "pull_request" not in authoritative[True]
+    assert "pull_request" in advisory[True]
 
 
 def test_mutation_workflows_pin_supported_node24_setup_uv():

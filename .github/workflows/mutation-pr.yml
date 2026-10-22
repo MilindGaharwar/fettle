@@ -1,10 +1,10 @@
-name: Mutation PR containment
+name: Mutation PR advisory
 
 on:
   pull_request:
 
 concurrency:
-  group: mutation-pr-containment-${{ github.event.pull_request.number }}
+  group: mutation-pr-advisory-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -13,76 +13,207 @@ permissions:
 jobs:
   changed-prepare:
     name: mutation (prepare changed scope)
-    continue-on-error: true
     runs-on: ubuntu-latest
     outputs:
+      matrix: ${{ steps.prepare.outputs.matrix }}
       shard_count: ${{ steps.prepare.outputs.shard_count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
-      - name: Prepare bounded changed-scope partitions
+      - name: Prepare exact-base changed-scope partitions
         id: prepare
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --no-sync python -m fettle.mutation_test --root . --base "origin/${BASE_REF}" --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
-          echo "shard_count=$(uv run --no-sync python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: steps.prepare.outputs.shard_count != '0'
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          uv run --no-sync python -m fettle.mutation_test --root . --base "$BASE_SHA" \
+            --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
+          uv run --no-sync python - <<'PY'
+          import json, os
+          from pathlib import Path
+          prepared = json.loads(Path("prepare-changed.json").read_text())
+          count = prepared["shard_count"]
+          if prepared.get("status") != "completed" or not isinstance(count, int) or not 0 <= count <= 256:
+              raise SystemExit(2)
+          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"shard_count":count}
+          Path("mutation-pr-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
+          PY
+          echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
+          echo "shard_count=$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" >> "$GITHUB_OUTPUT"
+      - name: Retain changed-scope manifests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mutation-changed-manifests-${{ github.run_id }}
-          path: mutation-changed-manifests
+          name: mutation-pr-manifests-${{ github.run_id }}
+          path: |
+            mutation-changed-manifests
+            prepare-changed.json
+            mutation-pr-identity.json
           if-no-files-found: error
+          retention-days: 1
 
-  containment:
-    if: always()
+  changed-shard:
+    if: needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0'
     needs: changed-prepare
-    name: mutation qualification pending
+    name: mutation (changed shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.changed-prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-pr-manifests-${{ github.run_id }}
+          path: mutation-pr-source
+      - name: Execute one manifest-bound advisory attempt
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SHARD_COUNT: ${{ needs.changed-prepare.outputs.shard_count }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          set +e
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --manifest "mutation-pr-source/mutation-changed-manifests/partition-${{ matrix.shard }}.json" \
+            --manifest-scope mutation-pr-source/mutation-changed-manifests \
+            --shard-index "${{ matrix.shard }}" --shard-count "$SHARD_COUNT" \
+            --timeout 21300 --json > mutation-report.json.tmp
+          status=$?
+          set -e
+          python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
+          mv mutation-report.json.tmp mutation-report.json
+          exit "$status"
+      - name: Retain shard report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-pr-shard-${{ github.run_id }}-${{ matrix.shard }}
+          path: mutation-report.json
+          if-no-files-found: error
+          retention-days: 1
+
+  aggregate:
+    if: always()
+    needs: [changed-prepare, changed-shard]
+    name: ${{ 'mutation evidence' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - run: uv venv --python 3.12.13 && uv pip install --quiet --no-deps -e .
-      - name: Reject incomplete changed-scope preparation
-        if: needs.changed-prepare.result != 'success' || needs.changed-prepare.outputs.shard_count == ''
-        run: exit 1
-      - name: Record non-applicable changed scope
-        if: needs.changed-prepare.outputs.shard_count == '0'
+      - name: Download exact changed-scope manifests
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-pr-manifests-${{ github.run_id }}
+          path: mutation-pr-source
+      - name: Download all shard reports
+        if: always() && needs.changed-prepare.outputs.shard_count != '0'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-pr-shard-${{ github.run_id }}-*
+          path: mutation-pr-reports
+          merge-multiple: false
+      - name: Aggregate complete exact-head evidence
+        if: always()
+        # Every missing, malformed, or indeterminate path emits {"status":"unknown","passed":false}.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SHARD_COUNT: ${{ needs.changed-prepare.outputs.shard_count }}
+          PREPARE_RESULT: ${{ needs.changed-prepare.result }}
         run: |
-          cat > mutation-report.json <<'JSON'
-          {"status":"not_applicable","message":"No mutation-relevant changed scope","score":null,"passed":true,"qualification_executed":false}
-          JSON
-      - name: Record required explicit qualification
-        if: needs.changed-prepare.outputs.shard_count != '0'
+          if [ "$PREPARE_RESULT" != success ] || [ -z "$SHARD_COUNT" ] || [ ! -f mutation-pr-source/mutation-pr-identity.json ]; then
+            python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope preparation evidence is missing or malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
+          elif [ "$SHARD_COUNT" = 0 ]; then
+            python - <<'PY'
+          import json, os
+          try:
+              identity=json.load(open("mutation-pr-source/mutation-pr-identity.json"))
+              valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("shard_count")==0)
+          except (OSError, ValueError, TypeError):
+              valid=False
+          json.dump({"status":"not_applicable" if valid else "unknown","message":"No mutation-relevant changed scope" if valid else "Changed-scope identity is malformed","revision":os.environ["HEAD_SHA"],"score":None,"passed":valid},open("mutation-report.json","w"),separators=(",",":"))
+          PY
+          else
+            if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
+              python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope identity is malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
+            fi
+            if [ ! -f mutation-report.json ]; then
+              set +e
+              uv run --no-sync python -m fettle.mutation_test --root . \
+                --aggregate mutation-pr-reports \
+                --aggregate-scope mutation-pr-source/mutation-changed-manifests \
+                --base "$BASE_SHA" --shard-count "$SHARD_COUNT" --json > mutation-report.json.tmp
+              status=$?
+              set -e
+              if python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)' 2>/dev/null; then
+                mv mutation-report.json.tmp mutation-report.json
+              else
+                python -c 'import json; json.dump({"status":"unknown","message":"Aggregate mutation evidence is missing or malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
+              fi
+              test "$status" -eq 0 || true
+            fi
+          fi
+      - name: Record advisory scope and shard-71 risk
+        if: always() && hashFiles('mutation-report.json') != ''
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          cat > mutation-report.json <<'JSON'
-          {"status":"unknown","message":"Mutation execution requires explicit maintainer dispatch; automatic PR fan-out is contained","score":null,"passed":false,"qualification_executed":false}
-          JSON
-      - name: Mutation summary
-        if: always() && hashFiles('mutation-report.json') != ''
-        run: >-
-          uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json
-          --artifact-name mutation-pr-containment-${{ github.run_id }}
-          --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
-      - name: Retain mutation containment evidence
-        if: always() && hashFiles('mutation-report.json') != ''
+          {
+            echo "### PR mutation advisory scope"
+            echo "- Head: \`$HEAD_SHA\`"
+            echo "- Base: \`$BASE_SHA\`"
+            echo "- One attempt per changed-scope shard; per-mutant timeouts remain advisory debt."
+            echo "- Runtime risk: historical shard 71 projects to 6.38 hours at ×1.25 uncertainty; the job remains capped at 360 minutes and any incomplete report is non-pass."
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json \
+            --artifact-name mutation-pr-advisory-${{ github.run_id }} \
+            --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
+      - name: Retain complete PR advisory evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mutation-pr-containment-${{ github.run_id }}
-          path: mutation-report.json
+          name: mutation-pr-advisory-${{ github.run_id }}
+          path: |
+            mutation-report.json
+            mutation-pr-source
+            mutation-pr-reports
           if-no-files-found: error
-      - name: Enforce mutation containment result
+          retention-days: 90
+      - name: Enforce mutation advisory result
         if: always()
         run: >-
-          uv run --no-sync python -c "import json,sys;
+          python -c "import json,sys;
           report=json.load(open('mutation-report.json'));
           sys.exit(0 if report.get('passed') is True else 2)"
