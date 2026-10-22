@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "types": {
+    "critical_paths": [
+      "fettle/evidence_ledger.py",
+      "fettle/dispatcher.py",
+      "fettle/dispatcher_types.py",
+      "fettle/dispatcher_registry.py",
+      "fettle/action_entrypoint.py",
+      "fettle/quality_scan.py",
+      "fettle/config.py"
+    ],
+    "whole_source": "fettle",
+    "advisory_baseline": {
+      "errors": 214,
+      "files": 36
+    }
+  },
+  "coverage": {
+    "combined_floor": 65.0,
+    "branch_floor": 69.0
+  }
+}

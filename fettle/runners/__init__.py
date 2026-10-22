@@ -69,3 +69,33 @@ RUNNER_NAMES: frozenset[str] = frozenset({"claude", "codex", "gemini", "opencode
 def detect_runners() -> dict[str, bool]:
     """Availability probe over all registered runners (feeds doctor/UAT)."""
     return {name: get_runner(name).available() for name in sorted(RUNNER_NAMES)}
+
+
+@dataclass
+class UATRunner:
+    """UAT launch policy: retain host permission checks and hook trust."""
+
+    name: str
+    arguments: tuple[str, ...]
+
+    def available(self) -> bool:
+        return get_runner(self.name).available()
+
+    def run(self, prompt: str, cwd: Path, timeout_s: int = 600) -> RunnerResult:
+        from fettle.runners._subprocess import run_cli
+
+        return run_cli(self.name, [*self.arguments, prompt], cwd, timeout_s)
+
+
+def get_uat_runner(name: str) -> AgentRunner:
+    """Select an explicitly permission-preserving UAT transport."""
+    arguments = {
+        "claude": ("--permission-mode", "manual", "-p"),
+        "codex": ("--ask-for-approval", "on-request", "exec", "--sandbox", "read-only"),
+    }
+    if name not in arguments:
+        raise ValueError(
+            f"runner '{name}' has no qualified permission-preserving UAT mode; "
+            "use claude or codex with normal host permissions"
+        )
+    return UATRunner(name, arguments[name])

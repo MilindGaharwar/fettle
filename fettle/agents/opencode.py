@@ -34,6 +34,7 @@ _EVENT_MAP = {
 
 _TOOL_MAP = {
     "bash": "Bash",
+    "shell": "Bash",
     "edit": "Edit",
     "read": "Read",
     "write": "Write",

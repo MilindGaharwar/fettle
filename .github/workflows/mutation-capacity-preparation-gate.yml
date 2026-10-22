@@ -1,0 +1,136 @@
+name: Mutation capacity preparation gate
+
+on:
+  workflow_call:
+    inputs:
+      admitted_shards:
+        required: true
+        type: string
+      next_shards:
+        required: true
+        type: string
+      candidate_sha:
+        required: true
+        type: string
+      experiment_id:
+        required: true
+        type: string
+      gate_id:
+        required: true
+        type: number
+      authorization_id:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  gate:
+    name: capacity validation (preparation admission)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate active grant before provider collection
+        env:
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+        run: >-
+          python -c 'import os; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])'
+      - name: Collect complete current-attempt provider state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m fettle.staged_preflight collect-stable-jobs \
+            --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --output capacity-preparation-jobs.json \
+            --attempts-directory capacity-preparation-collection-attempts \
+            --report capacity-preparation-collection.json \
+            --max-attempts 4 --max-elapsed-seconds 45 --retry-delay-seconds 2
+      - name: Charge observed work and reserve the next batch
+        env:
+          ADMITTED_SHARDS: ${{ inputs.admitted_shards }}
+          NEXT_SHARDS: ${{ inputs.next_shards }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          GATE_ID: ${{ inputs.gate_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import UTC, datetime
+          from pathlib import Path
+          from fettle.staged_preflight import (
+              account_runner_minutes, evaluate_capacity_preparation_admission,
+              capacity_authorization_contract,
+          )
+          assert os.environ["GITHUB_RUN_ATTEMPT"] == "1"
+          assert os.environ["CANDIDATE_SHA"] == os.environ["GITHUB_SHA"]
+          authorization_id = capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"])["authorization_id"]
+          admitted = json.loads(os.environ["ADMITTED_SHARDS"])
+          next_shards = json.loads(os.environ["NEXT_SHARDS"])
+          accounting = account_runner_minutes(
+              Path("capacity-preparation-jobs.json"), datetime.now(UTC),
+              expected_run_id=os.environ["GITHUB_RUN_ID"],
+              expected_run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+              job_timeout_minutes=35,
+          )
+          pages = json.loads(Path("capacity-preparation-jobs.json").read_text())
+          jobs = [job for page in pages for job in page["jobs"]]
+          monitors = [
+              job for job in jobs
+              if str(job.get("name", "")).endswith(
+                  "capacity validation (monitor preparation containment)"
+              )
+          ]
+          gate_id = int(os.environ["GATE_ID"])
+          if gate_id:
+              assert len(monitors) == 1
+              monitor = monitors[0]
+              live = monitor.get("status") == "in_progress" and monitor.get("conclusion") is None
+              complete = (
+                  monitor.get("status") == "completed"
+                  and monitor.get("conclusion") == "success"
+              )
+              assert live or complete
+          decision = evaluate_capacity_preparation_admission(
+              accounting, admitted_shards=admitted, next_shards=next_shards,
+          )
+          decision.update({
+              "authorization_id": authorization_id,
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "active_jobs": decision["active_shards"],
+              "evidence": {
+                  "provider_jobs": "capacity-preparation-jobs.json",
+                  "accounting_source_sha256": accounting["source_sha256"],
+              },
+              "next_permitted_action": (
+                  "admit_exact_next_shards" if decision["passed"] and next_shards
+                  else "freeze_exact_sample" if decision["passed"]
+                  else "stop_and_reconcile"
+              ),
+          })
+          Path("capacity-preparation-admission.json").write_text(
+              json.dumps(decision, indent=2) + "\n"
+          )
+          if decision["passed"] is not True:
+              raise SystemExit(2)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-preparation-admission-${{ github.run_id }}-${{ inputs.gate_id }}
+          path: |
+            capacity-preparation-jobs.json
+            capacity-preparation-collection.json
+            capacity-preparation-collection-attempts
+            capacity-preparation-admission.json
+          if-no-files-found: warn
+          retention-days: 90

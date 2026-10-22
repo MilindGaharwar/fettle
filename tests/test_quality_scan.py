@@ -34,6 +34,27 @@ VIOLATION = (
 CLEAN = "def f():\n    return 1\n"
 
 
+@pytest.mark.parametrize("status", [ResultStatus.TOOL_ERROR, ResultStatus.CONFIG_ERROR])
+@pytest.mark.parametrize("update_baseline", [False, True])
+def test_standalone_scanner_failure_is_nonpass(tmp_path, monkeypatch, capsys, status, update_baseline):
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text("[]\n")
+    monkeypatch.setattr(sys, "argv", ["quality_scan", "--root", str(tmp_path), "--json",
+                                     "--baseline", str(baseline)]
+                        + (["--update-baseline"] if update_baseline else []))
+    for scanner in ("ruff", "semgrep"):
+        monkeypatch.setattr(quality_scan, "execute_" + scanner,
+                            lambda targets, tool=scanner: quality_scan.ToolScanResult(
+                                tool, status, message="analyzer unavailable"))
+    monkeypatch.setattr(quality_scan, "scan_spec_audit", lambda *args: [])
+
+    assert quality_scan.main() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == status.value
+    assert len(result["tool_errors"]) == 2
+    assert baseline.read_text() == "[]\n"
+
+
 def run_scan(root: str, *extra_args: str):
     """Run quality_scan.py and return (parsed json | None, rc, stderr)."""
     proc = subprocess.run(
@@ -127,6 +148,37 @@ class TestQualityScan:
             assert not any(f["file"].startswith("build/") for f in result["findings"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_files_report_only_findings_for_requested_targets(self, tmp_path, monkeypatch):
+        requested = tmp_path / "app.py"
+        requested.write_text(CLEAN)
+        outside = tmp_path / "other.py"
+        outside.write_text(CLEAN)
+        findings = [
+            {
+                "file": str(path), "line": 1, "rule": "BLE001",
+                "message": message, "severity": "ERROR", "tool": "ruff",
+            }
+            for path, message in ((requested, "requested"), (outside, "outside"))
+        ]
+        monkeypatch.setattr(
+            quality_scan, "execute_ruff",
+            lambda _targets: quality_scan.ToolScanResult(
+                "ruff", ResultStatus.VIOLATION, findings,
+            ),
+        )
+        monkeypatch.setattr(
+            quality_scan, "execute_semgrep",
+            lambda _targets: quality_scan.ToolScanResult("semgrep", ResultStatus.PASS),
+        )
+        monkeypatch.setattr(quality_scan, "scan_spec_audit", lambda *_args: [])
+
+        result = quality_scan.scan_project(str(tmp_path), files=[str(requested)])
+
+        assert result["status"] == ResultStatus.VIOLATION.value
+        assert result["file_count"] == 1
+        assert [finding["file"] for finding in result["findings"]] == ["app.py"]
+        assert [finding["message"] for finding in result["findings"]] == ["requested"]
 
     def test_fettle_ignore_filters_findings(self):
         root = make_project({

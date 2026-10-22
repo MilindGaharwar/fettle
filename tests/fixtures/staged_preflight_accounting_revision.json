@@ -1,0 +1,21 @@
+{
+  "provenance": {
+    "source_run_id": "37795579761",
+    "source_run_attempt": "1",
+    "candidate_sha": "abed35141a0734b46f753e914d9450265e5a34ee",
+    "job_id": 113377920861,
+    "snapshot_sha256": [
+      "ee61bcdf4cf58527f5ffb1ffda499647cb1e7ed849f0d5bbd50c6d239b613f6c",
+      "d578de47c85aef63ac217556f7c15d5ce13a1081dfa9d534ac69cdd29ece896f",
+      "fbbbcbaea0b31d46fd6c5ef43a30cf6bc878e0c6538b344065e8c8eca6b2c8a5"
+    ],
+    "terminal_jobs_sha256": "78d3c3c171d8a215cab59b2157c86f13c73d17d950f5831bd6ede7e55a44c0eb",
+    "observation_time_basis": "retained Actions log lines reporting each budget-gate rejection"
+  },
+  "observations": [
+    {"observed_at": "2026-10-08T14:57:20.0955845Z", "created_at": "2026-10-08T14:57:13Z", "status": "queued", "conclusion": null, "started_at": "2026-10-08T14:57:13Z", "completed_at": null, "runner_id": null, "steps": []},
+    {"observed_at": "2026-10-08T14:57:36.0481048Z", "created_at": "2026-10-08T14:57:13Z", "status": "queued", "conclusion": null, "started_at": "2026-10-08T14:57:13Z", "completed_at": null, "runner_id": null, "steps": []},
+    {"observed_at": "2026-10-08T14:57:51.8871167Z", "created_at": "2026-10-08T14:57:13Z", "status": "queued", "conclusion": null, "started_at": "2026-10-08T14:57:13Z", "completed_at": null, "runner_id": null, "steps": []}
+  ],
+  "terminal": {"status": "completed", "conclusion": "success", "started_at": "2026-10-08T14:59:24Z", "completed_at": "2026-10-08T15:00:34Z", "runner_id": 1000042570, "steps_present": true}
+}

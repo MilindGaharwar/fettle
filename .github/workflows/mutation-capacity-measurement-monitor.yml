@@ -1,0 +1,206 @@
+name: Mutation capacity measurement monitor
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+      experiment_id:
+        required: true
+        type: string
+      authorization_id:
+        required: true
+        type: string
+      execution_controller_sha:
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  monitor:
+    name: capacity validation (monitor measurement containment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Monitor exact-once measurement exposure
+        id: monitor
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXECUTION_CONTROLLER_SHA: ${{ inputs.execution_controller_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          set +e
+          mkdir -p capacity-measurement-monitor
+          if ! python -c 'import os; from fettle.staged_preflight import capacity_measurement_authorization_contract; c=capacity_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"],os.environ["CANDIDATE_SHA"],os.environ["EXPERIMENT_ID"],execution_controller_sha=os.environ["EXECUTION_CONTROLLER_SHA"]); source=c.get("source_candidate_sha",c.get("candidate_sha")); assert source==os.environ["CANDIDATE_SHA"]; assert os.environ["EXECUTION_CONTROLLER_SHA"]==os.environ["GITHUB_SHA"]; assert c.get("execution_controller_sha",os.environ["GITHUB_SHA"])==os.environ["GITHUB_SHA"]'; then
+            printf '%s\n' '{"action":"cancel","reason":"capacity diagnostic authorization is invalid"}' \
+              > capacity-measurement-monitor/final-decision.json
+            exit 2
+          fi
+          if [ "$GITHUB_RUN_ATTEMPT" != 1 ] || { [ "$AUTHORIZATION_ID" = AH-PREP-CONTAINMENT-20261019-C ] && [ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]; }; then
+            printf '%s\n' '{"action":"cancel","reason":"measurement identity differs"}' \
+              > capacity-measurement-monitor/final-decision.json
+            exit 2
+          fi
+          for sample in $(seq 1 20); do
+            jobs="capacity-measurement-monitor/jobs-$sample.json"
+            decision="capacity-measurement-monitor/decision-$sample.json"
+            attempts="capacity-measurement-monitor/collection-$sample-attempts"
+            collection="capacity-measurement-monitor/collection-$sample.json"
+            if ! python -m fettle.staged_preflight collect-stable-jobs \
+              --endpoint "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+              --output "$jobs" --attempts-directory "$attempts" --report "$collection" \
+              --max-attempts 4 --max-elapsed-seconds 30 --retry-delay-seconds 2; then
+              printf '%s\n' '{"action":"cancel","reason":"provider accounting unavailable"}' > "$decision"
+              cp "$decision" capacity-measurement-monitor/final-decision.json
+              exit 2
+            fi
+            JOBS="$jobs" DECISION="$decision" python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          from fettle.staged_preflight import capacity_measurement_authorization_contract
+
+          pages = json.loads(Path(os.environ["JOBS"]).read_text())
+          contract = capacity_measurement_authorization_contract(
+              os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"],
+              os.environ["EXPERIMENT_ID"],
+              execution_controller_sha=os.environ["EXECUTION_CONTROLLER_SHA"],
+          )
+          authorization_id = contract["authorization_id"]
+          if (
+              not isinstance(pages, list) or not pages
+              or any(not isinstance(page, dict) or not isinstance(page.get("jobs"), list)
+                     for page in pages)
+          ):
+              raise ValueError("measurement provider pagination is malformed")
+          totals = {page.get("total_count") for page in pages}
+          jobs = [job for page in pages for job in page["jobs"]]
+          ids = [job.get("id") for job in jobs]
+          if (
+              len(totals) != 1 or totals.pop() != len(jobs)
+              or len(ids) != len(set(ids))
+              or any(type(job_id) is not int or job_id < 1 for job_id in ids)
+              or any(str(job.get("run_id")) != os.environ["EXPECTED_RUN_ID"] for job in jobs)
+              or any(str(job.get("run_attempt")) != os.environ["EXPECTED_RUN_ATTEMPT"] for job in jobs)
+          ):
+              raise ValueError("measurement provider pagination is incomplete or duplicated")
+
+          recovery = authorization_id == "AH-CORPUS-RECOVERY-20261020-A"
+          linux_measurement = authorization_id == "AH-LINUX-MEASUREMENT-20261021-A"
+          worker = re.compile(r"^(?:[^/]+ / )?capacity (?:recovery )?validation unit (\d+)$")
+          admitted = set(range(12)) if recovery else {0, 1, 2, 3}
+          successful_names = {
+              str(job.get("name", "")) for job in jobs
+              if job.get("status") == "completed" and job.get("conclusion") == "success"
+          }
+          if "capacity validation (admit batch 2)" in successful_names:
+              admitted.update(range(4, 8))
+          if "capacity validation (admit batch 3)" in successful_names:
+              admitted.update(range(8, 12))
+
+          worker_states = {
+              int(match.group(1)): (job.get("status"), job.get("conclusion"))
+              for job in jobs
+              if (match := worker.fullmatch(str(job.get("name", "")))) is not None
+          }
+          if linux_measurement and all(
+              worker_states.get(index) == ("completed", "success") for index in range(4)
+          ):
+              admitted.update(range(4, 8))
+          if linux_measurement and all(
+              worker_states.get(index) == ("completed", "success") for index in range(4, 8)
+          ):
+              admitted.update(range(8, 12))
+
+          observed = []
+          terminal = []
+          failed = []
+          terminal_conclusions = {
+              "success", "failure", "cancelled", "timed_out", "action_required",
+              "neutral", "skipped", "stale", "startup_failure",
+          }
+          for job in jobs:
+              match = worker.fullmatch(str(job.get("name", "")))
+              if match is None:
+                  continue
+              status = job.get("status")
+              conclusion = job.get("conclusion")
+              if (
+                  status not in {"queued", "in_progress", "completed"}
+                  or (status != "completed" and conclusion is not None)
+                  or (status == "completed" and conclusion not in terminal_conclusions)
+              ):
+                  raise ValueError("measurement worker lifecycle is malformed or contradictory")
+              index = int(match.group(1))
+              if index not in admitted:
+                  raise ValueError("measurement worker appeared before admission")
+              observed.append(index)
+              if status == "completed":
+                  terminal.append(index)
+                  if conclusion != "success":
+                      failed.append(index)
+          if len(observed) != len(set(observed)) or len(observed) > 12:
+              raise ValueError("measurement worker identity is duplicated or excessive")
+          if failed:
+              action, reason = "cancel", "an admitted measurement worker failed"
+          elif sorted(terminal) == list(range(12)):
+              action, reason = "complete", "all 12 measurement workers are terminal-success"
+          else:
+              action, reason = "continue", "measurement remains exact-once and admitted"
+          Path(os.environ["DECISION"]).write_text(json.dumps({
+              "schema_version": "1", "kind": "capacity_measurement_monitor_decision",
+              "authorization_id": authorization_id,
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "action": action, "reason": reason, "admitted_units": sorted(admitted),
+              "observed_units": sorted(observed), "terminal_units": sorted(terminal),
+              "failed_units": sorted(failed), "worker_ceiling_minutes": 240,
+              "controller_ceiling_minutes": 30, "transferable": False,
+              "active_jobs": sorted(set(observed) - set(terminal)),
+              "evidence": {"provider_jobs": os.environ["JOBS"]},
+              "next_permitted_action": (
+                  "dispatch_terminal_readback" if action == "complete"
+                  else "continue_observation" if action == "continue"
+                  else "stop_and_reconcile"
+              ),
+          }, indent=2) + "\n")
+          raise SystemExit(0 if action == "continue" else 10 if action == "complete" else 2)
+          PY
+            status=$?
+            cp "$decision" capacity-measurement-monitor/final-decision.json
+            if [ "$status" -eq 10 ]; then exit 0; fi
+            if [ "$status" -ne 0 ]; then exit 2; fi
+            sleep 20
+          done
+          printf '%s\n' '{"action":"transfer_containment","reason":"exact-once workers remain bounded by their hard job deadlines","next_permitted_action":"await_terminal_workers"}' \
+            > capacity-measurement-monitor/final-decision.json
+          exit 0
+      - name: Retain measurement monitor state before cancellation
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-measurement-monitor-${{ github.run_id }}
+          path: capacity-measurement-monitor
+          if-no-files-found: error
+          retention-days: 90
+      - name: Request cancellation after retaining diagnostics
+        if: steps.monitor.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --method POST
+          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
+      - name: Require successful terminal observation
+        if: always()
+        run: test "${{ steps.monitor.outcome }}" = "success"

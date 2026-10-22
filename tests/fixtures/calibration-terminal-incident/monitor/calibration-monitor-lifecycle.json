@@ -1,0 +1,79 @@
+{
+  "schema_version": "1",
+  "kind": "calibration_observer_sample",
+  "passed": true,
+  "billing_authority": false,
+  "completion_guaranteed": false,
+  "elapsed_seconds": 1825,
+  "expected_workers": 8,
+  "expected_shards": [
+    8,
+    27,
+    28,
+    37,
+    48,
+    50,
+    51,
+    53
+  ],
+  "admitted_shards": [
+    8,
+    27,
+    28,
+    37,
+    48,
+    50,
+    51,
+    53
+  ],
+  "observed_worker_jobs": 8,
+  "terminal_workers": 8,
+  "terminal_shards": [
+    8,
+    27,
+    28,
+    37,
+    48,
+    50,
+    51,
+    53
+  ],
+  "missing_terminal_shards": [],
+  "pending_admission_shards": [],
+  "completed_admissions": 0,
+  "expected_admissions": 0,
+  "route_complete": true,
+  "action": "complete",
+  "reason": "all admitted workers are terminal",
+  "contract": {
+    "schema_version": "1",
+    "kind": "calibration_observer_contract",
+    "shard_count": 8,
+    "expected_shards": [
+      8,
+      27,
+      28,
+      37,
+      48,
+      50,
+      51,
+      53
+    ],
+    "max_parallel": 8,
+    "worker_timeout_minutes": 35,
+    "worker_waves": 1,
+    "admission_dependencies": 0,
+    "components": {
+      "worker_waves_minutes": 35,
+      "scheduling_minutes": 5,
+      "polling_minutes": 1,
+      "publication_minutes": 5,
+      "cancellation_minutes": 5,
+      "reconciliation_minutes": 5,
+      "shutdown_minutes": 9
+    },
+    "observer_deadline_seconds": 3360,
+    "job_timeout_minutes": 65,
+    "completion_guaranteed": false
+  }
+}

@@ -4,7 +4,7 @@
 One Python process per hook event. Reads stdin once, loads config once,
 selects and runs applicable checks, aggregates output.
 
-Fail-open on all errors. Never crashes the session.
+Optional checks fail open; required checks fail closed when execution is incomplete.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fettle.config import load_config  # noqa: E402
 from fettle.dispatcher_aggregate import Aggregator  # noqa: E402
-from fettle.dispatcher_registry import select_checks  # noqa: E402
+from fettle.dispatcher_registry import CHECKS, select_checks  # noqa: E402
 from fettle.dispatcher_types import CheckResult, HookContext  # noqa: E402
 from fettle.trace import build_evidence, log_decision, log_evidenced_decision, read_tail  # noqa: E402
 
@@ -138,49 +138,65 @@ def main() -> int:
     session_id = hook_input.session_id or ""
 
     try:
-        config = load_config(str(cwd))
-    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+        config = load_config(str(cwd), strict=True)
+        budget_ms = _event_budget_ms(config, hook_input.hook_event_name)
+        deadline = start + (budget_ms / 1000.0)
+        ctx = HookContext(
+            input=hook_input,
+            config=config,
+            plugin_root=_REPO_ROOT,
+            hook_start_monotonic=start,
+            global_deadline_monotonic=deadline,
+        )
+        advisory_cfg = config.get("gates", {}).get("advisory", {})
+        aggregator = Aggregator(
+            total_budget_ms=budget_ms,
+            hook_event_name=hook_input.hook_event_name,
+            max_advisories_per_turn=int(advisory_cfg.get("max_per_turn", 3)),
+            max_advisory_bytes=int(advisory_cfg.get("max_total_bytes", 2048)),
+        )
+        required_names = {
+            spec.name for spec in CHECKS
+            if spec.matches(ctx) and spec.is_enabled(config) and spec.requires_execution_for(ctx)
+        }
+    except Exception as exc:  # noqa: BLE001 — unknown policy cannot authorize checks
         logger.error("fettle: config load failed: %s", exc, exc_info=True)
         _trace_dispatch_failure(
             "config_error", f"{type(exc).__name__}: {exc}", session_id
         )
-        config = {}
-
-    budget_ms = _event_budget_ms(config, hook_input.hook_event_name)
-    deadline = start + (budget_ms / 1000.0)
-
-    ctx = HookContext(
-        input=hook_input,
-        config=config,
-        plugin_root=_REPO_ROOT,
-        hook_start_monotonic=start,
-        global_deadline_monotonic=deadline,
-    )
-
-    advisory_cfg = config.get("gates", {}).get("advisory", {})
-    aggregator = Aggregator(
-        total_budget_ms=budget_ms,
-        hook_event_name=hook_input.hook_event_name,
-        max_advisories_per_turn=int(advisory_cfg.get("max_per_turn", 3)),
-        max_advisory_bytes=int(advisory_cfg.get("max_total_bytes", 2048)),
-    )
+        failure = Aggregator(total_budget_ms=0, hook_event_name=hook_input.hook_event_name)
+        failure.add_result("dispatcher", CheckResult.block(
+            "Policy configuration could not be loaded; required checks are unknown. "
+            "Run `fettle doctor` and retry."
+        ), 0)
+        output, exit_code = failure.finish()
+        print(json.dumps(output, separators=(",", ":")))
+        return exit_code
 
     try:
         checks = select_checks(ctx)
-    except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
+    except Exception as exc:  # noqa: BLE001 — retain required policy when selection fails
         logger.error("fettle: check registry failed: %s", exc, exc_info=True)
         _trace_dispatch_failure(
             "registry_error", f"{type(exc).__name__}: {exc}", session_id
         )
+        message = "Check selection failed; checks did not run. Run `fettle doctor` and retry."
+        aggregator.add_result(
+            "dispatcher",
+            CheckResult.block(message) if required_names else CheckResult.tool_error(message, action="fettle doctor"),
+            0,
+        )
         checks = []
 
-    for spec in checks:
+    for index, spec in enumerate(checks):
         if time.monotonic() > deadline:
-            if spec.fail_closed:
+            required = next((remaining for remaining in checks[index:]
+                             if remaining.requires_execution_for(ctx)), None)
+            if required:
                 aggregator.add_result(
-                    spec.name,
+                    required.name,
                     CheckResult.block(
-                        "Secret protection timed out before execution; the tool was not run. "
+                        f"Required check '{required.name}' could not run before the deadline. "
                         "Run `fettle doctor` and retry."
                     ),
                     0,
@@ -200,14 +216,15 @@ def main() -> int:
         try:
             result = spec.run(ctx)
             if result is None:
-                result = CheckResult.allow()
+                result = (CheckResult.unknown("Required check returned no result", action="retry")
+                          if spec.requires_execution_for(ctx) else CheckResult.allow())
         except Exception as exc:  # noqa: BLE001 — isolate check failures
-            if spec.fail_closed:
+            if spec.requires_execution_for(ctx):
                 logger.error("fettle: security check %s failed closed", spec.name)
                 aggregator.add_result(
                     spec.name,
                     CheckResult.block(
-                        "Secret protection failed closed; the tool was not run. "
+                        f"Required check '{spec.name}' failed closed. "
                         "Run `fettle doctor` and retry."
                     ),
                     int((time.monotonic() - check_start) * 1000),
@@ -217,6 +234,10 @@ def main() -> int:
             aggregator.record_check_error(spec.name, f"{type(exc).__name__}: {exc}")
             continue
 
+        if spec.requires_execution_for(ctx) and result.result_state.value in {"tool_error", "unknown"}:
+            result = CheckResult.block(
+                f"Required check '{spec.name}' did not complete. Run `fettle doctor` and retry."
+            )
         elapsed_ms = int((time.monotonic() - check_start) * 1000)
         aggregator.add_result(spec.name, result, elapsed_ms)
         if result.findings or result.evidence or spec.name == "authorship_gate":

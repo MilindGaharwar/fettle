@@ -143,6 +143,22 @@ def test_module_interpreter_is_current_python():
     assert canary._python() == Path(sys.executable).resolve()
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (f'"{sys.executable}" -m fettle.dispatcher', True),
+        (f'"{sys.executable}" XX-mXX fettle.dispatcher', False),
+        (f'"{sys.executable}" -m fettle.other', False),
+        (f'"{sys.executable}" -m fettle.dispatcher extra', False),
+        (f'"{sys.executable}" -m "fettle.dispatcher', False),
+        ('/different/python -m fettle.dispatcher', False),
+        (None, False),
+    ],
+)
+def test_registered_command_must_bind_exact_dispatcher_invocation(command, expected):
+    assert canary._command_binds_python(command) is expected
+
+
 def test_init_uses_platform_bridge_root(tmp_path, monkeypatch):
     home = tmp_path / "home"
     work_root = tmp_path / "work"

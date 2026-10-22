@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import signal
 import shlex
 import shutil
 import sqlite3
@@ -17,9 +18,11 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import uuid
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -33,6 +36,7 @@ from fettle.evidence import (
     Validity,
     validate_artifact,
 )
+from fettle.runtime_secret_guard import redact_secrets
 
 MUTMUT_VERSION = "2.5.1"
 _STATES = ("killed", "survived", "timeout", "suspicious", "untested", "skipped")
@@ -63,6 +67,8 @@ _MAX_SHOW_BYTES = 50 * 1024 * 1024
 _PARTITION_SCHEMA_VERSION = "1"
 _MUTATION_CACHE_SCHEMA_VERSION = "1"
 _CHECKPOINT_SCHEMA_VERSION = "1"
+_CAPACITY_PLAN_SCHEMA_VERSION = "2"
+_CAPACITY_RESULT_SCHEMA_VERSION = "1"
 _MUTATION_WATCH_NAMES = (
     ".fettle.toml", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini",
     "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "requirements-dev.txt",
@@ -71,11 +77,412 @@ _MUTATION_CACHE_DIR = Path(".fettle/mutation-cache")
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    if argv[:2] == ["mutmut", "run"]:
+        return _run_mutmut_process(argv, root, timeout)
     return subprocess.run(argv, cwd=root, env=_ENV, capture_output=True, text=True, timeout=timeout)
+
+
+_SOURCE_IGNORES = {
+    ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
+    "__pycache__", "build", "dist", "node_modules", "venv",
+}
+_MUTATION_RESIDUE_SUFFIXES = {".bak", ".orig", ".rej"}
+_WINDOWS_CREATE_SUSPENDED = 0x00000004
+
+
+class _MutationProcessTerminationError(OSError):
+    """The mutation worker tree could not be confirmed stopped."""
+
+    def __init__(self, message: str, *, tree_stopped: bool = False) -> None:
+        super().__init__(message)
+        self.tree_stopped = tree_stopped
+
+
+def _attach_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    """Bind a Windows worker tree to a kill-on-close job object."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimitInformation),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(process._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException:
+        kernel32.CloseHandle(job)
+        raise
+    process._fettle_job_handle = job  # type: ignore[attr-defined]
+
+
+def _resume_windows_process(process: subprocess.Popen[str]) -> None:
+    """Resume a worker only after Job Object containment is established."""
+    import ctypes
+    from ctypes import wintypes
+
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = wintypes.LONG
+    status = ntdll.NtResumeProcess(wintypes.HANDLE(process._handle))
+    if status != 0:
+        raise OSError(f"NtResumeProcess failed with NTSTATUS 0x{status & 0xffffffff:08x}")
+
+
+def _stop_unattached_windows_process(process: subprocess.Popen[str]) -> None:
+    """Stop and confirm a suspended worker that could not join its Job Object."""
+    try:
+        process.kill()
+        process.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+        raise _MutationProcessTerminationError(
+            f"cannot confirm unattached Windows mutation process stopped: {exc}",
+            tree_stopped=False,
+        ) from exc
+
+
+def _close_windows_kill_job(process: subprocess.Popen[str]) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    job = getattr(process, "_fettle_job_handle", None)
+    if job is None:
+        raise OSError("mutation process has no Windows job object")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    termination_error = None
+    try:
+        if not kernel32.TerminateJobObject(job, 1):
+            termination_error = ctypes.WinError(ctypes.get_last_error())
+        wait_result = kernel32.WaitForSingleObject(job, 10_000)
+        if wait_result != 0:  # WAIT_OBJECT_0
+            if wait_result == 0x00000102:  # WAIT_TIMEOUT
+                raise _MutationProcessTerminationError(
+                    "timed out terminating Windows mutation job", tree_stopped=False,
+                )
+            raise _MutationProcessTerminationError(
+                f"cannot confirm Windows mutation job termination: {ctypes.WinError(ctypes.get_last_error())}",
+                tree_stopped=False,
+            )
+        if termination_error is not None:
+            raise _MutationProcessTerminationError(
+                f"Windows mutation job termination failed: {termination_error}", tree_stopped=True,
+            )
+    finally:
+        kernel32.CloseHandle(job)
+        process._fettle_job_handle = None  # type: ignore[attr-defined]
+
+
+def _mutation_source_state(root: str) -> tuple[dict[str, tuple[bytes, int]], set[str]]:
+    root_path = Path(root)
+    sources: dict[str, tuple[bytes, int]] = {}
+    residue: set[str] = set()
+    for path in root_path.rglob("*"):
+        relative = path.relative_to(root_path)
+        if any(part in _SOURCE_IGNORES for part in relative.parts):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix == ".py":
+            sources[relative.as_posix()] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+        if path.suffix in _MUTATION_RESIDUE_SUFFIXES:
+            residue.add(relative.as_posix())
+    return sources, residue
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    termination_error = None
+    tree_stopped = False
+    try:
+        if os.name == "posix":
+            # The session leader can exit before its workers. Kill the process
+            # group even after the leader has returned so no descendant can
+            # mutate source after the integrity check.
+            os.killpg(process.pid, signal.SIGKILL)
+        else:  # pragma: no cover - exercised by the Windows workflow
+            _close_windows_kill_job(process)
+        tree_stopped = True
+    except ProcessLookupError:
+        tree_stopped = True
+    except (OSError, subprocess.SubprocessError) as exc:
+        termination_error = exc
+        tree_stopped = getattr(exc, "tree_stopped", False)
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        if process.poll() is None:
+            process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait()
+    if termination_error is not None:
+        raise _MutationProcessTerminationError(
+            f"mutation process tree termination failed: {termination_error}",
+            tree_stopped=tree_stopped,
+        ) from termination_error
+
+
+def _restore_mutation_source_state(
+    root: str,
+    before_sources: dict[str, tuple[bytes, int]],
+    before_residue: set[str],
+    mutation_scope: set[str],
+) -> tuple[str, list[str]]:
+    root_path = Path(root)
+    try:
+        after_sources, after_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify source after mutation execution: {exc}", []
+    errors = []
+    restored = []
+    for relative, (content, mode) in before_sources.items():
+        if after_sources.get(relative) == (content, mode):
+            continue
+        target = root_path / relative
+        backup = target.with_name(target.name + ".bak")
+        try:
+            observed = after_sources.get(relative)
+            if observed is not None and observed[0] == content and relative in mutation_scope:
+                os.chmod(target, mode)
+                continue
+            backup_relative = backup.relative_to(root_path).as_posix()
+            if (
+                backup_relative in before_residue
+                or backup.is_symlink()
+                or not backup.is_file()
+                or backup.read_bytes() != content
+            ):
+                errors.append(f"{relative}: changed without a matching mutation backup")
+                continue
+            descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, suffix=".fettle-restore")
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary_name, mode)
+                os.replace(temporary_name, target)
+                backup.unlink()
+                restored.append(relative)
+            finally:
+                if os.path.exists(temporary_name):
+                    os.unlink(temporary_name)
+        except OSError as exc:
+            errors.append(f"{relative}: restoration failed ({exc})")
+    try:
+        restored_sources, restored_residue = _mutation_source_state(root)
+    except OSError as exc:
+        return f"cannot verify restored source: {exc}", restored
+    if restored_sources != before_sources:
+        errors.append("whole-source manifest differs after restoration")
+    new_residue = sorted(restored_residue - before_residue)
+    if new_residue:
+        errors.append("new mutation residue remains: " + ", ".join(new_residue))
+    return "; ".join(errors), restored
+
+
+def _mutmut_source_scope(argv: list[str]) -> set[str]:
+    prefix = "--paths-to-mutate="
+    values = [argument.removeprefix(prefix) for argument in argv if argument.startswith(prefix)]
+    if len(values) != 1:
+        return set()
+    scope = set()
+    for value in values[0].split(","):
+        path = Path(value)
+        if not value or path.is_absolute() or ".." in path.parts:
+            return set()
+        scope.add(path.as_posix())
+    return scope
+
+
+def _run_mutmut_process(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run mutmut with whole-source restoration and residue verification."""
+    try:
+        before_sources, before_residue = _mutation_source_state(root)
+    except OSError as exc:
+        raise OSError(f"cannot capture pre-run mutation source manifest: {exc}") from exc
+    mutation_scope = _mutmut_source_scope(argv)
+    popen_kwargs = {"start_new_session": True} if os.name == "posix" else {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _WINDOWS_CREATE_SUSPENDED,
+    }
+    stdout = stderr = ""
+    prior_handlers = {}
+    process = None
+    interrupted_by = None
+    if os.name == "posix" and threading.current_thread() is threading.main_thread():
+        def interrupted(signum, _frame):
+            nonlocal interrupted_by
+            interrupted_by = signum
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        for signum in (signal.SIGHUP, signal.SIGTERM):
+            prior_handlers[signum] = signal.signal(signum, interrupted)
+    try:
+        try:
+            process = subprocess.Popen(
+                argv, cwd=root, env=_ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **popen_kwargs,
+            )
+            if os.name == "nt":  # pragma: no cover - exercised by the Windows workflow
+                try:
+                    _attach_windows_kill_job(process)
+                    _resume_windows_process(process)
+                except (OSError, KeyboardInterrupt) as exc:
+                    try:
+                        if getattr(process, "_fettle_job_handle", None) is not None:
+                            _close_windows_kill_job(process)
+                        else:
+                            _stop_unattached_windows_process(process)
+                    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as cleanup_exc:
+                        if isinstance(cleanup_exc, _MutationProcessTerminationError):
+                            raise cleanup_exc from exc
+                        raise _MutationProcessTerminationError(
+                            f"Windows mutation startup cleanup failed: {cleanup_exc}",
+                            tree_stopped=False,
+                        ) from exc
+                    raise
+        except (OSError, KeyboardInterrupt) as exc:
+            if getattr(exc, "tree_stopped", True):
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue, mutation_scope,
+                )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from exc
+            raise
+        if interrupted_by is not None:
+            _terminate_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            _terminate_process_tree(process)
+            if interrupted_by is not None:
+                raise InterruptedError(
+                    f"mutation execution interrupted by signal {interrupted_by}"
+                )
+        except (subprocess.TimeoutExpired, OSError, KeyboardInterrupt) as exc:
+            termination_error = exc if isinstance(exc, _MutationProcessTerminationError) else None
+            if termination_error is None:
+                try:
+                    _terminate_process_tree(process)
+                except _MutationProcessTerminationError as cleanup_exc:
+                    termination_error = cleanup_exc
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+            tree_stopped = termination_error is None or termination_error.tree_stopped
+            if tree_stopped:
+                integrity_error, _ = _restore_mutation_source_state(
+                    root, before_sources, before_residue, mutation_scope,
+                )
+                if integrity_error:
+                    raise OSError("mutation source integrity failure: " + integrity_error) from (
+                        termination_error or exc
+                    )
+            if termination_error is not None:
+                raise termination_error from exc
+            if isinstance(exc, subprocess.TimeoutExpired):
+                exc.output = stdout
+                exc.stderr = stderr
+            raise
+    finally:
+        for signum, handler in prior_handlers.items():
+            signal.signal(signum, handler)
+    integrity_error, restored = _restore_mutation_source_state(
+        root, before_sources, before_residue, mutation_scope,
+    )
+    if integrity_error:
+        raise OSError("mutation source integrity failure: " + integrity_error)
+    if restored:
+        raise OSError(
+            "mutation source integrity failure: mutmut returned without restoring: "
+            + ", ".join(restored)
+        )
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def _bounded(text: str) -> str:
     return text.strip()[-2000:]
+
+
+_ABSOLUTE_DIAGNOSTIC_PATH = re.compile(
+    r"(?i)(?:file:///|(?<![\w:/>])[A-Z]:[\\/]|(?<![\\])\\\\[^\\]"
+    r"|(?<![\w:/>.])/[A-Z0-9._~-])"
+)
+
+
+def _safe_mutation_diagnostic(value: object, root: str | None = None) -> str:
+    """Return bounded diagnostics without credentials or machine-local paths."""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = ""
+    if root:
+        resolved = str(Path(root).resolve())
+        text = text.replace(resolved, "<repo>").replace(resolved.replace("/", "\\"), "<repo>")
+    text = redact_secrets(text)
+    text = "\n".join(
+        "[REDACTED: absolute path]" if _ABSOLUTE_DIAGNOSTIC_PATH.search(line) else line
+        for line in text.splitlines()
+    )
+    return _bounded(text)
 
 
 def _error(status: str, message: str, **evidence) -> dict:
@@ -199,7 +606,7 @@ def _mapped_tests(
     files: list[str],
     test_mappings: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
-    """Map each production module to convention and direct-import tests."""
+    """Map each module to all matching tests, running its convention test first."""
     root_path = Path(root)
     test_paths = sorted((root_path / "tests").glob("test_*.py"))
     imports: dict[str, set[str]] = {}
@@ -225,12 +632,31 @@ def _mapped_tests(
             module = module.removesuffix(".__init__")
         matches = set(imports.get(module, set())) | set((test_mappings or {}).get(file, []))
         stem = Path(file).stem
+        owner = f"tests/test_{stem}.py"
         if stem not in {"__init__", "__main__"}:
-            candidate = root_path / "tests" / f"test_{stem}.py"
+            candidate = root_path / owner
+            if not candidate.is_file():
+                nested_name = module.split(".", 1)[-1].replace(".", "_")
+                owner = f"tests/test_{nested_name}.py"
+                candidate = root_path / owner
             if candidate.is_file():
                 matches.add(candidate.relative_to(root_path).as_posix())
-        mapped[file] = sorted(matches)
+        mapped[file] = sorted(matches, key=lambda test: (test != owner, test))
     return mapped
+
+
+def _validated_mapped_test_order(recorded: list[str], actual: list[str]) -> list[str]:
+    """Validate semantic membership while retaining the source runner's real order."""
+    for value, label in ((recorded, "recorded"), (actual, "actual")):
+        if (
+            not isinstance(value, list)
+            or any(not isinstance(item, str) or not item for item in value)
+            or len(value) != len(set(value))
+        ):
+            raise ValueError(f"capacity validation {label} test mapping is malformed or duplicated")
+    if set(recorded) != set(actual):
+        raise ValueError("capacity validation selection test mapping differs")
+    return actual
 
 
 def _has_mutmut() -> bool:
@@ -481,13 +907,107 @@ def _write_json_atomic(path: Path, value: dict) -> None:
             os.unlink(temporary)
 
 
+def load_mutation_report_candidates(root: Path) -> tuple[list[dict], list[dict]]:
+    """Load canonical reports while retaining zero-byte historical objects as quarantine."""
+    reports = []
+    quarantined = []
+    for path in sorted(root.rglob("mutation-report.json")) if root.exists() else []:
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if not raw:
+            quarantined.append({
+                "path": path.as_posix(), "sha256": digest, "size": 0,
+                "reason": "zero-byte historical report is not a selectable representation",
+            })
+            continue
+        try:
+            report = json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"mutation report {path} is malformed") from exc
+        if not isinstance(report, dict):
+            raise ValueError(f"mutation report {path} is not a JSON object")
+        reports.append({**report, "_retained_path": path.as_posix(), "_retained_sha256": digest})
+    return reports, quarantined
+
+
+def build_calibration_representation_inventory(
+    reports_root: Path,
+    selected: list[dict],
+    expected_shards: list[int],
+    quarantined: list[dict],
+) -> dict:
+    """Bind consolidation to one explicitly selected immutable report per shard."""
+    by_shard = {report.get("shard_index"): report for report in selected}
+    if sorted(by_shard) != sorted(expected_shards) or len(by_shard) != len(selected):
+        raise ValueError("calibration representation inventory is incomplete or duplicated")
+    representations = []
+    for index in sorted(expected_shards):
+        report = by_shard[index]
+        path = report.get("_retained_path")
+        digest = report.get("_retained_sha256")
+        if not isinstance(path, str) or not re.fullmatch(r"[0-9a-f]{64}", str(digest)):
+            raise ValueError("selected report lacks retained representation identity")
+        try:
+            relative_path = Path(path).relative_to(reports_root)
+        except ValueError as exc:
+            raise ValueError("selected report is outside the reports root") from exc
+        representations.append({
+            "shard_index": index, "kind": "report",
+            "path": relative_path.as_posix(), "sha256": digest,
+        })
+    return {
+        "schema_version": "1", "kind": "calibration_representation_inventory",
+        "reports_root": reports_root.as_posix(),
+        "representations": representations,
+        "quarantined": quarantined,
+    }
+
+
+def read_calibration_representation_inventory(path: Path) -> list[dict]:
+    """Read only the digest-bound report representations selected by validation."""
+    inventory = json.loads(path.read_text(encoding="utf-8"))
+    entries = inventory.get("representations") if isinstance(inventory, dict) else None
+    if (
+        inventory.get("schema_version") != "1"
+        or inventory.get("kind") != "calibration_representation_inventory"
+        or not isinstance(entries, list) or not entries
+    ):
+        raise ValueError("calibration representation inventory is malformed")
+    reports_root = path.parent
+    declared_root = inventory.get("reports_root")
+    if isinstance(declared_root, str) and Path(declared_root).name != path.parent.name:
+        reports_root = path.parent
+    reports = []
+    seen = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict) or entry.get("kind") != "report"
+            or not isinstance(entry.get("shard_index"), int)
+            or isinstance(entry.get("shard_index"), bool)
+            or entry["shard_index"] in seen
+            or not isinstance(entry.get("path"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", "")))
+        ):
+            raise ValueError("calibration representation inventory entry is malformed")
+        report_path = reports_root / entry["path"]
+        raw = report_path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+            raise ValueError("calibration representation digest differs")
+        report = json.loads(raw)
+        if not isinstance(report, dict) or report.get("shard_index") != entry["shard_index"]:
+            raise ValueError("calibration representation content differs")
+        reports.append(report)
+        seen.add(entry["shard_index"])
+    return reports
+
+
 def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: set[str]) -> dict:
     """Merge compatible terminal evidence while leaving failed attempts pending."""
     if not checkpoints:
         raise ValueError("at least one mutation checkpoint is required")
     first = checkpoints[0]
     required = {"schema_version", "calibration_id", "identity", "outcomes", "attempts"}
-    allowed = required | {"status", "pending"}
+    allowed = required | {"status", "pending", "incomplete_reason"}
     if not required <= set(first) <= allowed or first.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION:
         raise ValueError("mutation checkpoint has an unsupported schema")
     calibration_id = first.get("calibration_id")
@@ -497,7 +1017,10 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
     outcomes: dict[str, dict] = {}
     attempts: list[dict] = []
     seen_attempts: set[str] = set()
-    terminal_states = set(_STATES) - {"untested"}
+    # `skipped` means mutmut did not make the required mutation decision. It is
+    # retained in raw reports for diagnostics, but cannot close a calibration
+    # ledger or disappear from the required corpus.
+    terminal_states = set(_STATES) - {"untested", "skipped"}
     for checkpoint in checkpoints:
         if not isinstance(checkpoint, dict) or not required <= set(checkpoint) <= allowed:
             raise ValueError("mutation checkpoint has an unsupported schema")
@@ -507,6 +1030,9 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
             raise ValueError("mutation checkpoints belong to different calibrations")
         if checkpoint.get("identity") != identity:
             raise ValueError("mutation checkpoint identity differs")
+        reason = checkpoint.get("incomplete_reason")
+        if reason is not None and reason not in {"deadline_exhausted", "execution_error"}:
+            raise ValueError("mutation checkpoint incomplete reason is malformed")
         checkpoint_outcomes = checkpoint.get("outcomes")
         checkpoint_attempts = checkpoint.get("attempts")
         if not isinstance(checkpoint_outcomes, dict) or not isinstance(checkpoint_attempts, list):
@@ -532,12 +1058,25 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
                 raise ValueError("mutation checkpoint attempt is outside its corpus")
             if attempt.get("status") not in {"completed", "execution_error"}:
                 raise ValueError("mutation checkpoint attempt is malformed")
+            if attempt.get("status") == "execution_error":
+                allowed_attempt = {"fingerprint", "status", "message", "stdout", "stderr"}
+                if (
+                    not set(attempt) <= allowed_attempt
+                    or not isinstance(attempt.get("message"), str)
+                    or attempt["message"] != _safe_mutation_diagnostic(attempt["message"])
+                    or any(
+                        not isinstance(attempt.get(stream, ""), str)
+                        or attempt.get(stream, "") != _safe_mutation_diagnostic(attempt.get(stream, ""))
+                        for stream in ("stdout", "stderr")
+                    )
+                ):
+                    raise ValueError("mutation checkpoint execution diagnostic is unsafe")
             digest = _canonical_digest(attempt)
             if digest not in seen_attempts:
                 attempts.append(dict(attempt))
                 seen_attempts.add(digest)
     pending = len(expected_fingerprints - outcomes.keys())
-    return {
+    merged = {
         "schema_version": _CHECKPOINT_SCHEMA_VERSION,
         "calibration_id": calibration_id,
         "identity": identity,
@@ -546,6 +1085,15 @@ def merge_mutation_checkpoints(checkpoints: list[dict], expected_fingerprints: s
         "status": "completed" if pending == 0 else "incomplete",
         "pending": pending,
     }
+    reasons = {
+        checkpoint.get("incomplete_reason") for checkpoint in checkpoints
+        if checkpoint.get("incomplete_reason") is not None
+    }
+    if pending and reasons:
+        merged["incomplete_reason"] = (
+            "execution_error" if "execution_error" in reasons else "deadline_exhausted"
+        )
+    return merged
 
 
 def pending_mutation_records(corpus: list[dict], checkpoint: dict) -> list[dict]:
@@ -576,9 +1124,11 @@ def execute_pending_mutations(
     """Execute only pending canonical mutants after verifying current local IDs."""
     expected = {record["fingerprint"] for record in corpus}
     merged = merge_mutation_checkpoints([checkpoint], expected)
+    merged.pop("incomplete_reason", None)
     if checkpoint_path is not None:
         _write_json_atomic(checkpoint_path, merged)
     started = time.monotonic()
+    deadline_exhausted = False
     for file in sorted(mapping):
         file_pending = [record for record in pending_mutation_records(corpus, merged) if record["file"] == file]
         if not file_pending:
@@ -586,11 +1136,16 @@ def execute_pending_mutations(
         ranges = [item for item in line_ranges if item["file"] == file]
         remaining = timeout - int(time.monotonic() - started)
         if remaining < 1:
+            deadline_exhausted = True
             break
         generated = _preflight_mutmut(
             root, [file], mapping[file], {file: mapping[file]}, remaining, ranges,
         )
         if generated.get("status") != "completed":
+            deadline_exhausted = generated.get("deadline_exhausted") is True
+            merged["incomplete_reason"] = (
+                "deadline_exhausted" if deadline_exhausted else "execution_error"
+            )
             break
         current = {record["fingerprint"]: record for record in generated.get("corpus", [])}
         file_expected = {record["fingerprint"] for record in corpus if record["file"] == file}
@@ -599,12 +1154,21 @@ def execute_pending_mutations(
         for record in file_pending:
             remaining = timeout - int(time.monotonic() - started)
             if remaining < 1:
+                deadline_exhausted = True
                 break
-            engine_id = current[record["fingerprint"]].get("locator", {}).get("engine_id")
+            regenerated = current[record["fingerprint"]]
+            locator = regenerated.get("locator", {})
+            if regenerated.get("file") != file or locator.get("file") != file:
+                raise ValueError(f"regenerated mutation locator differs for {file}")
+            engine_id = locator.get("engine_id")
+            if not isinstance(engine_id, str) or re.fullmatch(r"[1-9][0-9]*", engine_id) is None:
+                raise ValueError(f"regenerated mutation engine ID is invalid for {file}")
             attempt_started = time.monotonic()
+            run = None
             try:
                 run = _run([
-                    "mutmut", "run", engine_id, "--test-time-base", str(timeout), "--runner",
+                    "mutmut", "run", engine_id, "--paths-to-mutate=" + file,
+                    "--test-time-base", str(timeout), "--runner",
                     "python -m pytest -x --assert=plain " + shlex.join(mapping[file]),
                 ], root, remaining)
                 if run.returncode < 0 or run.returncode & 1 or run.returncode & ~15:
@@ -617,6 +1181,8 @@ def execute_pending_mutations(
                 observed = [state for state in _STATES if engine_id in ids[state]]
                 if len(observed) != 1 or observed[0] == "untested":
                     raise OSError("mutmut did not produce one terminal outcome")
+                if observed[0] == "skipped":
+                    raise OSError("mutmut skipped a required mutation outcome")
                 duration_ms = round((time.monotonic() - attempt_started) * 1000)
                 merged["outcomes"][record["fingerprint"]] = {
                     "state": observed[0], "duration_ms": duration_ms,
@@ -629,14 +1195,27 @@ def execute_pending_mutations(
                 merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                merged["attempts"].append({
+            except subprocess.TimeoutExpired:
+                deadline_exhausted = True
+                merged["incomplete_reason"] = "deadline_exhausted"
+                break
+            except OSError as exc:
+                attempt = {
                     "fingerprint": record["fingerprint"], "status": "execution_error",
-                    "message": str(exc),
-                })
+                    "message": _safe_mutation_diagnostic(str(exc), root),
+                }
+                if run is not None:
+                    attempt.update(
+                        stdout=_safe_mutation_diagnostic(run.stdout, root),
+                        stderr=_safe_mutation_diagnostic(run.stderr, root),
+                    )
+                merged["attempts"].append(attempt)
+                merged["incomplete_reason"] = "execution_error"
                 if checkpoint_path is not None:
                     _write_json_atomic(checkpoint_path, merged)
                 break
+        if deadline_exhausted:
+            break
         if any(
             attempt["status"] == "execution_error"
             for attempt in merged["attempts"][-len(file_pending):]
@@ -644,6 +1223,10 @@ def execute_pending_mutations(
             break
     merged["pending"] = len(expected - merged["outcomes"].keys())
     merged["status"] = "completed" if merged["pending"] == 0 else "incomplete"
+    if merged["status"] == "completed":
+        merged.pop("incomplete_reason", None)
+    elif deadline_exhausted:
+        merged["incomplete_reason"] = "deadline_exhausted"
     if checkpoint_path is not None:
         _write_json_atomic(checkpoint_path, merged)
     return merged
@@ -669,6 +1252,1588 @@ def report_from_mutation_checkpoint(corpus: list[dict], checkpoint: dict) -> dic
         "non_killed": sorted(records, key=lambda record: record["fingerprint"]),
         "duration_ms": sum(outcome["duration_ms"] for outcome in outcomes.values()),
     }
+
+
+def _capacity_unit_candidates(preflight: dict, manifests: list[dict]) -> list[dict]:
+    """Map the corpus exactly once to executor-compatible shard/file windows."""
+    corpus = preflight.get("corpus")
+    if not isinstance(corpus, list):
+        raise ValueError("capacity validation preflight corpus is malformed")
+    by_shard: dict[int, list[dict]] = {}
+    for record in corpus:
+        if not isinstance(record, dict) or not isinstance(record.get("shard_index"), int):
+            raise ValueError("capacity validation corpus record is malformed")
+        by_shard.setdefault(record["shard_index"], []).append(record)
+    candidates = []
+    seen: set[str] = set()
+    for manifest in manifests:
+        shard = manifest["shard_index"]
+        shard_records = by_shard.get(shard, [])
+        ranges_by_file: dict[str, list[dict]] = {}
+        for line_range in manifest["ranges"]:
+            ranges_by_file.setdefault(line_range["file"], []).append(dict(line_range))
+        for file, ranges in sorted(ranges_by_file.items()):
+            records = sorted(
+                (
+                    record for record in shard_records
+                    if record.get("file") == file
+                ),
+                key=lambda record: record["fingerprint"],
+            )
+            if not records:
+                continue
+            groups = {tuple(record.get("mapped_tests", [])) for record in records}
+            if len(groups) != 1 or not next(iter(groups)):
+                raise ValueError("capacity validation file window has inconsistent mapped tests")
+            fingerprints = [record["fingerprint"] for record in records]
+            if any(not isinstance(item, str) or item in seen for item in fingerprints):
+                raise ValueError("capacity validation file-window fingerprints are duplicated or malformed")
+            seen.update(fingerprints)
+            mapped_tests = list(next(iter(groups)))
+            candidates.append({
+                "source_shard_index": shard,
+                "manifest_digest": manifest["digest"],
+                "file": file,
+                "ranges": sorted(ranges, key=lambda item: (item["start"], item["end"])),
+                "mapped_tests": mapped_tests,
+                "mapped_test_group_digest": _canonical_digest(mapped_tests),
+                "fingerprints": fingerprints,
+            })
+    declared = preflight.get("fingerprints")
+    if not isinstance(declared, list) or seen != set(declared):
+        raise ValueError("capacity validation file windows do not exactly cover the canonical corpus")
+    return candidates
+
+
+def build_capacity_validation_plan(
+    root: str,
+    cfg: dict,
+    preflight: dict,
+    manifests: list[dict],
+    *,
+    experiment_id: str,
+    revision: str,
+    historical_measured_files: set[str],
+    historical_source: dict,
+    prediction_seconds: dict[str, float],
+    environment_identities: dict[str, dict] | None = None,
+) -> dict:
+    """Freeze low/high whole-file units across six mapped-test-cost strata."""
+    from fettle.staged_preflight import (
+        validate_capacity_authorization,
+        validate_capacity_authorization_contract,
+    )
+
+    authorization_id = validate_capacity_authorization(preflight.get("authorization_id"))
+    authorization_contract = validate_capacity_authorization_contract(
+        preflight.get("authorization_contract"),
+        authorization_id=authorization_id,
+        candidate_sha=revision,
+        experiment_id=experiment_id,
+    )
+    if re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}", experiment_id) is None:
+        raise ValueError("capacity validation experiment ID is malformed")
+    if (
+        preflight.get("kind") != "capacity_validation_corpus"
+        or preflight.get("status") != "enumerated"
+        or preflight.get("passed") is not False
+        or any(preflight.get(field) is not False for field in (
+            "qualification_eligible", "billing_authority", "authoritative_predecessor",
+        ))
+    ):
+        raise ValueError("capacity validation requires a completed canonical enumeration")
+    if preflight.get("revision") != revision or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("capacity validation candidate revision differs")
+    manifests = sorted(manifests, key=lambda item: item.get("shard_index", -1))
+    if [item.get("shard_index") for item in manifests] != list(range(len(manifests))):
+        raise ValueError("capacity validation manifests are incomplete")
+    manifest_digests = [item["digest"] for item in manifests]
+    if preflight.get("manifest_digests") != manifest_digests:
+        raise ValueError("capacity validation enumeration is not bound to the manifests")
+    corpus = preflight.get("corpus")
+    fingerprints = preflight.get("fingerprints")
+    if (
+        preflight.get("shard_count") != len(manifests)
+        or not isinstance(corpus, list)
+        or not isinstance(fingerprints, list)
+        or fingerprints != sorted(fingerprints)
+        or len(fingerprints) != len(set(fingerprints))
+        or preflight.get("corpus_digest") != _canonical_digest(corpus)
+        or [record.get("fingerprint") for record in corpus if isinstance(record, dict)] != fingerprints
+    ):
+        raise ValueError("capacity validation canonical enumeration identity is malformed")
+    required_predictions = {"optimistic", "central", "conservative", "stress"}
+    if set(prediction_seconds) != required_predictions or any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 600
+        for value in prediction_seconds.values()
+    ):
+        raise ValueError("capacity validation prediction assumptions are malformed")
+    if any(not isinstance(item, str) or not item.endswith(".py") for item in historical_measured_files):
+        raise ValueError("capacity validation historical file identity is malformed")
+    historical_required = {
+        "candidate_sha", "run_ids", "artifact_counts", "historical_fingerprint_digest",
+        "candidate_matched_fingerprint_digest", "candidate_matched_fingerprint_count",
+        "candidate_measured_file_digest", "candidate_measured_file_count",
+        "engine_version", "evidence_role", "reusable_for_candidate",
+    }
+    if (
+        set(historical_source) != historical_required
+        or re.fullmatch(r"[0-9a-f]{40}", str(historical_source.get("candidate_sha", ""))) is None
+        or historical_source.get("run_ids") != ["31850858224", "31865158733"]
+        or historical_source.get("artifact_counts") != {
+            "31850858224": 514, "31865158733": 514,
+        }
+        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("historical_fingerprint_digest", ""))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(historical_source.get("candidate_matched_fingerprint_digest", ""))) is None
+        or historical_source.get("candidate_matched_fingerprint_digest")
+        != "cc57b1f709083447884b31ac5f67d647d9fc15a73b2e84bda18d68e06e0aa1de"
+        or historical_source.get("historical_fingerprint_digest")
+        != "75807358bcaaed80efb2f0f3cd5ed99e9f573f2ded26c50e2c6281c851abe5b3"
+        or historical_source.get("candidate_measured_file_digest") != _canonical_digest(
+            sorted(historical_measured_files)
+        )
+        or historical_source.get("candidate_measured_file_count") != len(historical_measured_files)
+        or historical_source.get("engine_version") != MUTMUT_VERSION
+        or historical_source.get("evidence_role") != "modeling_only_terminal_non_pass"
+        or historical_source.get("reusable_for_candidate") is not False
+        or historical_source.get("candidate_sha") == revision
+    ):
+        raise ValueError("capacity validation historical source provenance is malformed")
+
+    candidates = _capacity_unit_candidates(preflight, manifests)
+    candidate_files = {candidate["file"] for candidate in candidates}
+    if not historical_measured_files <= candidate_files:
+        raise ValueError("capacity validation historical measured files differ from candidate")
+    measured_files = historical_measured_files
+    eligible = sorted(
+        (candidate for candidate in candidates if candidate["file"] not in measured_files),
+        key=lambda unit: (
+            len(unit["mapped_tests"]), unit["mapped_test_group_digest"],
+            unit["file"], unit["source_shard_index"],
+        ),
+    )
+    if len(eligible) < 12:
+        raise ValueError("capacity validation requires twelve historically unmeasured file windows")
+    strata = [
+        eligible[(len(eligible) * index) // 6:(len(eligible) * (index + 1)) // 6]
+        for index in range(6)
+    ]
+    if any(len(stratum) < 2 for stratum in strata):
+        raise ValueError("capacity validation mapped-test-cost strata are not meaningful")
+
+    selected = []
+    for stratum_index, stratum in enumerate(strata):
+        units = sorted(
+            stratum,
+            key=lambda unit: (
+                len(unit["fingerprints"]), unit["file"], unit["source_shard_index"],
+            ),
+        )
+        choices = [units[0], units[-1]]
+        if (choices[0]["source_shard_index"], choices[0]["file"]) == (
+            choices[1]["source_shard_index"], choices[1]["file"]
+        ):
+            raise ValueError("capacity validation low/high units are not distinct")
+        for cost_class, unit in zip(("low", "high"), choices, strict=True):
+            count = len(unit["fingerprints"])
+            mapping = _mapped_tests(root, [unit["file"]], cfg.get("test_mappings", {}))
+            mapped_tests = _validated_mapped_test_order(
+                unit["mapped_tests"], mapping.get(unit["file"], []),
+            )
+            environment = (
+                environment_identities.get(unit["file"])
+                if environment_identities is not None
+                else _runtime_cache_identity(root, list(mapping), mapping, cfg)
+            )
+            if environment is None:
+                raise ValueError("capacity validation selection environment identity is incomplete")
+            selected.append({
+                "unit_index": len(selected),
+                "cost_class": cost_class,
+                "cost_stratum": stratum_index,
+                "historically_measured_file": False,
+                **unit,
+                "mapped_tests": mapped_tests,
+                "environment_digest": _checkpoint_environment_digest(environment),
+                "predicted_minutes": {
+                    name: round(count * seconds / 60, 6)
+                    for name, seconds in sorted(prediction_seconds.items())
+                },
+            })
+    selected_fingerprints = [item for unit in selected for item in unit["fingerprints"]]
+    if len(selected) != 12 or len(selected_fingerprints) != len(set(selected_fingerprints)):
+        raise ValueError("capacity validation selection is incomplete or duplicated")
+    plan = {
+        "schema_version": _CAPACITY_PLAN_SCHEMA_VERSION,
+        "kind": "capacity_validation_plan",
+        "status": "completed",
+        "passed": False,
+        "qualification_eligible": False,
+        "billing_authority": False,
+        "authoritative_predecessor": False,
+        "authorization_id": authorization_id,
+        "authorization_contract": authorization_contract,
+        "experiment_id": experiment_id,
+        "revision": revision,
+        "preflight_digest": _canonical_digest(preflight),
+        "preflight_corpus_digest": preflight["corpus_digest"],
+        "manifest_digests": manifest_digests,
+        "selection_policy": "six-mapped-test-cost-strata-unmeasured-files-low-high-fingerprint-count-v2",
+        "prediction_seconds_per_unobserved_fingerprint": dict(sorted(prediction_seconds.items())),
+        "historical_measured_files": sorted(historical_measured_files),
+        "historical_source": historical_source,
+        "decision_contract": capacity_validation_decision_contract(),
+        "coverage": {
+            "canonical_fingerprints": len(preflight["fingerprints"]),
+            "historically_measured_files": len(measured_files),
+            "historically_unmeasured_file_windows": len(eligible),
+            "selected_cost_strata": 6,
+            "selected_units": 12,
+            "selected_fingerprints": len(selected_fingerprints),
+            "supports_corpus_wide_p95": False,
+        },
+        "units": selected,
+    }
+    plan["digest"] = _canonical_digest(plan)
+    return plan
+
+
+def load_capacity_validation_plan(path: Path) -> dict:
+    """Load a strict non-authoritative sample plan."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "schema_version", "kind", "status", "passed", "qualification_eligible",
+        "billing_authority", "authoritative_predecessor", "authorization_id",
+        "authorization_contract",
+        "experiment_id", "revision",
+        "preflight_digest", "preflight_corpus_digest", "manifest_digests",
+        "selection_policy", "prediction_seconds_per_unobserved_fingerprint",
+        "historical_measured_files", "coverage", "units", "digest",
+        "historical_source", "decision_contract",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("capacity validation plan has an unsupported schema")
+    if (
+        value.get("schema_version") != _CAPACITY_PLAN_SCHEMA_VERSION
+        or value.get("kind") != "capacity_validation_plan"
+        or value.get("status") != "completed"
+        or value.get("passed") is not False
+        or any(value.get(field) is not False for field in (
+            "qualification_eligible", "billing_authority", "authoritative_predecessor",
+        ))
+        or len(value.get("units", [])) != 12
+        or value.get("decision_contract") != capacity_validation_decision_contract()
+    ):
+        raise ValueError("capacity validation plan is not non-authoritative and complete")
+    from fettle.staged_preflight import validate_capacity_authorization_contract
+
+    validate_capacity_authorization_contract(
+        value.get("authorization_contract"),
+        authorization_id=value.get("authorization_id"),
+        candidate_sha=value.get("revision"),
+        experiment_id=value.get("experiment_id"),
+    )
+    payload = {key: item for key, item in value.items() if key != "digest"}
+    if value["digest"] != _canonical_digest(payload):
+        raise ValueError("capacity validation plan digest differs")
+    indexes = [unit.get("unit_index") for unit in value["units"] if isinstance(unit, dict)]
+    fingerprints = [
+        fingerprint for unit in value["units"] if isinstance(unit, dict)
+        for fingerprint in unit.get("fingerprints", [])
+    ]
+    if indexes != list(range(12)) or len(fingerprints) != len(set(fingerprints)):
+        raise ValueError("capacity validation plan units are incomplete or duplicated")
+    return value
+
+
+def capacity_validation_decision_contract() -> dict:
+    """Return the pre-observation model decision and timer semantics."""
+    return {
+        "schema_version": "1",
+        "kind": "capacity_validation_decision_contract",
+        "decision": (
+            "invest_in_separately_reviewed_cost_aware_repartitioning_prototype_or_"
+            "reject_fingerprint_ranking_and_or_range_granularity"
+        ),
+        "non_claims": [
+            "optimal_scheduler", "corpus_wide_p95", "full_campaign_budget",
+            "mutation_qualification",
+        ],
+        "reported_calibration_context_not_renewed": {
+            "source": "docs/calibration-budget-contract-amendment.md",
+            "launch_cutoff_runner_minutes": 10800,
+            "material_reserve_runner_minutes": 2160,
+            "material_reserve_fraction_of_launch_cutoff": 0.2,
+            "material_reserve_projection_max_runner_minutes": 8640,
+            "worker_window_seconds": 1740,
+            "maximum_windows_per_shard": 2,
+            "two_window_seconds": 3480,
+        },
+        "prediction_error": {
+            "reference": "central_seconds_per_unobserved_fingerprint",
+            "absolute_relative_error_median_max": 0.35,
+            "optimistic_to_conservative_units_min": 10,
+            "stress_rate_exceedances_max": 0,
+        },
+        "ranking": {
+            "qualifying_count_ratio_min": 1.5,
+            "qualifying_central_delta_seconds_min": 60,
+            "concordance_duration_ratio_min": 1.2,
+            "concordance_delta_seconds_min": 60,
+            "investment_concordant_pairs_min": 5,
+            "investment_material_inversions_max": 0,
+            "material_inversion_duration_ratio_max": 0.8,
+            "material_inversion_delta_seconds_min": 60,
+            "reject_distinct_group_inversions_min": 2,
+        },
+        "timers": {
+            "execution": {
+                "deadline_seconds": 720,
+                "interval": "execute_pending_mutations_monotonic_elapsed",
+                "timeout_semantics": "right_censored_at_observed_execution_boundary",
+            },
+            "workflow_step": {
+                "deadline_seconds": 840,
+                "interval": "github_actions_execute_step_elapsed",
+                "timeout_semantics": "not_an_execution_duration",
+            },
+            "operating_target": {
+                "deadline_seconds": 960,
+                "interval": "whole_provider_worker_elapsed",
+                "timeout_semantics": "not_proven_exceeded_by_720_or_840_second_censoring",
+            },
+            "whole_worker": {
+                "deadline_seconds": 1200,
+                "interval": "whole_provider_worker_elapsed",
+                "timeout_semantics": "hard_containment_not_success",
+            },
+        },
+        "censoring": {
+            "exact_completion": "closed_interval",
+            "verified_incomplete": "right_censored_at_timer_specific_observed_boundary",
+            "unknown": "missing_malformed_stale_conflicting_or_unverifiable",
+            "shorter_timeout_never_proves_operating_target_exceeded": True,
+        },
+        "outcome_precedence": [
+            "reject_granularity_if_exact_attributable_whole_worker_interval_exceeds_960_seconds",
+            "reject_ranking_if_two_material_inversions_in_distinct_qualifying_groups",
+            "invest_if_all_12_exact_and_all_prediction_ranking_timing_identity_gates_pass",
+            "inconclusive",
+        ],
+        "granularity_limit": (
+            "A 720-second execution censor or 840-second step timeout cannot reject the "
+            "960-second range operating target; it makes investment fail and remains inconclusive."
+        ),
+        "substitution_allowed": False,
+        "rerun_allowed": False,
+    }
+
+
+def validate_capacity_validation_package(
+    root: str,
+    cfg: dict,
+    directory: Path,
+    *,
+    revision: str,
+    experiment_id: str,
+    plan_file_sha256: str,
+) -> dict:
+    """Validate every frozen preparation input before measurement fan-out."""
+    plan_path = directory / "capacity-validation-plan.json"
+    corpus_path = directory / "capacity-validation-corpus.json"
+    manifest_dir = directory / "capacity-manifests"
+    if hashlib.sha256(plan_path.read_bytes()).hexdigest() != plan_file_sha256:
+        raise ValueError("capacity validation plan file SHA-256 differs")
+    plan = load_capacity_validation_plan(plan_path)
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    manifests = [
+        load_partition_manifest(path)
+        for path in sorted(
+            manifest_dir.glob("partition-*.json"),
+            key=lambda path: int(path.stem.split("-")[1]),
+        )
+    ]
+    if plan["revision"] != revision or plan["experiment_id"] != experiment_id:
+        raise ValueError("capacity validation plan dispatch identity differs")
+    if _canonical_digest(corpus) != plan["preflight_digest"]:
+        raise ValueError("capacity validation corpus digest differs")
+    if corpus.get("revision") != revision or corpus.get("corpus_digest") != plan["preflight_corpus_digest"]:
+        raise ValueError("capacity validation corpus identity differs")
+    if [manifest["digest"] for manifest in manifests] != plan["manifest_digests"]:
+        raise ValueError("capacity validation manifest identity differs")
+    if len(manifests) != corpus.get("shard_count"):
+        raise ValueError("capacity validation manifests are incomplete")
+    rebuilt = build_capacity_validation_plan(
+        root, cfg, corpus, manifests,
+        experiment_id=experiment_id, revision=revision,
+        historical_measured_files=set(plan["historical_measured_files"]),
+        historical_source=plan["historical_source"],
+        prediction_seconds=plan["prediction_seconds_per_unobserved_fingerprint"],
+    )
+    if rebuilt != plan:
+        raise ValueError("capacity validation plan does not reproduce from its frozen inputs")
+    return plan
+
+
+def build_capacity_recovery_lineage(
+    corpus: dict,
+    plan: dict,
+    artifact_pages: list[dict],
+    job_pages: list[dict],
+    accounting: dict,
+    historical_evidence: dict,
+    *,
+    controller_sha: str,
+    source_executor_sha256: str,
+    recovery_experiment_id: str,
+    plan_file_sha256: str,
+    continuation_run_id: str,
+) -> dict:
+    """Bind a recovered source package without changing its failed source history."""
+    from fettle.staged_preflight import capacity_recovery_authorization_contract
+
+    source_sha = "65e63d953b45d3672c24df74d0a1364b83a0157b"
+    source_run_id = "39263581356"
+    source_grant = "AH-PREP-CONTAINMENT-20261019-C"
+    recovery_grant = "AH-CORPUS-RECOVERY-20261020-A"
+    corpus_digest = "bec653555a4bdbd32159699f3c0bd3826403b326a287a5bf0cc97b157dee6ccf"
+    if (
+        not re.fullmatch(r"[0-9a-f]{40}", controller_sha)
+        or controller_sha == source_sha
+        or re.fullmatch(r"[0-9a-f]{64}", source_executor_sha256) is None
+        or not re.fullmatch(r"[0-9a-f]{64}", plan_file_sha256)
+    ):
+        raise ValueError("capacity recovery controller or plan identity is malformed")
+    if (
+        corpus.get("kind") != "capacity_validation_corpus"
+        or corpus.get("revision") != source_sha
+        or corpus.get("corpus_digest") != corpus_digest
+        or corpus.get("authorization_id") != source_grant
+        or corpus.get("shard_count") != 256
+        or len(corpus.get("manifest_digests", [])) != 256
+        or len(set(corpus.get("manifest_digests", []))) != 256
+        or len(corpus.get("fingerprints", [])) != 52609
+        or len(set(corpus.get("fingerprints", []))) != 52609
+    ):
+        raise ValueError("capacity recovery source corpus identity differs")
+    if (
+        plan.get("kind") != "capacity_validation_plan"
+        or plan.get("revision") != source_sha
+        or plan.get("authorization_id") != source_grant
+        or plan.get("preflight_corpus_digest") != corpus_digest
+        or plan.get("manifest_digests") != corpus["manifest_digests"]
+        or len(plan.get("units", [])) != 12
+    ):
+        raise ValueError("capacity recovery source plan identity differs")
+
+    artifacts = [
+        artifact for page in artifact_pages if isinstance(page, dict)
+        for artifact in page.get("artifacts", []) if isinstance(artifact, dict)
+    ]
+    prefix = f"capacity-validation-enumeration-{source_run_id}-"
+    enumeration = [artifact for artifact in artifacts if str(artifact.get("name", "")).startswith(prefix)]
+    indexes = []
+    artifact_digests = []
+    for artifact in enumeration:
+        try:
+            index = int(artifact["name"].removeprefix(prefix))
+        except (KeyError, ValueError) as exc:
+            raise ValueError("capacity recovery artifact identity is malformed") from exc
+        workflow_run = artifact.get("workflow_run")
+        digest = str(artifact.get("digest", ""))
+        if (
+            not isinstance(workflow_run, dict)
+            or str(workflow_run.get("id")) != source_run_id
+            or workflow_run.get("head_sha") != source_sha
+            or artifact.get("expired") is not False
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        ):
+            raise ValueError("capacity recovery artifact origin or digest differs")
+        indexes.append(index)
+        artifact_digests.append(digest.removeprefix("sha256:"))
+    if sorted(indexes) != list(range(256)) or len(artifact_digests) != len(set(artifact_digests)):
+        raise ValueError("capacity recovery artifacts are missing, duplicated, or substituted")
+
+    historical_artifacts = {
+        artifact.get("name"): artifact for artifact in artifacts
+        if artifact.get("name") in {
+            f"capacity-preparation-admission-{source_run_id}-18",
+            f"capacity-preparation-monitor-{source_run_id}",
+        }
+    }
+    expected_historical_digests = {
+        f"capacity-preparation-admission-{source_run_id}-18":
+            "6215c9dd61fe67deaacee09958177115782de2acaf4b80dbd02b0c4928b616ca",
+        f"capacity-preparation-monitor-{source_run_id}":
+            "cefe007d9ff958e4c7c504176544f439e8fb03d63d85b62b5b87391c5ae0f8f4",
+    }
+    if set(historical_artifacts) != set(expected_historical_digests):
+        raise ValueError("capacity recovery historical artifacts are missing or substituted")
+    for name, expected_digest in expected_historical_digests.items():
+        artifact = historical_artifacts[name]
+        workflow_run = artifact.get("workflow_run")
+        if (
+            artifact.get("expired") is not False
+            or artifact.get("digest") != f"sha256:{expected_digest}"
+            or not isinstance(workflow_run, dict)
+            or str(workflow_run.get("id")) != source_run_id
+            or workflow_run.get("head_sha") != source_sha
+        ):
+            raise ValueError("capacity recovery historical artifact origin or digest differs")
+    expected_historical = {
+        "gate_18": {
+            "artifact_sha256": expected_historical_digests[
+                f"capacity-preparation-admission-{source_run_id}-18"
+            ],
+            "collection_sha256":
+                "08092c3d8d3e293a769741ad69026736aefcb6c1582cbf0dc7ce932fee2d9b96",
+            "jobs_sha256":
+                "81696980bb48b8493928507db0260338b133bf902348dede279934061726c3a4",
+            "observed_nonterminal_job_id": 118127166658,
+            "observed_nonterminal_shard": 249,
+            "observed_status": "in_progress",
+            "observed_conclusion": None,
+            "disposition": "failed_closed_non_pass",
+        },
+        "monitor": {
+            "artifact_sha256": expected_historical_digests[
+                f"capacity-preparation-monitor-{source_run_id}"
+            ],
+            "final_decision_sha256":
+                "be85db0399088309da689f8196dad1efd7efe8aacb775c64993ed66996c19a3a",
+            "action": "stop_and_reconcile",
+            "terminal_evidence": "unavailable",
+            "next_permitted_action": "stop_and_reconcile",
+        },
+    }
+    if historical_evidence != expected_historical:
+        raise ValueError("capacity recovery historical non-pass evidence differs")
+
+    jobs = [
+        job for page in job_pages if isinstance(page, dict)
+        for job in page.get("jobs", []) if isinstance(job, dict)
+    ]
+    worker_by_index = {}
+    pattern = re.compile(r"capacity-enumerate-[0-9]+ \(([0-9]+)\) / capacity validation \(enumerate [0-9]+\)")
+    for job in jobs:
+        match = pattern.fullmatch(str(job.get("name", "")))
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if index in worker_by_index:
+            raise ValueError("capacity recovery worker origin is duplicated")
+        if (
+            str(job.get("run_id")) != source_run_id
+            or str(job.get("run_attempt")) != "1"
+            or job.get("status") != "completed"
+            or job.get("conclusion") != "success"
+        ):
+            raise ValueError("capacity recovery worker is foreign or nonterminal")
+        worker_by_index[index] = job.get("id")
+    if sorted(worker_by_index) != list(range(256)):
+        raise ValueError("capacity recovery terminal worker coverage differs")
+
+    floors = {
+        "workers": 475.89,
+        "support": 10.27,
+        "cancellation_uncertainty": 56.88,
+    }
+    if (
+        not isinstance(accounting, dict)
+        or accounting.get("billing_authority") is not False
+        or accounting.get("historical_operational_floor_minutes") != floors
+        or accounting.get("observed_operational_minutes") != floors
+    ):
+        raise ValueError("capacity recovery historical accounting is incompatible")
+    recovery_contract = capacity_recovery_authorization_contract(
+        recovery_grant, source_sha, recovery_experiment_id,
+    )
+    lineage = {
+        "schema_version": "1",
+        "kind": "capacity_validation_recovery_lineage",
+        "status": "completed",
+        "passed": False,
+        "qualification_eligible": False,
+        "billing_authority": False,
+        "authoritative_predecessor": False,
+        "source": {
+            "candidate_sha": source_sha,
+            "executor_module_sha256": source_executor_sha256,
+            "run_id": source_run_id,
+            "run_attempt": "1",
+            "gate_id": 18,
+            "authorization_id": source_grant,
+            "historical_disposition": "failed_closed_non_pass",
+            "historical_evidence": historical_evidence,
+            "corpus_digest": corpus_digest,
+            "manifest_digests": corpus["manifest_digests"],
+            "artifact_zip_sha256": artifact_digests,
+            "worker_job_ids": [worker_by_index[index] for index in range(256)],
+            "operational_floor_minutes": floors,
+            "observed_operational_minutes": accounting["observed_operational_minutes"],
+        },
+        "recovery": {
+            "authorization_id": recovery_grant,
+            "authorization_contract": recovery_contract,
+            "experiment_id": recovery_experiment_id,
+            "controller_sha": controller_sha,
+            "continuation": {
+                "failed_admitted_run_id": continuation_run_id,
+                "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+                "marker_artifact_id": 12250220498,
+                "marker_digest": "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280",
+                "disposition": "failed_closed_non_pass",
+            },
+        },
+        "package": {
+            "plan_digest": plan["digest"],
+            "plan_file_sha256": plan_file_sha256,
+            "preflight_digest": _canonical_digest(corpus),
+            "selected_units": 12,
+        },
+        "enumeration_repeated": False,
+        "rerun_allowed": False,
+        "substitution_allowed": False,
+    }
+    lineage["digest"] = _canonical_digest(lineage)
+    return lineage
+
+
+def validate_capacity_recovery_lineage(
+    lineage: dict, corpus: dict, plan: dict, *, controller_sha: str,
+    recovery_experiment_id: str, plan_file_sha256: str,
+) -> dict:
+    """Validate the data-only recovery boundary consumed before measurement."""
+    from fettle.staged_preflight import validate_capacity_recovery_authorization_contract
+
+    if not isinstance(lineage, dict) or lineage.get("kind") != "capacity_validation_recovery_lineage":
+        raise ValueError("capacity recovery lineage is missing or malformed")
+    payload = {key: value for key, value in lineage.items() if key != "digest"}
+    source = lineage.get("source")
+    recovery = lineage.get("recovery")
+    package = lineage.get("package")
+    expected_floors = {
+        "workers": 475.89,
+        "support": 10.27,
+        "cancellation_uncertainty": 56.88,
+    }
+    expected_historical = {
+        "gate_18": {
+            "artifact_sha256":
+                "6215c9dd61fe67deaacee09958177115782de2acaf4b80dbd02b0c4928b616ca",
+            "collection_sha256":
+                "08092c3d8d3e293a769741ad69026736aefcb6c1582cbf0dc7ce932fee2d9b96",
+            "jobs_sha256":
+                "81696980bb48b8493928507db0260338b133bf902348dede279934061726c3a4",
+            "observed_nonterminal_job_id": 118127166658,
+            "observed_nonterminal_shard": 249,
+            "observed_status": "in_progress",
+            "observed_conclusion": None,
+            "disposition": "failed_closed_non_pass",
+        },
+        "monitor": {
+            "artifact_sha256":
+                "cefe007d9ff958e4c7c504176544f439e8fb03d63d85b62b5b87391c5ae0f8f4",
+            "final_decision_sha256":
+                "be85db0399088309da689f8196dad1efd7efe8aacb775c64993ed66996c19a3a",
+            "action": "stop_and_reconcile",
+            "terminal_evidence": "unavailable",
+            "next_permitted_action": "stop_and_reconcile",
+        },
+    }
+    artifact_digests = source.get("artifact_zip_sha256", []) if isinstance(source, dict) else []
+    worker_ids = source.get("worker_job_ids", []) if isinstance(source, dict) else []
+    observed = source.get("observed_operational_minutes", {}) if isinstance(source, dict) else {}
+    if (
+        lineage.get("digest") != _canonical_digest(payload)
+        or any(lineage.get(field) is not False for field in (
+            "passed", "qualification_eligible", "billing_authority", "authoritative_predecessor",
+        ))
+        or lineage.get("enumeration_repeated") is not False
+        or lineage.get("rerun_allowed") is not False
+        or lineage.get("substitution_allowed") is not False
+        or not isinstance(source, dict) or not isinstance(recovery, dict) or not isinstance(package, dict)
+        or source.get("historical_disposition") != "failed_closed_non_pass"
+        or source.get("run_id") != "39263581356"
+        or source.get("run_attempt") != "1"
+        or source.get("gate_id") != 18
+        or source.get("authorization_id") != "AH-PREP-CONTAINMENT-20261019-C"
+        or source.get("historical_evidence") != expected_historical
+        or source.get("operational_floor_minutes") != expected_floors
+        or observed != expected_floors
+        or len(artifact_digests) != 256
+        or len(set(artifact_digests)) != 256
+        or any(re.fullmatch(r"[0-9a-f]{64}", str(digest)) is None for digest in artifact_digests)
+        or len(worker_ids) != 256
+        or len(set(worker_ids)) != 256
+        or any(type(job_id) is not int or job_id < 1 for job_id in worker_ids)
+        or re.fullmatch(r"[0-9a-f]{64}", str(source.get("executor_module_sha256", ""))) is None
+        or source.get("candidate_sha") != corpus.get("revision")
+        or source.get("corpus_digest") != corpus.get("corpus_digest")
+        or source.get("manifest_digests") != corpus.get("manifest_digests")
+        or recovery.get("controller_sha") != controller_sha
+        or recovery.get("continuation") != {
+            "failed_admitted_run_id": "39391306615",
+            "head_sha": "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8",
+            "marker_artifact_id": 12250220498,
+            "marker_digest": "sha256:6a938890d590b7dbb48eb5f91c650e5d347f7e86d27d74ef30052f307ba52280",
+            "disposition": "failed_closed_non_pass",
+        }
+        or recovery.get("experiment_id") != recovery_experiment_id
+        or package.get("plan_digest") != plan.get("digest")
+        or package.get("plan_file_sha256") != plan_file_sha256
+        or package.get("preflight_digest") != _canonical_digest(corpus)
+        or package.get("selected_units") != 12
+    ):
+        raise ValueError("capacity recovery lineage is stale or conflicting")
+    validate_capacity_recovery_authorization_contract(
+        recovery.get("authorization_contract"),
+        authorization_id=recovery.get("authorization_id"),
+        candidate_sha=source.get("candidate_sha"),
+        experiment_id=recovery_experiment_id,
+    )
+    return lineage
+
+
+def validate_capacity_validation_results(
+    reports: list[dict],
+    expected_indexes: list[int],
+    *,
+    revision: str,
+    experiment_id: str,
+    plan_digest: str,
+    authorization_id: str,
+    authorization_contract: dict,
+) -> None:
+    """Require complete, distinct, digest-valid unit results before later admission."""
+    if len(reports) != len(expected_indexes):
+        raise ValueError("capacity validation result count differs")
+    if sorted(report.get("unit_index") for report in reports if isinstance(report, dict)) != expected_indexes:
+        raise ValueError("capacity validation result indexes differ")
+    required = {
+        "schema_version", "kind", "status", "passed", "qualification_eligible",
+        "billing_authority", "authoritative_predecessor", "authorization_id",
+        "authorization_contract",
+        "experiment_id", "revision",
+        "plan_digest", "unit_index", "unit", "environment_digest", "outcomes",
+        "attempts", "pending", "elapsed_ms", "source_restoration", "digest",
+    }
+    for report in reports:
+        if (
+            set(report) != required
+            or report.get("schema_version") != _CAPACITY_RESULT_SCHEMA_VERSION
+            or report.get("kind") != "capacity_validation_unit_result"
+            or report.get("status") != "completed"
+            or report.get("pending") != 0
+            or any(report.get(field) is not False for field in (
+                "passed", "qualification_eligible", "billing_authority", "authoritative_predecessor",
+            ))
+            or report.get("revision") != revision
+            or report.get("experiment_id") != experiment_id
+            or report.get("plan_digest") != plan_digest
+            or report.get("authorization_id") != authorization_id
+            or report.get("authorization_contract") != authorization_contract
+            or report.get("source_restoration", {}).get("restored") is not True
+        ):
+            raise ValueError("capacity validation result is incomplete, stale, or authoritative")
+        payload = {key: value for key, value in report.items() if key != "digest"}
+        if report["digest"] != _canonical_digest(payload):
+            raise ValueError("capacity validation result digest differs")
+        fingerprints = report["unit"].get("fingerprints", [])
+        if set(report["outcomes"]) != set(fingerprints) or len(fingerprints) != len(set(fingerprints)):
+            raise ValueError("capacity validation result coverage differs")
+
+
+def validate_capacity_recovery_results(
+    reports: list[dict], provenances: list[dict], expected_indexes: list[int], *, revision: str,
+    experiment_id: str, plan_digest: str, authorization_id: str,
+    authorization_contract: dict, recovery_authorization_id: str,
+    controller_sha: str, lineage_digest: str, source_executor_sha256: str,
+    adapter_sha256: str, approved_environment_digest: str | None = None,
+) -> None:
+    """Require source-valid results plus immutable recovery provenance."""
+    provenance_by_index = {
+        provenance.get("unit_index"): provenance
+        for provenance in provenances if isinstance(provenance, dict)
+    }
+    if len(provenances) != len(reports):
+        raise ValueError("capacity recovery provenance count differs")
+    for report in reports:
+        provenance = provenance_by_index.get(report.get("unit_index"))
+        if (
+            not isinstance(provenance, dict)
+            or len(provenance_by_index) != len(provenances)
+            or provenance.get("authorization_id") != recovery_authorization_id
+            or provenance.get("controller_sha") != controller_sha
+            or provenance.get("source_candidate_sha") != revision
+            or provenance.get("lineage_digest") != lineage_digest
+            or provenance.get("executor_module") != "fettle/mutation_test.py"
+            or provenance.get("executor_module_sha256") != source_executor_sha256
+            or provenance.get("adapter_sha256") != adapter_sha256
+            or not isinstance(provenance.get("interpreter"), str)
+            or not isinstance(provenance.get("sys_path"), list)
+            or any("controller" in path for path in provenance["sys_path"] if isinstance(path, str))
+            or provenance.get("ordered_tests") != report.get("unit", {}).get("mapped_tests")
+            or (
+                recovery_authorization_id == "AH-LINUX-MEASUREMENT-20261021-A"
+                and (
+                    approved_environment_digest is None
+                    or not _valid_captured_runtime_environment(
+                        provenance.get("runtime_environment"), approved_environment_digest,
+                    )
+                )
+            )
+            or provenance.get("digest") != _canonical_digest({
+                key: value for key, value in provenance.items() if key != "digest"
+            })
+        ):
+            raise ValueError("capacity recovery execution provenance differs")
+    validate_capacity_validation_results(
+        reports, expected_indexes, revision=revision,
+        experiment_id=experiment_id, plan_digest=plan_digest,
+        authorization_id=authorization_id,
+        authorization_contract=authorization_contract,
+    )
+
+
+def _valid_captured_runtime_environment(evidence: object, approved_digest: str) -> bool:
+    """Validate an exact pre-mutation checkpoint projection against its binding."""
+    if not isinstance(evidence, dict) or set(evidence) != {
+        "schema_version", "kind", "captured_before_mutation", "envelope", "digest",
+    }:
+        return False
+    envelope = evidence.get("envelope")
+    return (
+        evidence.get("schema_version") == "1"
+        and evidence.get("kind") == "capacity_validation_runtime_environment"
+        and evidence.get("captured_before_mutation") is True
+        and isinstance(envelope, dict)
+        and set(envelope) == {"engine", "environment", "dependencies"}
+        and isinstance(envelope.get("dependencies"), list)
+        and evidence.get("digest") == approved_digest
+        and _canonical_digest(envelope) == approved_digest
+    )
+
+
+def validate_captured_runtime_environment(evidence: object, approved_digest: str) -> dict:
+    """Fail closed on missing, altered, or mismatched runtime evidence."""
+    if not _valid_captured_runtime_environment(evidence, approved_digest):
+        raise ValueError("captured runtime environment evidence differs")
+    return evidence
+
+
+def evaluate_capacity_validation_decision(
+    plan: dict,
+    reports: list[dict],
+    worker_elapsed_seconds: dict[int, int],
+) -> dict:
+    """Apply the frozen paired-falsification contract without refitting it."""
+    contract = plan.get("decision_contract")
+    if contract != capacity_validation_decision_contract():
+        raise ValueError("capacity validation decision contract differs")
+    if (
+        not isinstance(worker_elapsed_seconds, dict)
+        or any(type(index) is not int or type(seconds) is not int or seconds < 1
+               for index, seconds in worker_elapsed_seconds.items())
+    ):
+        raise ValueError("capacity validation provider worker timing is malformed")
+    report_by_index = {
+        report.get("unit_index"): report for report in reports if isinstance(report, dict)
+    }
+    if len(report_by_index) != len(reports):
+        raise ValueError("capacity validation result indexes are duplicated or malformed")
+
+    exact = []
+    unknown = []
+    for unit in plan["units"]:
+        index = unit["unit_index"]
+        report = report_by_index.get(index)
+        if report is None or report.get("status") != "completed":
+            unknown.append(index)
+            continue
+        count = len(unit["fingerprints"])
+        elapsed_ms = report.get("elapsed_ms")
+        if (
+            count < 1 or not isinstance(elapsed_ms, int) or isinstance(elapsed_ms, bool)
+            or elapsed_ms < 0 or report.get("unit") != unit
+            or report.get("plan_digest") != plan["digest"]
+        ):
+            unknown.append(index)
+            continue
+        exact.append({
+            "unit_index": index,
+            "group": str(unit["cost_stratum"]),
+            "cost_class": unit["cost_class"],
+            "fingerprint_count": count,
+            "execution_seconds": elapsed_ms / 1000,
+            "seconds_per_fingerprint": elapsed_ms / 1000 / count,
+            "whole_worker_seconds": worker_elapsed_seconds.get(index),
+        })
+
+    predictions = plan["prediction_seconds_per_unobserved_fingerprint"]
+    errors = sorted(
+        abs(item["seconds_per_fingerprint"] / predictions["central"] - 1)
+        for item in exact
+    )
+    median_error = (
+        (errors[5] + errors[6]) / 2 if len(errors) == 12 else None
+    )
+    within_band = sum(
+        predictions["optimistic"] <= item["seconds_per_fingerprint"]
+        <= predictions["conservative"] for item in exact
+    )
+    stress_exceedances = sum(
+        item["seconds_per_fingerprint"] > predictions["stress"] for item in exact
+    )
+
+    pairs = []
+    inversions = []
+    concordances = []
+    by_group: dict[str, dict[str, dict]] = {}
+    for item in exact:
+        by_group.setdefault(item["group"], {})[item["cost_class"]] = item
+    for group in sorted(by_group):
+        values = by_group[group]
+        if set(values) != {"low", "high"}:
+            continue
+        low, high = values["low"], values["high"]
+        qualifying = (
+            high["fingerprint_count"] >= 1.5 * low["fingerprint_count"]
+            and predictions["central"]
+            * (high["fingerprint_count"] - low["fingerprint_count"]) >= 60
+        )
+        concordant = qualifying and (
+            high["execution_seconds"] >= 1.2 * low["execution_seconds"]
+            and high["execution_seconds"] - low["execution_seconds"] >= 60
+        )
+        inverted = qualifying and (
+            high["execution_seconds"] <= 0.8 * low["execution_seconds"]
+            and low["execution_seconds"] - high["execution_seconds"] >= 60
+        )
+        pair = {"group": group, "qualifying": qualifying,
+                "concordant": concordant, "material_inversion": inverted}
+        pairs.append(pair)
+        if concordant:
+            concordances.append(group)
+        if inverted:
+            inversions.append(group)
+
+    granularity_failures = sorted(
+        item["unit_index"] for item in exact
+        if item["whole_worker_seconds"] is not None
+        and item["whole_worker_seconds"] > contract["timers"]["operating_target"]["deadline_seconds"]
+    )
+    reasons = []
+    if granularity_failures:
+        outcome = "reject_granularity"
+        reasons.append("exact attributable whole-worker interval exceeded 960 seconds")
+    elif len(inversions) >= contract["ranking"]["reject_distinct_group_inversions_min"]:
+        outcome = "reject_ranking"
+        reasons.append("at least two qualifying mapped-test groups materially inverted")
+    else:
+        prediction_passed = (
+            median_error is not None
+            and median_error <= contract["prediction_error"]["absolute_relative_error_median_max"]
+            and within_band >= contract["prediction_error"]["optimistic_to_conservative_units_min"]
+            and stress_exceedances <= contract["prediction_error"]["stress_rate_exceedances_max"]
+        )
+        ranking_passed = (
+            len(concordances) >= contract["ranking"]["investment_concordant_pairs_min"]
+            and not inversions
+        )
+        timing_passed = (
+            len(exact) == 12 and set(worker_elapsed_seconds) == set(range(12))
+            and all(seconds <= contract["timers"]["operating_target"]["deadline_seconds"]
+                    for seconds in worker_elapsed_seconds.values())
+        )
+        if not unknown and prediction_passed and ranking_passed and timing_passed:
+            outcome = "invest"
+            reasons.append("all frozen prediction, ranking, identity, and timing gates passed")
+        else:
+            outcome = "inconclusive"
+            reasons.append("the complete frozen investment and rejection gates were not established")
+    return {
+        "schema_version": "1", "kind": "capacity_validation_model_decision",
+        "status": "completed", "passed": False, "qualification_eligible": False,
+        "billing_authority": False, "authoritative_predecessor": False,
+        "authorization_id": plan["authorization_id"],
+        "authorization_contract": plan["authorization_contract"],
+        "experiment_id": plan["experiment_id"], "revision": plan["revision"],
+        "plan_digest": plan["digest"], "outcome": outcome, "reasons": reasons,
+        "exact_units": sorted(item["unit_index"] for item in exact),
+        "unknown_or_censored_units": sorted(unknown),
+        "prediction": {"median_absolute_relative_error": median_error,
+                       "within_optimistic_conservative": within_band,
+                       "stress_exceedances": stress_exceedances},
+        "ranking": {"pairs": pairs, "concordant_groups": concordances,
+                    "material_inversion_groups": inversions},
+        "granularity": {"exact_whole_worker_target_exceedances": granularity_failures,
+                        "shorter_timeout_inference_allowed": False},
+        "limitations": plan["decision_contract"]["non_claims"],
+    }
+
+
+def reconcile_capacity_provider_accounting(
+    run: dict,
+    job_pages: list[dict],
+    source: dict,
+    *,
+    repository: str,
+    revision: str,
+    experiment_id: str,
+    execution_run_id: str,
+    preparation_run_id: str,
+    plan_file_sha256: str,
+    authorization_id: str,
+    authorization_contract: dict,
+) -> dict:
+    """Reconcile exact terminal provider records into separate non-authoritative ledgers."""
+    if source.get("authorization_id") != authorization_id:
+        raise ValueError("capacity execution source authorization differs")
+    if source.get("authorization_contract") != authorization_contract:
+        raise ValueError("capacity execution source authorization contract differs")
+    if (
+        not isinstance(run, dict) or not isinstance(source, dict)
+        or str(run.get("id")) != execution_run_id
+        or str(run.get("run_attempt")) != "1"
+        or run.get("head_sha") != revision
+        or run.get("event") != "workflow_dispatch"
+        or run.get("status") != "completed"
+        or run.get("conclusion") not in {
+            "success", "failure", "cancelled", "timed_out", "action_required",
+        }
+        or run.get("path") != ".github/workflows/mutation.yml"
+        or source.get("kind") != "capacity_validation_execution_source"
+        or source.get("revision") != revision
+        or str(source.get("run_id")) != execution_run_id
+        or str(source.get("run_attempt")) != "1"
+        or source.get("experiment_id") != experiment_id
+        or str(source.get("preparation_run_id")) != preparation_run_id
+        or source.get("plan_file_sha256") != plan_file_sha256
+        or source.get("workflow_sha") != revision
+        or not str(source.get("workflow_ref", "")).startswith(
+            repository + "/.github/workflows/mutation.yml@"
+        )
+    ):
+        raise ValueError("capacity execution provider identity is nonterminal or stale")
+    if not job_pages or any(not isinstance(page, dict) for page in job_pages):
+        raise ValueError("capacity provider job pages are unavailable")
+    total_counts = {page.get("total_count") for page in job_pages}
+    jobs = [job for page in job_pages for job in page.get("jobs", [])]
+    job_ids = [job.get("id") for job in jobs if isinstance(job, dict)]
+    if (
+        len(total_counts) != 1 or not isinstance(next(iter(total_counts)), int)
+        or next(iter(total_counts)) != len(jobs)
+        or len(job_ids) != len(jobs) or len(job_ids) != len(set(job_ids))
+        or any(
+            not isinstance(job_id, int) or isinstance(job_id, bool) or job_id < 1
+            for job_id in job_ids
+        )
+    ):
+        raise ValueError("capacity provider job pagination is incomplete or duplicated")
+
+    def record(job: dict) -> dict:
+        started = job.get("started_at")
+        completed = job.get("completed_at")
+        if not isinstance(started, str) or not isinstance(completed, str):
+            raise ValueError("provider job timing is unavailable")
+        try:
+            seconds = round((
+                datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                - datetime.fromisoformat(started.replace("Z", "+00:00"))
+            ).total_seconds())
+        except ValueError as exc:
+            raise ValueError("provider job timing is malformed") from exc
+        if seconds < 0:
+            raise ValueError("provider job timing is contradictory")
+        return {
+            "job_id": job.get("id"), "name": job.get("name"),
+            "status": job.get("status"), "conclusion": job.get("conclusion"),
+            "started_at": started, "completed_at": completed,
+            "elapsed_seconds": seconds, "charged_minutes_ceiling": math.ceil(seconds / 60),
+        }
+
+    worker = []
+    support = []
+    for job in jobs:
+        name = str(job.get("name", ""))
+        if re.search(r"capacity validation unit [0-9]+$", name):
+            worker.append(record(job))
+        elif "capacity validation" in name:
+            support.append(record(job))
+    indexes = [int(re.search(r"([0-9]+)$", item["name"]).group(1)) for item in worker]
+    expected_support = {
+        "capacity validation (execution admission)",
+        "capacity validation (admit batch 2)",
+        "capacity validation (admit batch 3)",
+        "capacity validation (non-authoritative readback)",
+    }
+    controller_name = "capacity validation (monitor measurement containment)"
+    controller = [item for item in support if item["name"].endswith(controller_name)]
+    support = [item for item in support if not item["name"].endswith(controller_name)]
+    support_names = [item["name"] for item in support]
+    worker_minutes = sum(item["charged_minutes_ceiling"] for item in worker)
+    support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
+    terminal_success = all(
+        item["status"] == "completed" and item["conclusion"] == "success"
+        for item in worker + support + controller
+    )
+    controller_minutes = sum(item["charged_minutes_ceiling"] for item in controller)
+    passed = (
+        sorted(indexes) == list(range(12)) and len(indexes) == len(set(indexes))
+        and set(support_names) == expected_support and len(support_names) == len(expected_support)
+        and len(controller) == 1 and controller[0]["name"].endswith(controller_name)
+        and terminal_success and run.get("conclusion") == "success"
+        and worker_minutes <= 240 and support_minutes <= 25 and controller_minutes <= 30
+    )
+    return {
+        "schema_version": "1", "kind": "capacity_validation_provider_accounting",
+        "status": "completed" if passed else "non_pass", "passed": False,
+        "qualification_eligible": False, "billing_authority": False,
+        "authoritative_predecessor": False, "experiment_id": experiment_id,
+        "authorization_id": authorization_id,
+        "authorization_contract": authorization_contract,
+        "revision": revision, "execution_run_id": execution_run_id,
+        "worker": {"ceiling_minutes": 240, "observed_minutes": worker_minutes,
+                   "transferable": False, "jobs": worker},
+        "routine_support": {"ceiling_minutes": 25, "observed_minutes": support_minutes,
+                            "transferable": False, "jobs": support},
+        "terminal_readback_support": {
+            "ceiling_minutes": 10, "charged_minutes": 10, "transferable": False,
+            "status": "conservative_ceiling_charged",
+            "measurement_basis": "The readback cannot observe its own terminal timestamp; charge the full independent ceiling.",
+        },
+        "cancellation_controller": {
+            "ceiling_minutes": 30, "observed_minutes": controller_minutes,
+            "transferable": False, "jobs": controller,
+            "status": "completed" if len(controller) == 1 and controller_minutes <= 30
+            else "indeterminate_non_pass",
+            "note": "Failure or cancellation remains non-pass even when controller exposure is bounded.",
+        },
+    }
+
+
+def reconcile_capacity_recovery_provider_accounting(
+    run: dict, job_pages: list[dict], recovery_run: dict,
+    recovery_job_pages: list[dict], failed_recovery_run: dict,
+    failed_recovery_job_pages: list[dict], missing_input_recovery_run: dict,
+    missing_input_recovery_job_pages: list[dict], source: dict, *, repository: str,
+    source_revision: str, controller_sha: str, recovery_experiment_id: str,
+    execution_run_id: str, recovery_run_id: str, plan_file_sha256: str,
+    recovery_authorization_id: str, recovery_authorization_contract: dict,
+    package_controller_sha: str | None = None,
+    retry_recovery_run: dict | None = None,
+    retry_recovery_job_pages: list[dict] | None = None,
+) -> dict:
+    """Reconcile the exact recovery graph without granting billing authority."""
+    package_controller_sha = package_controller_sha or controller_sha
+    source_identity = {
+        "schema_version": "1",
+        "kind": "capacity_validation_recovery_execution_source",
+        "source_candidate_sha": source_revision,
+        "package_controller_sha": package_controller_sha,
+        "execution_controller_sha": controller_sha,
+        "recovery_experiment_id": recovery_experiment_id,
+        "recovery_run_id": recovery_run_id,
+        "plan_file_sha256": plan_file_sha256,
+        "authorization_id": recovery_authorization_id,
+        "authorization_contract": recovery_authorization_contract,
+    }
+    legacy_source_identity = {
+        **source_identity,
+        "controller_sha": controller_sha,
+    }
+    legacy_source_identity.pop("package_controller_sha")
+    legacy_source_identity.pop("execution_controller_sha")
+    if (
+        source not in (source_identity, legacy_source_identity)
+        or str(run.get("id")) != execution_run_id
+        or str(run.get("run_attempt")) != "1"
+        or run.get("head_sha") != controller_sha
+        or run.get("event") != "workflow_dispatch"
+        or run.get("status") != "completed"
+        or run.get("conclusion") not in {"success", "failure", "cancelled", "timed_out"}
+        or run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("capacity recovery execution provider identity is stale")
+    if not job_pages or any(not isinstance(page, dict) for page in job_pages):
+        raise ValueError("capacity recovery provider job pages are unavailable")
+    if (
+        str(recovery_run.get("id")) != recovery_run_id
+        or recovery_run.get("run_attempt") != 1
+        or recovery_run.get("head_sha") != package_controller_sha
+        or recovery_run.get("event") != "workflow_dispatch"
+        or recovery_run.get("status") != "completed"
+        or recovery_run.get("conclusion") != "success"
+        or recovery_run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("capacity recovery freeze provider identity is stale")
+    if not recovery_job_pages or any(not isinstance(page, dict) for page in recovery_job_pages):
+        raise ValueError("capacity recovery freeze provider job pages are unavailable")
+    if (
+        str(failed_recovery_run.get("id")) != "39369184372"
+        or failed_recovery_run.get("run_attempt") != 1
+        or failed_recovery_run.get("head_sha") != "276ac10bb7b2ec7b80346e821c2324d12bfab73f"
+        or failed_recovery_run.get("event") != "workflow_dispatch"
+        or failed_recovery_run.get("status") != "completed"
+        or failed_recovery_run.get("conclusion") != "failure"
+        or failed_recovery_run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("failed recovery predecessor identity is stale")
+    if not failed_recovery_job_pages or any(
+        not isinstance(page, dict) for page in failed_recovery_job_pages
+    ):
+        raise ValueError("failed recovery predecessor job pages are unavailable")
+    if (
+        str(missing_input_recovery_run.get("id")) != "39378451442"
+        or missing_input_recovery_run.get("run_attempt") != 1
+        or missing_input_recovery_run.get("head_sha") != "8e46125ff7d0e6f7d3a845faed32fb14336a5185"
+        or missing_input_recovery_run.get("event") != "workflow_dispatch"
+        or missing_input_recovery_run.get("status") != "completed"
+        or missing_input_recovery_run.get("conclusion") != "failure"
+        or missing_input_recovery_run.get("path") != ".github/workflows/mutation.yml"
+    ):
+        raise ValueError("missing-input recovery predecessor identity is stale")
+    if not missing_input_recovery_job_pages or any(
+        not isinstance(page, dict) for page in missing_input_recovery_job_pages
+    ):
+        raise ValueError("missing-input recovery predecessor job pages are unavailable")
+    retry_jobs: list[dict] = []
+    retry_run_id = ""
+    if retry_recovery_run is not None or retry_recovery_job_pages is not None:
+        retry_id = str(retry_recovery_run.get("id")) if isinstance(retry_recovery_run, dict) else ""
+        retry_run_id = retry_id
+        expected_retry_sha = (
+            "ebd1e057ae3497b6ec72ef709a08d0c33d1b2bb8"
+            if retry_id == "39391306615" else controller_sha
+        )
+        if (
+            not isinstance(retry_recovery_run, dict)
+            or retry_id in {"39369184372", "39378451442", recovery_run_id}
+            or retry_recovery_run.get("run_attempt") != 1
+            or retry_recovery_run.get("head_sha") != expected_retry_sha
+            or retry_recovery_run.get("event") != "workflow_dispatch"
+            or retry_recovery_run.get("status") != "completed"
+            or retry_recovery_run.get("conclusion") != "failure"
+            or retry_recovery_run.get("path") != ".github/workflows/mutation.yml"
+        ):
+            raise ValueError("conditional retry recovery predecessor identity is stale")
+        if not retry_recovery_job_pages or any(
+            not isinstance(page, dict) for page in retry_recovery_job_pages
+        ):
+            raise ValueError("conditional retry recovery predecessor job pages are unavailable")
+        retry_totals = {page.get("total_count") for page in retry_recovery_job_pages}
+        retry_jobs = [job for page in retry_recovery_job_pages for job in page.get("jobs", [])]
+        retry_ids = [job.get("id") for job in retry_jobs]
+        if (
+            len(retry_totals) != 1 or retry_totals.pop() != len(retry_jobs)
+            or len(retry_ids) != len(set(retry_ids))
+            or any(type(job_id) is not int or job_id < 1 for job_id in retry_ids)
+        ):
+            raise ValueError("conditional retry recovery predecessor pagination differs")
+    totals = {page.get("total_count") for page in job_pages}
+    jobs = [job for page in job_pages for job in page.get("jobs", [])]
+    ids = [job.get("id") for job in jobs]
+    if (
+        len(totals) != 1 or totals.pop() != len(jobs)
+        or len(ids) != len(set(ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in ids)
+    ):
+        raise ValueError("capacity recovery provider pagination differs")
+    recovery_totals = {page.get("total_count") for page in recovery_job_pages}
+    recovery_jobs = [job for page in recovery_job_pages for job in page.get("jobs", [])]
+    recovery_ids = [job.get("id") for job in recovery_jobs]
+    if (
+        len(recovery_totals) != 1 or recovery_totals.pop() != len(recovery_jobs)
+        or len(recovery_ids) != len(set(recovery_ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in recovery_ids)
+    ):
+        raise ValueError("capacity recovery freeze provider pagination differs")
+    failed_totals = {page.get("total_count") for page in failed_recovery_job_pages}
+    failed_jobs = [job for page in failed_recovery_job_pages for job in page.get("jobs", [])]
+    failed_ids = [job.get("id") for job in failed_jobs]
+    if (
+        len(failed_totals) != 1 or failed_totals.pop() != len(failed_jobs)
+        or len(failed_ids) != len(set(failed_ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in failed_ids)
+    ):
+        raise ValueError("failed recovery predecessor pagination differs")
+    missing_totals = {page.get("total_count") for page in missing_input_recovery_job_pages}
+    missing_jobs = [
+        job for page in missing_input_recovery_job_pages for job in page.get("jobs", [])
+    ]
+    missing_ids = [job.get("id") for job in missing_jobs]
+    if (
+        len(missing_totals) != 1 or missing_totals.pop() != len(missing_jobs)
+        or len(missing_ids) != len(set(missing_ids))
+        or any(type(job_id) is not int or job_id < 1 for job_id in missing_ids)
+    ):
+        raise ValueError("missing-input recovery predecessor pagination differs")
+
+    for records, expected_run_id, label in (
+        (jobs, execution_run_id, "execution"),
+        (recovery_jobs, recovery_run_id, "recovery freeze"),
+        (failed_jobs, "39369184372", "failed recovery predecessor"),
+        (missing_jobs, "39378451442", "missing-input recovery predecessor"),
+        (retry_jobs, retry_run_id, "conditional retry recovery predecessor"),
+    ):
+        if any(
+            str(job.get("run_id")) != expected_run_id
+            or str(job.get("run_attempt")) != "1"
+            for job in records
+        ):
+            raise ValueError(f"capacity recovery {label} job identity differs")
+
+    def record(job: dict) -> dict:
+        try:
+            seconds = round((
+                datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+                - datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+            ).total_seconds())
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("capacity recovery provider timing is unavailable") from exc
+        if seconds < 0:
+            raise ValueError("capacity recovery provider timing is contradictory")
+        return {
+            "job_id": job["id"], "name": job.get("name"),
+            "status": job.get("status"), "conclusion": job.get("conclusion"),
+            "started_at": job["started_at"], "completed_at": job["completed_at"],
+            "elapsed_seconds": seconds, "charged_minutes_ceiling": math.ceil(seconds / 60),
+        }
+
+    worker_pattern = re.compile(r"(?:[^/]+ / )?capacity recovery validation unit ([0-9]+)$")
+    workers = []
+    support = []
+    controllers = []
+    for job in jobs:
+        name = str(job.get("name", ""))
+        match = worker_pattern.fullmatch(name)
+        if match is not None:
+            workers.append({**record(job), "unit_index": int(match.group(1))})
+        elif name.endswith("capacity validation (monitor measurement containment)"):
+            controllers.append(record(job))
+        elif name in {
+            "capacity recovery (execution admission)",
+            "capacity recovery (execution finalization)",
+        }:
+            support.append(record(job))
+    freeze = [record(job) for job in recovery_jobs if job.get("name") == "capacity validation (recover retained corpus)"]
+    failed_freeze = [
+        record(job) for job in failed_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
+    missing_input_freeze = [
+        record(job) for job in missing_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
+    retry_freeze = [
+        record(job) for job in retry_jobs
+        if job.get("name") == "capacity validation (recover retained corpus)"
+    ]
+    if (
+        len(failed_freeze) != 1
+        or failed_freeze[0]["status"] != "completed"
+        or failed_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in failed_jobs
+        )
+    ):
+        raise ValueError("failed recovery predecessor jobs differ")
+    if (
+        len(missing_input_freeze) != 1
+        or missing_input_freeze[0]["status"] != "completed"
+        or missing_input_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in missing_jobs
+        )
+    ):
+        raise ValueError("missing-input recovery predecessor jobs differ")
+    if retry_jobs and (
+        len(retry_freeze) != 1
+        or retry_freeze[0]["status"] != "completed"
+        or retry_freeze[0]["conclusion"] != "failure"
+        or any(
+            job.get("status") != "completed"
+            or (
+                job.get("name") != "capacity validation (recover retained corpus)"
+                and job.get("conclusion") != "skipped"
+            )
+            for job in retry_jobs
+        )
+    ):
+        raise ValueError("conditional retry recovery predecessor jobs differ")
+    if retry_jobs and str(retry_recovery_run.get("id")) == "39391306615" and (
+        retry_freeze[0]["job_id"] != 118523223941
+        or retry_freeze[0]["started_at"] != "2026-10-20T08:08:56Z"
+        or retry_freeze[0]["completed_at"] != "2026-10-20T08:10:03Z"
+        or retry_freeze[0]["charged_minutes_ceiling"] != 2
+    ):
+        raise ValueError("admitted recovery predecessor execution differs")
+    indexes = [item["unit_index"] for item in workers]
+    worker_minutes = sum(item["charged_minutes_ceiling"] for item in workers)
+    support_minutes = sum(item["charged_minutes_ceiling"] for item in support)
+    controller_minutes = sum(item["charged_minutes_ceiling"] for item in controllers)
+    freeze_minutes = sum(
+        item["charged_minutes_ceiling"]
+        for item in freeze + failed_freeze + missing_input_freeze + retry_freeze
+    )
+    terminal_success = all(
+        item["status"] == "completed" and item["conclusion"] == "success"
+        for item in workers + support + controllers + freeze
+    )
+    passed = (
+        sorted(indexes) == list(range(12)) and len(indexes) == len(set(indexes))
+        and len(support) == 2 and len(controllers) == 1
+        and len(freeze) == 1 and terminal_success
+        and run.get("conclusion") == "success"
+        and freeze_minutes <= 30 and worker_minutes <= 240
+        and support_minutes <= 25 and controller_minutes <= 30
+    )
+    return {
+        "schema_version": "1", "kind": "capacity_validation_recovery_provider_accounting",
+        "status": "completed" if passed else "non_pass", "passed": False,
+        "qualification_eligible": False, "billing_authority": False,
+        "authoritative_predecessor": False,
+        "source_candidate_sha": source_revision, "controller_sha": controller_sha,
+        "recovery_experiment_id": recovery_experiment_id,
+        "authorization_id": recovery_authorization_id,
+        "authorization_contract": recovery_authorization_contract,
+        "execution_run_id": execution_run_id, "recovery_run_id": recovery_run_id,
+        "historical_non_billing_floor_minutes": {
+            "workers": 475.89, "support": 10.27, "cancellation_uncertainty": 56.88,
+        },
+        "recovery_freeze": {"jobs": failed_freeze + missing_input_freeze + retry_freeze + freeze, "minutes": freeze_minutes, "ceiling_minutes": 30, "transferable": False},
+        "worker": {"jobs": workers, "minutes": worker_minutes, "ceiling_minutes": 240, "transferable": False},
+        "support": {"jobs": support, "minutes": support_minutes, "ceiling_minutes": 25, "transferable": False},
+        "cancellation_controller": {"jobs": controllers, "minutes": controller_minutes, "ceiling_minutes": 30, "transferable": False},
+        "terminal_readback": {"charged_minutes": 10, "ceiling_minutes": 10, "transferable": False, "status": "conservative_ceiling_charged"},
+    }
+
+
+def run_capacity_validation_unit(
+    root: str,
+    cfg: dict,
+    plan_path: Path,
+    preflight_path: Path,
+    unit_index: int,
+    timeout: int,
+    checkpoint_path: Path | None = None,
+) -> dict:
+    """Execute exactly one frozen sample unit as non-authoritative modeling evidence."""
+    plan = None
+    try:
+        plan = load_capacity_validation_plan(plan_path)
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+        if _canonical_digest(preflight) != plan["preflight_digest"]:
+            raise ValueError("capacity validation preflight digest differs")
+        if preflight.get("revision") != plan["revision"]:
+            raise ValueError("capacity validation preflight revision differs")
+        if not 0 <= unit_index < len(plan["units"]):
+            raise ValueError("capacity validation unit index is outside the frozen plan")
+        if not 1 <= timeout <= 720:
+            raise ValueError("capacity validation execution timeout must be between 1 and 720 seconds")
+        unit = plan["units"][unit_index]
+        corpus_by_fingerprint = {
+            record.get("fingerprint"): record for record in preflight.get("corpus", [])
+            if isinstance(record, dict)
+        }
+        corpus = []
+        for fingerprint in unit["fingerprints"]:
+            record = corpus_by_fingerprint.get(fingerprint)
+            if (
+                record is None or record.get("file") != unit["file"]
+                or record.get("shard_index") != unit["source_shard_index"]
+                or record.get("mapped_tests") != unit["mapped_tests"]
+            ):
+                raise ValueError("capacity validation unit differs from the canonical corpus")
+            corpus.append(record)
+        mapping = _mapped_tests(root, [unit["file"]], cfg.get("test_mappings", {}))
+        if mapping != {unit["file"]: unit["mapped_tests"]}:
+            raise ValueError("capacity validation test mapping differs")
+        environment = _runtime_cache_identity(root, list(mapping), mapping, cfg)
+        if environment is None:
+            raise ValueError("capacity validation environment identity is incomplete")
+        environment_digest = _checkpoint_environment_digest(environment)
+        if environment_digest != unit.get("environment_digest"):
+            raise ValueError("capacity validation environment identity differs")
+        source_path = Path(root) / unit["file"]
+        source_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        checkpoint = {
+            "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+            "calibration_id": f"{plan['experiment_id']}-unit-{unit_index}",
+            "identity": {
+                "revision": plan["revision"], "plan_digest": plan["digest"],
+                "unit_index": unit_index,
+                "environment_digest": environment_digest,
+            },
+            "outcomes": {}, "attempts": [],
+        }
+        checkpoint_path = checkpoint_path or plan_path.parent / f"capacity-validation-checkpoint-{unit_index}.json"
+        started = time.monotonic()
+        result = execute_pending_mutations(
+            root, corpus, mapping, unit["ranges"], checkpoint, timeout, checkpoint_path,
+        )
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        source_after = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        restored = source_before == source_after
+        pending = result["pending"]
+        capacity_result = {
+            "schema_version": _CAPACITY_RESULT_SCHEMA_VERSION,
+            "kind": "capacity_validation_unit_result",
+            "status": "completed" if pending == 0 and restored else "incomplete",
+            "passed": False,
+            "qualification_eligible": False,
+            "billing_authority": False,
+            "authoritative_predecessor": False,
+            "authorization_id": plan["authorization_id"],
+            "authorization_contract": plan["authorization_contract"],
+            "experiment_id": plan["experiment_id"],
+            "revision": plan["revision"],
+            "plan_digest": plan["digest"],
+            "unit_index": unit_index,
+            "unit": unit,
+            "environment_digest": environment_digest,
+            "outcomes": result["outcomes"],
+            "attempts": result["attempts"],
+            "pending": pending,
+            "elapsed_ms": elapsed_ms,
+            "source_restoration": {
+                "before_sha256": source_before,
+                "after_sha256": source_after,
+                "restored": restored,
+            },
+        }
+        capacity_result["digest"] = _canonical_digest(capacity_result)
+        return capacity_result
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        failure = {
+            "schema_version": _CAPACITY_RESULT_SCHEMA_VERSION,
+            "kind": "capacity_validation_unit_result",
+            "status": "unknown", "passed": False,
+            "qualification_eligible": False, "billing_authority": False,
+            "authoritative_predecessor": False,
+            "message": _safe_mutation_diagnostic(str(exc), root),
+        }
+        if plan is not None:
+            failure.update({
+                "authorization_id": plan["authorization_id"],
+                "authorization_contract": plan["authorization_contract"],
+                "experiment_id": plan["experiment_id"],
+                "revision": plan["revision"],
+                "plan_digest": plan["digest"],
+                "unit_index": unit_index,
+            })
+        return failure
 
 
 def run_resumable_mutation_shard(
@@ -766,6 +2931,12 @@ def run_resumable_mutation_shard(
             "engine_version": MUTMUT_VERSION, "test_runner": _TEST_RUNNER,
             "tests_run": sorted({test for tests in mapping.values() for test in tests}),
             "line_ranges": manifest["ranges"], "shard_index": manifest["shard_index"],
+            "calibration_id": calibration_id,
+            "preflight_digest": identity["preflight_digest"],
+            "preflight_corpus_digest": preflight["corpus_digest"],
+            "manifest_digest": identity["manifest_digest"],
+            "corpus_digest": identity["corpus_digest"],
+            "environment_digest": identity["environment_digest"],
             "shard_count": manifest["shard_count"], **outcome_report, **policy,
             "threshold": float(cfg.get("score_target", 70)),
         }
@@ -895,7 +3066,14 @@ def _source_tree_digest(root: Path) -> str:
     ignored = {
         ".fettle", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv",
         "__pycache__", ".mutmut-cache", "mutation-manifests", "mutation-preflight-shards",
-        "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json", "mutation-report.json",
+        "mutation-shards", "retained-preflight", "resume-checkpoints", "mutation-checkpoint.json",
+        "mutation-report.json", "capacity-manifests", "capacity-enumeration",
+        "capacity-preparation", "capacity-results", "capacity-validation-result.json",
+        "capacity-validation-command.json", "capacity-validation-checkpoint.json",
+        "capacity-validation-plan.json", "capacity-plan-command.json",
+        "capacity-manifest-summary.json", "capacity-observed-groups.json",
+        "capacity-predictions.json", "capacity-validation-plan.sha256",
+        "capacity-validation-corpus.json",
     }
     files = sorted(
         path for path in root.rglob("*")
@@ -1657,7 +3835,7 @@ def _collect_range_results(root: str, line_ranges: list[dict], engine_version: s
     allowed = {(item["file"], line) for item in line_ranges for line in range(item["start"], item["end"] + 1)}
     ids = {state: [] for state in _STATES}
     for mutant_id, filename, line, status in rows:
-        if (filename, line) not in allowed:
+        if (filename, line + 1) not in allowed:
             continue
         state = _CACHE_STATES.get(status)
         if state is None:
@@ -1743,7 +3921,10 @@ def _preflight_mutmut(
             argv.extend(["--use-patch-file", patch_path])
         run = _run(argv, root, timeout)
     except subprocess.TimeoutExpired:
-        return _error("tool_error", f"Mutation preflight timed out after {timeout}s", engine_version=actual)
+        return _error(
+            "tool_error", f"Mutation preflight timed out after {timeout}s",
+            engine_version=actual, deadline_exhausted=True,
+        )
     except OSError as exc:
         return _error("tool_error", f"Cannot execute mutmut preflight: {exc}", engine_version=actual)
     finally:
@@ -2004,6 +4185,16 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     score = compute_score(*(report[state] for state in _STATES[:5]))
     violations: list[str] = []
     debt: list[str] = []
+    skipped = report.get("skipped", 0)
+    required_incomplete = False
+    if not isinstance(skipped, int) or isinstance(skipped, bool) or skipped < 0:
+        required_incomplete = True
+        violations.append("required skipped outcome count is malformed")
+    elif skipped:
+        required_incomplete = True
+        violations.append(f"required skipped outcomes are incomplete: {skipped} observed")
+    if required_incomplete:
+        score = None
     checks = (
         ("untested", "max_untested", 0, "untested"),
         ("timeout", "max_mutant_timeouts", None, "timeout"),
@@ -2020,7 +4211,7 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
     target = float(cfg.get("score_target", 70))
     decided = report["killed"] + report["survived"]
     minimum = int(cfg.get("minimum_scored_mutants", 0))
-    score_eligible = decided >= minimum
+    score_eligible = not required_incomplete and decided >= minimum
     if score is None:
         violations.append("no decided mutants were reported")
     elif not score_eligible:
@@ -2033,24 +4224,44 @@ def evaluate_policy(report: dict, cfg: dict) -> dict:
         "score": None if score is None else round(score, 1),
         "score_eligible": score_eligible,
         "eligible": not violations and not debt,
-        "passed": mode != "enforce" or not violations,
+        "passed": not required_incomplete and (mode != "enforce" or not violations),
         "reasons": reasons,
     }
 
 
 def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
     """Select one completed report per shard while rejecting conflicting retries."""
-    attempts: dict[int, list[dict]] = {index: [] for index in range(shard_count)}
+    return select_shard_subset_attempts(reports, shard_count, list(range(shard_count)))
+
+
+def select_shard_subset_attempts(
+    reports: list[dict],
+    shard_count: int,
+    expected_shards: list[int],
+) -> list[dict]:
+    """Select one compatible completed report for every explicitly required shard."""
+    if (
+        not isinstance(shard_count, int) or isinstance(shard_count, bool) or shard_count < 1
+        or len(expected_shards) != len(set(expected_shards))
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            or not 0 <= index < shard_count
+            for index in expected_shards
+        )
+    ):
+        raise ValueError("required shard subset has invalid topology")
+    expected = set(expected_shards)
+    attempts: dict[int, list[dict]] = {index: [] for index in expected_shards}
     for report in reports:
         index = report.get("shard_index") if isinstance(report, dict) else None
         if (
             not isinstance(index, int) or isinstance(index, bool)
-            or index not in attempts or report.get("shard_count") != shard_count
+            or index not in expected or report.get("shard_count") != shard_count
         ):
             raise ValueError("shard attempt has invalid topology")
         attempts[index].append(report)
     selected = []
-    for index in range(shard_count):
+    for index in sorted(expected):
         completed = [report for report in attempts[index] if report.get("status") == "completed"]
         if not completed:
             raise ValueError(f"shard {index} has no completed attempt")
@@ -2096,6 +4307,9 @@ def aggregate_shards(
     threshold: float,
     test_mappings: dict[str, list[str]] | None = None,
     policy_config: dict | None = None,
+    manifests: list[dict] | None = None,
+    preflight: dict | None = None,
+    calibration_id: str | None = None,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -2106,6 +4320,45 @@ def aggregate_shards(
     expected_indexes = list(range(shard_count))
     if [report.get("shard_index") for report in reports] != expected_indexes:
         return _error("unknown", "Shard indexes are incomplete or duplicated")
+    qualification_inputs = (manifests, preflight, calibration_id)
+    if any(value is not None for value in qualification_inputs):
+        if not all(value is not None for value in qualification_inputs):
+            return _error("unknown", "Qualification source evidence is incomplete")
+        if (
+            not isinstance(manifests, list)
+            or len(manifests) != shard_count
+            or [manifest.get("shard_index") for manifest in manifests] != expected_indexes
+        ):
+            return _error("unknown", "Qualification manifests are incomplete or unordered")
+        try:
+            current_revision = _revision(root)
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            return _error("tool_error", f"Cannot verify qualification revision: {exc}")
+        if (
+            not isinstance(preflight, dict)
+            or preflight.get("status") != "completed"
+            or preflight.get("passed") is not True
+            or preflight.get("shard_count") != shard_count
+            or preflight.get("revision") != current_revision
+        ):
+            return _error("unknown", "Qualification preflight is incomplete or stale")
+        preflight_corpus = preflight.get("corpus")
+        if (
+            not isinstance(preflight_corpus, list)
+            or preflight.get("corpus_digest") != _canonical_digest(preflight_corpus)
+            or preflight.get("manifest_digests") != [manifest.get("digest") for manifest in manifests]
+        ):
+            return _error("unknown", "Qualification preflight identity is invalid")
+        if any(
+            manifest.get("revision") != current_revision
+            or manifest.get("shard_count") != shard_count
+            for manifest in manifests
+        ):
+            return _error("unknown", "Qualification manifest revision or topology is stale")
+        preflight_digest = _canonical_digest(preflight)
+    else:
+        preflight_corpus = None
+        preflight_digest = None
     for index, report in enumerate(reports):
         if report.get("status") != "completed":
             return _error("tool_error", f"Shard {index} is not completed")
@@ -2119,6 +4372,44 @@ def aggregate_shards(
             return _error("unknown", f"Shard {index} has invalid evidence: {exc}")
         if report.get("shard_count") != shard_count:
             return _error("unknown", f"Shard {index} has inconsistent shard count")
+        execution_fields = (
+            "preflight_digest", "preflight_corpus_digest", "manifest_digest",
+            "corpus_digest", "environment_digest",
+        )
+        if (
+            not isinstance(report.get("calibration_id"), str)
+            or not report["calibration_id"]
+            or any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in execution_fields)
+        ):
+            return _error("unknown", f"Shard {index} has incomplete qualification identity")
+        if manifests is not None and preflight is not None and calibration_id is not None:
+            manifest = manifests[index]
+            if (
+                report.get("files_tested") != manifest.get("files")
+                or report.get("line_ranges") != manifest.get("ranges")
+            ):
+                return _error("unknown", f"Shard {index} scope differs from its qualification manifest")
+            shard_corpus = sorted(
+                (
+                    record for record in preflight_corpus
+                    if isinstance(record, dict) and record.get("shard_index") == index
+                ),
+                key=lambda record: record.get("fingerprint", ""),
+            )
+            mapping = _mapped_tests(root, manifest["files"], test_mappings)
+            environment = _runtime_cache_identity(root, manifest["files"], mapping, policy_config or {})
+            if environment is None:
+                return _error("unknown", f"Shard {index} execution environment cannot be verified")
+            expected_qualification = {
+                "calibration_id": calibration_id,
+                "preflight_digest": preflight_digest,
+                "preflight_corpus_digest": preflight["corpus_digest"],
+                "manifest_digest": manifest["digest"],
+                "corpus_digest": _canonical_digest(shard_corpus),
+                "environment_digest": _checkpoint_environment_digest(environment),
+            }
+            if any(report.get(key) != value for key, value in expected_qualification.items()):
+                return _error("unknown", f"Shard {index} qualification identity is stale or unrelated")
         if report.get("engine_version") != MUTMUT_VERSION or report.get("test_runner") != _TEST_RUNNER:
             return _error("unknown", f"Shard {index} has unsupported execution identity")
         if not re.fullmatch(r"[0-9a-f]{40}", str(report.get("revision", ""))):
@@ -2143,6 +4434,9 @@ def aggregate_shards(
     identity = ("revision", "engine_version", "test_runner")
     if any(any(report.get(key) != first.get(key) for key in identity) for report in reports[1:]):
         return _error("unknown", "Shard execution identities differ")
+    shared_identity = ("calibration_id", "preflight_digest", "preflight_corpus_digest")
+    if any(any(report.get(key) != first.get(key) for key in shared_identity) for report in reports[1:]):
+        return _error("unknown", "Shard qualification identities differ")
 
     expected = [
         path for path in _get_all_py_files(root, paths)
@@ -2200,6 +4494,18 @@ def aggregate_shards(
         }),
         "test_mapping_digest": _canonical_digest(mapping),
         "line_range_digest": _canonical_digest(line_ranges),
+        "calibration_id": first["calibration_id"],
+        "preflight_digest": first["preflight_digest"],
+        "corpus_digest": first["preflight_corpus_digest"],
+        "execution_identity_digest": _canonical_digest([
+            {
+                "shard_index": report["shard_index"],
+                "manifest_digest": report["manifest_digest"],
+                "corpus_digest": report["corpus_digest"],
+                "environment_digest": report["environment_digest"],
+            }
+            for report in reports
+        ]),
     }
     return {
         "schema_version": "2",
@@ -2289,6 +4595,85 @@ def aggregate_preflight_shards(
         "corpus_digest": _canonical_digest(sorted(corpus, key=lambda record: record["fingerprint"])),
         "manifest_digests": [report["manifest_digest"] for report in reports],
     }
+
+
+def aggregate_capacity_validation_shards(
+    root: str,
+    reports: list[dict],
+    paths: list[str],
+    excluded: list[str],
+    shard_count: int,
+    *,
+    candidate_sha: str | None = None,
+    experiment_id: str | None = None,
+) -> dict:
+    """Validate isolated enumeration shards without publishing qualification input."""
+    canonical = []
+    authorization_ids = {
+        report.get("authorization_id") for report in reports if isinstance(report, dict)
+    }
+    if len(authorization_ids) != 1:
+        return _error("unknown", "Capacity enumeration shard authorizations conflict")
+    authorization_id = next(iter(authorization_ids))
+    from fettle.staged_preflight import validate_capacity_authorization
+    try:
+        validate_capacity_authorization(authorization_id)
+    except ValueError as exc:
+        return _error("unknown", str(exc))
+    for report in reports:
+        if not isinstance(report, dict):
+            return _error("unknown", "Capacity enumeration shard is malformed")
+        try:
+            validate_capacity_authorization(
+                report.get("authorization_id"),
+                expected_authorization_id=authorization_id,
+            )
+        except ValueError as exc:
+            return _error("unknown", str(exc))
+        if (
+            not isinstance(report, dict)
+            or report.get("kind") != "capacity_validation_enumeration_shard"
+            or report.get("status") != "enumerated"
+            or report.get("passed") is not False
+            or report.get("qualification_eligible") is not False
+            or report.get("billing_authority") is not False
+            or report.get("authoritative_predecessor") is not False
+        ):
+            return _error("unknown", "Capacity enumeration shard is authoritative, malformed, or incomplete")
+        converted = {
+            key: value for key, value in report.items()
+            if key not in {
+                "kind", "qualification_eligible", "billing_authority",
+                "authoritative_predecessor", "authorization_id",
+            }
+        }
+        converted["status"] = "completed"
+        converted["passed"] = True
+        canonical.append(converted)
+    aggregate = aggregate_preflight_shards(root, canonical, paths, excluded, shard_count)
+    if aggregate.get("status") != "completed" or aggregate.get("passed") is not True:
+        return aggregate
+    result = {
+        **aggregate,
+        "kind": "capacity_validation_corpus",
+        "status": "enumerated",
+        "passed": False,
+        "qualification_eligible": False,
+        "billing_authority": False,
+        "authoritative_predecessor": False,
+        "authorization_id": authorization_id,
+    }
+    if candidate_sha is not None or experiment_id is not None:
+        from fettle.staged_preflight import capacity_authorization_contract
+        if candidate_sha is None or experiment_id is None:
+            return _error("unknown", "Capacity authorization contract identity is incomplete")
+        try:
+            result["authorization_contract"] = capacity_authorization_contract(
+                authorization_id, candidate_sha, experiment_id,
+            )
+        except ValueError as exc:
+            return _error("unknown", str(exc))
+    return result
 
 
 def evaluate_stability(reports: list[dict], run_ids: list[str] | None = None) -> dict:
@@ -2577,13 +4962,23 @@ def main() -> int:
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
+    parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
+    parser.add_argument("--aggregate-capacity-enumeration", metavar="DIRECTORY", help="Aggregate isolated capacity enumeration")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
     parser.add_argument("--retained-preflight", help="Complete retained preflight aggregate")
     parser.add_argument("--calibration-id", help="Logical calibration identity")
     parser.add_argument("--checkpoint-output", help="Atomic resumable checkpoint output")
     parser.add_argument("--resume-checkpoints", help="Directory containing same-calibration checkpoints")
+    parser.add_argument("--capacity-plan", metavar="PATH", help="Write a non-authoritative capacity-validation plan")
+    parser.add_argument("--capacity-unit", type=int, help="Execute one frozen capacity-validation unit")
+    parser.add_argument("--capacity-experiment-id")
+    parser.add_argument("--capacity-history", help="JSON file containing frozen historical fingerprints")
+    parser.add_argument("--capacity-predictions", help="JSON file containing frozen prediction seconds")
+    parser.add_argument("--capacity-manifests", help="Complete manifest directory for capacity preparation")
+    parser.add_argument("--capacity-result", help="Atomic capacity-validation result output")
+    parser.add_argument("--capacity-checkpoint", help="Atomic capacity-validation partial checkpoint output")
     parser.add_argument("--initialize-timeout-report", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--github-summary", metavar="REPORT", help=argparse.SUPPRESS)
     parser.add_argument("--artifact-name", help=argparse.SUPPRESS)
@@ -2646,7 +5041,49 @@ def main() -> int:
         mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
     )
     base = args.base or mutation["base"]
-    if args.resume_manifest:
+    if args.capacity_plan and args.capacity_unit is None:
+        try:
+            if not all((args.retained_preflight, args.capacity_experiment_id, args.capacity_history, args.capacity_predictions, args.capacity_manifests)):
+                raise ValueError("capacity plan requires retained preflight, experiment ID, history, predictions, and manifests")
+            preflight = json.loads(Path(args.retained_preflight).read_text(encoding="utf-8"))
+            manifests = [
+                load_partition_manifest(path)
+                for path in sorted(
+                    Path(args.capacity_manifests).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            history = json.loads(Path(args.capacity_history).read_text(encoding="utf-8"))
+            predictions = json.loads(Path(args.capacity_predictions).read_text(encoding="utf-8"))
+            if (
+                not isinstance(history, dict)
+                or not isinstance(history.get("measured_files"), list)
+                or not isinstance(history.get("source"), dict)
+                or not isinstance(predictions, dict)
+            ):
+                raise ValueError("capacity plan assumptions are malformed")
+            report = build_capacity_validation_plan(
+                args.root, mutation, preflight, manifests,
+                experiment_id=args.capacity_experiment_id,
+                revision=_revision(args.root),
+                historical_measured_files=set(history["measured_files"]),
+                historical_source=history["source"],
+                prediction_seconds=predictions,
+            )
+            _write_json_atomic(Path(args.capacity_plan), report)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot prepare capacity validation: {exc}")
+    elif args.capacity_unit is not None:
+        if not args.capacity_plan or not args.retained_preflight or not args.capacity_result:
+            report = _error("unknown", "capacity unit requires plan, retained preflight, and result output")
+        else:
+            report = run_capacity_validation_unit(
+                args.root, mutation, Path(args.capacity_plan), Path(args.retained_preflight),
+                args.capacity_unit, timeout,
+                Path(args.capacity_checkpoint) if args.capacity_checkpoint else None,
+            )
+            _write_json_atomic(Path(args.capacity_result), report)
+    elif args.resume_manifest:
         missing = [
             name for name, value in (
                 ("--retained-preflight", args.retained_preflight),
@@ -2667,6 +5104,23 @@ def main() -> int:
             )
     elif args.preflight_manifest:
         report = run_mutation_preflight(args.root, {**mutation, "manifest": args.preflight_manifest})
+    elif args.aggregate_capacity_enumeration:
+        if args.shard_count is None or args.shard_count < 1:
+            report = _error("unknown", "--aggregate-capacity-enumeration requires a positive --shard-count")
+        else:
+            report_paths = sorted(
+                Path(args.aggregate_capacity_enumeration).rglob("capacity-validation-enumeration.json")
+            )
+            try:
+                reports = [json.loads(path.read_text()) for path in report_paths]
+            except (OSError, json.JSONDecodeError) as exc:
+                report = _error("unknown", f"Cannot read capacity enumeration shards: {exc}")
+            else:
+                report = aggregate_capacity_validation_shards(
+                    args.root, reports, paths, excluded, args.shard_count,
+                    candidate_sha=_revision(args.root),
+                    experiment_id=args.capacity_experiment_id,
+                )
     elif args.aggregate_preflight:
         if args.shard_count is None or args.shard_count < 1:
             report = _error("unknown", "--aggregate-preflight requires a positive --shard-count")
@@ -2685,23 +5139,43 @@ def main() -> int:
             report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
             try:
                 reports = [json.loads(path.read_text()) for path in report_paths]
+                manifests = None
+                retained_preflight = None
                 if args.aggregate_scope:
                     manifests = [
                         load_partition_manifest(path)
                         for path in sorted(Path(args.aggregate_scope).glob("partition-*.json"))
                     ]
+                    manifests.sort(key=lambda manifest: manifest["shard_index"])
                     if len(manifests) != args.shard_count:
                         raise ValueError("aggregate scope manifests are incomplete")
                     paths = sorted({file for manifest in manifests for file in manifest["files"]})
-                    selection = _get_changed_py_files(args.root, mutation["paths"], args.base or mutation["base"])
-                    if selection["status"] != "completed":
-                        raise ValueError(selection["message"])
-                    expected = [
-                        file for file in selection["files"]
-                        if not any(file.startswith(item) for item in excluded)
-                    ]
+                    if args.aggregate_preflight_evidence:
+                        expected = [
+                            file for file in _get_all_py_files(args.root, mutation["paths"])
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
+                    else:
+                        selection = _get_changed_py_files(
+                            args.root, mutation["paths"], args.base or mutation["base"]
+                        )
+                        if selection["status"] != "completed":
+                            raise ValueError(selection["message"])
+                        expected = [
+                            file for file in selection["files"]
+                            if not any(file.startswith(item) for item in excluded)
+                        ]
                     if paths != expected:
-                        raise ValueError("aggregate manifests do not match changed-file scope")
+                        scope = "full configured" if args.aggregate_preflight_evidence else "changed-file"
+                        raise ValueError(f"aggregate manifests do not match {scope} scope")
+                if args.aggregate_preflight_evidence:
+                    if not args.aggregate_scope or not args.calibration_id:
+                        raise ValueError(
+                            "qualification aggregation requires --aggregate-scope and --calibration-id"
+                        )
+                    retained_preflight = json.loads(
+                        Path(args.aggregate_preflight_evidence).read_text(encoding="utf-8")
+                    )
             except (OSError, json.JSONDecodeError) as exc:
                 report = _error("unknown", f"Cannot read shard reports: {exc}")
             except ValueError as exc:
@@ -2716,7 +5190,8 @@ def main() -> int:
                     return 2
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
-                    mutation["test_mappings"], mutation,
+                    mutation["test_mappings"], mutation, manifests, retained_preflight,
+                    args.calibration_id,
                 )
     else:
         if args.manifest_scope:
@@ -2743,8 +5218,13 @@ def main() -> int:
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)
     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
-    if report["status"] not in {"completed", "not_applicable"}:
+    if report["status"] not in {"completed", "not_applicable", "enumerated"}:
         return 2
+    if report.get("kind") in {
+        "capacity_validation_corpus", "capacity_validation_plan",
+        "capacity_validation_unit_result",
+    }:
+        return 0
     return 0 if report.get("passed", True) else 1
 
 
