@@ -108,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mutation-pr-shard-${{ github.run_id }}-${{ matrix.shard }}
+          name: mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: mutation-report.json
           if-no-files-found: error
           retention-days: 1
@@ -140,7 +140,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: mutation-pr-shard-${{ github.run_id }}-*
+          pattern: mutation-pr-shard-${{ github.run_id }}-*-*
           path: mutation-pr-reports
           merge-multiple: false
       - name: Aggregate complete exact-head evidence
@@ -198,13 +198,13 @@ jobs:
             echo "- Runtime risk: historical shard 71 projects to 6.38 hours at ×1.25 uncertainty; the job remains capped at 360 minutes and any incomplete report is non-pass."
           } >> "$GITHUB_STEP_SUMMARY"
           uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json \
-            --artifact-name mutation-pr-advisory-${{ github.run_id }} \
+            --artifact-name mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }} \
             --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
       - name: Retain complete PR advisory evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mutation-pr-advisory-${{ github.run_id }}
+          name: mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             mutation-report.json
             mutation-pr-source
