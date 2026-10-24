@@ -1486,7 +1486,10 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     assert '\"status\":\"not_applicable\"' in workflow
     assert '\"status\":\"unknown\"' in workflow
     assert "--aggregate mutation-pr-reports" in workflow
+    assert "--aggregate-advisory" in workflow
     assert '--base "$BASE_SHA" --shard-count "$SHARD_COUNT"' in workflow
+    assert 'MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"' in workflow
+    assert 'identity.get("merge_base")==os.environ["MERGE_BASE"]' in workflow
     assert "Aggregate mutation evidence is missing or malformed" in workflow
     assert "--github-summary mutation-report.json" in workflow
     assert "pattern: mutation-pr-shard-${{ github.run_id }}-*-*" in workflow
@@ -1494,6 +1497,101 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     assert "retention-days: 90" in workflow
     assert "if-no-files-found: error" in workflow
     assert "historical shard 71 projects to 6.38 hours" in workflow
+
+
+def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "src/__init__.py").write_text("")
+    (repo / "src/a.py").write_text("def value():\n    return 1\n")
+    (repo / "src/b.py").write_text("def value():\n    return 2\n")
+    (repo / "tests/test_a.py").write_text("from src.a import value\n\ndef test_value():\n    assert value() == 1\n")
+    (repo / "tests/test_b.py").write_text("from src.b import value\n\ndef test_value():\n    assert value() == 2\n")
+    (repo / ".fettle.toml").write_text(
+        "[mutation]\n"
+        "enabled = true\n"
+        "mode = 'advisory'\n"
+        "paths = ['src/a.py', 'src/b.py']\n"
+        "exclude = []\n"
+        "full_shards = 2\n"
+        "default_chunk_lines = 60\n"
+        "score_target = 0\n"
+        "[mutation.test_mappings]\n"
+        "'src/a.py' = ['tests/test_a.py']\n"
+        "'src/b.py' = ['tests/test_b.py']\n"
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "base"], cwd=repo, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+    env = {**os.environ, "PYTHONPATH": PLUGIN_DIR}
+    command = [sys.executable, "-m", "fettle.mutation_test", "--root", "."]
+
+    prepared = subprocess.run(
+        [
+            *command, "--base", base,
+            "--prepare-changed-manifests", "manifests", "--json",
+        ],
+        cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    reports = repo / "reports"
+    for index in range(2):
+        destination = reports / str(index)
+        destination.mkdir(parents=True)
+        shard = subprocess.run(
+            [
+                *command, "--manifest", f"manifests/partition-{index}.json",
+                "--manifest-scope", "manifests", "--shard-index", str(index),
+                "--shard-count", "2", "--timeout", "120", "--json",
+            ],
+            cwd=repo, env=env, capture_output=True, text=True,
+        )
+        assert shard.returncode == 0, shard.stderr
+        (destination / "mutation-report.json").write_text(shard.stdout)
+
+    aggregate_command = [
+        *command, "--aggregate", "reports", "--aggregate-advisory",
+        "--aggregate-scope", "manifests", "--base", base,
+        "--shard-count", "2", "--json",
+    ]
+    success = subprocess.run(
+        aggregate_command, cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert success.returncode == 0, success.stderr
+    report = json.loads(success.stdout)
+    assert report["status"] == "completed"
+    assert report["passed"] is True
+    assert report["aggregation_mode"] == "advisory"
+    assert report["qualification_eligible"] is False
+    assert not {"calibration_id", "preflight_digest", "corpus_digest"} & report.keys()
+
+    missing = reports / "1/mutation-report.json"
+    retained = missing.read_text()
+    missing.unlink()
+    incomplete = subprocess.run(
+        aggregate_command, cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert incomplete.returncode == 2
+    assert json.loads(incomplete.stdout)["passed"] is False
+    missing.write_text(retained)
+
+    mismatched = json.loads((reports / "0/mutation-report.json").read_text())
+    mismatched["manifest_digest"] = "0" * 64
+    (reports / "0/mutation-report.json").write_text(json.dumps(mismatched))
+    conflict = subprocess.run(
+        aggregate_command, cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert conflict.returncode == 2
+    conflict_report = json.loads(conflict.stdout)
+    assert conflict_report["passed"] is False
+    assert "manifest digest differs" in conflict_report["message"]
 
 
 def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():

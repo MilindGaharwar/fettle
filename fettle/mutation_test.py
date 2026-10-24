@@ -4310,6 +4310,7 @@ def aggregate_shards(
     manifests: list[dict] | None = None,
     preflight: dict | None = None,
     calibration_id: str | None = None,
+    advisory: bool = False,
 ) -> dict:
     """Combine only complete, equivalent shards that exactly cover full scope."""
     if shard_count < 1:
@@ -4320,8 +4321,30 @@ def aggregate_shards(
     expected_indexes = list(range(shard_count))
     if [report.get("shard_index") for report in reports] != expected_indexes:
         return _error("unknown", "Shard indexes are incomplete or duplicated")
+    if advisory:
+        if manifests is None or preflight is not None or calibration_id is not None:
+            return _error(
+                "unknown",
+                "Advisory aggregation requires manifests without qualification evidence",
+            )
+        if (
+            not isinstance(manifests, list)
+            or len(manifests) != shard_count
+            or [manifest.get("shard_index") for manifest in manifests] != expected_indexes
+        ):
+            return _error("unknown", "Advisory manifests are incomplete or unordered")
+        try:
+            current_revision = _revision(root)
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            return _error("tool_error", f"Cannot verify advisory revision: {exc}")
+        if any(
+            manifest.get("revision") != current_revision
+            or manifest.get("shard_count") != shard_count
+            for manifest in manifests
+        ):
+            return _error("unknown", "Advisory manifest revision or topology is stale")
     qualification_inputs = (manifests, preflight, calibration_id)
-    if any(value is not None for value in qualification_inputs):
+    if not advisory and any(value is not None for value in qualification_inputs):
         if not all(value is not None for value in qualification_inputs):
             return _error("unknown", "Qualification source evidence is incomplete")
         if (
@@ -4372,17 +4395,27 @@ def aggregate_shards(
             return _error("unknown", f"Shard {index} has invalid evidence: {exc}")
         if report.get("shard_count") != shard_count:
             return _error("unknown", f"Shard {index} has inconsistent shard count")
-        execution_fields = (
-            "preflight_digest", "preflight_corpus_digest", "manifest_digest",
-            "corpus_digest", "environment_digest",
-        )
-        if (
-            not isinstance(report.get("calibration_id"), str)
-            or not report["calibration_id"]
-            or any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in execution_fields)
-        ):
-            return _error("unknown", f"Shard {index} has incomplete qualification identity")
-        if manifests is not None and preflight is not None and calibration_id is not None:
+        if advisory:
+            manifest = manifests[index]
+            if (
+                report.get("files_tested") != manifest.get("files")
+                or report.get("line_ranges") != manifest.get("ranges")
+            ):
+                return _error("unknown", f"Shard {index} scope differs from its advisory manifest")
+            if report.get("manifest_digest") != manifest.get("digest"):
+                return _error("unknown", f"Shard {index} manifest digest differs from advisory scope")
+        else:
+            execution_fields = (
+                "preflight_digest", "preflight_corpus_digest", "manifest_digest",
+                "corpus_digest", "environment_digest",
+            )
+            if (
+                not isinstance(report.get("calibration_id"), str)
+                or not report["calibration_id"]
+                or any(not re.fullmatch(r"[0-9a-f]{64}", str(report.get(field, ""))) for field in execution_fields)
+            ):
+                return _error("unknown", f"Shard {index} has incomplete qualification identity")
+        if not advisory and manifests is not None and preflight is not None and calibration_id is not None:
             manifest = manifests[index]
             if (
                 report.get("files_tested") != manifest.get("files")
@@ -4434,9 +4467,10 @@ def aggregate_shards(
     identity = ("revision", "engine_version", "test_runner")
     if any(any(report.get(key) != first.get(key) for key in identity) for report in reports[1:]):
         return _error("unknown", "Shard execution identities differ")
-    shared_identity = ("calibration_id", "preflight_digest", "preflight_corpus_digest")
-    if any(any(report.get(key) != first.get(key) for key in shared_identity) for report in reports[1:]):
-        return _error("unknown", "Shard qualification identities differ")
+    if not advisory:
+        shared_identity = ("calibration_id", "preflight_digest", "preflight_corpus_digest")
+        if any(any(report.get(key) != first.get(key) for key in shared_identity) for report in reports[1:]):
+            return _error("unknown", "Shard qualification identities differ")
 
     expected = [
         path for path in _get_all_py_files(root, paths)
@@ -4481,32 +4515,57 @@ def aggregate_shards(
     )
     policy = policy_config or {"score_target": threshold}
     policy_result = evaluate_policy(counts, policy)
-    evidence_identity = {
-        "policy_digest": _canonical_digest({
-            key: policy.get(key) for key in (
-                "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
-                "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
-            )
-        }),
-        "source_scope_digest": _canonical_digest({
-            file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
-            for file in expected
-        }),
-        "test_mapping_digest": _canonical_digest(mapping),
-        "line_range_digest": _canonical_digest(line_ranges),
-        "calibration_id": first["calibration_id"],
-        "preflight_digest": first["preflight_digest"],
-        "corpus_digest": first["preflight_corpus_digest"],
-        "execution_identity_digest": _canonical_digest([
-            {
-                "shard_index": report["shard_index"],
-                "manifest_digest": report["manifest_digest"],
-                "corpus_digest": report["corpus_digest"],
-                "environment_digest": report["environment_digest"],
-            }
-            for report in reports
-        ]),
-    }
+    if advisory:
+        evidence_identity = {
+            "policy_digest": _canonical_digest({
+                key: policy.get(key) for key in (
+                    "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
+                    "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
+                )
+            }),
+            "source_scope_digest": _canonical_digest({
+                file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
+                for file in expected
+            }),
+            "test_mapping_digest": _canonical_digest(mapping),
+            "line_range_digest": _canonical_digest(line_ranges),
+            "execution_identity_digest": _canonical_digest([
+                {
+                    "shard_index": report["shard_index"],
+                    "manifest_digest": report["manifest_digest"],
+                }
+                for report in reports
+            ]),
+            "aggregation_mode": "advisory",
+            "qualification_eligible": False,
+        }
+    else:
+        evidence_identity = {
+            "policy_digest": _canonical_digest({
+                key: policy.get(key) for key in (
+                    "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
+                    "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
+                )
+            }),
+            "source_scope_digest": _canonical_digest({
+                file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
+                for file in expected
+            }),
+            "test_mapping_digest": _canonical_digest(mapping),
+            "line_range_digest": _canonical_digest(line_ranges),
+            "calibration_id": first["calibration_id"],
+            "preflight_digest": first["preflight_digest"],
+            "corpus_digest": first["preflight_corpus_digest"],
+            "execution_identity_digest": _canonical_digest([
+                {
+                    "shard_index": report["shard_index"],
+                    "manifest_digest": report["manifest_digest"],
+                    "corpus_digest": report["corpus_digest"],
+                    "environment_digest": report["environment_digest"],
+                }
+                for report in reports
+            ]),
+        }
     return {
         "schema_version": "2",
         "status": "completed",
@@ -4857,6 +4916,8 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
             for file in files
         ]),
     }
+    if manifest is not None:
+        evidence_identity["manifest_digest"] = manifest["digest"]
     cache_identity = None if all_files or line_ranges else _runtime_cache_identity(root, files, mapping, cfg)
     cache_reused = bool(
         cache_identity is not None and restore_mutation_native_cache(root, cache_identity)
@@ -4962,6 +5023,7 @@ def main() -> int:
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
+    parser.add_argument("--aggregate-advisory", action="store_true", help="Validate a manifest-bound advisory aggregate")
     parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
@@ -5138,6 +5200,15 @@ def main() -> int:
         else:
             report_paths = sorted(Path(args.aggregate).rglob("mutation-report.json"))
             try:
+                if args.aggregate_advisory and (
+                    not args.aggregate_scope
+                    or args.aggregate_preflight_evidence
+                    or args.calibration_id
+                ):
+                    raise ValueError(
+                        "--aggregate-advisory requires --aggregate-scope and rejects "
+                        "--aggregate-preflight-evidence and --calibration-id"
+                    )
                 reports = [json.loads(path.read_text()) for path in report_paths]
                 manifests = None
                 retained_preflight = None
@@ -5191,7 +5262,7 @@ def main() -> int:
                 report = aggregate_shards(
                     args.root, reports, paths, excluded, args.shard_count, threshold,
                     mutation["test_mappings"], mutation, manifests, retained_preflight,
-                    args.calibration_id,
+                    args.calibration_id, advisory=args.aggregate_advisory,
                 )
     else:
         if args.manifest_scope:

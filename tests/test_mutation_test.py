@@ -2292,6 +2292,29 @@ def test_qualification_aggregate_uses_full_configured_scope(tmp_path, monkeypatc
     assert captured["args"][9] == {}
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [[], ["--aggregate-preflight-evidence", "preflight.json"], ["--calibration-id", "cal-a"]],
+)
+def test_advisory_aggregate_cli_requires_scope_without_qualification_inputs(
+    tmp_path, monkeypatch, capsys, extra,
+):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    arguments = [
+        "mutation_test", "--aggregate", str(reports), "--aggregate-advisory",
+        "--shard-count", "1", "--json", *extra,
+    ]
+    if extra:
+        arguments.extend(["--aggregate-scope", str(tmp_path / "manifests")])
+    monkeypatch.setattr("sys.argv", arguments)
+
+    assert main() == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["passed"] is False
+    assert "--aggregate-advisory requires --aggregate-scope" in report["message"]
+
+
 def test_manifest_scope_supplies_complete_changed_file_set(tmp_path, monkeypatch, capsys):
     manifests = tmp_path / "manifests"
     manifests.mkdir()

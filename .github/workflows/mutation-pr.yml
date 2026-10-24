@@ -34,6 +34,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"
+          export MERGE_BASE
           uv run --no-sync python -m fettle.mutation_test --root . --base "$BASE_SHA" \
             --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
           uv run --no-sync python - <<'PY'
@@ -43,7 +45,7 @@ jobs:
           count = prepared["shard_count"]
           if prepared.get("status") != "completed" or not isinstance(count, int) or not 0 <= count <= 256:
               raise SystemExit(2)
-          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"shard_count":count}
+          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"merge_base":os.environ["MERGE_BASE"],"shard_count":count}
           Path("mutation-pr-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
           PY
           echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
@@ -152,6 +154,8 @@ jobs:
           SHARD_COUNT: ${{ needs.changed-prepare.outputs.shard_count }}
           PREPARE_RESULT: ${{ needs.changed-prepare.result }}
         run: |
+          MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"
+          export MERGE_BASE
           if [ "$PREPARE_RESULT" != success ] || [ -z "$SHARD_COUNT" ] || [ ! -f mutation-pr-source/mutation-pr-identity.json ]; then
             python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope preparation evidence is missing or malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
           elif [ "$SHARD_COUNT" = 0 ]; then
@@ -159,19 +163,20 @@ jobs:
           import json, os
           try:
               identity=json.load(open("mutation-pr-source/mutation-pr-identity.json"))
-              valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("shard_count")==0)
+              valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("shard_count")==0)
           except (OSError, ValueError, TypeError):
               valid=False
           json.dump({"status":"not_applicable" if valid else "unknown","message":"No mutation-relevant changed scope" if valid else "Changed-scope identity is malformed","revision":os.environ["HEAD_SHA"],"score":None,"passed":valid},open("mutation-report.json","w"),separators=(",",":"))
           PY
           else
-            if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
+            if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
               python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope identity is malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
             fi
             if [ ! -f mutation-report.json ]; then
               set +e
               uv run --no-sync python -m fettle.mutation_test --root . \
                 --aggregate mutation-pr-reports \
+                --aggregate-advisory \
                 --aggregate-scope mutation-pr-source/mutation-changed-manifests \
                 --base "$BASE_SHA" --shard-count "$SHARD_COUNT" --json > mutation-report.json.tmp
               status=$?
