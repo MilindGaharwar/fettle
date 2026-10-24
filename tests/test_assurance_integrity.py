@@ -90,7 +90,11 @@ def _git_head(root):
 
 
 def _write_mutation_report(root, *, passed=False, status="completed"):
-    from fettle.mutation_test import MUTMUT_VERSION, _canonical_digest
+    mutmut_version = "2.5.1"
+
+    def canonical_digest(value):
+        content = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(content.encode()).hexdigest()
 
     source = root / "src" / "a.py"
     test = root / "tests" / "test_a.py"
@@ -113,16 +117,16 @@ def _write_mutation_report(root, *, passed=False, status="completed"):
     report = {
         "schema_version": "2", "status": status, "passed": passed,
         "revision": _git_head(root), "selection": "all",
-        "engine_version": MUTMUT_VERSION,
+        "engine_version": mutmut_version,
         "test_runner": "python -m pytest -x --assert=plain {mapped_tests}",
         "files_tested": ["src/a.py"], "tests_run": ["tests/test_a.py"],
         "line_ranges": ranges,
-        "policy_digest": _canonical_digest(policy),
-        "source_scope_digest": _canonical_digest({
+        "policy_digest": canonical_digest(policy),
+        "source_scope_digest": canonical_digest({
             "src/a.py": hashlib.sha256(source.read_bytes()).hexdigest(),
         }),
-        "test_mapping_digest": _canonical_digest(mapping),
-        "line_range_digest": _canonical_digest(ranges),
+        "test_mapping_digest": canonical_digest(mapping),
+        "line_range_digest": canonical_digest(ranges),
         "killed": 1, "survived": 1, "timeout": 0, "suspicious": 0,
         "untested": 0, "skipped": 0, "score": 50.0,
         "non_killed": [{

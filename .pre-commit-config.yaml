@@ -38,13 +38,13 @@ repos:
       # changes CAN break consistency tests, so they run at commit time.
       - id: fettle-consistency
         name: fettle consistency tests (version/schema/contract)
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; unset $(git rev-parse --local-env-vars); "$PY" -m pytest tests/test_cli.py tests/test_config_schema.py -q --no-header -p no:cacheprovider'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || { echo "fettle hooks require .venv/bin/python; run uv sync" >&2; exit 1; }; PATH="$PWD/.venv/bin:$PATH"; export PATH; unset $(git rev-parse --local-env-vars); "$PY" -m pytest tests/test_cli.py tests/test_config_schema.py -q --no-header -p no:cacheprovider'
         language: system
         pass_filenames: false
         always_run: true
       - id: fettle-completion
         name: fettle completion evidence
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m fettle.cli completion validate'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -m fettle.cli completion validate --checkpoint'
         language: system
         pass_filenames: false
         always_run: true
@@ -52,7 +52,7 @@ repos:
       # Pushes are batch events; a red CI costs more than the wait.
       - id: fettle-full-suite
         name: fettle full test suite (pre-push)
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python3; unset $(git rev-parse --local-env-vars); PRE_COMMIT_ALLOW_NO_CONFIG=1 "$PY" -m pytest tests/ -q --no-header -p no:cacheprovider'
+        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || { echo "fettle hooks require .venv/bin/python; run uv sync" >&2; exit 1; }; PATH="$PWD/.venv/bin:$PATH"; export PATH; unset $(git rev-parse --local-env-vars); PRE_COMMIT_ALLOW_NO_CONFIG=1 "$PY" -m pytest tests/ -q --no-header -p no:cacheprovider'
         language: system
         pass_filenames: false
         always_run: true

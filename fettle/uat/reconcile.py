@@ -21,6 +21,7 @@ import uuid
 from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 
 from fettle import __version__
 from fettle.evidence import (
@@ -64,7 +65,7 @@ class Verdict:
 def parse_transcript(text: str) -> dict[str, dict]:
     """Extract SCENARIO blocks: {id: {observed, outcome, notes}}.
 
-    Later blocks for the same id win (the agent may retry a scenario).
+    Conflicting retries remain unresolved without independent attempt evidence.
     Malformed blocks are kept with whatever fields parsed.
     """
     blocks: dict[str, dict] = {}
@@ -84,7 +85,11 @@ def parse_transcript(text: str) -> dict[str, dict]:
                 entry[current] = f.group(2).strip()
             elif current and line.strip():
                 entry[current] += "\n" + line.strip()  # multi-line field
-        blocks[m.group(1)] = entry
+        sid = m.group(1)
+        if sid in blocks and blocks[sid] != entry:
+            entry["outcome"] = "conflicting-attempts"
+            entry["notes"] = "conflicting reports require independent attempt evidence"
+        blocks[sid] = entry
     return blocks
 
 
@@ -110,6 +115,9 @@ def parse_restart_probe(text: str) -> dict | None:
 def reconcile_restart_probe(worktree: str, session: dict, transcript: str) -> Verdict | None:
     """Reconcile configured restart evidence; None means not applicable."""
     probe = session.get("restart_probe") or {"status": "NOT_APPLICABLE"}
+    if not isinstance(probe, dict):
+        return Verdict("__lifecycle__/restart-persistence", "INDETERMINATE",
+                       note="malformed restart evidence; rerun UAT")
     if probe.get("status") == "NOT_APPLICABLE":
         return None
     sid = "__lifecycle__/restart-persistence"
@@ -123,7 +131,9 @@ def reconcile_restart_probe(worktree: str, session: dict, transcript: str) -> Ve
         return Verdict(sid, "INDETERMINATE",
                        note="restart evidence artifact is missing or malformed")
     block = parse_restart_probe(transcript)
-    if block is None or artifact.get("block_sha") != _digest(block):
+    if (not isinstance(artifact, dict) or block is None
+            or artifact.get("block") != block
+            or artifact.get("block_sha") != _digest(block)):
         return Verdict(sid, "INDETERMINATE",
                        note="restart evidence drifted from the retained artifact")
     if not block.get("before") or not block.get("after"):
@@ -134,6 +144,9 @@ def reconcile_restart_probe(worktree: str, session: dict, transcript: str) -> Ve
     if mapped is None:
         return Verdict(sid, "INDETERMINATE", observed=block.get("after", ""),
                        note=f"unrecognized restart outcome {outcome!r}")
+    if mapped == "CONFIRMED":
+        return Verdict(sid, "INDETERMINATE", observed=block["after"],
+                       note="restart claim lacks independent process and state evidence")
     return Verdict(sid, mapped, observed=block["after"], note=block.get("notes", ""))
 
 
@@ -162,8 +175,9 @@ def evaluate_judgment(
     )
     from fettle.spawn import governed_run
     run = governed_run(runner, prompt, str(Path(worktree)), timeout_s)
-    if run.error:
-        return {"status": "tool_error", "findings": [], "error": run.error}
+    if run.error or run.exit_code != 0:
+        return {"status": "tool_error", "findings": [],
+                "error": run.error or f"evaluator exited {run.exit_code}; rerun UAT judgment"}
     try:
         payload = json.loads(run.transcript)
         raw_findings = payload["findings"]
@@ -218,10 +232,10 @@ def reconcile(
 ) -> list[Verdict]:
     """One verdict per scenario. `scenarios` as from collect_scenarios().
 
-    P72: when ``require_artifacts`` is set (session reconciliation), a
-    CONFIRMED verdict must be backed by a captured observation artifact
-    whose block hash still matches the transcript — otherwise it degrades
-    to INDETERMINATE. Missing artifact or drift is never read as success.
+    Transcript blocks and their retained copies are claims, not execution
+    observations. Matches remain INDETERMINATE until an independent capture
+    and contract-oracle path is qualified. Missing or drifting claims also
+    remain non-pass.
     """
     blocks = parse_transcript(transcript)
     artifacts = artifacts or {}
@@ -243,13 +257,8 @@ def reconcile(
             if gate is not None:
                 verdicts.append(gate)
                 continue
-        if mapped == "CONFIRMED" and _looks_parroted(block["observed"], s):
-            verdicts.append(Verdict(sid, "INDETERMINATE", observed=block["observed"],
-                                    note="claimed match without independent evidence "
-                                         "(auto-answer suspected)"))
-        else:
-            verdicts.append(Verdict(sid, mapped, observed=block["observed"],
-                                    note=block["notes"]))
+        verdicts.append(Verdict(sid, mapped, observed=block["observed"],
+                                note=block["notes"]))
     return verdicts
 
 
@@ -257,7 +266,10 @@ def _confirm_gate(
     sid: str, block: dict, scenario: dict,
     artifacts: dict[str, dict], require_artifacts: bool,
 ) -> Verdict | None:
-    """P72: CONFIRMED must survive artifact verification; None = pass through."""
+    """Diagnose invalid claims without granting them execution authority."""
+    if _looks_parroted(block["observed"], scenario):
+        return Verdict(sid, "INDETERMINATE", observed=block["observed"],
+                       note="claimed match without independent evidence (auto-answer suspected)")
     artifact = artifacts.get(sid)
     if require_artifacts and artifact is None:
         return Verdict(
@@ -267,28 +279,38 @@ def _confirm_gate(
     if artifact is not None:
         from fettle.uat.artifacts import block_sha
 
+        if (not isinstance(artifact, dict)
+                or not isinstance(artifact.get("block"), dict)
+                or artifact.get("block_sha") != block_sha(artifact["block"])
+                or artifact.get("scenario_id") != sid
+                or artifact.get("steps") != scenario.get("steps", [])):
+            return Verdict(sid, "INDETERMINATE", observed=block["observed"],
+                           note="artifact content or scenario contract is invalid")
         if artifact.get("block_sha") != block_sha(block):
             return Verdict(
                 sid, "INDETERMINATE", observed=block["observed"],
                 note="transcript drifted from the captured observation artifact",
             )
-    return None
+    return Verdict(sid, "INDETERMINATE", observed=block["observed"],
+                   note="agent claim lacks independent execution evidence; "
+                        "retain observations and rerun with a qualified capture driver")
 
 
 _CANDIDATE_RE = re.compile(r"^CANDIDATE:\s*(.+)$")
 
 
 def _outside_scenario_blocks(transcript: str) -> str:
-    """Mask SCENARIO verdict blocks so candidate scanning skips them."""
-    matches = list(_BLOCK_RE.finditer(transcript))
-    if not matches:
-        return transcript
+    """Mask scenario and restart verdict sections during candidate scanning."""
     parts: list[str] = []
-    last = 0
-    for m in matches:
-        parts.append(transcript[last:m.start()])
-        last = m.end()
-    parts.append(transcript[last:])
+    in_verdict_block = False
+    for line in transcript.splitlines():
+        stripped = line.strip()
+        if _BLOCK_RE.match(stripped) or _RESTART_RE.match(stripped):
+            in_verdict_block = True
+        elif _CANDIDATE_RE.match(stripped):
+            in_verdict_block = False
+        if not in_verdict_block:
+            parts.append(line)
     return "\n".join(parts)
 
 
@@ -319,6 +341,29 @@ def parse_candidates(transcript: str) -> list[dict]:
     return candidates
 
 
+def _completion(verdicts: list[dict], session: dict, judgment: dict, session_error: str) -> dict:
+    if (not isinstance(verdicts, list) or not isinstance(judgment, dict)
+            or any(not isinstance(item, dict) or not isinstance(item.get("scenario_id"), str)
+                   or item.get("verdict") not in VERDICTS for item in verdicts)):
+        raise ValueError("malformed UAT verdicts or judgment")
+    product = [item for item in verdicts if not item["scenario_id"].startswith("__")]
+    product_ids = [item["scenario_id"] for item in product]
+    required = session.get("scenario_ids") or []
+    valid_inventory = (isinstance(required, list) and bool(required)
+                       and all(isinstance(sid, str) and sid for sid in required)
+                       and len(set(required)) == len(required))
+    exact_coverage = (valid_inventory and len(set(product_ids)) == len(product_ids)
+                      and set(product_ids) == set(required))
+    judgment_pass = (judgment.get("status") == "NOT_APPLICABLE"
+                     or judgment.get("status") == "completed" and judgment.get("findings") == [])
+    return {
+        "complete": bool(exact_coverage and not session_error and judgment_pass
+                         and all(item["verdict"] == "CONFIRMED" for item in verdicts)),
+        "required_total": len(required) if valid_inventory else len(product),
+        "required_confirmed": sum(item["verdict"] == "CONFIRMED" for item in product),
+    }
+
+
 def write_report(
     worktree: str,
     session: dict,
@@ -332,49 +377,61 @@ def write_report(
     review; they never influence verdicts.
     """
     path = Path(worktree) / ".fettle" / REPORT_NAME
+    verdicts = [
+        Verdict(verdict.scenario_id, "INDETERMINATE", verdict.observed,
+                "caller-supplied confirmation lacks independent execution evidence")
+        if verdict.verdict == "CONFIRMED" else verdict
+        for verdict in verdicts
+    ]
+    if session.get("capture_mode"):
+        from fettle.uat.controller import validate_capture
+
+        captured, capture_error = validate_capture(worktree, session)
+        if not capture_error:
+            verdicts = [Verdict(**item) for item in captured]
     from fettle.trace import build_evidence
+    judgment = judgment or {"status": "NOT_APPLICABLE", "findings": []}
+    session_error = _session_error(worktree, session)
+    projected = [{"scenario_id": verdict.scenario_id, "verdict": verdict.verdict,
+                  "observed": verdict.observed, "note": verdict.note} for verdict in verdicts]
+    completion = _completion(projected, session, judgment, session_error)
     evidence_id = build_evidence(
-        "uat_report", exit_code=0 if all(v.verdict == "CONFIRMED" for v in verdicts) else 1,
+        "uat_report", exit_code=0 if completion["complete"] else 1,
         scope=session.get("surface", ""),
     )["evidence_id"]
-    judgment = judgment or {"status": "NOT_APPLICABLE", "findings": []}
-    judgment_pass = (judgment["status"] == "NOT_APPLICABLE"
-                     or (judgment["status"] == "completed" and not judgment["findings"]))
-    complete = bool(verdicts) and all(v.verdict == "CONFIRMED" for v in verdicts)
-    complete = complete and judgment_pass
     data = {
         "session_id": session.get("session_id", ""),
         "surface": session.get("surface", ""),
         "evidence_id": evidence_id,
         "candidate_scenarios": candidates or [],
         "judgment": judgment,
-        "verdicts": [{"scenario_id": v.scenario_id, "verdict": v.verdict,
-                       "observed": v.observed, "note": v.note} for v in verdicts],
-        "completion": {
-            "complete": complete,
-            "required_total": len(verdicts),
-            "required_confirmed": sum(v.verdict == "CONFIRMED" for v in verdicts),
-        },
+        "session_error": session_error,
+        "verdicts": projected,
+        "completion": completion,
         "lifecycle": {
             "restart_probe": next((
                 {"verdict": v.verdict, "observed": v.observed, "note": v.note}
                 for v in verdicts
                 if v.scenario_id == "__lifecycle__/restart-persistence"
             ), {"verdict": "NOT_APPLICABLE",
-                "note": (session.get("restart_probe") or {}).get("reason", "")}),
+                "note": "restart probe not configured"}),
         },
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        _write_bytes_atomic(path, (json.dumps(data, indent=2) + "\n").encode())
         if session.get("canonical_evidence", True):
             try:
                 _write_report_evidence(worktree, session, data)
             except (OSError, TypeError, ValueError) as exc:
-                return str(path), (
+                error = (
                     "canonical UAT report evidence unavailable: "
                     + (str(exc) or type(exc).__name__)
                 )
+                data["session_error"] = error
+                data["completion"]["complete"] = False
+                _write_bytes_atomic(path, (json.dumps(data, indent=2) + "\n").encode())
+                return str(path), error
             evidence_data = json.loads(
                 (Path(worktree) / ".fettle" / REPORT_EVIDENCE_NAME).read_text(encoding="utf-8")
             )
@@ -441,7 +498,8 @@ def _write_report_evidence(worktree: str, session: dict, report: dict) -> None:
         for item in report["verdicts"]
     ]
     judgment = report["judgment"]
-    unresolved = judgment.get("status") in {"tool_error", "indeterminate"}
+    unresolved = (judgment.get("status") in {"tool_error", "indeterminate"}
+                  or bool(report.get("session_error")))
     artifact = EvidenceArtifact.create(
         kind="fettle.uat.report",
         producer={
@@ -496,24 +554,31 @@ def validate_canonical_evidence(worktree: str, report: dict) -> EvidenceValidati
         verdicts = report["verdicts"]
         completion = report["completion"]
         judgment = report["judgment"]
+        if (not isinstance(judgment, dict) or not isinstance(completion, dict)
+            or not isinstance(verdicts, list)
+            or any(not isinstance(item, dict) or not isinstance(item.get("scenario_id"), str)
+                   or item.get("verdict") not in VERDICTS for item in verdicts)):
+            return failure(Validity.MALFORMED)
         projected_verdicts = [
             {"scenario_id": item["scenario_id"], "verdict": item["verdict"]}
             for item in verdicts
         ]
-        confirmed = sum(item["verdict"] == "CONFIRMED" for item in verdicts)
-        expected_complete = bool(verdicts) and confirmed == len(verdicts)
         judgment_status = judgment.get("status")
-        judgment_findings = judgment.get("findings")
-        unresolved = judgment_status in {"tool_error", "indeterminate"}
-        judgment_pass = (
-            judgment_status == "NOT_APPLICABLE"
-            or judgment_status == "completed" and judgment_findings == []
-        )
-        expected_completion = {
-            "complete": expected_complete and judgment_pass,
-            "required_total": len(verdicts),
-            "required_confirmed": confirmed,
-        }
+        from fettle.uat.session import load_checkpoint
+
+        session = load_checkpoint(worktree) or {}
+        session_error = _session_error(worktree, session)
+        if session.get("capture_mode"):
+            from fettle.uat.controller import validate_capture
+
+            captured, capture_error = validate_capture(worktree, session)
+            if capture_error or verdicts != captured:
+                return failure(Validity.TAMPERED)
+        elif any(item["verdict"] == "CONFIRMED" for item in verdicts):
+            return failure(Validity.TAMPERED)
+        unresolved = (judgment_status in {"tool_error", "indeterminate"}
+                  or bool(session_error))
+        expected_completion = _completion(verdicts, session, judgment, session_error)
         if completion != expected_completion:
             return failure(Validity.TAMPERED)
         expected_state = (
@@ -521,19 +586,29 @@ def validate_canonical_evidence(worktree: str, report: dict) -> EvidenceValidati
             else ResultState.PASS if completion["complete"]
             else ResultState.VIOLATION
         )
+        retained_verdicts = payload.get("verdicts")
+        retained_completion = payload.get("completion")
+        retained_report = payload.get("report")
+        if (not isinstance(retained_verdicts, (list, tuple))
+                or not isinstance(retained_completion, Mapping)
+                or not isinstance(retained_report, Mapping)):
+            return failure(Validity.MALFORMED)
         if (
             payload.get("session_id") != str(report["session_id"])
             or payload.get("surface") != str(report["surface"])
-            or list(payload.get("verdicts", ())) != projected_verdicts
-            or dict(payload.get("completion", {})) != completion
-            or payload.get("report", {}).get("digest")
+            or list(retained_verdicts) != projected_verdicts
+            or dict(retained_completion) != completion
+            or retained_report.get("digest")
             != "sha256:" + hashlib.sha256(report_path.read_bytes()).hexdigest()
             or artifact.result_state != expected_state
         ):
             return failure(Validity.TAMPERED)
         context = EvidenceValidationContext(
             kind="fettle.uat.report",
-            source_snapshot_digest=artifact.source["snapshot_digest"],
+            source_snapshot_digest=_digest({
+                "session_id": report["session_id"],
+                "session_evidence": session.get("canonical_evidence_reference"),
+            }),
             source_revision=None,
             policy_digest=_digest({"canonical_evidence": True}),
             scope_digest=_digest({
@@ -580,15 +655,46 @@ def reconcile_session(root: str, worktree: str) -> tuple[list[Verdict], dict, st
     cp = load_checkpoint(worktree)
     if cp is None:
         return [], {}, f"no session checkpoint found in {worktree}"
+    if cp.get("capture_mode"):
+        from fettle.uat.controller import validate_capture
+
+        captured, capture_error = validate_capture(worktree, cp)
+        if Path(root).resolve() != Path(worktree).resolve():
+            return [], cp, "controller report must be inspected from its original product root"
+        if capture_error:
+            return [], cp, capture_error
+        verdicts = [Verdict(**item) for item in captured]
+        judgment = {"status": "NOT_APPLICABLE", "findings": []}
+        cp["session_error"] = _session_error(worktree, cp)
+        cp["judgment"] = judgment
+        _, err = write_report(worktree, cp, verdicts, judgment=judgment)
+        cp["acceptance_complete"] = not err and _completion(
+            captured, cp, judgment, cp["session_error"],
+        )["complete"]
+        return verdicts, cp, err
     transcript_path = cp.get("transcript", "")
-    if not transcript_path:
+    if not isinstance(transcript_path, str) or not transcript_path:
         return [], cp, "session has no transcript (did the run complete?)"
     try:
+        if not Path(transcript_path).resolve().is_relative_to(
+                (Path(worktree) / ".fettle").resolve()):
+            return [], cp, "session transcript escapes retained evidence directory"
         transcript = Path(transcript_path).read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return [], cp, f"cannot read transcript: {exc}"
-    scenarios = [s for s in collect_scenarios(root)
-                 if s["id"] in set(cp.get("scenario_ids", []))]
+    scenario_ids = cp.get("scenario_ids")
+    if (not isinstance(scenario_ids, list) or not scenario_ids
+            or any(not isinstance(sid, str) or not sid for sid in scenario_ids)
+            or len(set(scenario_ids)) != len(scenario_ids)):
+        return [], cp, "session requires a nonempty unique scenario inventory; rerun UAT"
+    try:
+        scenarios = collect_scenarios(root)
+    except ValueError as exc:
+        return [], cp, str(exc)
+    if set(scenario_ids) != {scenario["id"] for scenario in scenarios}:
+        return [], cp, "required scenario coverage changed or is incomplete; rerun UAT"
+    if cp.get("contract_digest") != _digest(scenarios):
+        cp["validation_error"] = "scenario contract is missing or changed; rerun UAT"
     from fettle.uat.artifacts import load_scenario_artifacts
 
     artifacts = load_scenario_artifacts(worktree)
@@ -603,21 +709,95 @@ def reconcile_session(root: str, worktree: str) -> tuple[list[Verdict], dict, st
     judgment = {"status": "NOT_APPLICABLE", "findings": []}
     evaluator_name = str(cp.get("evaluator_runner") or "")
     if evaluator_name:
-        from fettle.runners import get_runner
+        from fettle.runners import get_uat_runner
 
         try:
-            evaluator = get_runner(evaluator_name)
+            evaluator = get_uat_runner(evaluator_name)
             judgment = evaluate_judgment(
                 worktree, transcript, artifacts, evaluator,
                 timeout_s=int(cp.get("evaluator_timeout_s") or 600),
             )
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             judgment = {"status": "tool_error", "findings": [], "error": str(exc)}
     cp["judgment"] = judgment
     cp["judgment_pass"] = (
         judgment["status"] == "NOT_APPLICABLE"
         or (judgment["status"] == "completed" and not judgment["findings"])
     )
+    cp["session_error"] = _session_error(worktree, cp)
     _, err = write_report(worktree, cp, verdicts,
                           candidates=parse_candidates(transcript), judgment=judgment)
+    cp["acceptance_complete"] = not err and _completion(
+        [{"scenario_id": verdict.scenario_id, "verdict": verdict.verdict} for verdict in verdicts],
+        cp, judgment, cp["session_error"],
+    )["complete"]
     return verdicts, cp, err
+
+
+def _session_error(worktree: str, session: dict) -> str:
+    from fettle.uat.session import (
+        SESSION_EVIDENCE_NAME, _producer_digest as session_producer_digest,
+        collect_scenarios,
+    )
+
+    if session.get("status") != "completed" or session.get("error"):
+        return "session did not complete successfully; rerun UAT"
+    for field in ("artifact_error", "canonical_evidence_error", "validation_error"):
+        if session.get(field):
+            return str(session[field])
+    if session.get("capture_mode"):
+        from fettle.uat.controller import validate_capture
+
+        _, error = validate_capture(worktree, session)
+        return error
+    capture = session.get("web_capture")
+    if session.get("surface") == "web" and (
+            not isinstance(capture, dict) or capture.get("status") != "completed"):
+        return "required web capture is missing or failed; rerun UAT"
+    try:
+        scenarios = collect_scenarios(worktree)
+        if not scenarios or session.get("contract_digest") != _digest(scenarios):
+            return "session contract is missing or stale; rerun UAT"
+        scenario_ids = session.get("scenario_ids")
+        if scenario_ids != [scenario["id"] for scenario in scenarios]:
+            return "session scenario inventory is invalid; rerun UAT"
+        transcript = Path(session["transcript"]).resolve()
+        if not transcript.is_relative_to((Path(worktree) / ".fettle").resolve()):
+            return "session transcript escapes retained evidence directory"
+        digest = "sha256:" + hashlib.sha256(transcript.read_bytes()).hexdigest()
+        content = (Path(worktree) / ".fettle" / SESSION_EVIDENCE_NAME).read_bytes()
+        artifact = parse_artifact(content)
+        reference = session["canonical_evidence_reference"]
+        retained_ids = artifact.payload.get("scenario_ids")
+        retained_transcript = artifact.payload.get("transcript")
+        if (not isinstance(retained_ids, (list, tuple))
+                or not isinstance(retained_transcript, Mapping)):
+            return "session evidence has malformed payload; rerun UAT"
+        if (artifact.artifact_digest != reference["artifact_digest"]
+                or artifact.payload.get("status") != "completed"
+                or artifact.payload.get("session_id") != session.get("session_id")
+                or list(retained_ids) != scenario_ids
+                or retained_transcript.get("digest") != digest):
+            return "session evidence conflicts with checkpoint; rerun UAT"
+        validation = validate_artifact(content, EvidenceValidationContext(
+            kind="fettle.uat.session",
+            source_snapshot_digest=_digest({
+                "session_id": session.get("session_id", ""),
+                "transcript_digest": digest,
+                "contract_digest": session.get("contract_digest"),
+            }),
+            source_revision=None,
+            policy_digest=session["policy_digest"],
+            scope_digest=_digest({"surface": session.get("surface", ""),
+                                  "scenario_ids": scenario_ids}),
+            producer_id="fettle.uat.session",
+            producer_versions=frozenset({__version__}),
+            producer_implementation_digest=session_producer_digest(),
+            allowed_trust_classes=frozenset({"derived"}),
+            recovery_action="fettle uat run",
+        ))
+        if validation.validity != Validity.VALID or validation.result_state != ResultState.PASS:
+            return "session evidence is invalid or incomplete; rerun UAT"
+    except (KeyError, OSError, TypeError, ValueError):
+        return "session evidence is missing or malformed; rerun UAT"
+    return ""

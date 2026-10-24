@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- CI and release now share a fail-closed quality ratchet: seven critical modules
+  remain at zero mypy errors, while whole-source typing debt stays visibly
+  advisory at 214 errors across 36 files.
+- Combined coverage retains its 65% floor and branch coverage now has an
+  independent 69% floor computed from integer coverage.py counts. Missing,
+  malformed, contradictory, or empty evidence cannot pass.
+- A bounded Python-subprocess fixture exercises the production coverage verifier.
+  Non-Python processes, unsupported exec patterns, and abruptly terminated
+  children remain explicit coverage limitations.
+
 ## v1.13.1 - Complete Default Python Install
 
 - Plain `pipx install finefettle` now installs every Python runtime used by

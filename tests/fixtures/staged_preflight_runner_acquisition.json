@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "kind": "reconstructed_runner_acquisition_sequence",
+    "basis": "surrounding retained API snapshots from run 37766951306/1",
+    "limitation": "the failing monitor payload was not retained, so the precise original trigger is uncertain"
+  },
+  "states": [
+  {
+    "status": "queued",
+    "conclusion": null,
+    "started_at": null,
+    "completed_at": null,
+    "runner_id": null,
+    "runner_name": null,
+    "runner_group_id": null,
+    "runner_group_name": null,
+    "steps": []
+  },
+  {
+    "status": "queued",
+    "conclusion": null,
+    "started_at": "2026-10-08T11:18:08Z",
+    "completed_at": null,
+    "runner_id": null,
+    "runner_name": null,
+    "runner_group_id": null,
+    "runner_group_name": null,
+    "steps": []
+  },
+  {
+    "status": "queued",
+    "conclusion": null,
+    "started_at": "2026-10-08T11:18:08Z",
+    "completed_at": null,
+    "runner_id": 1000042526,
+    "runner_name": "GitHub Actions 1000042526",
+    "runner_group_id": 0,
+    "runner_group_name": "GitHub Actions",
+    "steps": []
+  },
+  {
+    "status": "in_progress",
+    "conclusion": null,
+    "started_at": "2026-10-08T11:18:08Z",
+    "completed_at": null,
+    "runner_id": 1000042526,
+    "runner_name": "GitHub Actions 1000042526",
+    "runner_group_id": 0,
+    "runner_group_name": "GitHub Actions",
+    "steps": [{"name": "Set up job", "status": "in_progress", "conclusion": null}]
+  },
+  {
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-10-08T11:18:08Z",
+    "completed_at": "2026-10-08T11:19:36Z",
+    "runner_id": 1000042526,
+    "runner_name": "GitHub Actions 1000042526",
+    "runner_group_id": 0,
+    "runner_group_name": "GitHub Actions",
+    "steps": [{"name": "Complete job", "status": "completed", "conclusion": "success"}]
+  }
+  ]
+}

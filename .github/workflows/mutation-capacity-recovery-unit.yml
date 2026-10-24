@@ -1,0 +1,218 @@
+name: Mutation capacity recovery unit
+
+on:
+  workflow_call:
+    inputs:
+      unit:
+        required: true
+        type: number
+      recovery_run_id:
+        required: true
+        type: string
+      recovery_experiment_id:
+        required: true
+        type: string
+      plan_sha256:
+        required: true
+        type: string
+      source_candidate_sha:
+        required: true
+        type: string
+      controller_sha:
+        required: true
+        type: string
+      authorization_id:
+        required: true
+        type: string
+      environment_digest:
+        required: true
+        type: string
+      package_controller_sha:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  execute:
+    name: capacity recovery validation unit ${{ inputs.unit }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONNOUSERSITE: "1"
+    steps:
+      - name: Checkout delivered recovery controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: controller
+      - name: Checkout immutable source candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_candidate_sha }}
+          path: source
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install controller and frozen source environments
+        run: |
+          uv venv controller/.venv --python 3.12.13
+          uv pip install --python controller/.venv/bin/python --quiet --no-deps -e controller
+          uv venv source/.venv --python 3.12.13
+          uv pip install --python source/.venv/bin/python --quiet --require-hashes -r source/requirements-mutation.txt
+          uv pip install --python source/.venv/bin/python --quiet --no-deps -e source
+      - name: Bind distinct controller and source identities
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_SHA: ${{ inputs.source_candidate_sha }}
+          CONTROLLER_SHA: ${{ inputs.controller_sha }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+          RECOVERY_EXPERIMENT_ID: ${{ inputs.recovery_experiment_id }}
+          PACKAGE_CONTROLLER_SHA: ${{ inputs.package_controller_sha }}
+        run: |
+          test "$RUN_ATTEMPT" = 1
+          test "$CONTROLLER_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = 65e63d953b45d3672c24df74d0a1364b83a0157b
+          test "$SOURCE_SHA" != "$CONTROLLER_SHA"
+          test "$AUTHORIZATION_ID" = AH-LINUX-MEASUREMENT-20261021-A
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_SHA"
+          controller/.venv/bin/python -c 'import os; from fettle.staged_preflight import linux_measurement_authorization_contract; linux_measurement_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["SOURCE_SHA"], os.environ["RECOVERY_EXPERIMENT_ID"], execution_controller_sha=os.environ["CONTROLLER_SHA"])'
+      - name: Download recovery package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-recovery-${{ inputs.recovery_run_id }}
+          path: recovered
+          run-id: ${{ inputs.recovery_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Initialize fail-closed result
+        env:
+          UNIT: ${{ inputs.unit }}
+          SOURCE_SHA: ${{ inputs.source_candidate_sha }}
+          CONTROLLER_SHA: ${{ inputs.controller_sha }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path("capacity-validation-result.json").write_text(json.dumps({
+              "schema_version": "2", "kind": "capacity_validation_unit_result",
+              "status": "not_started", "passed": False,
+              "qualification_eligible": False, "billing_authority": False,
+              "authoritative_predecessor": False,
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "source_candidate_sha": os.environ["SOURCE_SHA"],
+              "controller_sha": os.environ["CONTROLLER_SHA"],
+              "unit_index": int(os.environ["UNIT"]),
+          }, indent=2) + "\n")
+          PY
+      - name: Validate immutable recovery package before source execution
+        env:
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          CONTROLLER_SHA: ${{ inputs.controller_sha }}
+          SOURCE_SHA: ${{ inputs.source_candidate_sha }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+          RECOVERY_EXPERIMENT_ID: ${{ inputs.recovery_experiment_id }}
+          PACKAGE_CONTROLLER_SHA: ${{ inputs.package_controller_sha }}
+        run: |
+          controller/.venv/bin/python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from fettle.mutation_test import validate_capacity_recovery_lineage
+          package = Path("recovered/capacity-recovery")
+          corpus = json.loads((package / "capacity-validation-corpus.json").read_text())
+          plan_path = package / "capacity-validation-plan.json"
+          plan = json.loads(plan_path.read_text())
+          lineage = json.loads((package / "capacity-validation-recovery-lineage.json").read_text())
+          plan_sha = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+          if plan_sha != os.environ["PLAN_SHA256"]:
+              raise ValueError("recovery plan file digest differs")
+          if lineage.get("source", {}).get("candidate_sha") != os.environ["SOURCE_SHA"]:
+              raise ValueError("recovery source candidate differs")
+          validate_capacity_recovery_lineage(
+              lineage, corpus, plan,
+              controller_sha=os.environ["PACKAGE_CONTROLLER_SHA"],
+              recovery_experiment_id=lineage["recovery"]["experiment_id"],
+              plan_file_sha256=plan_sha,
+          )
+          PY
+      - name: Record isolated source executor provenance
+        env:
+          PYTHONNOUSERSITE: "1"
+          UNIT: ${{ inputs.unit }}
+          CONTROLLER_SHA: ${{ inputs.controller_sha }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          env -u PYTHONPATH source/.venv/bin/python -I - <<'PY'
+          import hashlib, importlib.metadata, json, os, platform, sys
+          from pathlib import Path
+          import fettle.mutation_test as module
+          source = Path("source").resolve()
+          module_path = Path(module.__file__).resolve()
+          if not module_path.is_relative_to(source):
+              raise ValueError("recovery measurement imported mutation code outside source")
+          package = Path("recovered/capacity-recovery")
+          lineage = json.loads((package / "capacity-validation-recovery-lineage.json").read_text())
+          plan = json.loads((package / "capacity-validation-plan.json").read_text())
+          paths = [str(Path(item).resolve()) for item in sys.path if item]
+          if any("controller" in item for item in paths):
+              raise ValueError("controller path is visible to source measurement")
+          provenance = {
+              "schema_version": "1", "kind": "capacity_validation_recovery_execution_provenance",
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "lineage_digest": lineage["digest"],
+              "controller_sha": os.environ["CONTROLLER_SHA"],
+              "source_candidate_sha": lineage["source"]["candidate_sha"],
+              "executor_module": module_path.relative_to(source).as_posix(),
+              "executor_module_sha256": hashlib.sha256(module_path.read_bytes()).hexdigest(),
+              "adapter_sha256": hashlib.sha256(Path("controller/.github/scripts/capacity_recovery_execute.py").read_bytes()).hexdigest(),
+              "unit_index": int(os.environ["UNIT"]),
+              "interpreter": sys.executable, "python": platform.python_version(),
+              "platform": f"{platform.system()}-{platform.machine()}", "sys_path": paths,
+              "ordered_tests": plan["units"][int(os.environ["UNIT"])]["mapped_tests"],
+              "dependencies": sorted((d.metadata.get("Name"), d.version) for d in importlib.metadata.distributions() if d.metadata.get("Name")),
+          }
+          provenance["digest"] = module._canonical_digest(provenance)
+          Path("capacity-validation-recovery-provenance.json").write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
+          PY
+      - name: Execute source-owned bounded capacity unit
+        timeout-minutes: 14
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: >-
+          env -u PYTHONPATH source/.venv/bin/python -I
+          controller/.github/scripts/capacity_recovery_execute.py
+          --source-root source --unit ${{ inputs.unit }}
+          --plan recovered/capacity-recovery/capacity-validation-plan.json
+          --corpus recovered/capacity-recovery/capacity-validation-corpus.json
+          --result capacity-validation-result.json
+          --checkpoint capacity-validation-checkpoint.json
+          --environment-evidence capacity-validation-runtime-environment.json
+          --timeout 720 > capacity-validation-command.json
+      - name: Bind captured runtime evidence to provenance
+        if: always()
+        run: |
+          test -f capacity-validation-runtime-environment.json || exit 0
+          source/.venv/bin/python -I -c 'import json; from pathlib import Path; import fettle.mutation_test as module; path=Path("capacity-validation-recovery-provenance.json"); provenance=json.loads(path.read_text()); provenance["runtime_environment"]=json.loads(Path("capacity-validation-runtime-environment.json").read_text()); provenance["digest"]=module._canonical_digest({key:value for key,value in provenance.items() if key != "digest"}); path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n")'
+      - name: Restore and verify frozen source checkout
+        if: always()
+        run: |
+          git -C source reset --quiet -- .
+          git -C source clean -ffdqx
+          git -C source diff --exit-code
+          test -z "$(git -C source status --porcelain --untracked-files=no)"
+      - name: Retain non-authoritative recovered result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-unit-${{ github.run_id }}-${{ inputs.unit }}
+          path: |
+            capacity-validation-result.json
+            capacity-validation-checkpoint.json
+            capacity-validation-command.json
+            capacity-validation-recovery-provenance.json
+            capacity-validation-runtime-environment.json
+          if-no-files-found: error
+          retention-days: 90

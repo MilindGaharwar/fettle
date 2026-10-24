@@ -108,6 +108,15 @@ class TestRobustness:
         payload = {"type": "tool.execute.before", "tool": "webfetch", "args": {}, "directory": "/r"}
         assert normalize(payload, fallback_cwd="/fb").tool_name is None
 
+    def test_opencode_shell_tool_maps_to_bash(self) -> None:
+        payload = {
+            "type": "tool.execute.before",
+            "tool": "shell",
+            "args": {"command": "printf safe"},
+            "directory": "/r",
+        }
+        assert normalize(payload, fallback_cwd="/fb").tool_name == "Bash"
+
     def test_gemini_unmapped_tool_passes_through(self) -> None:
         payload = {"hook_event_name": "BeforeTool", "tool_name": "web_fetch", "tool_input": {}}
         assert normalize(payload, fallback_cwd="/fb").tool_name == "web_fetch"

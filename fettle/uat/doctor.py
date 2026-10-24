@@ -10,6 +10,10 @@ read as ready (Stage 0 posture).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
+from pathlib import Path
+import shlex
+import shutil
 
 
 @dataclass
@@ -24,15 +28,59 @@ class Capability:
 
 def _playwright_available() -> bool:
     try:
-        import playwright  # noqa: F401
-        return True
-    except ImportError:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            return Path(playwright.chromium.executable_path).is_file()
+    except (ImportError, OSError, RuntimeError):
         return False
+
+
+def probe_contract(root: str, config: dict, path: str, approval: str) -> Capability:
+    import subprocess
+    import uuid
+
+    from fettle.uat.controller import _execute, _profile, _source, capability_error, load_contract
+    from fettle.uat.session import collect_scenarios
+
+    error = ""
+    surface = "cli"
+    try:
+        contract = load_contract(path, approval, collect_scenarios(root))
+        surface = contract.get("surface", "cli")
+        if contract["schema_version"] == 2:
+            from fettle.uat.network_controller import runtime
+
+            if config.get("uat", {}).get("start_command") or config.get("uat", {}).get("evaluator_runner"):
+                raise ValueError("use approved product startup; configured host startup/evaluator is unsupported")
+            _source(root)
+            runtime(contract)
+            return Capability(surface=surface, ready=True,
+                              detail=f"isolated {surface} runtime available; behavioral checks occur during run")
+        error = capability_error()
+        if error:
+            raise ValueError(error)
+        if config.get("uat", {}).get("start_command") or config.get("uat", {}).get("evaluator_runner"):
+            raise ValueError("read-only capture does not support restart/model-evaluator requirements")
+        entries = _source(root)
+        nonce = uuid.uuid4().hex
+        action = {"scenario_id": "__probe__", "argv": ["/bin/echo", nonce], "timeout_s": 3}
+        observation = _execute(root, action, _profile(root, entries, [*contract["actions"], action]))
+        if (observation["error"] or observation["exit_code"] != 0
+                or observation["stdout"] != nonce + "\n" or observation["stderr"]):
+            raise ValueError("native sandbox startup probe failed; no unsandboxed fallback")
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError) as exc:
+        error = (capability_error() if surface == "cli" else "") or str(exc)
+    return Capability(
+        surface=surface, ready=not error,
+        detail="read-only CLI controller prerequisites verified" if not error else f"{surface} capture blocked",
+        why=error, fix="review contract, approval digest and qualified runtime availability" if error else "",
+    )
 
 
 def probe(root: str, config: dict) -> tuple[list[Capability], str]:
     """Capability check per resolved surface. Returns (capabilities, error)."""
-    from fettle.runners import detect_runners
+    from fettle.runners import detect_runners, get_uat_runner
     from fettle.uat.surfaces import resolve_surfaces
 
     surfaces, err = resolve_surfaces(root, config)
@@ -40,9 +88,26 @@ def probe(root: str, config: dict) -> tuple[list[Capability], str]:
         return [], err
 
     uat_cfg = config.get("uat", {})
+    startup_error = ""
+    if uat_cfg.get("start_command"):
+        try:
+            arguments = shlex.split(uat_cfg["start_command"])
+            executable = arguments[0] if arguments else ""
+            local = Path(root) / executable
+            available = (local.is_file() and os.access(local, os.X_OK)
+                         if "/" in executable else bool(shutil.which(executable)))
+            if not executable or not available:
+                startup_error = "configured start_command executable is unavailable"
+        except (TypeError, ValueError):
+            startup_error = "configured start_command is malformed"
     runner_name = uat_cfg.get("runner", "claude")
     runners = detect_runners()
     runner_ok = runners.get(runner_name, False)
+    permission_error = ""
+    try:
+        get_uat_runner(runner_name)
+    except ValueError as exc:
+        permission_error = str(exc)
 
     caps: list[Capability] = []
     if not surfaces:
@@ -56,6 +121,18 @@ def probe(root: str, config: dict) -> tuple[list[Capability], str]:
 
     for s in surfaces:
         name = s["name"]
+        if startup_error:
+            caps.append(Capability(
+                surface=name, ready=False, detail="application startup unavailable",
+                why=startup_error, fix="repair [uat].start_command, then rerun fettle uat doctor",
+            ))
+            continue
+        if permission_error:
+            caps.append(Capability(
+                surface=name, ready=False, detail="permission-preserving runner unavailable",
+                why=permission_error, fix="configure [uat] runner = 'claude' or 'codex'",
+            ))
+            continue
         if not runner_ok:
             caps.append(Capability(
                 surface=name, ready=False,
@@ -72,7 +149,7 @@ def probe(root: str, config: dict) -> tuple[list[Capability], str]:
                 caps.append(Capability(
                     surface="web", ready=False,
                     detail="browser automation unavailable",
-                    why="playwright is missing from this Fettle environment",
+                    why="Playwright or its Chromium runtime is unavailable",
                     fix="reinstall finefettle, then run: playwright install",
                     manual=["start the app and walk each spec scenario in a browser",
                             "record what you saw: fettle uat attest <spec-id>/<S-n>"],

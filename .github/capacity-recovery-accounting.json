@@ -1,0 +1,13 @@
+{
+  "billing_authority": false,
+  "historical_operational_floor_minutes": {
+    "cancellation_uncertainty": 56.88,
+    "support": 10.27,
+    "workers": 475.89
+  },
+  "observed_operational_minutes": {
+    "cancellation_uncertainty": 56.88,
+    "support": 10.27,
+    "workers": 475.89
+  }
+}

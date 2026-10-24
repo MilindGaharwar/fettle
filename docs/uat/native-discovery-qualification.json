@@ -1,0 +1,1398 @@
+{
+  "cases": [
+    {
+      "canonical": {
+        "state": "pass",
+        "validity": "valid"
+      },
+      "case": "signed-baseline",
+      "consistent": true,
+      "contract_digest": "sha256:473d12a6ecfcc9e7c63c9b9b3a46efb394b62fdf3e2e5e85ef9e5b2455f57574",
+      "expected_state": "pass",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "reject\n"
+        }
+      ],
+      "state": "pass",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "signed-lower-open",
+      "consistent": true,
+      "contract_digest": "sha256:ed911bc7ddd8c49931ad00ac6b18960bee4e28a9bb04bad080502b39d7a00834",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "reject\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "signed-upper-open",
+      "consistent": true,
+      "contract_digest": "sha256:13e3df5b32e0ed8513ca0fe4a0d614dfc503ed707032b1f41f7ea414c0f5f2b3",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "reject\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "signed-unsigned-only",
+      "consistent": true,
+      "contract_digest": "sha256:6fd3781663316d8edd28989b5e998fde45a5a52c0c5590728190c2300f0d57a9",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "reject\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "signed-trims-space",
+      "consistent": true,
+      "contract_digest": "sha256:20463a7adb9457dd9676d5dfec91126b78c36dd48c5677837a0c6da6a297170c",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "reject\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "admit\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "malformed\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "reject\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "unknown",
+        "validity": "valid"
+      },
+      "case": "signed-timeout",
+      "consistent": true,
+      "contract_digest": "sha256:826fd2b516ab824c0861234b2ca2cbd00bd8a42909e2c2c560515f48ee845997",
+      "expected_state": "unknown",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "state": "unknown",
+      "suite": "signed-window"
+    },
+    {
+      "canonical": {
+        "state": "pass",
+        "validity": "valid"
+      },
+      "case": "positive-baseline",
+      "consistent": true,
+      "contract_digest": "sha256:0073e30efde77b55775a6d8e91d1055f13a8ab2122e7e0f6d3faa6ed5fbd5505",
+      "expected_state": "pass",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "invalid\n"
+        }
+      ],
+      "state": "pass",
+      "suite": "positive-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "positive-no-leading-zero",
+      "consistent": true,
+      "contract_digest": "sha256:3d7f14c3d8fa2f0565bbafc40612ae670da5aea2c9c1e2298c2a87aa64d2d2b2",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "invalid\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "positive-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "positive-unicode-digits",
+      "consistent": true,
+      "contract_digest": "sha256:ce258b8c1194e123dea00de5bfc4609dbd5db0eb9c66113e5cd20c82aa3483c4",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "invalid\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "positive-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "positive-magnitude",
+      "consistent": true,
+      "contract_digest": "sha256:1ca5060c67725fb79351d7989cf2da529eb4073cb1a48c9da55a89d947babad8",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "invalid\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "positive-window"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "positive-text-order",
+      "consistent": true,
+      "contract_digest": "sha256:e6c7ccd22ddbe81de128ec86843084ae14b55a56217cada556a50bdf67b63e91",
+      "expected_state": "violation",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": "within\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": "beyond\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": "invalid\n"
+        },
+        {
+          "attempt": 1,
+          "error": "",
+          "exit_code": 0,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": "invalid\n"
+        }
+      ],
+      "state": "violation",
+      "suite": "positive-window"
+    },
+    {
+      "canonical": {
+        "state": "unknown",
+        "validity": "valid"
+      },
+      "case": "positive-timeout",
+      "consistent": true,
+      "contract_digest": "sha256:7c2b2e03df27dd2e6bef22d35c1991d37354c67e7bdd557202d6bc4f1e38bd83",
+      "expected_state": "unknown",
+      "observations": [
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S1",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S2",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S3",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S4",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S5",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S6",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S7",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S8",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S9",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S10",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S11",
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "attempt": 1,
+          "error": "command timed out; no acceptance evidence",
+          "exit_code": -9,
+          "scenario_id": "classifier/S12",
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "state": "unknown",
+      "suite": "positive-window"
+    }
+  ],
+  "corpus_digest": "sha256:6067cee014a6e86dd529d630d687e1e730ba866e4a35d13903022ba3016d6b37",
+  "evaluator_digest": "sha256:249514a3f4fe14843703b8d6a89f8f88fb9f0337ad60ab90a4b3a5d01c02961a",
+  "graduation_passed": false,
+  "limits": [
+    "synthetic integer-range CLI input discovery only; not adaptive exploration",
+    "independently supplied approved policy is the oracle, never agent prose",
+    "sanitized retained observations are not portable canonical authority",
+    "no human parity, broad UAT completion or permission-enforcement promotion"
+  ],
+  "metrics": {
+    "blocked": 2,
+    "cases": 12,
+    "defects": 8,
+    "discovered": 8,
+    "false_alarms": 0,
+    "false_passes": 0,
+    "matched": 12,
+    "missed_defects": 0
+  },
+  "passed": true,
+  "proposals": [
+    {
+      "inputs": [
+        "-25",
+        "-24",
+        "73",
+        "74",
+        "+00073",
+        "-0",
+        "",
+        "+",
+        "73\n",
+        "\u0667",
+        "1_0",
+        "9999999999999999999999999999999999999999999999999999999999999999"
+      ],
+      "native": {
+        "events_digest": "sha256:17b8618c74f40ed7defb463304b82e9a1cf31c905102c8ed383723a4964f7bef",
+        "proposal_digest": "sha256:46b345a3e5fb3225b06b222481f604232b1dbe44036c51d47f13d4d97a6510d4",
+        "role": "untrusted action proposal; never acceptance evidence",
+        "terminal_event": "turn.completed",
+        "transport_exit": 0
+      },
+      "suite": "signed-window"
+    },
+    {
+      "inputs": [
+        "119",
+        "120",
+        "480",
+        "481",
+        "+000120",
+        "-120",
+        "9999999999999999999999999999999999999999",
+        "",
+        "+",
+        "120\n",
+        "\u0661\u0662\u0660",
+        "120.0"
+      ],
+      "native": {
+        "events_digest": "sha256:269ef3dff3941094a0b40b0300e9affcfb7b2a2327912ec5026f7a2f408ad90d",
+        "proposal_digest": "sha256:87ee904ff5078c4038813d6db354df8412d889b8431c3a4e03c4586b7d3b8913",
+        "role": "untrusted action proposal; never acceptance evidence",
+        "terminal_event": "turn.completed",
+        "transport_exit": 0
+      },
+      "suite": "positive-window"
+    }
+  ],
+  "recorded_at": "2026-09-22T07:34:23.310430+00:00",
+  "schema_version": 1,
+  "status": "completed",
+  "wheel_digest": "sha256:3118991c1c9a3d231c663ffdad44c1ea24420dacc1638593b5cd42474032b29b"
+}

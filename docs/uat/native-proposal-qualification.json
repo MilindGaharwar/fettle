@@ -1,0 +1,107 @@
+{
+  "cases": [
+    {
+      "canonical": {
+        "state": "pass",
+        "validity": "valid"
+      },
+      "case": "success",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "native_proposal": {
+        "events_digest": "sha256:d4dbaf9e357d72f051135daa95970438037e440509ae4f542e765348bb3bc5fb",
+        "oracle_injection_rejected": true,
+        "proposal_digest": "sha256:000cfd6c2926382622e8bda3882bf42a53336b6f0b210ca2c2c498274cd4e20f",
+        "role": "untrusted action proposal; never acceptance evidence",
+        "terminal_event": "turn.completed",
+        "transport_exit": 0
+      },
+      "observation": {
+        "attempt": 1,
+        "error": "",
+        "exit_code": 0,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": "Hello, Ada\n"
+      },
+      "passed": true,
+      "report_exit": 0,
+      "run_exit": 0,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    },
+    {
+      "canonical": {
+        "state": "violation",
+        "validity": "valid"
+      },
+      "case": "seeded-defect",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "native_proposal": {
+        "events_digest": "sha256:c3618920eee34ce6295abbf6dee3930b70e6686b8b86921dcb2d1b045755da77",
+        "oracle_injection_rejected": true,
+        "proposal_digest": "sha256:c964254acf9faa345043239b56145ffdef0d2269323c2b34ae6e192b218d36b7",
+        "role": "untrusted action proposal; never acceptance evidence",
+        "terminal_event": "turn.completed",
+        "transport_exit": 0
+      },
+      "observation": {
+        "attempt": 1,
+        "error": "",
+        "exit_code": 0,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": "Hello, wrong person\n"
+      },
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    },
+    {
+      "canonical": {
+        "state": "unknown",
+        "validity": "valid"
+      },
+      "case": "write-denied",
+      "doctor_exit": 0,
+      "forged_report_state": "unknown",
+      "native_proposal": {
+        "events_digest": "sha256:cedbb8622c40089a10877bf159e09fd4993f717158b1c44d9306af35ada6f54c",
+        "oracle_injection_rejected": true,
+        "proposal_digest": "sha256:c09b66a84c66ee81d285a6e6c2229fc2b5ea0376f88c045ce30360dacdd627ed",
+        "role": "untrusted action proposal; never acceptance evidence",
+        "terminal_event": "turn.completed",
+        "transport_exit": 0
+      },
+      "observation": {
+        "attempt": 1,
+        "error": "command terminated by signal or sandbox denial; review authorized action",
+        "exit_code": -9,
+        "scenario_id": "greeter/S1",
+        "stderr": "",
+        "stdout": ""
+      },
+      "passed": true,
+      "report_exit": 1,
+      "run_exit": 1,
+      "scenario_digest": "sha256:0ee9fabd29c2b3e588f2c2317135ce029437c787a1a1ab52bc32846800906325"
+    }
+  ],
+  "installed_identity": {
+    "controller_sha256": "4171f1dcaa253dccda24af99c703ff3135b74f0462a14db52e74c0d8cdeeff4c",
+    "installed": true,
+    "python": "3.12.13"
+  },
+  "limits": [
+    "macOS read-only CLI only",
+    "trusted controller and system runtime",
+    "no unrestricted same-user explorer",
+    "not human parity or enforcement graduation"
+  ],
+  "passed": true,
+  "platform": "macOS-26.7-arm64-arm-64bit",
+  "recorded_at": "2026-09-22T06:10:30.923839+00:00",
+  "schema_version": 1,
+  "wheel_digest": "sha256:3118991c1c9a3d231c663ffdad44c1ea24420dacc1638593b5cd42474032b29b"
+}

@@ -1,0 +1,20 @@
+{
+  "added_syscalls": [
+    "chroot"
+  ],
+  "chromium_sandbox": true,
+  "effective_seccomp_sha256": "fe3f122e31547eebf303b60472c5a08db0f8d1d53e576d3881d2a68a76878b8c",
+  "image": "sha256:f0d4499f7a1b579541905b3598db403bc8eb9390dbf24b594df19267a1c6b981",
+  "limits": [
+    "offline browser startup only",
+    "not product acceptance"
+  ],
+  "observation": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "{\"title\": \"boundary\", \"heading\": \"Sandbox active\"}\n"
+  },
+  "passed": true,
+  "recorded_at": "2026-09-21T13:42:28.781093+00:00",
+  "upstream_seccomp_sha256": "cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849"
+}
