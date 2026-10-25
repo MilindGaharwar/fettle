@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -1017,6 +1018,7 @@ def test_capacity_validation_admission_scripts_reject_invalid_identity(tmp_path)
     )
     valid = {
         "PATH": os.environ["PATH"],
+        "PYTHONPATH": PLUGIN_DIR,
         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
         "CANDIDATE_SHA": "a" * 40, "EXPERIMENT_ID": "capval-local",
         "PREPARATION_RUN_ID": "123", "PLAN_SHA256": "b" * 64,
@@ -1500,6 +1502,20 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
 
 
 def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
+    missing_tools = [
+        name
+        for name, available in (
+            ("mutmut", shutil.which("mutmut") is not None),
+            ("whatthepatch", importlib.util.find_spec("whatthepatch") is not None),
+        )
+        if not available
+    ]
+    if missing_tools:
+        reason = "mutation fixture requires: " + ", ".join(missing_tools)
+        if os.environ.get("FETTLE_REQUIRE_MUTATION_TOOLS") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / "tests").mkdir()
@@ -1553,7 +1569,7 @@ def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
             ],
             cwd=repo, env=env, capture_output=True, text=True,
         )
-        assert shard.returncode == 0, shard.stderr
+        assert shard.returncode == 0, shard.stderr or shard.stdout
         (destination / "mutation-report.json").write_text(shard.stdout)
 
     aggregate_command = [
@@ -1592,6 +1608,16 @@ def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
     conflict_report = json.loads(conflict.stdout)
     assert conflict_report["passed"] is False
     assert "manifest digest differs" in conflict_report["message"]
+
+
+def test_linux_coverage_job_requires_real_mutation_fixture_tools():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/ci.yml").read_text()
+    coverage_job = workflow.split("  coverage:\n", 1)[1].split("\n  windows-bridge:", 1)[0]
+
+    assert "--require-hashes -r requirements-mutation.txt" in coverage_job
+    assert "FETTLE_REQUIRE_MUTATION_TOOLS: \"1\"" in coverage_job
+    assert "PYTHONPATH: ${{ github.workspace }}" in coverage_job
+    assert "pip install --quiet -e ." not in coverage_job
 
 
 def test_changed_mutation_workflow_keeps_replay_behind_explicit_dispatch():
