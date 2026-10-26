@@ -105,6 +105,125 @@ def _workflow_step(job_name, step_name):
     )
 
 
+def test_retained_advisory_reuse_validator_proves_docs_only_full_reuse(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/retained_advisory_reuse_validation.py"
+    spec = importlib.util.spec_from_file_location("retained_reuse_validation", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    source = tmp_path / "source"
+    (source / "fettle").mkdir(parents=True)
+    (source / "tests").mkdir()
+    (source / "fettle/a.py").write_text("a = 1\n")
+    (source / "tests/test_a.py").write_text("import fettle.a\n")
+    (source / "requirements-mutation.txt").write_text("mutmut==2.5.1\n")
+    (source / ".fettle.toml").write_text(
+        "[mutation]\n"
+        "enabled=true\nmode='advisory'\npaths=['fettle/']\nexclude=[]\n"
+        "full_shards=1\nscore_target=0\n"
+        "[mutation.test_mappings]\n'fettle/a.py'=['tests/test_a.py']\n"
+    )
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=source, check=True)
+    subprocess.run(["git", "add", "."], cwd=source, check=True)
+    subprocess.run(["git", "commit", "-qm", "source"], cwd=source, check=True)
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    manifest = {
+        "schema_version": "1", "revision": revision, "shard_index": 0,
+        "shard_count": 1, "files": ["fettle/a.py"],
+        "ranges": [{"file": "fettle/a.py", "start": 1, "end": 1}],
+    }
+    manifest["digest"] = module._canonical_digest(manifest)
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "partition-0.json").write_text(json.dumps(manifest))
+    report = {
+        "schema_version": "2", "status": "completed", "revision": revision,
+        "merge_base": None, "selection": "shard", "files_tested": ["fettle/a.py"],
+        "deleted_files": [], "engine_version": "2.5.1",
+        "test_runner": "python -m pytest -x --assert=plain {mapped_tests}",
+        "tests_run": ["tests/test_a.py"], "line_ranges": manifest["ranges"],
+        "shard_index": 0, "shard_count": 1, "manifest_digest": manifest["digest"],
+        "policy_digest": "1" * 64, "source_scope_digest": "2" * 64,
+        "test_mapping_digest": "3" * 64, "line_range_digest": "4" * 64,
+        "calibration_id": "fixture", "preflight_digest": "5" * 64,
+        "preflight_corpus_digest": "6" * 64, "corpus_digest": "7" * 64,
+        "environment_digest": "8" * 64, "execution_identity_digest": "9" * 64,
+        "killed": 1, "survived": 0, "timeout": 0, "suspicious": 0,
+        "untested": 0, "skipped": 0, "non_killed": [], "survivor_preview": [],
+        "survivors": [], "passed": True, "eligible": False, "score_eligible": True,
+        "reasons": [], "threshold": 0, "score": 100.0, "duration_ms": 1,
+        "total_duration_ms": 1, "cache_reused": False, "rerun_command": "mutmut run",
+        "run_exit_code": 0, "results_exit_code": 0, "module_runs": [], "stderr": "",
+    }
+    reports = tmp_path / "reports/0"
+    reports.mkdir(parents=True)
+    (reports / "mutation-report.json").write_text(json.dumps(report))
+    evidence_index = tmp_path / "evidence-index.json"
+    evidence_index.write_text(json.dumps({
+        "revision": revision,
+        "headline_outcomes": {
+            "killed": 1, "survived": 0, "timeout": 0, "suspicious": 0,
+            "untested": 0, "skipped": 0,
+        },
+    }))
+
+    result = module.validate_retained_reuse(
+        source, manifests, tmp_path / "reports", evidence_index,
+        source_run_id="40146257143", source_run_attempt="2",
+    )
+
+    assert result["passed"] is True
+    assert result["reused_shards"] == 1
+    assert result["reexecuted_shards"] == 0
+    assert result["aggregation_mode"] == "advisory"
+    assert result["qualification_eligible"] is False
+
+
+def test_retained_advisory_reuse_validator_is_offline_only():
+    script = (
+        Path(PLUGIN_DIR) / ".github/scripts/retained_advisory_reuse_validation.py"
+    ).read_text()
+    workflow = (
+        Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml"
+    ).read_text()
+
+    assert "retained_advisory_reuse_validation.py" not in workflow
+    assert "requests" not in script
+    assert "urlopen" not in script
+
+
+def test_retained_advisory_reuse_validator_rejects_dirty_source(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/retained_advisory_reuse_validation.py"
+    spec = importlib.util.spec_from_file_location("retained_reuse_validation_dirty", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    source = tmp_path / "source"
+    source.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=source, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "source"], cwd=source, check=True)
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (source / "dirty.txt").write_text("not retained\n")
+    evidence_index = tmp_path / "evidence-index.json"
+    evidence_index.write_text(json.dumps({"revision": revision}))
+
+    with pytest.raises(ValueError, match="clean exact retained revision"):
+        module.validate_retained_reuse(
+            source, tmp_path / "manifests", tmp_path / "reports", evidence_index,
+            source_run_id="40146257143", source_run_attempt="2",
+        )
+
+
 def test_capacity_validation_route_is_registered_dormant_and_isolated():
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
@@ -1497,10 +1616,12 @@ def test_pr_advisory_publishes_the_protected_check_context():
     assert "name: ${{ 'mutation evidence' }}" in advisory
 
 
-def test_changed_mutation_workflow_executes_one_bounded_attempt_per_shard():
+def test_pr_mutation_workflow_executes_one_bounded_attempt_per_full_scope_shard():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
-    assert "--prepare-changed-manifests mutation-changed-manifests" in workflow
+    assert "--prepare-manifests mutation-changed-manifests" in workflow
+    assert "--prepare-changed-manifests mutation-changed-manifests" not in workflow
+    assert '"scope":"full_configured"' in workflow
     assert "fromJSON(needs.changed-prepare.outputs.matrix)" in workflow
     assert "max-parallel: 20" in workflow
     assert "timeout-minutes: 360" in workflow
@@ -1558,6 +1679,37 @@ def test_admission_gate_runs_every_test_file_with_bounded_parallelism():
     assert "run_full_suite_parallel.py --workers 4" in workflow
 
 
+def test_pr_advisory_reuse_is_digest_bound_and_advisory_only():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    prepare = parsed["jobs"]["changed-prepare"]
+    shard = parsed["jobs"]["changed-shard"]
+    aggregate = parsed["jobs"]["aggregate"]
+    source = next(
+        step for step in prepare["steps"]
+        if step.get("name") == "Find latest successful advisory source"
+    )
+    reuse = next(
+        step for step in prepare["steps"]
+        if step.get("name") == "Select digest-compatible advisory shards"
+    )
+
+    assert parsed["permissions"]["actions"] == "read"
+    assert "status=success" in source["run"]
+    assert "--prepare-advisory-reuse" in reuse["run"]
+    assert "--reuse-source-run-id" in reuse["run"]
+    assert prepare["outputs"]["matrix"] == "${{ steps.reuse.outputs.matrix }}"
+    assert prepare["outputs"]["reused_shards"] == "${{ steps.reuse.outputs.reused_shards }}"
+    assert "matrix != '{\"shard\":[]}'" in shard["if"]
+    aggregate_source = "\n".join(
+        step.get("run", "") for step in aggregate["steps"]
+    )
+    assert "mutation-pr-reused-reports" in aggregate_source
+    assert "--aggregate-advisory" in aggregate_source
+    assert "--aggregate-preflight-evidence" not in aggregate_source
+
+
 def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
     _require_mutation_fixture_tools()
     script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
@@ -1600,7 +1752,7 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     assert '\"status\":\"unknown\"' in workflow
     assert "--aggregate mutation-pr-reports" in workflow
     assert "--aggregate-advisory" in workflow
-    assert '--base "$BASE_SHA" --shard-count "$SHARD_COUNT"' in workflow
+    assert '--shard-count "$SHARD_COUNT"' in workflow
     assert 'MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"' in workflow
     assert 'identity.get("merge_base")==os.environ["MERGE_BASE"]' in workflow
     assert "Aggregate mutation evidence is missing or malformed" in workflow
@@ -1636,6 +1788,7 @@ def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
         "'src/a.py' = ['tests/test_a.py']\n"
         "'src/b.py' = ['tests/test_b.py']\n"
     )
+    shutil.copy(Path(PLUGIN_DIR) / "requirements-mutation.txt", repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
@@ -1664,7 +1817,8 @@ def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
             [
                 *command, "--manifest", f"manifests/partition-{index}.json",
                 "--manifest-scope", "manifests", "--shard-index", str(index),
-                "--shard-count", "2", "--timeout", "120", "--json",
+                "--shard-count", "2", "--advisory-execution",
+                "--timeout", "120", "--json",
             ],
             cwd=repo, env=env, capture_output=True, text=True,
         )
@@ -1685,6 +1839,7 @@ def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
     assert report["passed"] is True
     assert report["aggregation_mode"] == "advisory"
     assert report["qualification_eligible"] is False
+    assert report["reused_shards"] == []
     assert not {"calibration_id", "preflight_digest", "corpus_digest"} & report.keys()
 
     missing = reports / "1/mutation-report.json"
