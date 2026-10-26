@@ -1,5 +1,36 @@
 # Audit Hardening Worklog
 
+## 2026-10-25: AH07 observation finalized on PR #46
+
+Exact PR head `9791109626b7c2009f5d333cb23c33234f3ffb54` passed both
+required checks. Push CI `40146254600` and pull-request CI `40146257146`
+completed successfully. Mutation advisory run `40146257143` failed closed on
+attempt 1 because provider runner loss left shard 59 without a report. The one
+authorized failed-job rerun completed shard 59 on attempt 2; the aggregate
+selected `mutation-pr-shard-40146257143-2-59` together with the 255 valid
+attempt-1 reports. The `mutation evidence` check then completed successfully.
+
+The completed manifest-bound advisory aggregate reports `status: completed`,
+`passed: true`, `aggregation_mode: advisory`, and
+`qualification_eligible: false`. Its 22,900 outcomes are 14,811 killed, 8,084
+survived, 5 timeouts, and zero suspicious, untested, or skipped. No shard
+exceeded 18,000 engine seconds. The retained attempt-1 non-pass and attempt-2
+pass, report hashes, selection identity, timings, and dispositions are under
+`qualification-248851d-20261022/run-9791109-40146257143/` in the external
+evidence repository.
+
+This finalized the AH07 observation for PR #46 without converting the advisory
+into full mutation qualification. The owner approved integration on 2026-10-26.
+Because protected `main` requires linear history, GitHub rejected the requested
+merge commit and then accepted the separately authorized squash. Squash commit
+`2605978fea599870496bdaec8b99ba9063a7a649` has the same tree
+`6fcb9e91c93864af32e10c0180f3c6e7a34b7e1a` as exact PR head `9791109`.
+Main CI run `40263918145` passed, completing AH07 part close.
+
+Full-corpus qualification remains `CLOSED_NON_PASS`; the approximately 8,000
+baseline survivors are not waived. Tag, release, ratchet enablement, and workflow
+retirement remain owner approval gates.
+
 ## 2026-10-22: Staged-preflight allocation repair
 
 Run `39697422660/1` remains `CLOSED_NON_PASS`. It produced 40 of 256 shard

@@ -1,7 +1,8 @@
 # Application Audit Follow-Up Plan
 
 Date: 2026-09-18
-Status: AH01-AH06 accepted 2026-10-17 under amended AH07; later packages remain pending.
+Status: AH07 closed 2026-10-26: green PR #46 head `9791109` was integrated as
+tree-equivalent squash `2605978`, and exact-main CI passed.
 Owner: Milind (approval); implementing engineer (delivery); independent automated
 reviewer in an isolated session (acceptance review).
 
@@ -77,7 +78,7 @@ Estimates are focused engineering days including review, not calendar promises.
 | [x] | WP-AH04 | P0 | Concurrent ledger operations preserve valid history | AH00 | 2-3 | Accepted under amended AH07 |
 | [x] | WP-AH05 | P1 | Wheel includes graph providers and usable commands | AH00 | 1-2 | Accepted; exact wheel and installed-host probes pass |
 | [x] | WP-AH06 | P1 | UAT inputs preserve their declared classes | AH00 for integration | 0.5-1 | Accepted under amended AH07 |
-| [x] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Independent criterion review confirmed AH01-AH06; separate non-pass states retained |
+| [x] | WP-AH07 | P1 | Independent hardening acceptance evidence | AH01-AH06 | 1-2 | Closed on tree-equivalent main squash `2605978`; exact-head CI, advisory mutation evidence, and main CI green |
 | [x] | WP-AH08 | P2 | Ratcheted critical-module type and branch checks | AH07 | 2-4 | Shared fail-closed CI/release verifier; 65% combined and 69% branch floors |
 | [ ] | WP-AH09 | P2 | Measured hook and ledger performance | AH07 | 2-3 | Exploratory local baseline; frozen benchmark pending |
 | [ ] | WP-AH10 | P2 | One justified CLI or mutation responsibility extraction | AH08-AH09 | 3-5 | Measurement-gated |
