@@ -64,6 +64,7 @@ def _python_heredoc(script):
 def test_mutation_fixture_tool_probe_skips_or_fails_by_environment(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/mutmut")
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.delenv("FETTLE_REQUIRE_MUTATION_TOOLS", raising=False)
 
     with pytest.raises(pytest.skip.Exception, match="whatthepatch"):
         _require_mutation_fixture_tools()
