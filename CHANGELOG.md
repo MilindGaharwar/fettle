@@ -2,6 +2,8 @@
 
 ## v1.14.0 — PR Advisory Evidence Hardening
 
+**Released 2026-10-26**
+
 - Pull requests now receive manifest-bound advisory mutation evidence for the
   changed Python mutation scope automatically on `pull_request`. Reports bind
   the exact head, base, merge base, shard topology, and manifest digests;
