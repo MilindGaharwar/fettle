@@ -62,6 +62,7 @@ from fettle.mutation_test import (
     merge_mutation_checkpoints,
     pending_mutation_records,
     execute_pending_mutations,
+    evaluate_advisory_projection,
     report_from_mutation_checkpoint,
     prepare_shard_replay_matrix,
     prepare_advisory_reuse,
@@ -4219,6 +4220,136 @@ def _advisory_reuse_fixture(tmp_path):
             )
         )
     return config, manifests, reports
+
+
+def _projection_ledger(manifests, durations=(100.0, 110.0, 120.0)):
+    sources = [
+        {"run_id": str(700 + index), "attempt": 1, "revision": hex(index + 1)[2:] * 40}
+        for index in range(3)
+    ]
+    return {
+        "schema_version": "1",
+        "kind": "mutation_target_runner_observed_ledger",
+        "runner": "ubuntu-latest",
+        "engine": "mutmut 2.5.1",
+        "shard_count": len(manifests),
+        "p95_method": "nearest_rank",
+        "minimum_observations": 3,
+        "source_runs": sources,
+        "shards": [
+            {
+                "shard_index": manifest["shard_index"],
+                "observations": [
+                    {
+                        "source_run_id": source["run_id"],
+                        "revision": source["revision"],
+                        "engine_seconds": duration + manifest["shard_index"],
+                        "modules": [
+                            {
+                                "file": manifest["files"][0],
+                                "engine_seconds": duration,
+                                "mutants": 10,
+                            }
+                        ],
+                    }
+                    for source, duration in zip(sources, durations, strict=True)
+                ],
+            }
+            for manifest in manifests
+        ],
+    }
+
+
+def test_advisory_projection_admits_only_selected_shards_with_target_runner_p95(tmp_path):
+    _config, manifests, _reports = _advisory_reuse_fixture(tmp_path)
+    result = evaluate_advisory_projection(
+        manifests,
+        {"shard": [1]},
+        _projection_ledger(manifests),
+        engine_budget_seconds=200,
+    )
+
+    assert result["passed"] is True
+    assert result["dispatch_shards"] == [1]
+    assert result["admission_threshold_seconds"] == 170.0
+    assert result["projections"] == [
+        {
+            "shard_index": 1,
+            "module": "fettle/b.py",
+            "p95_engine_seconds": 121.0,
+            "seconds_per_mutant": 12.0,
+            "source_run_id": "702",
+            "observation_count": 3,
+        }
+    ]
+    assert result["qualification_eligible"] is False
+
+
+def test_advisory_projection_blocks_above_85_percent_and_names_bottleneck(tmp_path):
+    _config, manifests, _reports = _advisory_reuse_fixture(tmp_path)
+    ledger = _projection_ledger(manifests, durations=(160.0, 180.0, 190.0))
+    ledger["shards"][0]["observations"][2]["modules"].append(
+        {"file": "fettle/slow.py", "engine_seconds": 90.0, "mutants": 3}
+    )
+
+    result = evaluate_advisory_projection(
+        manifests, {"shard": [0]}, ledger, engine_budget_seconds=200
+    )
+
+    assert result["passed"] is False
+    assert result["blockers"] == [
+        {
+            "shard_index": 0,
+            "module": "fettle/slow.py",
+            "p95_engine_seconds": 190.0,
+            "seconds_per_mutant": 30.0,
+            "source_run_id": "702",
+            "observation_count": 3,
+        }
+    ]
+
+
+def test_advisory_projection_admits_exactly_at_85_percent(tmp_path):
+    _config, manifests, _reports = _advisory_reuse_fixture(tmp_path)
+    ledger = _projection_ledger(manifests, durations=(150.0, 160.0, 170.0))
+
+    result = evaluate_advisory_projection(
+        manifests, {"shard": [0]}, ledger, engine_budget_seconds=200
+    )
+
+    assert result["passed"] is True
+    assert result["projections"][0]["p95_engine_seconds"] == 170.0
+    assert result["admission_threshold_seconds"] == 170.0
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    [
+        (lambda ledger: ledger["source_runs"].pop(), "insufficient distinct"),
+        (
+            lambda ledger: ledger["shards"][0]["observations"].__setitem__(
+                1, deepcopy(ledger["shards"][0]["observations"][0])
+            ),
+            "duplicated",
+        ),
+        (
+            lambda ledger: ledger["shards"][0]["observations"][0].pop("modules"),
+            "malformed",
+        ),
+        (lambda ledger: ledger["shards"].pop(), "incomplete"),
+    ],
+)
+def test_advisory_projection_rejects_missing_malformed_or_conflicting_evidence(
+    tmp_path, mutate, match,
+):
+    _config, manifests, _reports = _advisory_reuse_fixture(tmp_path)
+    ledger = _projection_ledger(manifests)
+    mutate(ledger)
+
+    with pytest.raises(ValueError, match=match):
+        evaluate_advisory_projection(
+            manifests, {"shard": [0]}, ledger, engine_budget_seconds=200
+        )
 
 
 def test_advisory_reuse_accepts_exact_inputs_and_records_provenance(tmp_path):

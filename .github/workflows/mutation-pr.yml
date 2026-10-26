@@ -53,7 +53,7 @@ jobs:
     name: mutation (prepare advisory scope)
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.reuse.outputs.matrix }}
+      matrix: ${{ steps.projection.outputs.matrix }}
       shard_count: ${{ steps.prepare.outputs.shard_count }}
       reuse_run_id: ${{ steps.reuse-source.outputs.run_id }}
       reuse_run_attempt: ${{ steps.reuse-source.outputs.run_attempt }}
@@ -142,7 +142,26 @@ jobs:
           mkdir -p mutation-pr-reused-reports
           echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
           echo "reused_shards=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["reused_shards"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
+      - name: Enforce observed P95 engine budget
+        id: projection
+        if: always()
+        run: |
+          set +e
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --advisory-projection-ledger .github/mutation-observed-ledger.json \
+            --advisory-projection-manifests mutation-changed-manifests \
+            --advisory-projection-matrix advisory-reuse.json \
+            --engine-budget-seconds 21300 --json > mutation-projection.json
+          status=$?
+          set -e
+          if python -c 'import json,sys; value=json.load(open("mutation-projection.json")); sys.exit(0 if value.get("passed") is True else 2)'; then
+            echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"shard":[]}' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
       - name: Retain advisory-scope manifests
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-pr-manifests-${{ github.run_id }}
@@ -150,6 +169,7 @@ jobs:
             mutation-changed-manifests
             prepare-changed.json
             advisory-reuse.json
+            mutation-projection.json
             mutation-pr-identity.json
             mutation-pr-reused-reports
           if-no-files-found: error
@@ -291,7 +311,7 @@ jobs:
               test "$status" -eq 0 || true
             fi
           fi
-      - name: Record advisory scope and shard-71 risk
+      - name: Record advisory scope and projected runtime
         if: always() && hashFiles('mutation-report.json') != ''
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -302,7 +322,7 @@ jobs:
             echo "- Head: \`$HEAD_SHA\`"
             echo "- Base: \`$BASE_SHA\`"
             echo "- One attempt per changed-scope shard; per-mutant timeouts remain advisory debt."
-            echo "- Runtime risk: historical shard 71 projects to 6.38 hours at ×1.25 uncertainty; the job remains capped at 360 minutes and any incomplete report is non-pass."
+            echo "- Runtime admission: every dispatched shard passed target-runner P95 at 85% of the 21,300-second engine budget."
           } >> "$GITHUB_STEP_SUMMARY"
           uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json \
             --artifact-name mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }} \

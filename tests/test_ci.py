@@ -1699,7 +1699,7 @@ def test_pr_advisory_reuse_is_digest_bound_and_advisory_only():
     assert "status=success" in source["run"]
     assert "--prepare-advisory-reuse" in reuse["run"]
     assert "--reuse-source-run-id" in reuse["run"]
-    assert prepare["outputs"]["matrix"] == "${{ steps.reuse.outputs.matrix }}"
+    assert prepare["outputs"]["matrix"] == "${{ steps.projection.outputs.matrix }}"
     assert prepare["outputs"]["reused_shards"] == "${{ steps.reuse.outputs.reused_shards }}"
     assert "matrix != '{\"shard\":[]}'" in shard["if"]
     aggregate_source = "\n".join(
@@ -1708,6 +1708,28 @@ def test_pr_advisory_reuse_is_digest_bound_and_advisory_only():
     assert "mutation-pr-reused-reports" in aggregate_source
     assert "--aggregate-advisory" in aggregate_source
     assert "--aggregate-preflight-evidence" not in aggregate_source
+
+
+def test_pr_advisory_projection_blocks_dispatch_before_matrix_fanout():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    prepare = parsed["jobs"]["changed-prepare"]
+    shard = parsed["jobs"]["changed-shard"]
+    projection = next(
+        step for step in prepare["steps"]
+        if step.get("name") == "Enforce observed P95 engine budget"
+    )
+
+    assert prepare["outputs"]["matrix"] == "${{ steps.projection.outputs.matrix }}"
+    assert "--advisory-projection-matrix advisory-reuse.json" in projection["run"]
+    assert "--engine-budget-seconds 21300" in projection["run"]
+    assert 'matrix={"shard":[]}' in projection["run"]
+    assert "fromJSON(needs.changed-prepare.outputs.matrix)" in shard["strategy"]["matrix"]
+    assert "mutation-projection.json" in next(
+        step["with"]["path"] for step in prepare["steps"]
+        if step.get("name") == "Retain advisory-scope manifests"
+    )
 
 
 def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
@@ -1761,7 +1783,9 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     assert "mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "retention-days: 90" in workflow
     assert "if-no-files-found: error" in workflow
-    assert "historical shard 71 projects to 6.38 hours" in workflow
+    assert "--advisory-projection-ledger .github/mutation-observed-ledger.json" in workflow
+    assert "--engine-budget-seconds 21300" in workflow
+    assert "85% of the 21,300-second engine budget" in workflow
 
 
 def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
