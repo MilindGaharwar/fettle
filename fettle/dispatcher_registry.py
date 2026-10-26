@@ -10,6 +10,7 @@ every gate module it will never select.
 
 from __future__ import annotations
 
+import os
 from importlib import import_module
 
 from fettle.dispatcher_types import CheckResult, CheckRunner, CheckSpec, HookContext
@@ -26,6 +27,19 @@ def _lazy(module: str, attr: str = "run_check") -> CheckRunner:
         return getattr(import_module(module), attr)(ctx)
     run.__qualname__ = f"{module}.{attr}"
     return run
+
+
+def _quality_requires_execution(ctx: HookContext) -> bool:
+    gates = ctx.config.get("gates", {})
+    if ctx.event == "Stop" or ctx.input.raw.get("stop_hook_active") is not None:
+        return bool(gates.get("tests", {}).get("enabled"))
+    if ctx.event != "PreToolUse" or ctx.tool_name not in {"Write", "Edit"}:
+        return False
+    bootstrap = gates.get("ci_bootstrap", {})
+    return any(gates.get(name, {}).get("enabled") for name in ("ux_spec", "plan")) or bool(
+        bootstrap.get("enabled") and bootstrap.get("mode") in {"enforce", "strict"}
+    )
+
 
 CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
@@ -49,6 +63,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         name="capsule_guard",
         run=_lazy("fettle.capsule_guard"),
+        required_when=lambda ctx: bool(os.environ.get("FETTLE_POLICY_CAPSULE")),
         events=frozenset({"PreToolUse"}),
         tools=None,
         order=1,
@@ -57,6 +72,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — Write|Edit
     CheckSpec(
         name="config_protect",
+        policy_gates=("config_protect",),
         run=_lazy("fettle.config_protect"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -66,6 +82,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         name="quality_gate",
         run=_lazy("fettle.quality_gate"),
+        required_when=_quality_requires_execution,
         events=frozenset({"PreToolUse", "PostToolUse", "Stop"}),
         tools=None,
         order=5,
@@ -75,6 +92,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         name="mcp_trust_gate",
         run=_lazy("fettle.mcp_trust_gate"),
+        required_when=lambda ctx: bool(ctx.config.get("gates", {}).get("mcp_trust", {}).get("enabled")),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash", "Write", "Edit"}),
         order=8,
@@ -82,6 +100,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="destructive_guard",
+        policy_gates=("destructive",),
         run=_lazy("fettle.destructive_guard"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash"}),
@@ -90,6 +109,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="agent_spawn_gate",
+        policy_gates=("agent_spawn",),
         run=_lazy("fettle.agent_spawn_gate"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash"}),
@@ -98,6 +118,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="commit_message",
+        policy_gates=("commit_message",),
         run=_lazy("fettle.commit_message"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash"}),
@@ -107,6 +128,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — Write|Edit (tool-backed)
     CheckSpec(
         name="adapter_check",
+        policy_gates=("lint",),
         run=_lazy("fettle.adapter_check"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -170,6 +192,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         name="stop_quality_gate",
         run=_lazy("fettle.stop_quality_gate"),
+        fail_closed=True,
         events=frozenset({"Stop"}),
         tools=None,
         order=50,
@@ -178,6 +201,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse — authorship separation (P52, WP-520)
     CheckSpec(
         name="authorship_gate",
+        policy_gates=("authorship",),
         run=_lazy("fettle.authorship_gate"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -187,6 +211,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse + PostToolUse — TDD ordering
     CheckSpec(
         name="tdd_gate",
+        policy_gates=("tdd",),
         run=_lazy("fettle.tdd_gate"),
         events=frozenset({"PreToolUse", "PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -196,6 +221,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — spec scenario coverage (Stage 3, S3.3)
     CheckSpec(
         name="bdd_gate",
+        policy_gates=("bdd",),
         run=_lazy("fettle.bdd_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -205,6 +231,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — claim-before-work in fettle worktrees (Stage 4, S4.3)
     CheckSpec(
         name="claims_gate",
+        policy_gates=("claims",),
         run=_lazy("fettle.claims_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -214,6 +241,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — complexity (Python only)
     CheckSpec(
         name="complexity_check",
+        policy_gates=("complexity",),
         run=_lazy("fettle.complexity_check"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -224,6 +252,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse(Bash) — deploy safety
     CheckSpec(
         name="deploy_gate",
+        policy_gates=("deploy_safety",),
         run=_lazy("fettle.deploy_gate"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash"}),
@@ -233,6 +262,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse(Bash) — release/tag validation
     CheckSpec(
         name="release_gate",
+        policy_gates=("release",),
         run=_lazy("fettle.release_gate"),
         events=frozenset({"PreToolUse"}),
         tools=frozenset({"Bash"}),
@@ -242,6 +272,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PreToolUse + PostToolUse(Bash) — artifact verification
     CheckSpec(
         name="artifact_gate",
+        policy_gates=("artifact_integrity",),
         run=_lazy("fettle.artifact_gate"),
         events=frozenset({"PreToolUse", "PostToolUse"}),
         tools=frozenset({"Bash"}),
@@ -270,6 +301,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # Stop — fresh green `fettle verify` stamp required (Stage 7, S7.1)
     CheckSpec(
         name="verify_gate",
+        policy_gates=("verify",),
         run=_lazy("fettle.verify_gate"),
         events=frozenset({"Stop"}),
         tools=None,
@@ -288,6 +320,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # Stop — pushed commits demand a fresh green remote CI verdict (Stage 8)
     CheckSpec(
         name="ci_gate",
+        policy_gates=("ci",),
         run=_lazy("fettle.ci_gate"),
         events=frozenset({"Stop"}),
         tools=None,
@@ -297,6 +330,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # Stop — reject malformed or contradictory milestone completion claims.
     CheckSpec(
         name="completion_gate",
+        policy_gates=("completion",),
         run=_lazy("fettle.completion_gate"),
         events=frozenset({"Stop"}),
         tools=None,
@@ -305,6 +339,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="completion_manifest_gate",
+        policy_gates=("completion",),
         run=_lazy("fettle.completion_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -315,6 +350,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # Stop — coverage (advisory by default, after blocking checks)
     CheckSpec(
         name="coverage_gate",
+        policy_gates=("coverage",),
         run=_lazy("fettle.coverage_gate"),
         events=frozenset({"Stop"}),
         tools=None,

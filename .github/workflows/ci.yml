@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, audit/hardening-integration-20261005]
   pull_request:
 
 # WP-B4: third-party actions pinned by commit SHA (tag in trailing comment);
@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -29,14 +38,29 @@ jobs:
       - name: Require provenance for every rule asset
         run: python scripts/check_rule_provenance.py
 
-  # WP-B5: honesty for the `Typing :: Typed` classifier — mypy runs on every
-  # push but does not block yet. Promote to blocking once the baseline is 0.
+      - name: Typecheck hardened trust boundaries
+        run: |
+          python -m pip install --quiet mypy==2.3.0
+          python -m fettle.quality_ratchet types --policy .github/quality-ratchet.json
+
+  # Whole-source typing remains advisory debt. The shared verifier still blocks
+  # critical-scope failures in lint and reports unavailable advisory measurement
+  # explicitly here instead of masking the command with `|| true`.
   typecheck:
     name: typecheck (mypy, non-blocking)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -45,8 +69,8 @@ jobs:
       - name: Install mypy (pinned)
         run: python -m pip install --quiet mypy==2.3.0 pyyaml==6.0.3
 
-      - name: Mypy (informative)
-        run: mypy fettle --ignore-missing-imports || true
+      - name: Mypy (structured advisory debt)
+        run: python -m fettle.quality_ratchet types --policy .github/quality-ratchet.json
 
   test:
     strategy:
@@ -77,6 +101,15 @@ jobs:
     name: test (${{ matrix.os }}, py${{ matrix.python }}, semgrep ${{ matrix.semgrep }}${{ matrix.canary && ', canary' || '' }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -122,20 +155,32 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Validate completion evidence
-        run: fettle completion validate
+        run: fettle completion validate --checkpoint
 
       - name: Self-scan (dogfood)
         run: python fettle/quality_scan.py --root fettle --json > /dev/null
 
   # WP-B1: branch coverage with a no-regression floor. Baseline measured at
   # 67% (2026-08; much of the suite exercises hooks via subprocess, which
-  # coverage does not see). Floor 65 ratchets upward — raise it as the
-  # in-process baseline climbs toward the [gates.coverage] threshold of 80.
+  # coverage may not see). Combined floor 65 and branch floor 69 are checked
+  # independently from integer counts by the shared CI/release verifier.
   coverage:
     name: coverage (branch, floor 65)
     runs-on: ubuntu-latest
+    env:
+      FETTLE_REQUIRE_MUTATION_TOOLS: "1"
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -143,8 +188,8 @@ jobs:
 
       - name: Install tools (pinned)
         run: |
-          python -m pip install --quiet pytest==9.1.1 pytest-cov==7.1.0 ruff==0.15.20 semgrep==1.168.0 pyyaml==6.0.3
-          python -m pip install --quiet -e .
+          python -m pip install --quiet --require-hashes -r requirements-mutation.txt
+          python -m pip install --quiet pytest-cov==7.1.0
 
       - name: Install cargo + shellcheck (parity with the test job)
         run: |
@@ -152,7 +197,15 @@ jobs:
           sudo apt-get install -yq --no-install-recommends shellcheck cargo
 
       - name: Tests with coverage
-        run: python -m pytest tests/ -q --cov=fettle --cov-branch --cov-report=term --cov-report=xml --cov-fail-under=65
+        run: |
+          python -m pytest tests/ -q --cov=fettle --cov-branch --cov-report=
+          mv .coverage .coverage.main
+          coverage run --rcfile=.github/coverage-subprocess.toml -m pytest tests/test_quality_ratchet_subprocess.py -q
+          coverage combine
+          coverage report
+          coverage xml
+          coverage json -o coverage.json
+          python -m fettle.quality_ratchet coverage --policy .github/quality-ratchet.json --report coverage.json
 
       - name: Publish coverage report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -165,6 +218,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -184,6 +246,11 @@ jobs:
           python -m venv $venv
           $python = Join-Path $venv "Scripts\python.exe"
           & $python -m pip install --quiet $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { throw "package installation failed" }
+          & $python -m pytest tests/test_evidence_ledger.py -q -k "concurrent_append or independent_processes or lock_timeout or interrupted_writer"
+          if ($LASTEXITCODE -ne 0) { throw "ledger concurrency and interruption tests failed" }
+          & $python -m pytest tests/test_mutation_test.py -q -k "mutmut_process_timeout_restores or mutmut_process_stops_descendants_after_leader_exits or windows_ or unconfirmed_tree_termination"
+          if ($LASTEXITCODE -ne 0) { throw "mutation worker lifecycle tests failed" }
           & $python -m fettle demo
           if ($LASTEXITCODE -ne 0) { throw "offline demo failed" }
           $bridgeRoot = Join-Path $env:LOCALAPPDATA "fettle\bridge"
@@ -220,18 +287,38 @@ jobs:
     runs-on: ubuntu-latest
     container: python:3.12-slim
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build and install exact wheel
+      - name: Install checkout prerequisite
         run: |
           apt-get update -q
           apt-get install -yq --no-install-recommends git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "${GITHUB_WORKSPACE:-}" ] || [ ! -d "$GITHUB_WORKSPACE" ]; then
+            echo "::error::GITHUB_WORKSPACE must identify an existing directory"
+            exit 1
+          fi
+          actual_head="$(git -C "$GITHUB_WORKSPACE" -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)"
+          if [ "$actual_head" != "$EXPECTED_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $EXPECTED_SHA"
+            exit 1
+          fi
+
+      - name: Build and install exact wheel
+        run: |
           python -m pip install --quiet build==1.5.0 pipx==1.7.1
           python -m build --wheel
           export PIPX_HOME=/tmp/pipx
           export PIPX_BIN_DIR=/tmp/bin
           pipx install dist/*.whl
           /tmp/bin/fettle demo || exit 1
+          cd /tmp
+          /tmp/pipx/venvs/finefettle/bin/python -I -c "from fettle.providers import default_providers; import fettle.graph_cli; assert len(default_providers()) == 5"
 
       - name: Configure detected OpenCode host without a clone
         run: |
@@ -243,10 +330,35 @@ jobs:
           /tmp/bin/fettle init --json > /tmp/init.json
           /tmp/pipx/venvs/finefettle/bin/python -c "import json; from pathlib import Path; from fettle.bridge import validate_bridge; data=json.loads(Path('/tmp/init.json').read_text()); steps={item['name']: item for item in data}; assert steps['bridge']['status'] == 'created'; assert steps['opencode']['status'] == 'created'; assert validate_bridge().ok"
 
+  completion-strict:
+    name: Completion evidence (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify exact event commit
+        shell: bash
+        run: |
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out $actual_head instead of immutable event SHA $GITHUB_SHA"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install fettle (editable)
+        run: python -m pip install --quiet -e .
+
+      - name: Require complete milestone evidence
+        run: fettle completion validate
+
   required:
     name: CI required
     if: always()
-    needs: [lint, test, coverage, windows-bridge, linux-wheel]
+    needs: [lint, test, coverage, windows-bridge, linux-wheel, completion-strict]
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking CI job
@@ -256,12 +368,14 @@ jobs:
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           WINDOWS_BRIDGE_RESULT: ${{ needs.windows-bridge.result }}
           LINUX_WHEEL_RESULT: ${{ needs.linux-wheel.result }}
+          COMPLETION_RESULT: ${{ needs.completion-strict.result }}
         run: |
           if [ "$LINT_RESULT" != "success" ] || \
              [ "$TEST_RESULT" != "success" ] || \
              [ "$COVERAGE_RESULT" != "success" ] || \
              [ "$WINDOWS_BRIDGE_RESULT" != "success" ] || \
-             [ "$LINUX_WHEEL_RESULT" != "success" ]; then
-            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT"
+             [ "$LINUX_WHEEL_RESULT" != "success" ] || \
+             [ "$COMPLETION_RESULT" != "success" ]; then
+            echo "::error::Required CI failed: lint=$LINT_RESULT test=$TEST_RESULT coverage=$COVERAGE_RESULT windows-bridge=$WINDOWS_BRIDGE_RESULT linux-wheel=$LINUX_WHEEL_RESULT completion=$COMPLETION_RESULT"
             exit 1
           fi

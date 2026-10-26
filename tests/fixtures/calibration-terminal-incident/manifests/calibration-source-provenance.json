@@ -1,0 +1,11 @@
+{
+  "schema_version": "1",
+  "kind": "calibration_source",
+  "mode": "calibration",
+  "revision": "1d5bb2cd122d7207f4464ff03d060e5a6ad6b286",
+  "run_id": "38148783107",
+  "run_attempt": "1",
+  "calibration_id": "cal-1d5bb2cd-s1-20261011-fresh",
+  "calibration_stage": "1",
+  "preflight_run_id": "38139581903"
+}

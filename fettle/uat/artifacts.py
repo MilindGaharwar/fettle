@@ -26,11 +26,10 @@ def write_scenario_artifacts(
     scenarios: list[dict],
     surface: str,
 ) -> str:
-    """Write one observation artifact per reported scenario.
+    """Retain agent claims for inspection, never as independent observations.
 
-    The artifact captures the raw SCENARIO block (verbatim transcript slice)
-    plus a content hash, giving the reconciler an independent capture to
-    verify against. Returns the artifacts directory path.
+    Content hashes detect drift but do not establish execution provenance.
+    Returns the artifacts directory path.
     """
     from fettle.uat.reconcile import parse_transcript
 
@@ -44,6 +43,7 @@ def write_scenario_artifacts(
             continue
         record = {
             "schema_version": 1,
+            "evidence_basis": "agent-claim",
             "scenario_id": sid,
             "surface": surface,
             "captured_at": round(time.time(), 3),
@@ -69,6 +69,7 @@ def load_scenario_artifacts(worktree_or_dir: str) -> dict[str, dict]:
     if not base.is_dir():
         base = location
     out: dict[str, dict] = {}
+    duplicates: set[str] = set()
     if not base.is_dir():
         return out
     for path in sorted(base.glob("*.json")):
@@ -76,8 +77,15 @@ def load_scenario_artifacts(worktree_or_dir: str) -> dict[str, dict]:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        if not isinstance(record, dict):
+            continue
         sid = record.get("scenario_id")
-        if sid:
+        if not isinstance(sid, str) or not sid or sid in duplicates:
+            continue
+        if sid in out:
+            duplicates.add(sid)
+            del out[sid]
+        else:
             out[sid] = record
     return out
 
@@ -100,8 +108,8 @@ def capture_web_page(app_url: str, dest_dir: str) -> dict:
             page = browser.new_page(viewport={"width": 1280, "height": 720})
             page.goto(app_url, wait_until="networkidle", timeout=30_000)
             page.screenshot(path=str(shot), full_page=True)
-            a11y_path.write_text(json.dumps(page.accessibility.snapshot(),
-                                            indent=2), encoding="utf-8")
+            a11y_path.write_text(json.dumps({"aria_snapshot": page.locator("body").aria_snapshot()},
+                                           indent=2), encoding="utf-8")
             url = page.url
             browser.close()
         return {"status": "completed", "screenshot": str(shot),

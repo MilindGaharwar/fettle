@@ -187,6 +187,24 @@ class CheckSpec:
     enabled_by_default: bool = True
     budget_ms: int | None = None
     fail_closed: bool = False
+    policy_gates: tuple[str, ...] = ()
+    required_when: Callable[[HookContext], bool] | None = None
+
+    def requires_execution_for(self, ctx: HookContext) -> bool:
+        return self.requires_execution(ctx.config) or bool(
+            self.required_when and self.required_when(ctx)
+        )
+
+    def requires_execution(self, config: dict[str, Any]) -> bool:
+        if self.fail_closed:
+            return True
+        gates = config.get("gates", {})
+        return any(
+            gates.get(name, {}).get("enabled", False)
+            and (gates[name].get("mode") in {"enforce", "strict", "soft"}
+                 or gates[name].get("enforce") is True)
+            for name in self.policy_gates
+        )
 
     def matches(self, ctx: HookContext) -> bool:
         if ctx.event not in self.events:

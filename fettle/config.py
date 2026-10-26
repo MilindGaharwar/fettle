@@ -438,21 +438,25 @@ def _xdg_config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
 
 
-def _load_toml_layer(path: Path) -> dict | None:
+def _load_toml_layer(path: Path, *, strict: bool = False) -> dict | None:
     """Load one layer file. Missing → None; corrupt → fail-visible skip."""
     if not path.is_file():
+        if strict and path.exists():
+            raise ValueError(f"Not a policy layer file: {path}")
         return None
     try:
         with open(path, "rb") as fh:
             return tomllib.load(fh)
     except (tomllib.TOMLDecodeError, OSError) as e:
+        if strict:
+            raise ValueError(f"Could not load policy layer: {path}") from e
         print(  # nosemgrep: debug-print-statement -- user-facing config diagnostic
             f"fettle: could not parse {path}: {e} — skipping layer", file=sys.stderr,
         )
         return None
 
 
-def _ancestor_dir_layers(root: Path, for_path: str) -> list[PolicyLayer]:
+def _ancestor_dir_layers(root: Path, for_path: str, *, strict: bool = False) -> list[PolicyLayer]:
     """Directory-override layers applicable to `for_path`.
 
     Walks ancestors of the file from the repo root down (deeper wins) —
@@ -472,7 +476,7 @@ def _ancestor_dir_layers(root: Path, for_path: str) -> list[PolicyLayer]:
         if part.startswith(".") or part in _DIR_NOISE:
             break
         current = current / part
-        data = _load_toml_layer(current / CONFIG_FILENAME)
+        data = _load_toml_layer(current / CONFIG_FILENAME, strict=strict)
         if data is not None:
             layers.append(PolicyLayer(
                 name=f"dir:{current.relative_to(root)}",
@@ -496,7 +500,7 @@ def _dict_diff(before: dict, after: dict) -> dict:
 
 
 def resolve_with_provenance(
-    cwd: str | None = None, for_path: str | None = None
+    cwd: str | None = None, for_path: str | None = None, *, strict: bool = False
 ) -> tuple[dict[str, Any], list[PolicyLayer]]:
     """Canonical resolution with per-layer provenance (WP-20).
 
@@ -510,7 +514,7 @@ def resolve_with_provenance(
     packs_dir = _xdg_config_home() / "fettle"
     for kind in ("org", "team"):
         pack_path = packs_dir / f"{kind}.toml"
-        data = _load_toml_layer(pack_path)
+        data = _load_toml_layer(pack_path, strict=strict)
         if data is not None:
             name = data.pop("_name", kind)
             layers.append(PolicyLayer(f"{kind}:{name}", str(pack_path), data))
@@ -520,7 +524,9 @@ def resolve_with_provenance(
     config_path = Path(configured_path).expanduser() if configured_path else root / CONFIG_FILENAME
     if not config_path.is_absolute():
         config_path = Path.cwd() / config_path
-    repo_data = _load_toml_layer(config_path)
+    if strict and configured_path and not config_path.is_file():
+        raise ValueError(f"Explicit policy layer is missing or not a file: {config_path}")
+    repo_data = _load_toml_layer(config_path, strict=strict)
 
     # WP-144: central policy (cache-only — never network in the hook path)
     # is keyed off the repo's [extends] and merges UNDER it, over team.
@@ -536,7 +542,7 @@ def resolve_with_provenance(
 
     # Directory overrides — path-scoped resolution only.
     if for_path:
-        layers.extend(_ancestor_dir_layers(root, for_path))
+        layers.extend(_ancestor_dir_layers(root, for_path, strict=strict))
 
     cfg: dict = {}
     for layer in layers:
@@ -572,13 +578,16 @@ def resolve_with_provenance(
     return cfg, layers
 
 
-def load_config(cwd: str | None = None, for_path: str | None = None) -> dict[str, Any]:
+def load_config(
+    cwd: str | None = None, for_path: str | None = None, *, strict: bool = False
+) -> dict[str, Any]:
     """Merged config for the project at `cwd` (default: process cwd).
 
     Pass `for_path` (a file the caller is gating) to include directory
     `.fettle.toml` overrides on the file's ancestor chain.
+    With `strict=True`, unreadable or corrupt layers raise instead of being skipped.
     """
-    return resolve_with_provenance(cwd, for_path)[0]
+    return resolve_with_provenance(cwd, for_path, strict=strict)[0]
 
 
 def state_dir(session_id: str) -> Path:

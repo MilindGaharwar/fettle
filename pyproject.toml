@@ -65,6 +65,7 @@ packages = [
     "fettle._demo_fixture",
     "fettle.adapters",
     "fettle.agents",
+    "fettle.providers",
     "fettle.runners",
     "fettle.uat",
 ]

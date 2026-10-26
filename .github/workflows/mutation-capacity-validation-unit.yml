@@ -1,0 +1,162 @@
+name: Mutation capacity validation unit
+
+on:
+  workflow_call:
+    inputs:
+      unit:
+        required: true
+        type: number
+      preparation_run_id:
+        required: true
+        type: string
+      experiment_id:
+        required: true
+        type: string
+      plan_sha256:
+        required: true
+        type: string
+      candidate_sha:
+        required: true
+        type: string
+      authorization_id:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  execute:
+    name: capacity validation unit ${{ inputs.unit }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reject reruns and bind candidate
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: >-
+          python -c 'import os,re,sys; from fettle.staged_preflight import capacity_authorization_contract;
+          capacity_authorization_contract(os.environ["AUTHORIZATION_ID"], os.environ["CANDIDATE_SHA"], os.environ["EXPERIMENT_ID"]); sys.exit(0 if os.environ["RUN_ATTEMPT"]=="1"
+          and os.environ["CANDIDATE_SHA"]==os.environ["GITHUB_SHA"]
+          and re.fullmatch(r"capval-[A-Za-z0-9_-]{1,57}",os.environ["EXPERIMENT_ID"])
+          and re.fullmatch(r"[0-9a-f]{64}",os.environ["PLAN_SHA256"]) else 2)'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - name: Download frozen capacity preparation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: capacity-validation-preparation-${{ inputs.preparation_run_id }}
+          path: capacity-preparation
+          run-id: ${{ inputs.preparation_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate frozen plan identity
+        env:
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          path = Path("capacity-preparation/capacity-validation-plan.json")
+          assert hashlib.sha256(path.read_bytes()).hexdigest() == os.environ["PLAN_SHA256"]
+          plan = json.loads(path.read_text())
+          assert plan["experiment_id"] == os.environ["EXPERIMENT_ID"]
+          assert plan["revision"] == os.environ["GITHUB_SHA"]
+          assert plan["passed"] is False and plan["qualification_eligible"] is False
+          assert plan["authorization_id"] == os.environ["AUTHORIZATION_ID"]
+          PY
+      - name: Initialize fail-closed unit result
+        env:
+          UNIT: ${{ inputs.unit }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
+          Path("capacity-validation-result.json").write_text(json.dumps({
+              "schema_version": "1", "kind": "capacity_validation_unit_result",
+              "status": "not_started", "passed": False,
+              "qualification_eligible": False, "billing_authority": False,
+              "authoritative_predecessor": False,
+              "authorization_id": os.environ["AUTHORIZATION_ID"],
+              "authorization_contract": plan["authorization_contract"],
+              "experiment_id": os.environ["EXPERIMENT_ID"],
+              "revision": os.environ["GITHUB_SHA"],
+              "plan_file_sha256": os.environ["PLAN_SHA256"],
+              "unit_index": int(os.environ["UNIT"]),
+          }, indent=2) + "\n")
+          PY
+      - name: Execute bounded capacity unit
+        timeout-minutes: 14
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --capacity-unit ${{ inputs.unit }}
+          --capacity-plan capacity-preparation/capacity-validation-plan.json
+          --retained-preflight capacity-preparation/capacity-validation-corpus.json
+          --capacity-result capacity-validation-result.json
+          --capacity-checkpoint capacity-validation-checkpoint.json
+          --timeout 720 --json > capacity-validation-command.json
+      - name: Isolate partial checkpoint from authoritative consumers
+        if: always()
+        env:
+          UNIT: ${{ inputs.unit }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+          AUTHORIZATION_ID: ${{ inputs.authorization_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          plan = json.loads(Path("capacity-preparation/capacity-validation-plan.json").read_text())
+          path = Path("capacity-validation-checkpoint.json")
+          if path.is_file():
+              raw = json.loads(path.read_text())
+              isolated = {
+                  "schema_version": "1", "kind": "capacity_validation_partial_checkpoint",
+                  "status": raw.get("status", "unknown"), "passed": False,
+                  "qualification_eligible": False, "billing_authority": False,
+                  "authoritative_predecessor": False,
+                   "authorization_id": os.environ["AUTHORIZATION_ID"],
+                   "authorization_contract": plan["authorization_contract"],
+                  "experiment_id": os.environ["EXPERIMENT_ID"],
+                  "revision": os.environ["GITHUB_SHA"],
+                  "unit_index": int(os.environ["UNIT"]),
+                  "identity": raw.get("identity"), "outcomes": raw.get("outcomes", {}),
+                  "attempts": raw.get("attempts", []), "pending": raw.get("pending"),
+              }
+              path.write_text(json.dumps(isolated, indent=2) + "\n")
+          PY
+      - name: Restore and verify disposable workspace
+        if: always()
+        run: |
+          git reset --quiet -- .
+          git clean -ffdqx --exclude=capacity-validation-result.json --exclude=capacity-validation-command.json --exclude=capacity-validation-checkpoint.json
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Retain non-authoritative capacity result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capacity-validation-unit-${{ github.run_id }}-${{ inputs.unit }}
+          path: |
+            capacity-validation-result.json
+            capacity-validation-command.json
+            capacity-validation-checkpoint.json
+          if-no-files-found: error
+          retention-days: 90

@@ -539,13 +539,13 @@ def _write_uat_report(root, all_confirmed=True):
     assert path and not error, error
 
 
-def test_uat_dimension_passes_with_bound_canonical_sidecar(tmp_path):
+def test_uat_dimension_requires_upstream_session_not_just_sidecar(tmp_path):
     root = _init_repo(tmp_path)
     _write_uat_report(root)
 
     uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
 
-    assert uat["status"] == "PASS"
+    assert uat["status"] == "UNKNOWN"
     assert any(e["path"] == ".fettle/uat-report.evidence.json"
                for e in uat["evidence"])
 
@@ -576,7 +576,7 @@ def test_uat_dimension_rejects_edited_report(tmp_path):
     assert "tampered" in uat["reason"]
 
 
-def test_newer_canonical_uat_violation_supersedes_older_pass(tmp_path):
+def test_canonical_uat_claim_without_session_remains_unknown(tmp_path):
     from fettle.uat.reconcile import Verdict, write_report
 
     root = _init_repo(tmp_path)
@@ -589,8 +589,7 @@ def test_newer_canonical_uat_violation_supersedes_older_pass(tmp_path):
 
     uat = build_assurance_record(str(root))["record"]["dimensions"]["uat"]
 
-    assert uat["status"] == "FAIL"
-    assert "0/1 scenarios confirmed" in uat["reason"]
+    assert uat["status"] == "UNKNOWN"
 
 
 def test_unresolved_uat_evaluator_is_unknown_at_assurance_boundary(tmp_path):
