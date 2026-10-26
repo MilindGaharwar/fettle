@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finefettle"
-version = "1.13.1"
+version = "1.14.0"
 description = "Open-source trust layer for AI coding agents: in-session quality, delegation-safe policy, and evidence-bound verification"
 readme = "README.md"
 license = "Apache-2.0"

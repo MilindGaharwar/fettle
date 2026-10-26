@@ -6,7 +6,7 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-The current package version is v1.13.1. It includes the R1 evidence contract, the
+The current source version is v1.14.0. It includes the R1 evidence contract, the
 graduated R2 canonical workspace/adapter substrate, scanner and CI result
 integrity, deterministic change-integrity contracts, accepted application audit
 hardening, retained mutation calibration evidence, and wheel-native

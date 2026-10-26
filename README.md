@@ -36,6 +36,8 @@ or repository is needed for the demo. Python 3.11+ and Git are prerequisites.
 
 > **fettle** *(v.)* - a foundry term for trimming and cleaning a rough casting.
 
+Current source release: **v1.14.0**.
+
 ## Why Fettle
 
 AI coding agents changed the unit of software work. It is no longer only a diff;
