@@ -1502,7 +1502,8 @@ def test_pr_advisory_fanout_needs_real_bounded_admission_gate():
     )
     assert install == shard_install
     assert any(
-        step.get("run") == "uv run --no-sync python -m pytest tests/ -q"
+        step.get("run")
+        == "uv run --no-sync python .github/scripts/run_full_suite_parallel.py --workers 4"
         for step in gate["steps"]
     )
     fixture = next(
@@ -1511,6 +1512,20 @@ def test_pr_advisory_fanout_needs_real_bounded_admission_gate():
     )
     assert ".github/scripts/mutation_admission_fixture.py" in fixture
     assert "mutation-admission-fixtures" in fixture
+
+
+def test_admission_gate_runs_every_test_file_with_bounded_parallelism():
+    script = (
+        Path(PLUGIN_DIR) / ".github/scripts/run_full_suite_parallel.py"
+    ).read_text()
+    workflow = (
+        Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml"
+    ).read_text()
+
+    assert 'glob("test_*.py")' in script
+    assert "ThreadPoolExecutor(max_workers=args.workers)" in script
+    assert 'completed {completed}/{len(files)} test files' in script
+    assert "run_full_suite_parallel.py --workers 4" in workflow
 
 
 def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):

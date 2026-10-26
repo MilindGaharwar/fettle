@@ -29,15 +29,15 @@ jobs:
           uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
-      - name: Run full suite in shard environment
-        env:
-          FETTLE_REQUIRE_MUTATION_TOOLS: "1"
-          PYTHONPATH: ${{ github.workspace }}
-        run: uv run --no-sync python -m pytest tests/ -q
       - name: Exercise real two-shard advisory path
         run: >-
           uv run --no-sync python .github/scripts/mutation_admission_fixture.py
           --output mutation-admission-fixtures
+      - name: Run full suite in shard environment
+        env:
+          FETTLE_REQUIRE_MUTATION_TOOLS: "1"
+          PYTHONPATH: ${{ github.workspace }}
+        run: uv run --no-sync python .github/scripts/run_full_suite_parallel.py --workers 4
       - name: Retain admission fixtures
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
