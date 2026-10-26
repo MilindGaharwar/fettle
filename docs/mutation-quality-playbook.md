@@ -12,14 +12,29 @@ debugging loop.
 4. Replay the smallest changed scope.
 5. Use a full run only after preflight and narrow replay succeed.
 
-PR orchestration prepares the changed-scope manifests but does not execute a
-mutation matrix automatically. A mutation-relevant PR remains unknown/non-pass
-until a maintainer explicitly dispatches the applicable preflight and replay or
-calibration stages. An explicit non-applicable changed scope may pass without
-execution. Replay identity comes from the original digest-bound manifest. The
-aggregate must select exactly one compatible completed attempt per shard. A
-retry timeout, missing attempt, or conflicting completed attempt remains exit 2
-and cannot establish a score or pass.
+On every pull request, `.github/workflows/mutation-pr.yml` binds preparation to
+the exact head, base, and merge base. A mutation-relevant scope automatically
+dispatches the changed-scope shard matrix. Each shard consumes its digest-bound
+manifest and publishes an attempt-scoped artifact; a failed job may receive one
+bounded failed-job rerun, but the aggregate must select exactly one compatible
+completed attempt for every shard. A retry timeout, missing attempt, or
+conflicting completed attempt remains exit 2 and cannot establish a score or
+pass.
+
+`fettle/mutation_test.py` aggregates this pull-request evidence with
+`aggregation_mode: "advisory"` and `qualification_eligible: false`. Advisory
+success therefore confirms complete, compatible changed-scope execution only.
+It does not establish a full-corpus baseline, waive survivors, or qualify a
+ratchet. If preparation proves there is no mutation-relevant Python scope, the
+workflow dispatches no shards and publishes identity-bound `not_applicable`
+evidence with `passed: true`. Missing or malformed zero-scope identity remains
+non-pass.
+
+Protected `main` requires both `CI required` and `mutation evidence`. It also
+requires linear history, so approved changes land through a linear merge method;
+passing source checks do not authorize a direct protected-branch push. Full-scope
+qualification remains a separate, fresh, held-out path and never reuses advisory
+terminal outcomes.
 
 ```bash
 pipx install finefettle
@@ -40,11 +55,15 @@ polyglot adapters do not imply polyglot mutation support.
   are run-local locators only.
 - Missing, malformed, stale, partial, overlapping, or incompatible evidence
   cannot establish a score or pass enforcement.
+- Pull-request shard and aggregate artifacts are scoped by workflow run attempt.
+  Never select a report by shard number alone or combine incompatible attempts.
 - Native cache reuse requires an exact compatibility identity. Delete stale
   `.mutmut-cache` and `.fettle/mutation-cache` state rather than weakening
   validation.
 - Independent calibrations may share one immutable preflight corpus, but never
   terminal outcomes. Run authoritative calibrations sequentially.
+- Advisory pull-request aggregates are always qualification-ineligible, even
+  when all changed-scope shards pass.
 - A failed staged-preflight run remains non-pass. Its successful shard reports may
   contribute to a separately identified recovery corpus only when immutable artifact
   hashes, candidate/runtime/dependency/policy identity, complete manifest topology,
@@ -62,7 +81,8 @@ polyglot adapters do not imply polyglot mutation support.
   stages 1, 2, and 3; a continuation may not itself be continued. A locally calculated
   extracted-file hash does not establish artifact origin, and the exception never
   replaces a successfully published canonical report. See
-  `docs/calibration-budget-contract-amendment.md` for fixed budget and run limits.
+  `docs/calibration-budget-contract-amendment.md` for the retained historical
+  budget and run limits; it is not the current pull-request evidence path.
 - Keep retained JSON bounded and secret-free. Do not add absolute paths,
   credentials, environment values, or raw unbounded process output.
 
