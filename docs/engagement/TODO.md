@@ -113,10 +113,10 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 
 ### Current priority order
 
-- [~] P0-1. Finish and obtain operator acceptance of authorized audit hardening
-      and required mutation qualification. Retain exact-candidate evidence for all
-      criteria, including AH07. Start no new post-hardening work before this gate;
-      do not overlap lifecycle implementation in the current dirty worktree.
+- [x] P0-1. Audit hardening accepted and merged through tree-equivalent squashes:
+      PR #46 source `9791109` → `2605978`, then PR #47 source `a572f80` →
+      `023f9b3`. Exact-tip main CI passed after each merge. Full mutation
+      qualification remains `CLOSED_NON_PASS` and is not implied by this closure.
 - [ ] P0-ERA. Immediately after the hardening merge and before any D4 run:
       expensive-run admission (docs/backlog/expensive-run-admission.md). Gate job
       the shard fan-out `needs:`, running the real prepare→shard→aggregate path
@@ -143,8 +143,10 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       implemented; Verify Gate, Dispatcher, TDD Gate, property/state-machine
       tests, and refinement maps remain
 - [~] D4. P34 mutation evidence integrity — fail-closed wrapper, seeded weak
-      assertion, and advisory changed/full workflow implemented; three retained
-      stable mutation-workflow runs remain before baseline and ratchet graduation
+      assertion, and automatic PR advisory workflow implemented. In progress,
+      pending P0-ERA packages 1–3 and a stable definition before three fresh,
+      complete, retained, consecutive, same-corpus, non-reused full-scope runs on
+      `main`; only then may baseline and ratchet proposals proceed
 - [x] D5. P35 seeded-defect and recorded-override contract — promoted
       `ci.verdict` seeded evidence and fail-closed, revision/evidence/policy-bound
       enforcing override path verified

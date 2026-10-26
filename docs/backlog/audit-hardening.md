@@ -1,7 +1,7 @@
 ---
 fettle-work-item: v2
 id: audit-hardening
-status: open
+status: claimed
 scope:
   - fettle/quality_scan.py
   - fettle/action_entrypoint.py
@@ -26,6 +26,17 @@ spec: audit-hardening
 
 Authorized to start by the operator on 2026-09-18. Full activity inventory and
 acceptance criteria: [implementation plan](../audit-hardening-implementation-plan.md).
+
+## Resolution
+
+Done on 2026-10-26. PR #46 source `9791109` landed as tree-equivalent squash
+`2605978`; PR #47 source `a572f80` landed as tree-equivalent squash `023f9b3`.
+Exact-tip main CI passed after both merges. The criterion-level completion record
+is [`docs/completion/audit-hardening.json`](../completion/audit-hardening.json),
+with retained detailed evidence in
+[`docs/completion/evidence/audit-hardening.json`](../completion/evidence/audit-hardening.json).
+This resolution accepts audit hardening only; full mutation qualification remains
+`CLOSED_NON_PASS`.
 
 ## Acceptance Criteria
 

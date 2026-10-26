@@ -2499,8 +2499,11 @@ Current dispositions:
 - **P43 narrow formal verification** — PARK remaining three models
   (Verify Gate, Dispatcher, TDD Gate) pending measured demand; Policy
   Capsule and Work Item Claims models are verified and maintained.
-- **P34 ratchet graduation** — no triage required; awaiting qualifying runs,
-  now accumulating automatically through the required PR mutation gate.
+- **P34 ratchet graduation** — D4 is in progress pending P0-ERA. Automatic PR
+  mutation evidence is advisory and `qualification_eligible: false`; it does not
+  accumulate qualification. After P0-ERA packages 1–3 and a stable definition,
+  qualification requires three fresh, complete, retained, consecutive,
+  same-corpus, non-reused full-scope runs on `main`.
 
 - Phase 0 UX: complete in `docs/polyglot-governance.ux-spec.md`.
 - Phase 0.5 UI: not applicable; this plan changes CLI, hook, LSP, and protocol
@@ -2510,8 +2513,8 @@ Current dispositions:
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
-- P33–P43 status: P33 and P35 are complete; P34 has one accepted full retained
-  CI run but awaits measured reproducibility and actionability evidence; P43 has
+- P33–P43 status: P33 and P35 are complete; P34 remains `CLOSED_NON_PASS` and
+  awaits P0-ERA plus fresh full-scope qualification evidence; P43 has
   two of five planned models but has not met its
   completion contract; P36–P42 remain proposed or evidence-gated.
   UX/BDD additions are recorded in `docs/polyglot-governance.ux-spec.md`.

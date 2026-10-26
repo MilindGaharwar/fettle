@@ -1,6 +1,7 @@
 # Mutation Quality Implementation Plan
 
-Status: approved for implementation on 2026-08-08.
+Status: advisory PR evidence is implemented and automatic; D4 is in progress
+pending P0-ERA. Full-corpus qualification remains `CLOSED_NON_PASS`.
 
 Related UX contract: [mutation-quality.ux-spec.md](mutation-quality.ux-spec.md)
 
