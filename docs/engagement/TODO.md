@@ -110,6 +110,33 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
   - [x] S13.5 tests + docs + work note (capability matrix)
 
 ## Phase D — Post-v1.8 trust evolution
+
+### Current priority order
+
+- [~] P0-1. Finish and obtain operator acceptance of authorized audit hardening
+      and required mutation qualification. Retain exact-candidate evidence for all
+      criteria, including AH07. Start no new post-hardening work before this gate;
+      do not overlap lifecycle implementation in the current dirty worktree.
+- [ ] P0-ERA. Immediately after the hardening merge and before any D4 run:
+      expensive-run admission (docs/backlog/expensive-run-admission.md). Gate job
+      the shard fan-out `needs:`, running the real prepare→shard→aggregate path
+      on a two-shard fixture plus the full suite in the runner environment;
+      digest-bound reuse of unchanged shard reports on the advisory path; per-shard
+      projection from the observed runner ledger only. Recorded 2026-10-25 after
+      three commit-bound ~12 h runs were lost to offline-reproducible defects.
+      No scope, pass-semantics, or qualification change.
+- [ ] P4. Research briefs, documents/slides, browser side effects, remote artifacts,
+      MCP/non-code desktop hosts, and in-toto/PROV alignment remain deferred.
+      Revisit a physical core/pack split only after a second workflow demonstrates
+      shared behavior. New domains require their own authority and skill/discipline
+      review, not a copy of spreadsheet or coding checks.
+- [ ] P4-VT (deferred). Vacuous-test rule pack and distinguishing-mutant authoring
+      convention seeded from OSS Verify's enrollment rules
+      (docs/backlog/vacuous-test-rule-pack.md). Python tests first; no enrollment,
+      no new gate, no scope or pass-semantics change. Revisit after AH07 closes,
+      in recorded order.
+- [ ] PARKED. P49-P51 await a viable P48 consumer redesign and separate
+      authorization. Standalone ATIF inspection remains `NO_GO`.
 - [x] D1. P33 scanner and CI result integrity
 - [x] D2. P44 immutable change-integrity contracts and adversarial corpus
 - [~] D3. P43 narrow formal verification — Policy Capsule and Work Item Claims

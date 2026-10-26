@@ -31,6 +31,14 @@ Memory, model confidence, advisory graph output, and external indexes cannot
 grant authority. Missing or invalid evidence is a canonical non-pass for every
 consequential consumer.
 
+Prior art for stating evidence limits this way: Theorem Labs' OSS Verify proof
+corpus (`theorem-labs/oss-verify-proofs`) pins every binary and statement by
+SHA-256, lists the exact axioms a checker may accept, and publishes "what a
+proof does not say" and "what you have to trust" beside each result. Fettle's
+`billing_authority`, `qualification_eligible`, and `canonical_evidence` fields
+serve the same purpose: the artifact names its own scope and the reader's trust
+assumptions rather than implying them.
+
 ## Representation Inventory
 
 | Surface | Current representation and owner | Schema / identity | Persistence and retention | Current authority | P66 target |
