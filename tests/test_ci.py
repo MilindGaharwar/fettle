@@ -31,6 +31,23 @@ from scripts.staged_preflight import (  # noqa: E402
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
 
+def _require_mutation_fixture_tools():
+    missing = [
+        name
+        for name, available in (
+            ("mutmut", shutil.which("mutmut") is not None),
+            ("whatthepatch", importlib.util.find_spec("whatthepatch") is not None),
+        )
+        if not available
+    ]
+    if not missing:
+        return
+    reason = "mutation fixture requires: " + ", ".join(missing)
+    if os.environ.get("FETTLE_REQUIRE_MUTATION_TOOLS") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 def _run_actions_bash(script, *, cwd, env):
     env = {key: value for key, value in env.items() if value is not None}
     return subprocess.run(
@@ -42,6 +59,18 @@ def _run_actions_bash(script, *, cwd, env):
 def _python_heredoc(script):
     marker = "python - <<'PY'\n"
     return script.split(marker, 1)[1].split("\nPY", 1)[0]
+
+
+def test_mutation_fixture_tool_probe_skips_or_fails_by_environment(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/mutmut")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+
+    with pytest.raises(pytest.skip.Exception, match="whatthepatch"):
+        _require_mutation_fixture_tools()
+
+    monkeypatch.setenv("FETTLE_REQUIRE_MUTATION_TOOLS", "1")
+    with pytest.raises(pytest.fail.Exception, match="whatthepatch"):
+        _require_mutation_fixture_tools()
 
 
 def _first_python_heredoc(script):
@@ -1529,6 +1558,7 @@ def test_admission_gate_runs_every_test_file_with_bounded_parallelism():
 
 
 def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
+    _require_mutation_fixture_tools()
     script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
     env = {**os.environ, "PYTHONPATH": PLUGIN_DIR}
 
@@ -1548,6 +1578,7 @@ def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
 
 
 def test_mutation_admission_fixture_accepts_relative_evidence_path(tmp_path):
+    _require_mutation_fixture_tools()
     script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
     result = subprocess.run(
         [sys.executable, str(script), "--output", "admission-evidence"],
@@ -1581,19 +1612,7 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
 
 
 def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
-    missing_tools = [
-        name
-        for name, available in (
-            ("mutmut", shutil.which("mutmut") is not None),
-            ("whatthepatch", importlib.util.find_spec("whatthepatch") is not None),
-        )
-        if not available
-    ]
-    if missing_tools:
-        reason = "mutation fixture requires: " + ", ".join(missing_tools)
-        if os.environ.get("FETTLE_REQUIRE_MUTATION_TOOLS") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
+    _require_mutation_fixture_tools()
 
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
