@@ -121,7 +121,7 @@ as a non-success state. It does not change the default closure, Assurance, or CI
 | External integrations | SonarQube, Black Duck/Polaris, Pact | Disabled by default; credentials come from environment variables |
 | Guided workflows | 17 workflows across supported agents | Workflows guide agent reasoning; CLI commands remain deterministic automation |
 | Delegation | Worktrees, claims, topology, spawn, capsules, roles, reports | Defense in depth, not process isolation |
-| Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, accepted baseline comparison | Changed-scope survivors are enforced in this repository; adoption elsewhere remains policy-controlled |
+| Mutation evidence | Python preflight, changed/full execution, retained schema-v2 reports, baseline comparison, and automatic manifest-bound PR advisory aggregation | PR evidence integrity is required, but survivor policy and qualification remain separate; advisory aggregates are qualification-ineligible |
 | Specifications and UAT | Living Markdown specs, trace coverage, agent/manual acceptance verdicts | UAT is report-only; unavailable automation remains visible |
 | Change intelligence | Snapshot-bound graph status, impact, shadow comparison, and explicit contextual analysis | Advisory; contextual promotion failed its frozen evaluation and does not authorize a change |
 | State consistency | Contract creation, lint, listing, and execution | Adapter reach is contract-specific |
