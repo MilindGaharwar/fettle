@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Calibration terminal-accounting retention
 
 ## Guarantee

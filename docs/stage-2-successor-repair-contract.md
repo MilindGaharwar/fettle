@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Stage-2 successor repair contract
 
 Status: **amended and authorized for bounded repair implementation and offline verification**  

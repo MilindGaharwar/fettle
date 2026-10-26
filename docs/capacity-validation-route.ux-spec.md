@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # UX Spec: Capacity Model-Validation Route
 
 ## Jobs To Be Done
