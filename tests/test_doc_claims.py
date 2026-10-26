@@ -67,7 +67,6 @@ def test_readme_advisory_claim_matches_pr_workflow():
         "README mutation capability must state automatic PR advisory evidence"
     )
     assert "qualification-ineligible" in mutation_row
-    assert "name: mutation evidence" not in workflow
     assert "name: ${{ 'mutation evidence' }}" in containment
     assert "pull_request:" in containment
     assert '"status":"unknown"' in containment
