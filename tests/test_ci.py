@@ -1547,6 +1547,20 @@ def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
         assert retained["passed"] is False
 
 
+def test_mutation_admission_fixture_accepts_relative_evidence_path(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--output", "admission-evidence"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": PLUGIN_DIR},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "admission-evidence/positive/summary.md").is_file()
+
+
 def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 

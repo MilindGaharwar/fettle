@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument("--scenario", choices=SCENARIOS)
     args = parser.parse_args()
     try:
-        return run(args.output, args.scenario)
+        return run(args.output.resolve(), args.scenario)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"mutation admission fixture failed: {exc}", file=sys.stderr)
         return 2
