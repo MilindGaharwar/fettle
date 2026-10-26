@@ -53,8 +53,8 @@ def test_todo_s55_web_claim_matches_drivable_surfaces():
         )
 
 
-def test_readme_replay_gate_claim_matches_workflow():
-    """README's explicit replay and survivor-enforcement claims match CI."""
+def test_readme_advisory_claim_matches_pr_workflow():
+    """README's automatic advisory and qualification claims match PR CI."""
     readme = _read("README.md")
     workflow = _read(".github/workflows/mutation.yml")
     containment = _read(".github/workflows/mutation-pr.yml")
@@ -63,13 +63,16 @@ def test_readme_replay_gate_claim_matches_workflow():
         (line for line in readme.splitlines() if line.startswith("| Mutation quality |")),
         "",
     )
-    assert "explicit-dispatch replay" in mutation_row and "survivor enforcement" in mutation_row, (
-        "README mutation capability must state replay and survivor enforcement"
+    assert "automatic manifest-bound PR advisory evidence" in mutation_row, (
+        "README mutation capability must state automatic PR advisory evidence"
     )
-    assert "name: mutation evidence" in workflow
-    assert "name: mutation evidence" not in containment
+    assert "qualification-ineligible" in mutation_row
+    assert "name: ${{ 'mutation evidence' }}" in containment
+    assert "pull_request:" in containment
     assert '"status":"unknown"' in containment
     assert '"passed":false' in containment
+    assert '"status":"not_applicable" if valid else "unknown"' in containment
+    assert "github.run_attempt" in containment
     assert "--resume-manifest" not in containment
     assert "--resume-manifest" in workflow
 

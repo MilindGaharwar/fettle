@@ -1,17 +1,26 @@
 # Changelog
 
-## Unreleased
+## v1.14.0 — PR Advisory Evidence Hardening
 
 - Pull requests now receive manifest-bound advisory mutation evidence for the
-  changed Python mutation scope. Reports bind the exact head, merge base, shard
-  topology, and manifest digests; missing, malformed, conflicting, or incomplete
-  shard evidence remains non-pass.
+  changed Python mutation scope automatically on `pull_request`. Reports bind
+  the exact head, base, merge base, shard topology, and manifest digests;
+  missing, malformed, conflicting, or incomplete shard evidence remains non-pass.
 - Pull requests with no mutation-relevant Python changes dispatch no mutation
   shards. They publish retained, identity-bound `not_applicable` evidence and
   pass the `mutation evidence` check only when the zero-scope identity validates.
 - Advisory aggregate reports identify `aggregation_mode: "advisory"` and remain
-  explicitly ineligible for qualification. This does not establish a full-corpus
-  baseline, waive survivors, or enable a mutation ratchet.
+  explicitly `qualification_eligible: false`. This does not establish a
+  full-corpus baseline, waive survivors, or enable a mutation ratchet; full-corpus
+  qualification remains `CLOSED_NON_PASS`.
+- Shard reports are retained in attempt-scoped artifacts. A failed shard job may
+  receive one bounded rerun, while aggregation still requires exactly one
+  compatible completed attempt for every shard.
+- Heavy-module tests were relocated into bounded test modules so required CI can
+  exercise the hardening path without hiding or weakening coverage.
+- The hardening branch landed through tree-equivalent squash commits that preserve
+  protected `main`'s linear-history requirement. AH07 is closed with exact-tip
+  main CI green after PRs #46 and #47.
 - CI and release now share a fail-closed quality ratchet: seven critical modules
   remain at zero mypy errors, while whole-source typing debt stays visibly
   advisory at 214 errors across 36 files.
@@ -21,6 +30,31 @@
 - A bounded Python-subprocess fixture exercises the production coverage verifier.
   Non-Python processes, unsupported exec patterns, and abruptly terminated
   children remain explicit coverage limitations.
+- Removal of the `scripts` → `fettle/` compatibility symlink, promised for this
+  minor in v1.13.0, is explicitly deferred; this release does not remove it.
+- Added a strict fail-closed runtime secret boundary before tool execution on
+  Claude Code, Codex CLI, Gemini CLI, and OpenCode. Claude Code and Gemini also
+  protect credential-bearing tool output before model exposure; Codex and
+  OpenCode output filtering is explicitly unsupported.
+- `fettle doctor` now distinguishes host installation, registration, trust,
+  execution, and verification instead of treating registration as proof that an
+  integration ran.
+- Added explicit advisory contextual impact analysis and retained its frozen
+  40-case evaluation. Promotion remains blocked by 78.05% held-out required
+  recall, only 7 eligible held-out cases, and inconclusive paired precision gain.
+- Stop-hook import checks understand src-layout packages (`src/<pkg>/`)
+  and skip dependencies declared in pyproject/requirements even when no
+  `.venv` exists to probe (ephemeral `uv run --with` environments).
+- Stop-hook cross-file checks now discover the project root by walking up to
+  `pyproject.toml`, `setup.py`, or `.git`; recognize packages installed in the
+  project's `.venv`; and accept `from pkg import submodule` without an
+  `__init__` re-export.
+- Removed `effectiveness_report.py`, which depended on a private logging tool no
+  public install has. The effectiveness loop remains deferred until it can use
+  Fettle's own trace files.
+- Rust and shell gate tests now run on Ubuntu CI, and Cargo is resolved from
+  `PATH` instead of a hard-coded Linux toolchain path.
+- The README documents the seven plugin slash commands.
 
 ## v1.13.1 - Complete Default Python Install
 
@@ -1262,37 +1296,6 @@ for the full enterprise arc (WP-133..WP-153).
 
 ### External audit
 - `docs/archive/audit-2026-07-07.md`: independent code audit with prioritized TODO.
-
-## Unreleased
-
-- Added a strict fail-closed runtime secret boundary before tool execution on
-  Claude Code, Codex CLI, Gemini CLI, and OpenCode. Claude Code and Gemini also
-  protect credential-bearing tool output before model exposure; Codex and
-  OpenCode output filtering is explicitly unsupported.
-- `fettle doctor` now distinguishes host installation, registration, trust,
-  execution, and verification instead of treating registration as proof that an
-  integration ran.
-- Added explicit advisory contextual impact analysis and retained its frozen
-  40-case evaluation. Promotion remains blocked by 78.05% held-out required
-  recall, only 7 eligible held-out cases, and inconclusive paired precision gain.
-- Stop-hook import checks understand src-layout packages (`src/<pkg>/`)
-  and skip dependencies declared in pyproject/requirements even when no
-  .venv exists to probe (ephemeral `uv run --with` envs) — a second
-  round of import false positives on real-world project layouts.
-- Stop-hook cross-file checks no longer flood real projects with false
-  positives:
-  `stop_quality_gate.py` discovers the project root by walking up to
-  `pyproject.toml`/`setup.py`/`.git` instead of using the edited file's own
-  directory; `check_imports` recognizes packages installed in the project's
-  `.venv` (the hook's interpreter can't import them); `check_contracts`
-  accepts `from pkg import submodule` without an `__init__` re-export.
-
-- Removed `effectiveness_report.py`: it depended on a private logging tool
-  no public install has; the tool's name joined the scrub-audit pattern.
-  The effectiveness loop returns in v0.4.0 built on Fettle's own trace files.
-- Rust/shell gate tests now run on ubuntu CI (cargo + shellcheck installed);
-  cargo is resolved from PATH instead of a hardcoded Linux toolchain path.
-- README documents the seven plugin slash commands.
 
 ## v0.2.1 (2026-07-04)
 

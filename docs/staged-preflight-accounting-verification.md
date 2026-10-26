@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Staged-preflight accounting verification
 
 This record applies to the accounting repair based on candidate

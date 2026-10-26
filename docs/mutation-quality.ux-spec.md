@@ -15,6 +15,12 @@ engine's complete mutation-detail vocabulary before an expensive run, so parser
 drift and unsupported mutation shapes fail quickly with enough evidence to fix
 them.
 
+Current repository workflow: opening a pull request automatically runs the
+manifest-bound changed-scope advisory path. Its attempt-scoped aggregate reports
+`aggregation_mode: "advisory"` and `qualification_eligible: false`; a validated
+zero scope dispatches no shards and reports `not_applicable`. This feedback never
+claims a full-corpus baseline or qualification.
+
 ## Personas Affected
 
 - New user: needs one documented command, useful defaults, and an explanation

@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Final Acceptance Contract and Closure Proposal
 
 ## 2026-10-22 readiness-repair outcome and dispatch decision

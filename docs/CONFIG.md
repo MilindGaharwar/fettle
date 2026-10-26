@@ -223,6 +223,14 @@ fettle mutation status --report mutation-report.json --json
   suspicious outcomes distinct. `None` timeout/suspicious budgets are visible
   uncalibrated debt, not implicit acceptance.
 
+For this repository's pull requests, `.github/workflows/mutation-pr.yml`
+automatically prepares and executes the mutation-relevant changed scope, retains
+attempt-scoped shard artifacts, and aggregates through `fettle/mutation_test.py`
+with `aggregation_mode: "advisory"` and `qualification_eligible: false`. A
+validated zero scope dispatches no shards and publishes `not_applicable`
+evidence. These workflow semantics do not change the local CLI contract above
+and do not establish full-corpus qualification.
+
 ```toml
 [mutation]
 enabled = true

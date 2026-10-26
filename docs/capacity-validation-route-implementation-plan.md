@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Capacity Model-Validation Route Implementation Plan
 
 Status: authorized by `AH-CAPACITY-ROUTE-20261015-B` on 2026-10-15.

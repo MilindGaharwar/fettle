@@ -6,10 +6,10 @@ and `docs/engagement/` as provenance.
 
 ## Current Baseline
 
-The current package version is v1.13.1. It includes the R1 evidence contract, the
+The current source version is v1.14.0. It includes the R1 evidence contract, the
 graduated R2 canonical workspace/adapter substrate, scanner and CI result
-integrity, deterministic change-integrity contracts, P62's reproducible
-full-repository mutation calibration and accepted baseline, and wheel-native
+integrity, deterministic change-integrity contracts, accepted application audit
+hardening, retained mutation calibration evidence, and wheel-native
 versioned agent transports. The default installer includes every Python runtime
 Fettle invokes, and assurance validates producer-bound canonical evidence before
 persisting its own portable record. Runtime secret access is blocked pre-tool on
@@ -27,7 +27,7 @@ subject to the graduation triggers below. See the
 | Graduated | Scanner and CI result integrity (P33) | Required scanner failures are canonical non-pass outcomes and cannot become clean CI results |
 | Graduated | Canonical workspace and adapter substrate | Python, JS/TS, Go, and Rust pass dispatcher parity in mixed repositories |
 | Graduated | Change-integrity contracts and adversarial corpus (P44) | Immutable source, graph, provider, traversal, freshness, closure, and obligation records have deterministic identities and executable adversarial fixtures |
-| Enforced changed-scope gate; operational evidence ongoing | Mutation evidence integrity and quality ratchet (P34/P62-P65) | Independent full calibrations reproduce exactly, the committed 49.1 floor is established, and changed-scope survivors block merges; P65 continues measured operation per the [mutation quality plan](mutation-quality-implementation-plan.md) |
+| Accepted hardening; D4 in progress pending P0-ERA | Mutation evidence integrity and quality ratchet (P34/P62-P65) | Automatic PR evidence remains advisory and qualification-ineligible. Complete P0-ERA packages 1–3 and define stability, then retain three fresh, complete, consecutive, same-corpus, non-reused full-scope runs on `main` before proposing a baseline or ratchet; qualification remains `CLOSED_NON_PASS` |
 | In progress | Narrow formal verification (P43) | Policy Capsule and Work Item Claims are model-checked; Verify Gate, Dispatcher, and TDD Gate models plus implementation refinement evidence remain |
 | Graduated | Authorship separation (P52) | Role-based edit enforcement, TLA+ role invariants, adversarial path coverage, topology guidance, and an evidenced two-role flow are verified |
 | Proposed, priority | First-class portable evidence (P66-P71) | Consequential results bind producer, source, policy, scope, completeness, freshness, and occurrence; producers graduate independently with measured cost per verified change |

@@ -1,3 +1,5 @@
+Historical: superseded on 2026-10-26 by the PR advisory path; retained as evidence.
+
 # Accounting-only staged-preflight continuation proposal
 
 Status: **prepared for review; not wired for dispatch or source admission**.
