@@ -1476,10 +1476,60 @@ def test_changed_mutation_workflow_executes_one_bounded_attempt_per_shard():
     assert "timeout-minutes: 360" in workflow
     assert "--timeout 21300" in workflow
     assert "--manifest-scope mutation-pr-source/mutation-changed-manifests" in workflow
-    assert "needs: changed-prepare" in workflow
+    assert "needs: [admission-gate, changed-prepare]" in workflow
     assert "fail-fast: false" in workflow
     assert "--resume-manifest" not in workflow
     assert "mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}" in workflow
+
+
+def test_pr_advisory_fanout_needs_real_bounded_admission_gate():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    gate = parsed["jobs"]["admission-gate"]
+    prepare = parsed["jobs"]["changed-prepare"]
+    shard = parsed["jobs"]["changed-shard"]
+    aggregate = parsed["jobs"]["aggregate"]
+
+    assert gate["runs-on"] == shard["runs-on"] == "ubuntu-latest"
+    assert gate["timeout-minutes"] == 10
+    assert prepare["needs"] == "admission-gate"
+    assert shard["needs"] == ["admission-gate", "changed-prepare"]
+    assert aggregate["needs"] == ["admission-gate", "changed-prepare", "changed-shard"]
+    install = next(step["run"] for step in gate["steps"] if step.get("name") == "Install pinned mutation tools")
+    shard_install = next(
+        step["run"] for step in shard["steps"] if step.get("name") == "Install pinned mutation tools"
+    )
+    assert install == shard_install
+    assert any(
+        step.get("run") == "uv run --no-sync python -m pytest tests/ -q"
+        for step in gate["steps"]
+    )
+    fixture = next(
+        step["run"] for step in gate["steps"]
+        if step.get("name") == "Exercise real two-shard advisory path"
+    )
+    assert ".github/scripts/mutation_admission_fixture.py" in fixture
+    assert "mutation-admission-fixtures" in fixture
+
+
+def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
+    script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
+    env = {**os.environ, "PYTHONPATH": PLUGIN_DIR}
+
+    for scenario in (
+        "broken-aggregator-flag",
+        "missing-runtime-dependency",
+        "mismatched-manifest-digest",
+    ):
+        result = subprocess.run(
+            [sys.executable, str(script), "--output", str(tmp_path / scenario), "--scenario", scenario],
+            cwd=PLUGIN_DIR, env=env, capture_output=True, text=True,
+        )
+        assert result.returncode != 0, result.stdout + result.stderr
+        retained = json.loads((tmp_path / scenario / scenario / "result.json").read_text())
+        assert retained["scenario"] == scenario
+        assert retained["passed"] is False
 
 
 def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():

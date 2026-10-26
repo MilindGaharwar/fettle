@@ -11,7 +11,44 @@ permissions:
   contents: read
 
 jobs:
+  admission-gate:
+    name: mutation (admission gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install pinned mutation tools
+        run: |
+          uv venv --python 3.12.13
+          uv pip install --quiet --require-hashes -r requirements-mutation.txt
+          uv pip install --quiet --no-deps -e .
+      - name: Run full suite in shard environment
+        env:
+          FETTLE_REQUIRE_MUTATION_TOOLS: "1"
+          PYTHONPATH: ${{ github.workspace }}
+        run: uv run --no-sync python -m pytest tests/ -q
+      - name: Exercise real two-shard advisory path
+        run: >-
+          uv run --no-sync python .github/scripts/mutation_admission_fixture.py
+          --output mutation-admission-fixtures
+      - name: Retain admission fixtures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-admission-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mutation-admission-fixtures
+          if-no-files-found: error
+          retention-days: 90
+
   changed-prepare:
+    needs: admission-gate
     name: mutation (prepare changed scope)
     runs-on: ubuntu-latest
     outputs:
@@ -62,8 +99,8 @@ jobs:
           retention-days: 1
 
   changed-shard:
-    if: needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0'
-    needs: changed-prepare
+    if: needs.admission-gate.result == 'success' && needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0'
+    needs: [admission-gate, changed-prepare]
     name: mutation (changed shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -117,7 +154,7 @@ jobs:
 
   aggregate:
     if: always()
-    needs: [changed-prepare, changed-shard]
+    needs: [admission-gate, changed-prepare, changed-shard]
     name: ${{ 'mutation evidence' }}
     runs-on: ubuntu-latest
     steps:
@@ -152,11 +189,14 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SHARD_COUNT: ${{ needs.changed-prepare.outputs.shard_count }}
+          ADMISSION_RESULT: ${{ needs.admission-gate.result }}
           PREPARE_RESULT: ${{ needs.changed-prepare.result }}
         run: |
           MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"
           export MERGE_BASE
-          if [ "$PREPARE_RESULT" != success ] || [ -z "$SHARD_COUNT" ] || [ ! -f mutation-pr-source/mutation-pr-identity.json ]; then
+          if [ "$ADMISSION_RESULT" != success ]; then
+            python -c 'import json; json.dump({"status":"unknown","message":"Mutation admission gate did not pass","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
+          elif [ "$PREPARE_RESULT" != success ] || [ -z "$SHARD_COUNT" ] || [ ! -f mutation-pr-source/mutation-pr-identity.json ]; then
             python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope preparation evidence is missing or malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
           elif [ "$SHARD_COUNT" = 0 ]; then
             python - <<'PY'
