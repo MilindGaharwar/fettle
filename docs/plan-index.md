@@ -8,7 +8,7 @@ this index is the navigation layer.
 
 | Program | Detailed plan | Status | Next actions |
 |---|---|---|---|
-| Application audit hardening (2026-09-18) | [Prioritized work packages](audit-hardening-implementation-plan.md) + [UX contract](audit-hardening.ux-spec.md) + [worklog](audit-hardening-worklog.md) | AH01-AH06 accepted under amended AH07; AH08 implemented at signed `072bd62` and exact-head push CI `39041471220` passed; full mutation qualification remains `CLOSED_NON_PASS` | Preserve candidate-specific evidence; reconsider broader mutation qualification at H5, or earlier only for a demonstrated critical gap or governing requirement; do not start AH09 without authorization |
+| Application audit hardening (2026-09-18) | [Prioritized work packages](audit-hardening-implementation-plan.md) + [UX contract](audit-hardening.ux-spec.md) + [worklog](audit-hardening-worklog.md) | AH07 closed on tree-equivalent main squash `2605978`: exact-head CI, advisory mutation evidence, and main CI passed; full mutation qualification remains `CLOSED_NON_PASS` | Begin P0-ERA on a fresh branch before any further expensive provider run |
 | Evidence convergence | `fettle-evolution-implementation-plan.md` P66–P71 (inline) | P66–P69 complete; P70/P71 evidence-gated | Accumulate qualifying runs via required PR mutation gate |
 | Mutation quality | `mutation-quality-implementation-plan.md` + playbook | Baseline complete; advisory graduation | P64 methodology automation; ratchet decision after qualifying runs |
 | Change integrity (hypergraph) | `change-integrity-implementation-plan.md` (+ architecture, UX spec) | P44-P47 complete; P48 contextual advisory implemented but not promoted | Preserve existing authority; P49 remains deferred on P41 |

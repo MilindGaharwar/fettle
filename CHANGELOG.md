@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Pull requests now receive manifest-bound advisory mutation evidence for the
+  changed Python mutation scope. Reports bind the exact head, merge base, shard
+  topology, and manifest digests; missing, malformed, conflicting, or incomplete
+  shard evidence remains non-pass.
+- Pull requests with no mutation-relevant Python changes dispatch no mutation
+  shards. They publish retained, identity-bound `not_applicable` evidence and
+  pass the `mutation evidence` check only when the zero-scope identity validates.
+- Advisory aggregate reports identify `aggregation_mode: "advisory"` and remain
+  explicitly ineligible for qualification. This does not establish a full-corpus
+  baseline, waive survivors, or enable a mutation ratchet.
 - CI and release now share a fail-closed quality ratchet: seven critical modules
   remain at zero mypy errors, while whole-source typing debt stays visibly
   advisory at 214 errors across 36 files.
