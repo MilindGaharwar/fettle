@@ -31,6 +31,23 @@ from scripts.staged_preflight import (  # noqa: E402
 SYNTH_AWS = "AKIAZ7Q3M5N8P2K4R6T9"
 
 
+def _require_mutation_fixture_tools():
+    missing = [
+        name
+        for name, available in (
+            ("mutmut", shutil.which("mutmut") is not None),
+            ("whatthepatch", importlib.util.find_spec("whatthepatch") is not None),
+        )
+        if not available
+    ]
+    if not missing:
+        return
+    reason = "mutation fixture requires: " + ", ".join(missing)
+    if os.environ.get("FETTLE_REQUIRE_MUTATION_TOOLS") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 def _run_actions_bash(script, *, cwd, env):
     env = {key: value for key, value in env.items() if value is not None}
     return subprocess.run(
@@ -42,6 +59,19 @@ def _run_actions_bash(script, *, cwd, env):
 def _python_heredoc(script):
     marker = "python - <<'PY'\n"
     return script.split(marker, 1)[1].split("\nPY", 1)[0]
+
+
+def test_mutation_fixture_tool_probe_skips_or_fails_by_environment(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/mutmut")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.delenv("FETTLE_REQUIRE_MUTATION_TOOLS", raising=False)
+
+    with pytest.raises(pytest.skip.Exception, match="whatthepatch"):
+        _require_mutation_fixture_tools()
+
+    monkeypatch.setenv("FETTLE_REQUIRE_MUTATION_TOOLS", "1")
+    with pytest.raises(pytest.fail.Exception, match="whatthepatch"):
+        _require_mutation_fixture_tools()
 
 
 def _first_python_heredoc(script):
@@ -1476,10 +1506,91 @@ def test_changed_mutation_workflow_executes_one_bounded_attempt_per_shard():
     assert "timeout-minutes: 360" in workflow
     assert "--timeout 21300" in workflow
     assert "--manifest-scope mutation-pr-source/mutation-changed-manifests" in workflow
-    assert "needs: changed-prepare" in workflow
+    assert "needs: [admission-gate, changed-prepare]" in workflow
     assert "fail-fast: false" in workflow
     assert "--resume-manifest" not in workflow
     assert "mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}" in workflow
+
+
+def test_pr_advisory_fanout_needs_real_bounded_admission_gate():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    gate = parsed["jobs"]["admission-gate"]
+    prepare = parsed["jobs"]["changed-prepare"]
+    shard = parsed["jobs"]["changed-shard"]
+    aggregate = parsed["jobs"]["aggregate"]
+
+    assert gate["runs-on"] == shard["runs-on"] == "ubuntu-latest"
+    assert gate["timeout-minutes"] == 10
+    assert prepare["needs"] == "admission-gate"
+    assert shard["needs"] == ["admission-gate", "changed-prepare"]
+    assert aggregate["needs"] == ["admission-gate", "changed-prepare", "changed-shard"]
+    install = next(step["run"] for step in gate["steps"] if step.get("name") == "Install pinned mutation tools")
+    shard_install = next(
+        step["run"] for step in shard["steps"] if step.get("name") == "Install pinned mutation tools"
+    )
+    assert install == shard_install
+    assert any(
+        step.get("run")
+        == "uv run --no-sync python .github/scripts/run_full_suite_parallel.py --workers 4"
+        for step in gate["steps"]
+    )
+    fixture = next(
+        step["run"] for step in gate["steps"]
+        if step.get("name") == "Exercise real two-shard advisory path"
+    )
+    assert ".github/scripts/mutation_admission_fixture.py" in fixture
+    assert "mutation-admission-fixtures" in fixture
+
+
+def test_admission_gate_runs_every_test_file_with_bounded_parallelism():
+    script = (
+        Path(PLUGIN_DIR) / ".github/scripts/run_full_suite_parallel.py"
+    ).read_text()
+    workflow = (
+        Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml"
+    ).read_text()
+
+    assert 'glob("test_*.py")' in script
+    assert "ThreadPoolExecutor(max_workers=args.workers)" in script
+    assert 'completed {completed}/{len(files)} test files' in script
+    assert "run_full_suite_parallel.py --workers 4" in workflow
+
+
+def test_pr_advisory_admission_negative_fixtures_fail_before_fanout(tmp_path):
+    _require_mutation_fixture_tools()
+    script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
+    env = {**os.environ, "PYTHONPATH": PLUGIN_DIR}
+
+    for scenario in (
+        "broken-aggregator-flag",
+        "missing-runtime-dependency",
+        "mismatched-manifest-digest",
+    ):
+        result = subprocess.run(
+            [sys.executable, str(script), "--output", str(tmp_path / scenario), "--scenario", scenario],
+            cwd=PLUGIN_DIR, env=env, capture_output=True, text=True,
+        )
+        assert result.returncode != 0, result.stdout + result.stderr
+        retained = json.loads((tmp_path / scenario / scenario / "result.json").read_text())
+        assert retained["scenario"] == scenario
+        assert retained["passed"] is False
+
+
+def test_mutation_admission_fixture_accepts_relative_evidence_path(tmp_path):
+    _require_mutation_fixture_tools()
+    script = Path(PLUGIN_DIR) / ".github/scripts/mutation_admission_fixture.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--output", "admission-evidence"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": PLUGIN_DIR},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "admission-evidence/positive/summary.md").is_file()
 
 
 def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
@@ -1502,19 +1613,7 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
 
 
 def test_pr_advisory_real_entry_points_bind_manifests_and_fail_closed(tmp_path):
-    missing_tools = [
-        name
-        for name, available in (
-            ("mutmut", shutil.which("mutmut") is not None),
-            ("whatthepatch", importlib.util.find_spec("whatthepatch") is not None),
-        )
-        if not available
-    ]
-    if missing_tools:
-        reason = "mutation fixture requires: " + ", ".join(missing_tools)
-        if os.environ.get("FETTLE_REQUIRE_MUTATION_TOOLS") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
+    _require_mutation_fixture_tools()
 
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
