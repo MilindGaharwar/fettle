@@ -15,6 +15,7 @@ import pytest
 
 from fettle.mutation_test import (
     build_mutation_cache_identity,
+    build_advisory_reuse_identity,
     build_mutation_report_artifact,
     build_capacity_recovery_lineage,
     collect_mutation_dependency_identities,
@@ -63,6 +64,7 @@ from fettle.mutation_test import (
     execute_pending_mutations,
     report_from_mutation_checkpoint,
     prepare_shard_replay_matrix,
+    prepare_advisory_reuse,
     select_shard_attempts,
     select_shard_subset_attempts,
     run_resumable_mutation_shard,
@@ -4174,6 +4176,201 @@ def _shard_report(index, files, **changes):
     )
     report.update(changes)
     return report
+
+
+def _advisory_reuse_fixture(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("a")
+    (tmp_path / "fettle/b.py").write_text("b")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    (tmp_path / "tests/test_b.py").write_text("import fettle.b\n")
+    (tmp_path / "requirements-mutation.txt").write_text("mutmut==2.5.1\n")
+    config = {
+        "mode": "advisory",
+        "score_target": 70,
+        "test_mappings": {
+            "fettle/a.py": ["tests/test_a.py"],
+            "fettle/b.py": ["tests/test_b.py"],
+        },
+    }
+    manifests = []
+    reports = []
+    for index, file in enumerate(("fettle/a.py", "fettle/b.py")):
+        manifest = {
+            "schema_version": "1",
+            "revision": "b" * 40,
+            "shard_index": index,
+            "shard_count": 2,
+            "files": [file],
+            "ranges": [{"file": file, "start": 1, "end": 1}],
+        }
+        manifest["digest"] = _canonical_digest(manifest)
+        manifests.append(manifest)
+        reports.append(
+            _shard_report(
+                index,
+                [file],
+                revision="a" * 40,
+                manifest_digest="f" * 64,
+                advisory_reuse_identity=build_advisory_reuse_identity(
+                    str(tmp_path), manifest, config
+                ),
+            )
+        )
+    return config, manifests, reports
+
+
+def test_advisory_reuse_accepts_exact_inputs_and_records_provenance(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        result = prepare_advisory_reuse(
+            str(tmp_path),
+            config,
+            manifests,
+            reports,
+            source_run_id="700",
+            source_run_attempt="2",
+        )
+
+    assert result["reused_shards"] == [0, 1]
+    assert result["matrix"] == {"shard": []}
+    assert [report["revision"] for report in result["reports"]] == ["b" * 40] * 2
+    assert result["reports"][0]["manifest_digest"] == manifests[0]["digest"]
+    assert result["reports"][0]["reuse_provenance"] == {
+        "source_run_id": "700",
+        "source_run_attempt": "2",
+        "original_revision": "a" * 40,
+        "original_manifest_digest": "f" * 64,
+        "original_report_digest": _canonical_digest(reports[0]),
+    }
+
+
+def test_advisory_reuse_rejects_duplicate_candidate_reports(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        result = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, [*reports, deepcopy(reports[0])],
+            source_run_id="700", source_run_attempt="1",
+        )
+
+    assert result["reused_shards"] == [1]
+    assert result["matrix"] == {"shard": [0]}
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reused"),
+    [
+        (lambda root, config, manifests: (root / "fettle/a.py").write_text("changed"), [1]),
+        (lambda root, config, manifests: (root / "tests/test_a.py").write_text("changed"), [1]),
+        (lambda root, config, manifests: (root / "requirements-mutation.txt").write_text("changed"), []),
+        (lambda root, config, manifests: config.update(score_target=71), []),
+        (lambda root, config, manifests: manifests[0]["ranges"][0].update(end=2), [1]),
+    ],
+)
+def test_advisory_reuse_reexecutes_only_identity_mismatches(
+    tmp_path, change, expected_reused,
+):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    change(tmp_path, config, manifests)
+
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        result = prepare_advisory_reuse(
+            str(tmp_path),
+            config,
+            manifests,
+            reports,
+            source_run_id="700",
+            source_run_attempt="1",
+        )
+
+    assert result["reused_shards"] == expected_reused
+    assert result["matrix"] == {
+        "shard": [index for index in range(2) if index not in expected_reused]
+    }
+
+
+def test_advisory_aggregate_retains_reuse_provenance_and_stays_ineligible(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    with (
+        patch("fettle.mutation_test._revision", return_value="b" * 40),
+        patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")),
+    ):
+        reused = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, reports,
+            source_run_id="700", source_run_attempt="1",
+        )["reports"]
+        result = aggregate_shards(
+            str(tmp_path), reused, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert result["status"] == "completed"
+    assert result["aggregation_mode"] == "advisory"
+    assert result["qualification_eligible"] is False
+    assert result["reused_shards"] == [0, 1]
+    assert [item["shard_index"] for item in result["reuse_provenance"]] == [0, 1]
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    [
+        {},
+        {
+            "source_run_id": "700",
+            "source_run_attempt": "1",
+            "original_revision": "b" * 40,
+            "original_manifest_digest": "f" * 64,
+            "original_report_digest": "a" * 64,
+        },
+    ],
+)
+def test_advisory_aggregate_rejects_missing_or_stale_reuse_provenance(
+    tmp_path, provenance,
+):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    reports[0].update(
+        revision="b" * 40,
+        manifest_digest=manifests[0]["digest"],
+        reuse_provenance=provenance,
+    )
+    reports[1].update(revision="b" * 40, manifest_digest=manifests[1]["digest"])
+
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        result = aggregate_shards(
+            str(tmp_path), reports, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert result["status"] == "unknown"
+    assert "reuse provenance" in result["message"]
+
+
+def test_advisory_aggregate_rejects_tampered_reused_report(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        reused = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, reports,
+            source_run_id="700", source_run_attempt="1",
+        )["reports"]
+    reused[0]["duration_ms"] += 1
+
+    with (
+        patch("fettle.mutation_test._revision", return_value="b" * 40),
+        patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")),
+    ):
+        result = aggregate_shards(
+            str(tmp_path), reused, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert result["status"] == "unknown"
+    assert "does not bind its source report" in result["message"]
 
 
 def test_aggregate_shards_proves_complete_non_overlapping_scope(tmp_path):

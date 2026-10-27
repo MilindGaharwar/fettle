@@ -3344,6 +3344,142 @@ def write_changed_partition_manifests(
     return write_partition_manifests(root, changed_cfg, output_dir), files
 
 
+def _advisory_policy_digest(config: dict) -> str:
+    return _canonical_digest({
+        key: config.get(key)
+        for key in (
+            "mode",
+            "score_target",
+            "minimum_scored_mutants",
+            "max_new_actionable_survivors",
+            "max_untested",
+            "max_mutant_timeouts",
+            "max_suspicious_mutants",
+        )
+    })
+
+
+def build_advisory_reuse_identity(root: str, manifest: dict, config: dict) -> dict:
+    """Bind advisory reuse to every byte that can affect one shard's outcome."""
+    root_path = Path(root)
+    files = manifest.get("files")
+    ranges = manifest.get("ranges")
+    if not isinstance(files, list) or not files or not isinstance(ranges, list):
+        raise ValueError("advisory reuse manifest scope is malformed")
+    mapping = _mapped_tests(root, files, config.get("test_mappings", {}))
+    tests = sorted({test for mapped in mapping.values() for test in mapped})
+    if not tests or any(not mapped for mapped in mapping.values()):
+        raise ValueError("advisory reuse test mapping is incomplete")
+
+    def digests(paths: list[str], label: str) -> dict[str, str]:
+        result = {}
+        for relative in paths:
+            try:
+                canonical = _canonical_path(relative)
+                path = root_path / canonical
+                if not path.is_file() or not path.resolve().is_relative_to(root_path.resolve()):
+                    raise OSError("not a repository file")
+                result[canonical] = hashlib.sha256(path.read_bytes()).hexdigest()
+            except (OSError, UnicodeError, ValueError) as exc:
+                raise ValueError(f"advisory reuse {label} is unreadable: {relative}") from exc
+        return result
+
+    runtime = root_path / "requirements-mutation.txt"
+    try:
+        runtime_digest = hashlib.sha256(runtime.read_bytes()).hexdigest()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("advisory reuse pinned runtime is unreadable") from exc
+    manifest_scope = {
+        key: manifest.get(key)
+        for key in ("schema_version", "shard_index", "shard_count", "files", "ranges")
+    }
+    payload = {
+        "manifest_digest": _canonical_digest(manifest_scope),
+        "source_digests": digests(files, "source"),
+        "mapped_test_digests": digests(tests, "mapped test"),
+        "requirements_mutation_digest": runtime_digest,
+        "policy_digest": _advisory_policy_digest(config),
+    }
+    return {"schema_version": "1", "digest": _canonical_digest(payload), **payload}
+
+
+def prepare_advisory_reuse(
+    root: str,
+    config: dict,
+    manifests: list[dict],
+    reports: list[dict],
+    *,
+    source_run_id: str,
+    source_run_attempt: str,
+) -> dict:
+    """Select exact advisory reports and attach immutable source provenance."""
+    if (
+        not re.fullmatch(r"[1-9][0-9]*", source_run_id)
+        or not re.fullmatch(r"[1-9][0-9]*", source_run_attempt)
+    ):
+        raise ValueError("advisory reuse source run provenance is malformed")
+    manifests = sorted(manifests, key=lambda item: item.get("shard_index", -1))
+    expected = list(range(len(manifests)))
+    if not manifests or [item.get("shard_index") for item in manifests] != expected:
+        raise ValueError("advisory reuse manifests are incomplete or unordered")
+    current_revision = _revision(root)
+    reusable_by_index = {}
+    for report in reports:
+        index = report.get("shard_index") if isinstance(report, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or index not in expected:
+            continue
+        if index in reusable_by_index:
+            reusable_by_index[index] = None
+            continue
+        reusable_by_index[index] = report
+
+    reused_reports = []
+    reused_shards = []
+    for index, manifest in enumerate(manifests):
+        report = reusable_by_index.get(index)
+        if not isinstance(report, dict) or report.get("status") != "completed":
+            continue
+        original_revision = report.get("revision")
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", str(original_revision or ""))
+            or report.get("shard_count") != len(manifests)
+            or report.get("selection") != "shard"
+        ):
+            continue
+        try:
+            identity = build_advisory_reuse_identity(root, manifest, config)
+            _validate_report_schema(report)
+        except (OSError, TypeError, ValueError):
+            continue
+        if report.get("advisory_reuse_identity") != identity:
+            continue
+        original_digest = _canonical_digest(report)
+        reused_reports.append({
+            **report,
+            "revision": current_revision,
+            "manifest_digest": manifest["digest"],
+            "reuse_provenance": {
+                "source_run_id": source_run_id,
+                "source_run_attempt": source_run_attempt,
+                "original_revision": original_revision,
+                "original_manifest_digest": report.get("manifest_digest"),
+                "original_report_digest": original_digest,
+            },
+        })
+        reused_shards.append(index)
+    return {
+        "schema_version": "1",
+        "status": "completed",
+        "passed": True,
+        "revision": current_revision,
+        "source_run_id": source_run_id,
+        "source_run_attempt": source_run_attempt,
+        "reused_shards": reused_shards,
+        "matrix": {"shard": [index for index in expected if index not in reused_shards]},
+        "reports": reused_reports,
+    }
+
+
 def _canonical_mutant(
     root: str,
     file: str,
@@ -4404,6 +4540,46 @@ def aggregate_shards(
                 return _error("unknown", f"Shard {index} scope differs from its advisory manifest")
             if report.get("manifest_digest") != manifest.get("digest"):
                 return _error("unknown", f"Shard {index} manifest digest differs from advisory scope")
+            provenance = report.get("reuse_provenance")
+            if provenance is not None:
+                try:
+                    current_reuse_identity = build_advisory_reuse_identity(
+                        root, manifest, policy_config or {},
+                    )
+                except ValueError as exc:
+                    return _error(
+                        "unknown",
+                        f"Shard {index} reuse identity cannot be verified: {exc}",
+                    )
+                if report.get("advisory_reuse_identity") != current_reuse_identity:
+                    return _error(
+                        "unknown", f"Shard {index} advisory reuse identity is stale"
+                    )
+                if (
+                    not isinstance(provenance, dict)
+                    or set(provenance) != {
+                        "source_run_id", "source_run_attempt", "original_revision",
+                        "original_manifest_digest", "original_report_digest",
+                    }
+                    or not re.fullmatch(r"[1-9][0-9]*", str(provenance.get("source_run_id", "")))
+                    or not re.fullmatch(r"[1-9][0-9]*", str(provenance.get("source_run_attempt", "")))
+                    or not re.fullmatch(r"[0-9a-f]{40}", str(provenance.get("original_revision", "")))
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("original_manifest_digest", "")))
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("original_report_digest", "")))
+                    or provenance["original_revision"] == report.get("revision")
+                ):
+                    return _error("unknown", f"Shard {index} reuse provenance is malformed or stale")
+                original_report = {
+                    key: value for key, value in report.items() if key != "reuse_provenance"
+                }
+                original_report.update(
+                    revision=provenance["original_revision"],
+                    manifest_digest=provenance["original_manifest_digest"],
+                )
+                if _canonical_digest(original_report) != provenance["original_report_digest"]:
+                    return _error(
+                        "unknown", f"Shard {index} reuse provenance does not bind its source report"
+                    )
         else:
             execution_fields = (
                 "preflight_digest", "preflight_corpus_digest", "manifest_digest",
@@ -4516,13 +4692,11 @@ def aggregate_shards(
     policy = policy_config or {"score_target": threshold}
     policy_result = evaluate_policy(counts, policy)
     if advisory:
+        reused_shards = [
+            report["shard_index"] for report in reports if "reuse_provenance" in report
+        ]
         evidence_identity = {
-            "policy_digest": _canonical_digest({
-                key: policy.get(key) for key in (
-                    "mode", "score_target", "minimum_scored_mutants", "max_new_actionable_survivors",
-                    "max_untested", "max_mutant_timeouts", "max_suspicious_mutants",
-                )
-            }),
+            "policy_digest": _advisory_policy_digest(policy),
             "source_scope_digest": _canonical_digest({
                 file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
                 for file in expected
@@ -4538,6 +4712,11 @@ def aggregate_shards(
             ]),
             "aggregation_mode": "advisory",
             "qualification_eligible": False,
+            "reused_shards": reused_shards,
+            "reuse_provenance": [
+                {"shard_index": report["shard_index"], **report["reuse_provenance"]}
+                for report in reports if "reuse_provenance" in report
+            ],
         }
     else:
         evidence_identity = {
@@ -4918,6 +5097,13 @@ def run_mutation_test(root: str, cfg: dict) -> dict:
     }
     if manifest is not None:
         evidence_identity["manifest_digest"] = manifest["digest"]
+    if manifest is not None and cfg.get("advisory_execution") is True:
+        try:
+            evidence_identity["advisory_reuse_identity"] = build_advisory_reuse_identity(
+                root, manifest, cfg,
+            )
+        except ValueError as exc:
+            return _error("unknown", str(exc), **common)
     cache_identity = None if all_files or line_ranges else _runtime_cache_identity(root, files, mapping, cfg)
     cache_reused = bool(
         cache_identity is not None and restore_mutation_native_cache(root, cache_identity)
@@ -5020,10 +5206,16 @@ def main() -> int:
     parser.add_argument("--manifest-scope", metavar="DIRECTORY", help="Complete manifest set defining execution scope")
     parser.add_argument("--prepare-manifests", metavar="DIRECTORY", help="Write configured full-run manifests")
     parser.add_argument("--prepare-changed-manifests", metavar="DIRECTORY", help="Write bounded changed-scope manifests")
+    parser.add_argument("--prepare-advisory-reuse", metavar="DIRECTORY", help="Select digest-compatible retained advisory shards")
+    parser.add_argument("--reuse-manifest-scope", metavar="DIRECTORY", help="Current advisory manifests for reuse selection")
+    parser.add_argument("--reuse-output", metavar="DIRECTORY", help="Write selected retained shard reports")
+    parser.add_argument("--reuse-source-run-id")
+    parser.add_argument("--reuse-source-run-attempt")
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
     parser.add_argument("--aggregate-advisory", action="store_true", help="Validate a manifest-bound advisory aggregate")
+    parser.add_argument("--advisory-execution", action="store_true", help="Bind one shard for advisory-only result reuse")
     parser.add_argument("--aggregate-preflight-evidence", help="Retained preflight that binds a qualification aggregate")
     parser.add_argument("--preflight-manifest", help="Run bounded preflight from a partition manifest")
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
@@ -5076,6 +5268,43 @@ def main() -> int:
             report = prepare_shard_replay_matrix(reports, args.shard_count)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             report = _error("unknown", f"Cannot prepare mutation replay: {exc}")
+        print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0 if report["status"] == "completed" else 2
+    if args.prepare_advisory_reuse:
+        try:
+            if not args.reuse_manifest_scope or not args.reuse_output:
+                raise ValueError(
+                    "--prepare-advisory-reuse requires --reuse-manifest-scope and --reuse-output"
+                )
+            manifests = [
+                load_partition_manifest(path)
+                for path in sorted(
+                    Path(args.reuse_manifest_scope).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            reports = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(Path(args.prepare_advisory_reuse).rglob("mutation-report.json"))
+            ]
+            report = prepare_advisory_reuse(
+                args.root,
+                mutation,
+                manifests,
+                reports,
+                source_run_id=args.reuse_source_run_id or "",
+                source_run_attempt=args.reuse_source_run_attempt or "",
+            )
+            output = Path(args.reuse_output)
+            output.mkdir(parents=True, exist_ok=True)
+            for reused in report.pop("reports"):
+                destination = output / str(reused["shard_index"])
+                destination.mkdir()
+                (destination / "mutation-report.json").write_text(
+                    json.dumps(reused, indent=2) + "\n", encoding="utf-8"
+                )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot prepare advisory reuse: {exc}")
         print(json.dumps(report, indent=2) if args.json else format_report(report))
         return 0 if report["status"] == "completed" else 2
     if args.prepare_manifests or args.prepare_changed_manifests:
@@ -5221,7 +5450,7 @@ def main() -> int:
                     if len(manifests) != args.shard_count:
                         raise ValueError("aggregate scope manifests are incomplete")
                     paths = sorted({file for manifest in manifests for file in manifest["files"]})
-                    if args.aggregate_preflight_evidence:
+                    if args.aggregate_preflight_evidence or args.aggregate_advisory:
                         expected = [
                             file for file in _get_all_py_files(args.root, mutation["paths"])
                             if not any(file.startswith(item) for item in excluded)
@@ -5237,7 +5466,11 @@ def main() -> int:
                             if not any(file.startswith(item) for item in excluded)
                         ]
                     if paths != expected:
-                        scope = "full configured" if args.aggregate_preflight_evidence else "changed-file"
+                        scope = (
+                            "full configured"
+                            if args.aggregate_preflight_evidence or args.aggregate_advisory
+                            else "changed-file"
+                        )
                         raise ValueError(f"aggregate manifests do not match {scope} scope")
                 if args.aggregate_preflight_evidence:
                     if not args.aggregate_scope or not args.calibration_id:
@@ -5285,6 +5518,7 @@ def main() -> int:
             "timeout_s": timeout, "score_target": threshold,
             "shard_index": args.shard_index, "shard_count": args.shard_count,
             "manifest": args.manifest,
+            "advisory_execution": args.advisory_execution,
             **({"full_shards": args.shard_count} if args.manifest and args.shard_count is not None else {}),
         })
     output = json.dumps(report, indent=2) if args.json else format_report(report)

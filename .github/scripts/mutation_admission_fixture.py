@@ -79,6 +79,7 @@ def _fixture(root: Path) -> str:
         "'src/a.py' = ['tests/test_a.py']\n"
         "'src/b.py' = ['tests/test_b.py']\n"
     )
+    shutil.copy(Path(__file__).resolve().parents[2] / "requirements-mutation.txt", root)
     _check(_run(["git", "init", "-q"], cwd=root, env=os.environ.copy()), "git init")
     _check(
         _run(
@@ -151,6 +152,7 @@ def _prepare_and_shard(
                 str(index),
                 "--shard-count",
                 "2",
+                "--advisory-execution",
                 "--timeout",
                 "120",
                 "--json",
