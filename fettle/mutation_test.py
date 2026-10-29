@@ -3318,7 +3318,7 @@ def write_changed_partition_manifests(
     output_dir: Path,
     base: str,
 ) -> tuple[list[Path], list[str]]:
-    """Write bounded manifests that exactly cover the current changed-file scope."""
+    """Write the stable configured topology when mutation source is changed."""
     selection = _get_changed_py_files(root, cfg.get("paths", ["src/"]), base)
     if selection["status"] != "completed":
         raise ValueError(selection["message"])
@@ -3328,20 +3328,9 @@ def write_changed_partition_manifests(
     ]
     if not files:
         return [], []
-    default_chunk_lines = int(cfg.get("default_chunk_lines", 60))
-    chunk_lines = cfg.get("chunk_lines", {})
-    chunk_count = sum(
-        (len((Path(root) / file).read_text(encoding="utf-8").splitlines()) + chunk_lines.get(file, default_chunk_lines) - 1)
-        // chunk_lines.get(file, default_chunk_lines)
-        for file in files
-    )
-    changed_cfg = {
-        **cfg,
-        "paths": files,
-        "exclude": [],
-        "full_shards": min(256, chunk_count),
-    }
-    return write_partition_manifests(root, changed_cfg, output_dir), files
+    # Changed files decide applicability. Stable configured partitions let the
+    # five content digests decide which shards can be reused versus executed.
+    return write_partition_manifests(root, cfg, output_dir), files
 
 
 def _advisory_policy_digest(config: dict) -> str:
@@ -3476,6 +3465,111 @@ def prepare_advisory_reuse(
         "source_run_attempt": source_run_attempt,
         "reused_shards": reused_shards,
         "matrix": {"shard": [index for index in expected if index not in reused_shards]},
+        "reports": reused_reports,
+    }
+
+
+def prepare_advisory_reuse_candidates(
+    root: str,
+    config: dict,
+    manifests: list[dict],
+    candidates: list[dict],
+) -> dict:
+    """Select each shard from the newest valid retained content match."""
+    manifests = sorted(manifests, key=lambda item: item.get("shard_index", -1))
+    expected = list(range(len(manifests)))
+    if not manifests or [item.get("shard_index") for item in manifests] != expected:
+        raise ValueError("advisory reuse manifests are incomplete or unordered")
+    current_revision = _revision(root)
+    valid_candidates = []
+    for candidate in candidates:
+        identity = candidate.get("identity") if isinstance(candidate, dict) else None
+        reports = candidate.get("reports") if isinstance(candidate, dict) else None
+        run_id = str(candidate.get("run_id", "")) if isinstance(candidate, dict) else ""
+        attempt = str(candidate.get("run_attempt", "")) if isinstance(candidate, dict) else ""
+        started = candidate.get("run_started_at") if isinstance(candidate, dict) else None
+        if (
+            not isinstance(identity, dict)
+            or identity.get("kind") != "mutation_pr_advisory_identity"
+            or identity.get("scope") not in {"changed", "full_configured"}
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("head_sha", "")))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("base_sha", "")))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("merge_base", "")))
+            or identity.get("shard_count") != len(manifests)
+            or not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or not re.fullmatch(r"[1-9][0-9]*", attempt)
+            or not isinstance(started, str)
+            or not isinstance(reports, list)
+        ):
+            continue
+        by_index: dict[int, dict | None] = {}
+        for report in reports:
+            index = report.get("shard_index") if isinstance(report, dict) else None
+            if not isinstance(index, int) or isinstance(index, bool) or index not in expected:
+                continue
+            by_index[index] = report if index not in by_index else None
+        valid_candidates.append((started, run_id, attempt, identity, by_index))
+    valid_candidates.sort(key=lambda item: item[0], reverse=True)
+
+    reused_reports = []
+    reused_shards = []
+    reasons = []
+    digest_fields = (
+        "manifest_digest", "source_digests", "mapped_test_digests",
+        "requirements_mutation_digest", "policy_digest",
+    )
+    for index, manifest in enumerate(manifests):
+        current_identity = build_advisory_reuse_identity(root, manifest, config)
+        observed = None
+        for _started, run_id, attempt, source_identity, by_index in valid_candidates:
+            report = by_index.get(index)
+            if not isinstance(report, dict):
+                continue
+            if observed is None:
+                observed = report.get("advisory_reuse_identity")
+            try:
+                _validate_report_schema(report)
+            except (TypeError, ValueError):
+                continue
+            if (
+                report.get("status") != "completed"
+                or report.get("selection") != "shard"
+                or report.get("shard_count") != len(manifests)
+                or report.get("revision") != source_identity["head_sha"]
+                or report.get("advisory_reuse_identity") != current_identity
+            ):
+                continue
+            reused_reports.append({
+                **report,
+                "revision": current_revision,
+                "manifest_digest": manifest["digest"],
+                "reuse_provenance": {
+                    "source_run_id": run_id,
+                    "source_run_attempt": attempt,
+                    "original_revision": report["revision"],
+                    "original_manifest_digest": report.get("manifest_digest"),
+                    "original_report_digest": _canonical_digest(report),
+                },
+            })
+            reused_shards.append(index)
+            break
+        else:
+            differing = [
+                field for field in digest_fields
+                if not isinstance(observed, dict) or observed.get(field) != current_identity[field]
+            ]
+            reasons.append({
+                "shard_index": index,
+                "differing_digests": differing or ["compatible_completed_report"],
+            })
+    return {
+        "schema_version": "1",
+        "status": "completed",
+        "passed": True,
+        "revision": current_revision,
+        "reused_shards": reused_shards,
+        "matrix": {"shard": [index for index in expected if index not in reused_shards]},
+        "reexecution_reasons": reasons,
         "reports": reused_reports,
     }
 
@@ -5374,6 +5468,7 @@ def main() -> int:
     parser.add_argument("--reuse-output", metavar="DIRECTORY", help="Write selected retained shard reports")
     parser.add_argument("--reuse-source-run-id")
     parser.add_argument("--reuse-source-run-attempt")
+    parser.add_argument("--reuse-candidates-index", metavar="PATH")
     parser.add_argument("--advisory-projection-ledger", metavar="PATH")
     parser.add_argument("--advisory-projection-manifests", metavar="DIRECTORY")
     parser.add_argument("--advisory-projection-matrix", metavar="PATH")
@@ -5479,18 +5574,39 @@ def main() -> int:
                     key=lambda path: int(path.stem.split("-")[1]),
                 )
             ]
-            reports = [
-                json.loads(path.read_text(encoding="utf-8"))
-                for path in sorted(Path(args.prepare_advisory_reuse).rglob("mutation-report.json"))
-            ]
-            report = prepare_advisory_reuse(
-                args.root,
-                mutation,
-                manifests,
-                reports,
-                source_run_id=args.reuse_source_run_id or "",
-                source_run_attempt=args.reuse_source_run_attempt or "",
-            )
+            if args.reuse_candidates_index:
+                index = json.loads(Path(args.reuse_candidates_index).read_text(encoding="utf-8"))
+                candidates = []
+                for item in index.get("candidates", []):
+                    candidate_root = Path(args.prepare_advisory_reuse) / str(item["run_id"])
+                    identities = list(candidate_root.rglob("mutation-pr-identity.json"))
+                    if len(identities) != 1:
+                        continue
+                    candidates.append({
+                        **item,
+                        "identity": json.loads(identities[0].read_text(encoding="utf-8")),
+                        "reports": [
+                            json.loads(path.read_text(encoding="utf-8"))
+                            for path in sorted(candidate_root.rglob("mutation-report.json"))
+                            if "mutation-pr-reports" in path.parts
+                        ],
+                    })
+                report = prepare_advisory_reuse_candidates(
+                    args.root, mutation, manifests, candidates,
+                )
+            else:
+                reports = [
+                    json.loads(path.read_text(encoding="utf-8"))
+                    for path in sorted(Path(args.prepare_advisory_reuse).rglob("mutation-report.json"))
+                ]
+                report = prepare_advisory_reuse(
+                    args.root,
+                    mutation,
+                    manifests,
+                    reports,
+                    source_run_id=args.reuse_source_run_id or "",
+                    source_run_attempt=args.reuse_source_run_attempt or "",
+                )
             output = Path(args.reuse_output)
             output.mkdir(parents=True, exist_ok=True)
             for reused in report.pop("reports"):
