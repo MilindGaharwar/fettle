@@ -3392,6 +3392,36 @@ def build_advisory_reuse_identity(root: str, manifest: dict, config: dict) -> di
     return {"schema_version": "1", "digest": _canonical_digest(payload), **payload}
 
 
+def _bound_advisory_reuse_provenance(report: dict) -> dict | None:
+    provenance = report.get("reuse_provenance")
+    if provenance is None:
+        return None
+    if (
+        not isinstance(provenance, dict)
+        or set(provenance) != {
+            "source_run_id", "source_run_attempt", "original_revision",
+            "original_manifest_digest", "original_report_digest",
+        }
+        or not re.fullmatch(r"[1-9][0-9]*", str(provenance.get("source_run_id", "")))
+        or not re.fullmatch(r"[1-9][0-9]*", str(provenance.get("source_run_attempt", "")))
+        or not re.fullmatch(r"[0-9a-f]{40}", str(provenance.get("original_revision", "")))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("original_manifest_digest", "")))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("original_report_digest", "")))
+        or provenance["original_revision"] == report.get("revision")
+    ):
+        return None
+    original_report = {
+        key: value for key, value in report.items() if key != "reuse_provenance"
+    }
+    original_report.update(
+        revision=provenance["original_revision"],
+        manifest_digest=provenance["original_manifest_digest"],
+    )
+    if _canonical_digest(original_report) != provenance["original_report_digest"]:
+        return None
+    return provenance
+
+
 def prepare_advisory_reuse(
     root: str,
     config: dict,
@@ -3442,18 +3472,24 @@ def prepare_advisory_reuse(
             continue
         if report.get("advisory_reuse_identity") != identity:
             continue
-        original_digest = _canonical_digest(report)
-        reused_reports.append({
-            **report,
-            "revision": current_revision,
-            "manifest_digest": manifest["digest"],
-            "reuse_provenance": {
+        existing_provenance = report.get("reuse_provenance")
+        if existing_provenance is not None:
+            provenance = _bound_advisory_reuse_provenance(report)
+            if provenance is None:
+                continue
+        else:
+            provenance = {
                 "source_run_id": source_run_id,
                 "source_run_attempt": source_run_attempt,
                 "original_revision": original_revision,
                 "original_manifest_digest": report.get("manifest_digest"),
-                "original_report_digest": original_digest,
-            },
+                "original_report_digest": _canonical_digest(report),
+            }
+        reused_reports.append({
+            **report,
+            "revision": current_revision,
+            "manifest_digest": manifest["digest"],
+            "reuse_provenance": provenance,
         })
         reused_shards.append(index)
     return {
@@ -3539,17 +3575,24 @@ def prepare_advisory_reuse_candidates(
                 or report.get("advisory_reuse_identity") != current_identity
             ):
                 continue
-            reused_reports.append({
-                **report,
-                "revision": current_revision,
-                "manifest_digest": manifest["digest"],
-                "reuse_provenance": {
+            existing_provenance = report.get("reuse_provenance")
+            if existing_provenance is not None:
+                provenance = _bound_advisory_reuse_provenance(report)
+                if provenance is None:
+                    continue
+            else:
+                provenance = {
                     "source_run_id": run_id,
                     "source_run_attempt": attempt,
                     "original_revision": report["revision"],
                     "original_manifest_digest": report.get("manifest_digest"),
                     "original_report_digest": _canonical_digest(report),
-                },
+                }
+            reused_reports.append({
+                **report,
+                "revision": current_revision,
+                "manifest_digest": manifest["digest"],
+                "reuse_provenance": provenance,
             })
             reused_shards.append(index)
             break
