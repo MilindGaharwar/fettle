@@ -1,4 +1,4 @@
-"""Fettle configuration — single source for gates, severity, and paths.
+"""Fettle configuration — Single source for gates, severity, and paths.
 
 Canonical layering (later wins, WP-20 unified resolver):
     defaults → org.toml → team.toml → remote [extends] → repo .fettle.toml
