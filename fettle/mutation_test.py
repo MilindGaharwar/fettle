@@ -3318,7 +3318,7 @@ def write_changed_partition_manifests(
     output_dir: Path,
     base: str,
 ) -> tuple[list[Path], list[str]]:
-    """Write bounded manifests that exactly cover the current changed-file scope."""
+    """Write the stable configured topology when mutation source is changed."""
     selection = _get_changed_py_files(root, cfg.get("paths", ["src/"]), base)
     if selection["status"] != "completed":
         raise ValueError(selection["message"])
@@ -3328,20 +3328,9 @@ def write_changed_partition_manifests(
     ]
     if not files:
         return [], []
-    default_chunk_lines = int(cfg.get("default_chunk_lines", 60))
-    chunk_lines = cfg.get("chunk_lines", {})
-    chunk_count = sum(
-        (len((Path(root) / file).read_text(encoding="utf-8").splitlines()) + chunk_lines.get(file, default_chunk_lines) - 1)
-        // chunk_lines.get(file, default_chunk_lines)
-        for file in files
-    )
-    changed_cfg = {
-        **cfg,
-        "paths": files,
-        "exclude": [],
-        "full_shards": min(256, chunk_count),
-    }
-    return write_partition_manifests(root, changed_cfg, output_dir), files
+    # Changed files decide applicability. Stable configured partitions let the
+    # five content digests decide which shards can be reused versus executed.
+    return write_partition_manifests(root, cfg, output_dir), files
 
 
 def _advisory_policy_digest(config: dict) -> str:
@@ -3477,6 +3466,274 @@ def prepare_advisory_reuse(
         "reused_shards": reused_shards,
         "matrix": {"shard": [index for index in expected if index not in reused_shards]},
         "reports": reused_reports,
+    }
+
+
+def prepare_advisory_reuse_candidates(
+    root: str,
+    config: dict,
+    manifests: list[dict],
+    candidates: list[dict],
+) -> dict:
+    """Select each shard from the newest valid retained content match."""
+    manifests = sorted(manifests, key=lambda item: item.get("shard_index", -1))
+    expected = list(range(len(manifests)))
+    if not manifests or [item.get("shard_index") for item in manifests] != expected:
+        raise ValueError("advisory reuse manifests are incomplete or unordered")
+    current_revision = _revision(root)
+    valid_candidates = []
+    for candidate in candidates:
+        identity = candidate.get("identity") if isinstance(candidate, dict) else None
+        reports = candidate.get("reports") if isinstance(candidate, dict) else None
+        run_id = str(candidate.get("run_id", "")) if isinstance(candidate, dict) else ""
+        attempt = str(candidate.get("run_attempt", "")) if isinstance(candidate, dict) else ""
+        started = candidate.get("run_started_at") if isinstance(candidate, dict) else None
+        if (
+            not isinstance(identity, dict)
+            or identity.get("kind") != "mutation_pr_advisory_identity"
+            or identity.get("scope") not in {"changed", "full_configured"}
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("head_sha", "")))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("base_sha", "")))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(identity.get("merge_base", "")))
+            or identity.get("shard_count") != len(manifests)
+            or not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or not re.fullmatch(r"[1-9][0-9]*", attempt)
+            or not isinstance(started, str)
+            or not isinstance(reports, list)
+        ):
+            continue
+        by_index: dict[int, dict | None] = {}
+        for report in reports:
+            index = report.get("shard_index") if isinstance(report, dict) else None
+            if not isinstance(index, int) or isinstance(index, bool) or index not in expected:
+                continue
+            by_index[index] = report if index not in by_index else None
+        valid_candidates.append((started, run_id, attempt, identity, by_index))
+    valid_candidates.sort(key=lambda item: item[0], reverse=True)
+
+    reused_reports = []
+    reused_shards = []
+    reasons = []
+    digest_fields = (
+        "manifest_digest", "source_digests", "mapped_test_digests",
+        "requirements_mutation_digest", "policy_digest",
+    )
+    for index, manifest in enumerate(manifests):
+        current_identity = build_advisory_reuse_identity(root, manifest, config)
+        observed = None
+        for _started, run_id, attempt, source_identity, by_index in valid_candidates:
+            report = by_index.get(index)
+            if not isinstance(report, dict):
+                continue
+            if observed is None:
+                observed = report.get("advisory_reuse_identity")
+            try:
+                _validate_report_schema(report)
+            except (TypeError, ValueError):
+                continue
+            if (
+                report.get("status") != "completed"
+                or report.get("selection") != "shard"
+                or report.get("shard_count") != len(manifests)
+                or report.get("revision") != source_identity["head_sha"]
+                or report.get("advisory_reuse_identity") != current_identity
+            ):
+                continue
+            reused_reports.append({
+                **report,
+                "revision": current_revision,
+                "manifest_digest": manifest["digest"],
+                "reuse_provenance": {
+                    "source_run_id": run_id,
+                    "source_run_attempt": attempt,
+                    "original_revision": report["revision"],
+                    "original_manifest_digest": report.get("manifest_digest"),
+                    "original_report_digest": _canonical_digest(report),
+                },
+            })
+            reused_shards.append(index)
+            break
+        else:
+            differing = [
+                field for field in digest_fields
+                if not isinstance(observed, dict) or observed.get(field) != current_identity[field]
+            ]
+            reasons.append({
+                "shard_index": index,
+                "differing_digests": differing or ["compatible_completed_report"],
+            })
+    return {
+        "schema_version": "1",
+        "status": "completed",
+        "passed": True,
+        "revision": current_revision,
+        "reused_shards": reused_shards,
+        "matrix": {"shard": [index for index in expected if index not in reused_shards]},
+        "reexecution_reasons": reasons,
+        "reports": reused_reports,
+    }
+
+
+def evaluate_advisory_projection(
+    manifests: list[dict],
+    matrix: dict,
+    ledger: dict,
+    *,
+    engine_budget_seconds: int,
+) -> dict:
+    """Block advisory dispatch when target-runner P95 exceeds its safe budget."""
+    if (
+        not isinstance(engine_budget_seconds, int)
+        or isinstance(engine_budget_seconds, bool)
+        or engine_budget_seconds < 1
+    ):
+        raise ValueError("advisory engine budget must be a positive integer")
+    threshold = engine_budget_seconds * 0.85
+    indexes = matrix.get("shard") if isinstance(matrix, dict) else None
+    if (
+        not isinstance(indexes, list)
+        or any(not isinstance(index, int) or isinstance(index, bool) for index in indexes)
+        or len(indexes) != len(set(indexes))
+    ):
+        raise ValueError("advisory dispatch matrix is malformed or duplicated")
+    shard_count = len(manifests)
+    if (
+        not manifests
+        or [manifest.get("shard_index") for manifest in manifests] != list(range(shard_count))
+        or any(manifest.get("shard_count") != shard_count for manifest in manifests)
+        or any(index < 0 or index >= shard_count for index in indexes)
+    ):
+        raise ValueError("advisory projection manifests are incomplete or unordered")
+    if not isinstance(ledger, dict):
+        raise ValueError("target-runner observed ledger identity is malformed or stale")
+    source_runs = ledger.get("source_runs")
+    shards = ledger.get("shards")
+    minimum = ledger.get("minimum_observations")
+    if (
+        ledger.get("schema_version") != "1"
+        or ledger.get("kind") != "mutation_target_runner_observed_ledger"
+        or ledger.get("runner") != "ubuntu-latest"
+        or ledger.get("engine") != f"mutmut {MUTMUT_VERSION}"
+        or ledger.get("shard_count") != shard_count
+        or ledger.get("p95_method") != "nearest_rank"
+        or not isinstance(minimum, int)
+        or isinstance(minimum, bool)
+        or minimum < 3
+        or not isinstance(source_runs, list)
+        or not isinstance(shards, list)
+    ):
+        raise ValueError("target-runner observed ledger identity is malformed or stale")
+    run_ids = []
+    for source in source_runs:
+        if (
+            not isinstance(source, dict)
+            or set(source) != {"run_id", "attempt", "revision"}
+            or not re.fullmatch(r"[1-9][0-9]*", str(source.get("run_id", "")))
+            or not isinstance(source.get("attempt"), int)
+            or isinstance(source.get("attempt"), bool)
+            or source["attempt"] < 1
+            or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("revision", "")))
+        ):
+            raise ValueError("target-runner ledger source provenance is malformed")
+        run_ids.append(source["run_id"])
+    if len(run_ids) < minimum or len(run_ids) != len(set(run_ids)):
+        raise ValueError("target-runner ledger has insufficient distinct source runs")
+    source_revisions = {
+        source["run_id"]: source["revision"] for source in source_runs
+    }
+    by_index = {}
+    for shard in shards:
+        index = shard.get("shard_index") if isinstance(shard, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or index in by_index:
+            raise ValueError("target-runner ledger shard indexes are malformed or duplicated")
+        by_index[index] = shard
+    if sorted(by_index) != list(range(shard_count)):
+        raise ValueError("target-runner ledger shard observations are incomplete")
+
+    projections = []
+    blockers = []
+    for index in indexes:
+        shard = by_index.get(index)
+        observations = shard.get("observations") if isinstance(shard, dict) else None
+        if not isinstance(observations, list) or len(observations) < minimum:
+            raise ValueError(f"shard {index} has insufficient target-runner observations")
+        observed_runs = []
+        validated = []
+        for observation in observations:
+            modules = observation.get("modules") if isinstance(observation, dict) else None
+            seconds = observation.get("engine_seconds") if isinstance(observation, dict) else None
+            if (
+                not isinstance(observation, dict)
+                or not re.fullmatch(r"[1-9][0-9]*", str(observation.get("source_run_id", "")))
+                or observation.get("source_run_id") not in run_ids
+                or not re.fullmatch(r"[0-9a-f]{40}", str(observation.get("revision", "")))
+                or observation.get("revision")
+                != source_revisions.get(observation.get("source_run_id"))
+                or not isinstance(seconds, (int, float))
+                or isinstance(seconds, bool)
+                or seconds < 0
+                or not isinstance(modules, list)
+            ):
+                raise ValueError(f"shard {index} target-runner observation is malformed")
+            valid_modules = []
+            for module in modules:
+                if (
+                    not isinstance(module, dict)
+                    or set(module) != {"file", "engine_seconds", "mutants"}
+                    or not isinstance(module.get("file"), str)
+                    or not module["file"]
+                    or not isinstance(module.get("engine_seconds"), (int, float))
+                    or isinstance(module.get("engine_seconds"), bool)
+                    or module["engine_seconds"] < 0
+                    or not isinstance(module.get("mutants"), int)
+                    or isinstance(module.get("mutants"), bool)
+                    or module["mutants"] < 0
+                ):
+                    raise ValueError(f"shard {index} target-runner module observation is malformed")
+                valid_modules.append(module)
+            observed_runs.append(observation["source_run_id"])
+            validated.append({**observation, "modules": valid_modules})
+        if len(observed_runs) != len(set(observed_runs)):
+            raise ValueError(f"shard {index} target-runner observations are duplicated")
+        ordered = sorted(validated, key=lambda observation: observation["engine_seconds"])
+        p95_observation = ordered[math.ceil(0.95 * len(ordered)) - 1]
+        modules = [module for module in p95_observation["modules"] if module["mutants"] > 0]
+        if not modules:
+            raise ValueError(f"shard {index} P95 observation has no measured mutants")
+        bottleneck = max(
+            modules,
+            key=lambda module: module["engine_seconds"] / module["mutants"],
+        )
+        projection = {
+            "shard_index": index,
+            "module": bottleneck["file"],
+            "p95_engine_seconds": p95_observation["engine_seconds"],
+            "seconds_per_mutant": round(
+                bottleneck["engine_seconds"] / bottleneck["mutants"], 6
+            ),
+            "source_run_id": p95_observation["source_run_id"],
+            "observation_count": len(validated),
+        }
+        projections.append(projection)
+        if projection["p95_engine_seconds"] > threshold:
+            blockers.append(projection)
+    return {
+        "schema_version": "1",
+        "kind": "mutation_advisory_projection_decision",
+        "status": "completed",
+        "passed": not blockers,
+        "qualification_eligible": False,
+        "engine_budget_seconds": engine_budget_seconds,
+        "admission_ratio": 0.85,
+        "admission_threshold_seconds": threshold,
+        "dispatch_shards": indexes,
+        "projections": projections,
+        "blockers": blockers,
+        "message": (
+            "Target-runner P95 projection is within the advisory engine budget"
+            if not blockers
+            else "Target-runner P95 projection exceeds 85% of the advisory engine budget"
+        ),
     }
 
 
@@ -5211,6 +5468,11 @@ def main() -> int:
     parser.add_argument("--reuse-output", metavar="DIRECTORY", help="Write selected retained shard reports")
     parser.add_argument("--reuse-source-run-id")
     parser.add_argument("--reuse-source-run-attempt")
+    parser.add_argument("--reuse-candidates-index", metavar="PATH")
+    parser.add_argument("--advisory-projection-ledger", metavar="PATH")
+    parser.add_argument("--advisory-projection-manifests", metavar="DIRECTORY")
+    parser.add_argument("--advisory-projection-matrix", metavar="PATH")
+    parser.add_argument("--engine-budget-seconds", type=int)
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
@@ -5270,6 +5532,35 @@ def main() -> int:
             report = _error("unknown", f"Cannot prepare mutation replay: {exc}")
         print(json.dumps(report, indent=2) if args.json else format_report(report))
         return 0 if report["status"] == "completed" else 2
+    if args.advisory_projection_ledger:
+        try:
+            if not args.advisory_projection_manifests or not args.advisory_projection_matrix:
+                raise ValueError(
+                    "--advisory-projection-ledger requires manifests and a dispatch matrix"
+                )
+            manifests = [
+                load_partition_manifest(path)
+                for path in sorted(
+                    Path(args.advisory_projection_manifests).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            selection = json.loads(
+                Path(args.advisory_projection_matrix).read_text(encoding="utf-8")
+            )
+            ledger = json.loads(
+                Path(args.advisory_projection_ledger).read_text(encoding="utf-8")
+            )
+            report = evaluate_advisory_projection(
+                manifests,
+                selection.get("matrix") if isinstance(selection, dict) else None,
+                ledger,
+                engine_budget_seconds=args.engine_budget_seconds or 0,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot evaluate advisory projection: {exc}")
+        print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0 if report.get("passed") is True else 2
     if args.prepare_advisory_reuse:
         try:
             if not args.reuse_manifest_scope or not args.reuse_output:
@@ -5283,18 +5574,39 @@ def main() -> int:
                     key=lambda path: int(path.stem.split("-")[1]),
                 )
             ]
-            reports = [
-                json.loads(path.read_text(encoding="utf-8"))
-                for path in sorted(Path(args.prepare_advisory_reuse).rglob("mutation-report.json"))
-            ]
-            report = prepare_advisory_reuse(
-                args.root,
-                mutation,
-                manifests,
-                reports,
-                source_run_id=args.reuse_source_run_id or "",
-                source_run_attempt=args.reuse_source_run_attempt or "",
-            )
+            if args.reuse_candidates_index:
+                index = json.loads(Path(args.reuse_candidates_index).read_text(encoding="utf-8"))
+                candidates = []
+                for item in index.get("candidates", []):
+                    candidate_root = Path(args.prepare_advisory_reuse) / str(item["run_id"])
+                    identities = list(candidate_root.rglob("mutation-pr-identity.json"))
+                    if len(identities) != 1:
+                        continue
+                    candidates.append({
+                        **item,
+                        "identity": json.loads(identities[0].read_text(encoding="utf-8")),
+                        "reports": [
+                            json.loads(path.read_text(encoding="utf-8"))
+                            for path in sorted(candidate_root.rglob("mutation-report.json"))
+                            if "mutation-pr-reports" in path.parts
+                        ],
+                    })
+                report = prepare_advisory_reuse_candidates(
+                    args.root, mutation, manifests, candidates,
+                )
+            else:
+                reports = [
+                    json.loads(path.read_text(encoding="utf-8"))
+                    for path in sorted(Path(args.prepare_advisory_reuse).rglob("mutation-report.json"))
+                ]
+                report = prepare_advisory_reuse(
+                    args.root,
+                    mutation,
+                    manifests,
+                    reports,
+                    source_run_id=args.reuse_source_run_id or "",
+                    source_run_attempt=args.reuse_source_run_attempt or "",
+                )
             output = Path(args.reuse_output)
             output.mkdir(parents=True, exist_ok=True)
             for reused in report.pop("reports"):

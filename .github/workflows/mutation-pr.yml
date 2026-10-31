@@ -21,6 +21,19 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+      - name: Defer while another advisory matrix is active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/mutation-pr.yml/runs?status=in_progress&per_page=100" \
+            > mutation-pr-active.json
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/mutation-pr.yml/runs?status=queued&per_page=100" \
+            > mutation-pr-queued.json
+          python .github/scripts/mutation_advisory_runs.py guard \
+            --runs mutation-pr-active.json --runs mutation-pr-queued.json \
+            --current-run-id "$GITHUB_RUN_ID" --output mutation-advisory-serialization.json
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
@@ -44,7 +57,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-admission-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
-          path: mutation-admission-fixtures
+          path: |
+            mutation-admission-fixtures
+            mutation-advisory-serialization.json
           if-no-files-found: error
           retention-days: 90
 
@@ -53,10 +68,8 @@ jobs:
     name: mutation (prepare advisory scope)
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.reuse.outputs.matrix }}
+      matrix: ${{ steps.projection.outputs.matrix }}
       shard_count: ${{ steps.prepare.outputs.shard_count }}
-      reuse_run_id: ${{ steps.reuse-source.outputs.run_id }}
-      reuse_run_attempt: ${{ steps.reuse-source.outputs.run_attempt }}
       reused_shards: ${{ steps.reuse.outputs.reused_shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,8 +90,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           MERGE_BASE="$(git merge-base "$BASE_SHA" HEAD)"
           export MERGE_BASE
-          uv run --no-sync python -m fettle.mutation_test --root . \
-            --prepare-manifests mutation-changed-manifests --json > prepare-changed.json
+          uv run --no-sync python -m fettle.mutation_test --root . --base "$MERGE_BASE" \
+            --prepare-changed-manifests mutation-changed-manifests --json > prepare-changed.json
           uv run --no-sync python - <<'PY'
           import json, os
           from pathlib import Path
@@ -86,55 +99,45 @@ jobs:
           count = prepared["shard_count"]
           if prepared.get("status") != "completed" or not isinstance(count, int) or not 0 <= count <= 256:
               raise SystemExit(2)
-          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"merge_base":os.environ["MERGE_BASE"],"scope":"full_configured","shard_count":count}
+          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"merge_base":os.environ["MERGE_BASE"],"scope":"changed","shard_count":count}
           Path("mutation-pr-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
           PY
           echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
           echo "shard_count=$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" >> "$GITHUB_OUTPUT"
-      - name: Find latest successful advisory source
+      - name: Find successful advisory sources
         id: reuse-source
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/actions/workflows/mutation-pr.yml/runs?event=pull_request&status=success&per_page=100" \
             > mutation-pr-runs.json
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          pages=json.loads(Path("mutation-pr-runs.json").read_text())
-          runs=[run for page in pages for run in page.get("workflow_runs", [])]
-          candidates=[run for run in runs if run.get("head_sha") != os.environ["HEAD_SHA"] and any(pr.get("base", {}).get("ref") == os.environ.get("GITHUB_BASE_REF") for pr in run.get("pull_requests", []))]
-          selected=max(candidates, key=lambda run: run.get("run_started_at", ""), default=None)
-          output=Path(os.environ["GITHUB_OUTPUT"])
-          with output.open("a") as handle:
-              handle.write(f"run_id={selected['id'] if selected else ''}\n")
-              handle.write(f"run_attempt={selected['run_attempt'] if selected else ''}\n")
-          PY
+          python .github/scripts/mutation_advisory_runs.py candidates \
+            --runs mutation-pr-runs.json --current-run-id "$GITHUB_RUN_ID" \
+            --output mutation-pr-reuse-candidates.json
       - name: Download retained advisory candidate
-        if: steps.reuse-source.outputs.run_id != ''
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: mutation-pr-advisory-${{ steps.reuse-source.outputs.run_id }}-*
-          path: mutation-pr-reuse-source
-          run-id: ${{ steps.reuse-source.outputs.run_id }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p mutation-pr-reuse-source
+          python -c 'import json; [print(item["run_id"], item["run_attempt"]) for item in json.load(open("mutation-pr-reuse-candidates.json"))["candidates"]]' |
+          while read -r run_id run_attempt; do
+            mkdir -p "mutation-pr-reuse-source/$run_id"
+            gh run download "$run_id" --name "mutation-pr-advisory-$run_id-$run_attempt" \
+              --dir "mutation-pr-reuse-source/$run_id" || true
+          done
       - name: Select digest-compatible advisory shards
         id: reuse
-        env:
-          SOURCE_RUN_ID: ${{ steps.reuse-source.outputs.run_id }}
-          SOURCE_RUN_ATTEMPT: ${{ steps.reuse-source.outputs.run_attempt }}
         run: |
-          if [ -n "$SOURCE_RUN_ID" ] && [ -d mutation-pr-reuse-source/mutation-pr-reports ]; then
+          if [ "$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" = 0 ]; then
+            python -c 'import json; json.dump({"status":"completed","passed":True,"reused_shards":[],"matrix":{"shard":[]},"reexecution_reasons":[]},open("advisory-reuse.json","w"),separators=(",",":"))'
+          elif find mutation-pr-reuse-source -type f -name mutation-pr-identity.json -print -quit | grep -q .; then
             uv run --no-sync python -m fettle.mutation_test --root . \
-              --prepare-advisory-reuse mutation-pr-reuse-source/mutation-pr-reports \
+              --prepare-advisory-reuse mutation-pr-reuse-source \
               --reuse-manifest-scope mutation-changed-manifests \
               --reuse-output mutation-pr-reused-reports \
-              --reuse-source-run-id "$SOURCE_RUN_ID" \
-              --reuse-source-run-attempt "$SOURCE_RUN_ATTEMPT" --json > advisory-reuse.json
+              --reuse-candidates-index mutation-pr-reuse-candidates.json \
+              --json > advisory-reuse.json
           else
             python -c 'import json; json.dump({"status":"completed","passed":True,"reused_shards":[],"matrix":json.load(open("prepare-changed.json"))["matrix"]},open("advisory-reuse.json","w"),separators=(",",":"))'
           fi
@@ -142,7 +145,31 @@ jobs:
           mkdir -p mutation-pr-reused-reports
           echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
           echo "reused_shards=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["reused_shards"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
+      - name: Enforce observed P95 engine budget
+        id: projection
+        if: always()
+        run: |
+          if [ "$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" = 0 ]; then
+            python -c 'import json; json.dump({"status":"not_applicable","passed":True,"qualification_eligible":False,"dispatch_shards":[]},open("mutation-projection.json","w"),separators=(",",":"))'
+            echo 'matrix={"shard":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          uv run --no-sync python -m fettle.mutation_test --root . \
+            --advisory-projection-ledger .github/mutation-observed-ledger.json \
+            --advisory-projection-manifests mutation-changed-manifests \
+            --advisory-projection-matrix advisory-reuse.json \
+            --engine-budget-seconds 21300 --json > mutation-projection.json
+          status=$?
+          set -e
+          if python -c 'import json,sys; value=json.load(open("mutation-projection.json")); sys.exit(0 if value.get("passed") is True else 2)'; then
+            echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("advisory-reuse.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"shard":[]}' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
       - name: Retain advisory-scope manifests
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-pr-manifests-${{ github.run_id }}
@@ -150,10 +177,11 @@ jobs:
             mutation-changed-manifests
             prepare-changed.json
             advisory-reuse.json
+            mutation-projection.json
             mutation-pr-identity.json
             mutation-pr-reused-reports
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 90
 
   changed-shard:
     if: needs.admission-gate.result == 'success' && needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0' && needs.changed-prepare.outputs.matrix != '{"shard":[]}'
@@ -207,7 +235,7 @@ jobs:
           name: mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: mutation-report.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 90
 
   aggregate:
     if: always()
@@ -265,13 +293,13 @@ jobs:
           import json, os
           try:
               identity=json.load(open("mutation-pr-source/mutation-pr-identity.json"))
-              valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="full_configured" and identity.get("shard_count")==0)
+              valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="changed" and identity.get("shard_count")==0)
           except (OSError, ValueError, TypeError):
               valid=False
           json.dump({"status":"not_applicable" if valid else "unknown","message":"No mutation-relevant changed scope" if valid else "Changed-scope identity is malformed","revision":os.environ["HEAD_SHA"],"score":None,"passed":valid},open("mutation-report.json","w"),separators=(",",":"))
           PY
           else
-            if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="full_configured" and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
+            if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="changed" and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
               python -c 'import json; json.dump({"status":"unknown","message":"Changed-scope identity is malformed","score":None,"passed":False},open("mutation-report.json","w"),separators=(",",":"))'
             fi
             if [ ! -f mutation-report.json ]; then
@@ -291,7 +319,7 @@ jobs:
               test "$status" -eq 0 || true
             fi
           fi
-      - name: Record advisory scope and shard-71 risk
+      - name: Record advisory scope and projected runtime
         if: always() && hashFiles('mutation-report.json') != ''
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -302,7 +330,7 @@ jobs:
             echo "- Head: \`$HEAD_SHA\`"
             echo "- Base: \`$BASE_SHA\`"
             echo "- One attempt per changed-scope shard; per-mutant timeouts remain advisory debt."
-            echo "- Runtime risk: historical shard 71 projects to 6.38 hours at ×1.25 uncertainty; the job remains capped at 360 minutes and any incomplete report is non-pass."
+            echo "- Runtime admission: every dispatched shard passed target-runner P95 at 85% of the 21,300-second engine budget."
           } >> "$GITHUB_STEP_SUMMARY"
           uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json \
             --artifact-name mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }} \
