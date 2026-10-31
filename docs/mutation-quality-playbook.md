@@ -30,6 +30,11 @@ workflow dispatches no shards and publishes identity-bound `not_applicable`
 evidence with `passed: true`. Missing or malformed zero-scope identity remains
 non-pass.
 
+Advisory cost follows the configured partition contract: changes to engine files
+such as `fettle/mutation_test.py` or `fettle/staged_preflight.py` always cost the
+full matrix; non-engine source changes cost the shards that contain that source;
+documentation-only changes cost zero shards.
+
 Protected `main` requires both `CI required` and `mutation evidence`. It also
 requires linear history, so approved changes land through a linear merge method;
 passing source checks do not authorize a direct protected-branch push. Full-scope
