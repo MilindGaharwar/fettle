@@ -1,4 +1,4 @@
-"""Fettle v0.5.0 — WP-100: AI-agent optimized summaries."""
+"""Fettle v0.5.0 — WP-100: AI-agent-optimized summaries."""
 
 from __future__ import annotations
 
