@@ -4454,6 +4454,140 @@ def test_advisory_reuse_candidates_prefers_newest_content_match(tmp_path):
     assert {item["reuse_provenance"]["source_run_id"] for item in result["reports"]} == {"701"}
 
 
+def test_advisory_reuse_candidates_chain_carries_original_provenance(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    identity_a = {
+        "kind": "mutation_pr_advisory_identity", "scope": "changed",
+        "head_sha": "a" * 40, "base_sha": "0" * 40,
+        "merge_base": "0" * 40, "shard_count": 2,
+    }
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        reused_a = prepare_advisory_reuse_candidates(
+            str(tmp_path), config, manifests, [{
+                "run_id": "700", "run_attempt": "1",
+                "run_started_at": "2026-10-01T00:00:00Z",
+                "identity": identity_a, "reports": reports,
+            }],
+        )["reports"]
+
+    identity_b = {**identity_a, "head_sha": "b" * 40}
+    manifests_b = deepcopy(manifests)
+    for manifest in manifests_b:
+        manifest["revision"] = "c" * 40
+        manifest["digest"] = _canonical_digest({
+            key: value for key, value in manifest.items() if key != "digest"
+        })
+    with patch("fettle.mutation_test._revision", return_value="c" * 40):
+        reused_b = prepare_advisory_reuse_candidates(
+            str(tmp_path), config, manifests_b, [{
+                "run_id": "701", "run_attempt": "1",
+                "run_started_at": "2026-10-02T00:00:00Z",
+                "identity": identity_b, "reports": reused_a,
+            }],
+        )["reports"]
+
+    assert [report["reuse_provenance"] for report in reused_b] == [
+        report["reuse_provenance"] for report in reused_a
+    ]
+    with (
+        patch("fettle.mutation_test._revision", return_value="c" * 40),
+        patch("fettle.mutation_test._run", return_value=_proc(out="c" * 40 + "\n")),
+    ):
+        aggregate = aggregate_shards(
+            str(tmp_path), reused_b, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests_b, advisory=True,
+        )
+
+    assert aggregate["status"] == "completed"
+    assert aggregate["passed"] is True
+
+
+def test_advisory_reuse_candidates_skip_chained_report_that_does_not_bind(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    identity_a = {
+        "kind": "mutation_pr_advisory_identity", "scope": "changed",
+        "head_sha": "a" * 40, "base_sha": "0" * 40,
+        "merge_base": "0" * 40, "shard_count": 2,
+    }
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        reused_a = prepare_advisory_reuse_candidates(
+            str(tmp_path), config, manifests, [{
+                "run_id": "700", "run_attempt": "1",
+                "run_started_at": "2026-10-01T00:00:00Z",
+                "identity": identity_a, "reports": reports,
+            }],
+        )["reports"]
+    reused_a[0]["duration_ms"] += 1
+    identity_b = {**identity_a, "head_sha": "b" * 40}
+    manifests_b = deepcopy(manifests)
+    for manifest in manifests_b:
+        manifest["revision"] = "c" * 40
+        manifest["digest"] = _canonical_digest({
+            key: value for key, value in manifest.items() if key != "digest"
+        })
+
+    with patch("fettle.mutation_test._revision", return_value="c" * 40):
+        result = prepare_advisory_reuse_candidates(
+            str(tmp_path), config, manifests_b, [
+                {
+                    "run_id": "701", "run_attempt": "1",
+                    "run_started_at": "2026-10-02T00:00:00Z",
+                    "identity": identity_b, "reports": reused_a,
+                },
+                {
+                    "run_id": "700", "run_attempt": "1",
+                    "run_started_at": "2026-10-01T00:00:00Z",
+                    "identity": identity_a, "reports": reports,
+                },
+            ],
+        )
+
+    selected = next(report for report in result["reports"] if report["shard_index"] == 0)
+    assert selected["reuse_provenance"]["source_run_id"] == "700"
+
+
+def test_advisory_aggregate_rejects_rehashed_chained_provenance(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    with patch("fettle.mutation_test._revision", return_value="b" * 40):
+        reused_a = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, reports,
+            source_run_id="700", source_run_attempt="1",
+        )["reports"]
+    broken = deepcopy(reused_a)
+    manifests_b = deepcopy(manifests)
+    for manifest in manifests_b:
+        manifest["revision"] = "c" * 40
+        manifest["digest"] = _canonical_digest({
+            key: value for key, value in manifest.items() if key != "digest"
+        })
+    for report, manifest in zip(broken, manifests_b, strict=True):
+        old_revision = report["revision"]
+        old_manifest_digest = report["manifest_digest"]
+        old_report_digest = _canonical_digest(report)
+        report.update(
+            revision="c" * 40,
+            manifest_digest=manifest["digest"],
+            reuse_provenance={
+                "source_run_id": "701",
+                "source_run_attempt": "1",
+                "original_revision": old_revision,
+                "original_manifest_digest": old_manifest_digest,
+                "original_report_digest": old_report_digest,
+            },
+        )
+
+    with patch("fettle.mutation_test._revision", return_value="c" * 40):
+        result = aggregate_shards(
+            str(tmp_path), broken, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests_b, advisory=True,
+        )
+
+    assert result["status"] == "unknown"
+    assert "does not bind its source report" in result["message"]
+
+
 @pytest.mark.parametrize(
     ("change", "expected_field"),
     [
