@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "milestone": "expensive-run-admission",
+  "revision": "p0-era-closure-2026-11-01",
+  "expected_outcome": "error",
+  "case": "reuse candidates exist but no mutation-pr-identity.json downloaded",
+  "observed": {
+    "status": "error",
+    "passed": false,
+    "candidate_run_ids": [
+      "101",
+      "202"
+    ],
+    "exit_code": 2
+  },
+  "command": ".github/scripts/mutation_reuse_download_guard.sh --self-test"
+}

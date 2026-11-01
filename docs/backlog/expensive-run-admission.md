@@ -1,11 +1,12 @@
 ---
 fettle-work-item: v2
 id: expensive-run-admission
-status: open
+status: done
 scope:
   - docs/backlog/expensive-run-admission.md
   - docs/engagement/TODO.md
   - .github/workflows/mutation-pr.yml
+  - .github/scripts/mutation_reuse_download_guard.sh
   - fettle/mutation_test.py
 spec: mutation-quality-playbook
 ---
@@ -84,13 +85,17 @@ any D4 full-scope run. Not part of PR #46.
 ## Boundary
 
 No change to mutation scope, pass semantics (`passed = skipped == 0`), survivor
-handling, or qualification evidence. Reuse is advisory-path only.
+handling, or qualification evidence. Reuse is advisory-path only. Rule 13:
+when reuse candidates exist but none of their identity-bound artifacts download,
+the advisory fails closed with `status: error`, `passed: false`, the candidate
+run IDs, and exit 2. Full-matrix fallback applies only when the candidate list
+is genuinely empty.
 
 ## Resolution
 
-PR #56 delivered the chained-provenance repair, and PR #57 supplied the
-content-identical E3 provider proof. Final closure remains gated on the
-zero-scope provider proof described below. The evidence root is
+PR #56 delivered the chained-provenance repair, PR #57 supplied the
+content-identical E3 provider proof, and PR #58 supplied and merged the final
+zero-scope provider proof. The evidence root is
 `qualification-248851d-20261022/p0-era-chained-reuse-20261031/`; each provider
 run is retained separately as `run-<sha7>-<run_id>/` with an
 `evidence-index.json` and SHA-256 manifest.
@@ -125,12 +130,16 @@ run is retained separately as `run-<sha7>-<run_id>/` with an
   as `f128654`; source and squash trees both equal `e5ef5ec2e4a14f3228357110e5018a76af9a5305`.
 
 The provider sequence was runs 41160480854, 41163582112, 41170984332,
-41195355210, 41284457898, and 41289732689. Retained job intervals total
-18,428.43 runner-minutes through E3. Run 41160480854 is the existing 2a proof:
+41195355210, 41284457898, 41289732689, and closure run 41291993820. Retained
+job intervals total 18,433.46 runner-minutes through closure. Run 41160480854
+is the existing 2a proof:
 `not_applicable`, zero reused or dispatched shards, published evidence, and
-6m41s wall time. This closure PR must independently repeat that zero-scope
-result in under 20 minutes before merge; missing, malformed, stale,
-contradictory, or partial evidence remains non-pass.
+6m41s wall time. Closure run 41291993820 independently repeated that result at
+head `620d121`: `not_applicable`, zero reused or dispatched shards, published
+aggregate digest
+`sha256:eff3f1316d837680399f0c0290c18b6bdc56fc7fccd53cc3c191b9d5668024c0`,
+and 5m11s wall time. PR #58 was squash-merged as `af6969c`; source and squash
+trees both equal `7de0d4bed26d69e0308b6fac6afbf8f154aaeda8`.
 
 The repair protects the successful advisory supply; it does not make that
 supply qualification evidence. No D4 run was dispatched while P0-ERA was open.

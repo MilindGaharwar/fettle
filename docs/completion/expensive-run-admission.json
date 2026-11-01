@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "milestone": "expensive-run-admission",
+  "revision": "p0-era-closure-2026-11-01",
+  "scope_digest_version": 2,
+  "scope_digest": "4c09c24a824517b26a150df998791d7cc5b5b24632c648d14caf922b171f92cd",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "gate-before-fanout",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The real runner-parity admission fixture and full suite passed; retained negative fixtures fail before shard fan-out.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission.json",
+        "sha256": "a774541855698eafa7672885a35e014086b7a44f16b364c238fbf6e0207565d0",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Rerun the admission fixture and full suite before any advisory fan-out change."
+    },
+    {
+      "id": "zero-scope-not-applicable",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Closure run 41291993820 published not_applicable with passed true, zero reused or dispatched shards, exact identity binding, and 311-second wall time.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission.json",
+        "sha256": "a774541855698eafa7672885a35e014086b7a44f16b364c238fbf6e0207565d0",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Repeat an exact zero-scope provider run and retain its artifacts."
+    },
+    {
+      "id": "content-identical-reuse",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Run 41289732689 reused all 256 provenance-bound reports, dispatched no shards, published a passing aggregate, and completed in 1185 seconds.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission.json",
+        "sha256": "a774541855698eafa7672885a35e014086b7a44f16b364c238fbf6e0207565d0",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Repeat the one-shard source probe and content-identical amend sequence."
+    },
+    {
+      "id": "source-change-projection",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The selector projected only shard 170 for source_digests and run 41284457898 executed only that shard.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission.json",
+        "sha256": "a774541855698eafa7672885a35e014086b7a44f16b364c238fbf6e0207565d0",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Replay the exact source-change projection and compare provider dispatch."
+    },
+    {
+      "id": "candidate-download-fails-closed",
+      "kind": "error_path",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The offline shell contract confirms non-empty candidates without downloaded identities emit status error, passed false, candidate run IDs, and exit 2.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission-error-path.json",
+        "sha256": "5948014824aad5b708a6307194fb75140b4d608e8715c1f4b3a1a7b1268127da",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Run .github/scripts/mutation_reuse_download_guard.sh --self-test and inspect the error case."
+    },
+    {
+      "id": "advisory-only-boundary",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Qualification eligibility remains false and no D4 workflow was dispatched during P0-ERA.",
+      "evidence": {
+        "path": "docs/completion/evidence/expensive-run-admission.json",
+        "sha256": "a774541855698eafa7672885a35e014086b7a44f16b364c238fbf6e0207565d0",
+        "revision": "p0-era-closure-2026-11-01"
+      },
+      "recovery": "Audit workflow history and reuse aggregate qualification fields."
+    }
+  ]
+}
