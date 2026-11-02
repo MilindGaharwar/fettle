@@ -1716,6 +1716,67 @@ def test_pr_advisory_reuse_is_digest_bound_and_advisory_only():
     assert "--aggregate-preflight-evidence" not in aggregate_source
 
 
+def test_pr_advisory_expired_candidate_override_is_attributable_and_isolated():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    prepare = parsed["jobs"]["changed-prepare"]
+    aggregate = parsed["jobs"]["aggregate"]
+    reuse = next(
+        step for step in prepare["steps"]
+        if step.get("name") == "Select digest-compatible advisory shards"
+    )
+    summary = next(
+        step for step in aggregate["steps"]
+        if step.get("name") == "Record advisory scope and projected runtime"
+    )
+    retained = next(
+        step for step in aggregate["steps"]
+        if step.get("name") == "Retain complete PR advisory evidence"
+    )
+    manifests = next(
+        step for step in prepare["steps"]
+        if step.get("name") == "Retain advisory-scope manifests"
+    )
+
+    assert "types: [opened, synchronize, reopened, labeled]" in workflow
+    assert "github.event.action == 'labeled'" in parsed["concurrency"]["group"]
+    assert "github.event.label.name != 'mutation-full-matrix-authorized'" in parsed["concurrency"]["group"]
+    assert "label-noop" in parsed["concurrency"]["group"]
+    for job in parsed["jobs"].values():
+        assert "github.event.action != 'labeled'" in job["if"]
+        assert "github.event.label.name == 'mutation-full-matrix-authorized'" in job["if"]
+    assert reuse["env"]["OVERRIDE_LABEL"] == (
+        "${{ github.event.action == 'labeled' && "
+        "github.event.label.name == 'mutation-full-matrix-authorized' && "
+        "github.event.label.name || '' }}"
+    )
+    assert reuse["env"]["OVERRIDE_ACTOR"] == (
+        "${{ github.event.action == 'labeled' && "
+        "github.event.label.name == 'mutation-full-matrix-authorized' && "
+        "github.event.sender.login || '' }}"
+    )
+    assert "--authorization-label" in reuse["run"]
+    assert "--authorized-by" in reuse["run"]
+    assert "mutation-pr-identity.json" in reuse["run"]
+    assert "--prepare-advisory-reuse" in reuse["run"]
+    assert "advisory-reuse.json" in manifests["with"]["path"]
+    assert "mutation-pr-source" in retained["with"]["path"]
+    assert "candidates_expired" in summary["run"]
+    assert "authorized_by" in summary["run"]
+
+
+def test_pr_advisory_download_guard_self_test_covers_fail_closed_override_contract():
+    script = Path(PLUGIN_DIR) / ".github/scripts/mutation_reuse_download_guard.sh"
+    result = subprocess.run(
+        ["bash", str(script), "--self-test"],
+        cwd=PLUGIN_DIR, capture_output=True, text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_pr_advisory_serializes_matrices_from_real_api_responses(tmp_path):
     script = Path(PLUGIN_DIR) / ".github/scripts/mutation_advisory_runs.py"
     response = tmp_path / "runs.json"

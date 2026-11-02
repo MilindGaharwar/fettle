@@ -2,9 +2,11 @@ name: Mutation PR advisory
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: mutation-pr-advisory-${{ github.event.pull_request.number }}
+  # Non-authorizing labels must never cancel a live advisory matrix.
+  group: mutation-pr-advisory-${{ github.event.pull_request.number }}${{ github.event.action == 'labeled' && github.event.label.name != 'mutation-full-matrix-authorized' && '-label-noop' || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -13,6 +15,7 @@ permissions:
 
 jobs:
   admission-gate:
+    if: github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized'
     name: mutation (admission gate)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -64,6 +67,7 @@ jobs:
           retention-days: 90
 
   changed-prepare:
+    if: github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized'
     needs: admission-gate
     name: mutation (prepare advisory scope)
     runs-on: ubuntu-latest
@@ -128,13 +132,17 @@ jobs:
           done
       - name: Select digest-compatible advisory shards
         id: reuse
+        env:
+          OVERRIDE_LABEL: ${{ github.event.action == 'labeled' && github.event.label.name == 'mutation-full-matrix-authorized' && github.event.label.name || '' }}
+          OVERRIDE_ACTOR: ${{ github.event.action == 'labeled' && github.event.label.name == 'mutation-full-matrix-authorized' && github.event.sender.login || '' }}
         run: |
           if [ "$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" = 0 ]; then
             python -c 'import json; json.dump({"status":"completed","passed":True,"reused_shards":[],"matrix":{"shard":[]},"reexecution_reasons":[]},open("advisory-reuse.json","w"),separators=(",",":"))'
           else
             .github/scripts/mutation_reuse_download_guard.sh \
               mutation-pr-reuse-candidates.json mutation-pr-reuse-source \
-              prepare-changed.json advisory-reuse.json
+              prepare-changed.json advisory-reuse.json \
+              --authorization-label "$OVERRIDE_LABEL" --authorized-by "$OVERRIDE_ACTOR"
             if find mutation-pr-reuse-source -type f -name mutation-pr-identity.json -print -quit | grep -q .; then
               uv run --no-sync python -m fettle.mutation_test --root . \
                 --prepare-advisory-reuse mutation-pr-reuse-source \
@@ -187,7 +195,7 @@ jobs:
           retention-days: 90
 
   changed-shard:
-    if: needs.admission-gate.result == 'success' && needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0' && needs.changed-prepare.outputs.matrix != '{"shard":[]}'
+    if: (github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized') && needs.admission-gate.result == 'success' && needs.changed-prepare.result == 'success' && needs.changed-prepare.outputs.shard_count != '0' && needs.changed-prepare.outputs.matrix != '{"shard":[]}'
     needs: [admission-gate, changed-prepare]
     name: mutation (changed shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -241,7 +249,7 @@ jobs:
           retention-days: 90
 
   aggregate:
-    if: always()
+    if: always() && (github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized')
     needs: [admission-gate, changed-prepare, changed-shard]
     name: ${{ 'mutation evidence' }}
     runs-on: ubuntu-latest
@@ -335,6 +343,16 @@ jobs:
             echo "- One attempt per changed-scope shard; per-mutant timeouts remain advisory debt."
             echo "- Runtime admission: every dispatched shard passed target-runner P95 at 85% of the 21,300-second engine budget."
           } >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          path = Path("mutation-pr-source/advisory-reuse.json")
+          if path.is_file():
+              override = json.loads(path.read_text(encoding="utf-8")).get("override")
+              if override and override.get("reason") == "candidates_expired":
+                  runs = ", ".join(override["candidate_run_ids"])
+                  print(f'- Full matrix override: candidates_expired; authorized by `{override["authorized_by"]}` via `{override["label"]}`; candidate runs: {runs}.')
+          PY
           uv run --no-sync python -m fettle.mutation_test --github-summary mutation-report.json \
             --artifact-name mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }} \
             --artifact-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
