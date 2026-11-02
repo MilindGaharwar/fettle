@@ -2996,6 +2996,7 @@ def test_authoritative_check_binds_candidate_and_probe_cannot_qualify():
 def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_only():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()
 
+    assert 'cron: "23 3 * * 1"' in workflow
     assert "github.event.inputs.mode == 'preflight'" in workflow
     assert "github.event_name == 'schedule' || github.event.inputs.mode != 'preflight'" not in workflow
     assert "needs: [prepare, preflight-aggregate]" not in workflow

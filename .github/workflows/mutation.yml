@@ -3,7 +3,7 @@ run-name: ${{ inputs.mode == 'readback-probe' && format('Mutation readback probe
 
 on:
   schedule:
-    - cron: "23 3 * * *"
+    - cron: "23 3 * * 1"
   workflow_dispatch:
     inputs:
       mode:
