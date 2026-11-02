@@ -100,6 +100,14 @@ zero-scope provider proof. The evidence root is
 run is retained separately as `run-<sha7>-<run_id>/` with an
 `evidence-index.json` and SHA-256 manifest.
 
+Off-machine copy: MilindGaharwar/fettle-evidence (private), release
+evidence-20261102, archive fettle-evidence-20261102.tar.zst sha256
+8f7a7521ed4eb199266c4939fc8631e6f9430f22e16fcb14b7aa48cbc799f9a4,
+source-tree fingerprint
+94e17d55bfae80b14b8dcc7fd36d8d3cfcbe0bb15941c991843ac982b8ffa14b
+(40,937 files). Three documented manifest deviations are recorded in the
+release's BACKUP-VERIFICATION-20261102.json; no sealed manifest was altered.
+
 - **E0 — environment parity:** Python 3.12.13, pinned mutmut 2.5.1, and a
   non-editable package install completed all 219 test files. The retained
   output SHA-256 is
