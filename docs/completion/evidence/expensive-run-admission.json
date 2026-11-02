@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "milestone": "expensive-run-admission",
+  "revision": "p0-era-closure-2026-11-01",
+  "observations": {
+    "admission_gate": "The real two-shard prepare, shard, aggregate, and publication fixture passed; broken aggregate input, missing runtime dependency, removed report, and altered manifest digest remained non-pass.",
+    "zero_scope": "Runs 41160480854 and 41291993820 both completed as not_applicable with passed true, zero reused shards, an empty execution matrix, no shard execution, and published evidence. Closure run 41291993820 completed in 311 seconds.",
+    "digest_bound_reuse": "Run 41284457898 reused 255 reports and executed shard 170. Content-identical run 41289732689 reused all 256 reports, dispatched no shards, and published a passing aggregate in 1185 seconds; 255 reports cite run 41195355210 and shard 170 cites run 41284457898.",
+    "projection": "The source-change projection selected only shard 170 for source_digests, and the provider execution matched it.",
+    "candidate_download_guard": "The offline executable guard covers empty candidates, candidates with a downloaded mutation-pr-identity.json, and candidates without any downloaded identity. The last case writes status error, passed false, and candidate run IDs, then exits 2.",
+    "qualification_boundary": "All reuse evidence is advisory-only and qualification_eligible remains false. No D4 workflow was dispatched."
+  },
+  "provider_runs": [
+    41160480854,
+    41163582112,
+    41170984332,
+    41195355210,
+    41284457898,
+    41289732689,
+    41291993820
+  ],
+  "closure": {
+    "pull_request": 58,
+    "source_revision": "620d121237c7e73a24eb6af5e488dbd3b15b9ba8",
+    "merge_revision": "af6969c08652052a7204f97c711f3ae338a680ac",
+    "source_tree": "7de0d4bed26d69e0308b6fac6afbf8f154aaeda8",
+    "merge_tree": "7de0d4bed26d69e0308b6fac6afbf8f154aaeda8",
+    "aggregate_artifact_digest": "sha256:eff3f1316d837680399f0c0290c18b6bdc56fc7fccd53cc3c191b9d5668024c0",
+    "manifests_artifact_digest": "sha256:33e29b92cd33bee1e5c5b3d61451f2e5dee6106d01134f6ec5bdf64b0ab9d641",
+    "runner_seconds": 302,
+    "wall_seconds": 311
+  },
+  "content_identical": {
+    "run": 41289732689,
+    "aggregate_artifact_digest": "sha256:dcffa9c459969556240380e9afa1eefa02c93211ea897adeac4abaf4f6cf6b8f",
+    "reused_shards": 256,
+    "dispatched_shards": 0,
+    "wall_seconds": 1185
+  },
+  "cumulative_provider_runner_minutes": 18433.46,
+  "retained_evidence": "external://local/qualification-248851d-20261022",
+  "uat_decision": "SHIP"
+}

@@ -131,15 +131,18 @@ jobs:
         run: |
           if [ "$(python -c 'import json; print(json.load(open("prepare-changed.json"))["shard_count"])')" = 0 ]; then
             python -c 'import json; json.dump({"status":"completed","passed":True,"reused_shards":[],"matrix":{"shard":[]},"reexecution_reasons":[]},open("advisory-reuse.json","w"),separators=(",",":"))'
-          elif find mutation-pr-reuse-source -type f -name mutation-pr-identity.json -print -quit | grep -q .; then
-            uv run --no-sync python -m fettle.mutation_test --root . \
-              --prepare-advisory-reuse mutation-pr-reuse-source \
-              --reuse-manifest-scope mutation-changed-manifests \
-              --reuse-output mutation-pr-reused-reports \
-              --reuse-candidates-index mutation-pr-reuse-candidates.json \
-              --json > advisory-reuse.json
           else
-            python -c 'import json; json.dump({"status":"completed","passed":True,"reused_shards":[],"matrix":json.load(open("prepare-changed.json"))["matrix"]},open("advisory-reuse.json","w"),separators=(",",":"))'
+            .github/scripts/mutation_reuse_download_guard.sh \
+              mutation-pr-reuse-candidates.json mutation-pr-reuse-source \
+              prepare-changed.json advisory-reuse.json
+            if find mutation-pr-reuse-source -type f -name mutation-pr-identity.json -print -quit | grep -q .; then
+              uv run --no-sync python -m fettle.mutation_test --root . \
+                --prepare-advisory-reuse mutation-pr-reuse-source \
+                --reuse-manifest-scope mutation-changed-manifests \
+                --reuse-output mutation-pr-reused-reports \
+                --reuse-candidates-index mutation-pr-reuse-candidates.json \
+                --json > advisory-reuse.json
+            fi
           fi
           python -c 'import json,sys; value=json.load(open("advisory-reuse.json")); sys.exit(0 if value.get("status")=="completed" and value.get("passed") is True else 2)'
           mkdir -p mutation-pr-reused-reports

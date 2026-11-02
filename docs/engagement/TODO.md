@@ -117,7 +117,7 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       PR #46 source `9791109` → `2605978`, then PR #47 source `a572f80` →
       `023f9b3`. Exact-tip main CI passed after each merge. Full mutation
       qualification remains `CLOSED_NON_PASS` and is not implied by this closure.
-- [ ] P0-ERA. Immediately after the hardening merge and before any D4 run:
+- [x] P0-ERA. Immediately after the hardening merge and before any D4 run:
       expensive-run admission (docs/backlog/expensive-run-admission.md). Gate job
       the shard fan-out `needs:`, running the real prepare→shard→aggregate path
       on a two-shard fixture plus the full suite in the runner environment;
