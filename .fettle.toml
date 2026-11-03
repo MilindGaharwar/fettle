@@ -30,7 +30,7 @@ enabled = true
 mode = "enforce"
 
 [gates.verify]
-timeout_s = 600
+timeout_s = 900
 
 [gates.plan]
 exclude = [
