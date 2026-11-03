@@ -8,6 +8,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 
 | Goal | Mechanism |
 |---|---|
+| Qualify one fresh full-scope D4 mutation run | `.github/workflows/mutation-d4.yml` admission + isolated `gate` phase/execute pre-gate + one 256-shard `mutation-d4-shard.yml` matrix; `fettle/mutation_test.py::aggregate_d4_shards` owns sealed-container/current-attempt aggregation and its CLI builds and provider-re-digests `d4-evidence-index.json`; fixture evidence in `tests/test_mutation_test.py` and graph evidence in `tests/test_ci.py` |
 | Add a PreToolUse guard (block/advise before a tool runs) | New check module + register in `fettle/dispatcher_registry.py::CHECKS`; wire config under `[gates.<name>]` |
 | Prevent secrets entering agent context | Strict runtime secret boundary before Read/Bash/nested execution; replace output only on transports with pre-model interception; report unsupported hosts truthfully |
 | Add a PostToolUse quality/finding check | Same as above with `events={"PostToolUse"}`; return findings + recovery steps |

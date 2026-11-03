@@ -12,6 +12,18 @@ debugging loop.
 4. Replay the smallest changed scope.
 5. Use a full run only after preflight and narrow replay succeed.
 
+## D4 dispatch preconditions
+
+The standalone `.github/workflows/mutation-d4.yml` execute graph admits a run only when these checks pass:
+
+- `candidate_sha` equals the workflow revision and `git status --porcelain` is empty (`d4-admit`).
+- `d4_id`, `d4_preflight_run_id`, and `d4_runner_minute_ceiling` are supplied; calibration, stage, and resume inputs are empty (`d4-admit` and `tests/test_ci.py`).
+- The retained preflight contains exactly 256 ordered manifests, reconciled generated and canonical counts, zero collisions, and a byte-identical current `corpus-identity.json` (`build_d4_corpus_identity` and `d4-admit`).
+- The supplied ceiling is at least the ledger's nearest-rank per-shard P95 total plus the 1,200-minute cancellation reserve (`evaluate_d4_admission` and `tests/test_mutation_test.py`).
+- The `gate` phase runs only the real-path synthetic `d4-gate`; execute also requires that gate before the 256-shard matrix starts. Its report is retained as `d4-gate-report-<run_id>-<attempt>` (`d4-gate`, `d4-shards`, and `tests/test_ci.py`).
+- Aggregation accepts exactly 256 fresh current-run/current-attempt reports whose container digest matches sealed `corpus-identity.json`; it rejects missing, duplicated, malformed, checkpoint-only, reused, stale, or unrelated lineage (`aggregate_d4_shards` and `tests/test_mutation_test.py`).
+- Retention installs the pinned mutation environment and invokes Fettle through `uv run --no-sync`; the CLI builds the evidence index from retained files, appends provider artifact IDs, re-digests it, and the job mirrors the index plus retained-file digests to `evidence/d4`. Any mirror or policy failure remains a non-pass (`d4-retain` and `tests/test_ci.py`).
+
 On every pull request, `.github/workflows/mutation-pr.yml` binds preparation to
 the exact head, base, and merge base. A mutation-relevant scope automatically
 dispatches the changed-scope shard matrix. Each shard consumes its digest-bound
