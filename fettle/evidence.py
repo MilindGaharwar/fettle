@@ -40,7 +40,7 @@ _ARTIFACT_FIELDS = {
 }
 _REQUIRED_ARTIFACT_FIELDS = _ARTIFACT_FIELDS - {"parents"}
 _PRODUCER_FIELDS = {"id", "version", "implementation_digest"}
-_SOURCE_FIELDS = {"snapshot_digest", "revision"}
+_SOURCE_FIELDS = {"snapshot_digest", "revision", "post_run_snapshot_digest"}
 _REFERENCE_FIELDS = {"artifact_digest", "kind", "schema_version", "expected"}
 _EXPECTED_FIELDS = {
     "source_snapshot_digest", "policy_digest", "scope_digest", "producer_id",
@@ -327,6 +327,10 @@ def _artifact_from_dict(value: Mapping[str, object], *, verify_digest: bool) -> 
     }
     if "revision" in source:
         normalized_source["revision"] = _normalized_text(source["revision"], "source.revision")
+    if "post_run_snapshot_digest" in source:
+        normalized_source["post_run_snapshot_digest"] = _digest(
+            source["post_run_snapshot_digest"], "source.post_run_snapshot_digest",
+        )
     result_state = _normalized_text(value["result_state"], "result_state")
     try:
         ResultState(result_state)
