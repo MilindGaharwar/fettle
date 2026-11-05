@@ -52,6 +52,32 @@ def _write_edits(state: Path, files: list[str]) -> Path:
     return edits
 
 
+def _git_repo(path: Path) -> Path:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@fettle.invalid"], cwd=path, check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "T"], cwd=path, check=True)
+    (path / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\nstate/\n"
+    )
+    return path
+
+
+def _commit_all(path: Path) -> None:
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=path, check=True)
+
+
+def _pytest_config():
+    from fettle.test_discovery import TestConfig
+
+    return TestConfig(
+        framework="pytest", command=f"{sys.executable} -m pytest tests/",
+        test_roots=["tests"],
+    )
+
+
 class TestImpactedMapping:
     def test_impl_file_maps_to_convention_tests(self, tmp_path):
         (tmp_path / "tests").mkdir()
@@ -198,6 +224,280 @@ class TestRunVerify:
         assert stamp["scope"] == "impacted"
         assert stamp["impacted"] == ["tests/test_widget.py"]
         assert stamp["ok"], stamp["error"]  # red test_other.py NOT in scope
+
+    def test_partial_mapping_falls_back_to_full_real_pytest(self, tmp_path, capsys):
+        repo = _git_repo(tmp_path)
+        (repo / "pkg").mkdir()
+        (repo / "pkg" / "a.py").write_text("VALUE = 1\n")
+        (repo / "pkg" / "b.py").write_text("VALUE = 2\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_a.py").write_text(
+            "from pkg.a import VALUE\n\ndef test_a(): assert VALUE == 1\n"
+        )
+        (repo / "tests" / "test_other.py").write_text(
+            "from pkg.b import VALUE\n\ndef test_b(): assert VALUE == 2\n"
+        )
+        _commit_all(repo)
+        (repo / "pkg" / "a.py").write_text("VALUE = 1  # edited\n")
+        (repo / "pkg" / "b.py").write_text("VALUE = 3\n")
+        state = repo / "state" / "sess-g"
+        _write_edits(state, [str(repo / "pkg" / "a.py"), str(repo / "pkg" / "b.py")])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(mode="enforce"), session_id="sess-g")
+            result = run_check(_gate_ctx(repo, _cfg(mode="enforce")))
+
+        assert stamp["scope"] == "full"
+        assert stamp["scope_reason"] == "unmapped_files"
+        assert stamp["unmapped"] == ["pkg/b.py"]
+        assert stamp["ok"] is False
+        assert result.decision == Decision.BLOCK
+        assert "pkg/b.py" in capsys.readouterr().out
+
+    def test_no_mappings_still_runs_full_suite(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        (repo / "orphan.py").write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_other.py").write_text("def test_other(): assert True\n")
+        _commit_all(repo)
+        (repo / "orphan.py").write_text("VALUE = 2\n")
+        state = repo / "state" / "sess-none"
+        _write_edits(state, [str(repo / "orphan.py")])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-none")
+
+        assert stamp["ok"] is True
+        assert stamp["scope"] == "full"
+        assert stamp["scope_reason"] == "unmapped_files"
+        assert stamp["unmapped"] == ["orphan.py"]
+
+    def test_deleted_file_is_visible_without_unmapped_fallback_reason(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        removed = repo / "removed.py"
+        removed.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_other.py").write_text("def test_other(): assert True\n")
+        _commit_all(repo)
+        removed.unlink()
+        state = repo / "state" / "sess-deleted"
+        _write_edits(state, [str(removed)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-deleted")
+
+        assert stamp["ok"] is True
+        assert stamp["edited"] == ["removed.py"]
+        assert stamp["unmapped"] == []
+        assert "scope_reason" not in stamp
+
+    def test_deleted_test_file_is_visible_but_not_passed_to_pytest(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        removed = repo / "tests" / "test_removed.py"
+        removed.parent.mkdir()
+        removed.write_text("def test_removed(): assert True\n")
+        (repo / "tests" / "test_other.py").write_text("def test_other(): assert True\n")
+        _commit_all(repo)
+        removed.unlink()
+        state = repo / "state" / "sess-deleted-test"
+        _write_edits(state, [str(removed)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-deleted-test")
+
+        assert stamp["ok"] is True
+        assert stamp["scope"] == "full"
+        assert stamp["edited"] == ["tests/test_removed.py"]
+        assert stamp["impacted"] == []
+
+    def test_rename_ignores_deleted_old_path_and_maps_existing_new_path(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        old = repo / "old.py"
+        old.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_new.py").write_text("def test_new(): assert True\n")
+        _commit_all(repo)
+        new = repo / "new.py"
+        old.rename(new)
+        state = repo / "state" / "sess-rename"
+        _write_edits(state, [str(old), str(new)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-rename")
+
+        assert stamp["ok"] is True
+        assert stamp["scope"] == "impacted"
+        assert stamp["impacted"] == ["tests/test_new.py"]
+        assert stamp["unmapped"] == []
+
+    def test_tracked_source_change_during_pytest_is_tool_error(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        source = repo / "source.py"
+        source.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_source.py").write_text(
+            "from pathlib import Path\n\n"
+            "def test_mutates_source():\n"
+            "    Path('source.py').write_text('VALUE = 2\\n')\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        state = repo / "state" / "sess-g"
+        _write_edits(state, [str(source)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(mode="enforce"), session_id="sess-g")
+            result = run_check(_gate_ctx(repo, _cfg(mode="enforce")))
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is False
+        assert "source tree changed during verification" in stamp["error"]
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
+        assert artifact.source["snapshot_digest"] != artifact.source["post_run_snapshot_digest"]
+        assert result.decision == Decision.BLOCK
+
+    def test_untracked_source_created_during_pytest_is_tool_error(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        source = repo / "source.py"
+        source.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_source.py").write_text(
+            "from pathlib import Path\n\n"
+            "def test_creates_source(): Path('generated.py').write_text('VALUE = 2\\n')\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        state = repo / "state" / "sess-untracked"
+        _write_edits(state, [str(source)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-untracked")
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is False
+        assert "generated.py" in stamp["error"]
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
+
+    def test_untracked_source_content_change_during_pytest_is_tool_error(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        source = repo / "source.py"
+        source.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_source.py").write_text(
+            "from pathlib import Path\n\n"
+            "def test_changes_untracked_content():\n"
+            "    Path('generated.py').write_text('VALUE = 2\\n')\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        generated = repo / "generated.py"
+        generated.write_text("VALUE = 1\n")
+        state = repo / "state" / "sess-untracked-content"
+        _write_edits(state, [str(source)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-untracked-content")
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert generated.read_text() == "VALUE = 2\n"
+        assert stamp["ok"] is False
+        assert stamp["source_drift"] is True
+        assert "source tree changed during verification" in stamp["error"]
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
+        assert artifact.source["snapshot_digest"] != artifact.source["post_run_snapshot_digest"]
+
+    def test_timeout_after_source_change_preserves_unknown_pre_run_evidence(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        source = repo / "source.py"
+        source.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_source.py").write_text(
+            "def test_source(): assert True\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        state = repo / "state" / "sess-g"
+        edits = _write_edits(state, [str(source)])
+        real_run = subprocess.run
+
+        def change_source_then_timeout(cmd, **kwargs):
+            if cmd[0] == "git":
+                return real_run(cmd, **kwargs)
+            source.write_text("VALUE = 2\n")
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config()),
+              patch("fettle.verify_gate.subprocess.run", side_effect=change_source_then_timeout)):
+            stamp = run_verify(str(repo), _cfg(mode="enforce"), session_id="sess-g")
+            result = run_check(_gate_ctx(repo, _cfg(mode="enforce")))
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is False
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
+        assert artifact.source["snapshot_digest"] != artifact.source["post_run_snapshot_digest"]
+        assert result.decision == Decision.BLOCK
+        assert (repo / STAMP_RELPATH).stat().st_mtime >= edits.stat().st_mtime
+
+    def test_generated_ignored_outputs_do_not_change_snapshot(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        source = repo / "source.py"
+        source.write_text("VALUE = 1\n")
+        (repo / ".gitignore").write_text(".pytest_cache/\n__pycache__/\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_source.py").write_text(
+            "from pathlib import Path\n\n"
+            "def test_generated_outputs():\n"
+            "    Path('.fettle').mkdir(exist_ok=True)\n"
+            "    Path('.fettle/runtime').write_text('x')\n"
+            "    Path('__pycache__').mkdir(exist_ok=True)\n"
+            "    Path('__pycache__/runtime').write_text('x')\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        state = repo / "state" / "sess-ignore"
+        _write_edits(state, [str(source)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-ignore")
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is True
+        assert artifact.source["snapshot_digest"] == artifact.source["post_run_snapshot_digest"]
+
+    def test_scope_fallback_fields_are_bound_into_canonical_evidence(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        orphan = repo / "orphan.py"
+        orphan.write_text("VALUE = 1\n")
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_other.py").write_text("def test_other(): assert True\n")
+        _commit_all(repo)
+        orphan.write_text("VALUE = 2\n")
+        state = repo / "state" / "sess-scope"
+        _write_edits(state, [str(orphan)])
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-scope")
+        stamp["unmapped"] = []
+
+        from fettle.verify_gate import validate_canonical_evidence
+        result = validate_canonical_evidence(str(repo), _cfg(), stamp)
+
+        assert result.validity.value == "wrong_scope"
 
     def test_full_flag_ignores_scoping(self, tmp_path):
         repo = _project(tmp_path, f"{sys.executable} -c pass")
@@ -352,6 +652,91 @@ class TestRunVerify:
         test_call = next(call for call in invoke.call_args_list if call.args[0][0] != "git")
         assert "--cov=src" in test_call.args[0]
         assert stamp["workspaces"][0]["command"].endswith("tests/test_widget.py")
+
+    def test_workspace_partial_mapping_falls_back_to_workspace_full_suite(
+        self, tmp_path, capsys,
+    ):
+        from types import SimpleNamespace
+
+        from fettle.workspace import Workspace
+
+        repo = _git_repo(tmp_path)
+        left = repo / "left"
+        right = repo / "right"
+        for root in (left, right):
+            (root / "tests").mkdir(parents=True)
+        (left / "a.py").write_text("VALUE = 1\n")
+        (left / "tests" / "test_a.py").write_text(
+            "from a import VALUE\n\ndef test_a(): assert VALUE == 1\n"
+        )
+        (right / "b.py").write_text("VALUE = 2\n")
+        (right / "tests" / "test_other.py").write_text(
+            "from b import VALUE\n\ndef test_b(): assert VALUE == 2\n"
+        )
+        _commit_all(repo)
+        (left / "a.py").write_text("VALUE = 1  # edited\n")
+        (right / "b.py").write_text("VALUE = 3\n")
+        state = repo / "state" / "sess-workspace"
+        _write_edits(state, [str(left / "a.py"), str(right / "b.py")])
+        workspaces = [
+            Workspace(name="left", path="left", language="python",
+                      marker="pyproject.toml",
+                      test_command=f"{sys.executable} -m pytest tests/",
+                      test_roots=["tests"]),
+            Workspace(name="right", path="right", language="python",
+                      marker="pyproject.toml",
+                      test_command=f"{sys.executable} -m pytest tests/",
+                      test_roots=["tests"]),
+        ]
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=workspaces))):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-workspace")
+
+        records = {record["path"]: record for record in stamp["workspaces"]}
+        assert records["left"]["scope"] == "impacted"
+        assert records["right"]["scope"] == "full"
+        assert records["right"]["scope_reason"] == "unmapped_files"
+        assert records["right"]["unmapped"] == ["b.py"]
+        assert records["right"]["ok"] is False
+        assert "right/b.py" in capsys.readouterr().out
+
+    def test_workspace_source_change_during_pytest_is_tool_error(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.workspace import Workspace
+
+        repo = _git_repo(tmp_path)
+        api = repo / "api"
+        (api / "tests").mkdir(parents=True)
+        source = api / "app.py"
+        source.write_text("VALUE = 1\n")
+        (api / "tests" / "test_app.py").write_text(
+            "from pathlib import Path\n\n"
+            "def test_mutates(): Path('app.py').write_text('VALUE = 2\\n')\n"
+        )
+        _commit_all(repo)
+        source.write_text("VALUE = 1  # edited\n")
+        state = repo / "state" / "sess-workspace"
+        _write_edits(state, [str(source)])
+        workspace = Workspace(
+            name="api", path="api", language="python", marker="pyproject.toml",
+            test_command=f"{sys.executable} -m pytest tests/", test_roots=["tests"],
+        )
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=[workspace]))):
+            stamp = run_verify(str(repo), _cfg(), session_id="sess-workspace")
+        record = stamp["workspaces"][0]
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert record["ok"] is False
+        assert "source tree changed during verification" in record["error"]
+        assert record["source_snapshot_digest"] != record["post_run_snapshot_digest"]
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
 
 
 def _gate_ctx(cwd: Path, config: dict) -> HookContext:
@@ -619,6 +1004,345 @@ class TestStopGate:
               patch("fettle.verify_gate.discover_test_config", return_value=tc)):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
 
+    def test_new_unmappable_edit_rejects_stale_impacted_scope(self, tmp_path):
+        from fettle.verify_gate import _write_stamp
+
+        mapped = tmp_path / "widget.py"
+        mapped.write_text("x = 1\n")
+        unmapped = tmp_path / "orphan.py"
+        unmapped.write_text("x = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(mapped), str(unmapped)])
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g",
+            "scope": "impacted", "impacted": ["tests/test_widget.py"],
+        }, _cfg(mode="enforce"))
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "orphan.py" in result.message
+
+    def test_workspace_impacted_stamp_must_cover_each_edited_file(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.workspace import Workspace
+
+        api = tmp_path / "api"
+        (api / "tests").mkdir(parents=True)
+        mapped = api / "widget.py"
+        mapped.write_text("x = 1\n")
+        unmapped = api / "orphan.py"
+        unmapped.write_text("x = 1\n")
+        (api / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(mapped), str(unmapped)])
+        from fettle.verify_gate import _write_stamp
+        _write_stamp(str(tmp_path), {
+            "ok": True, "session_id": "sess-g", "scope": "workspace",
+            "exit_code": 0,
+            "workspaces": [{
+                "path": "api", "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"],
+            }],
+        }, _cfg(mode="enforce"))
+        workspace = Workspace(
+            name="api", path="api", language="python", marker="pyproject.toml",
+            test_command="pytest tests/", test_roots=["tests"],
+        )
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=[workspace]))):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "orphan.py" in result.message
+
+    def test_workspace_impacted_stamp_omitting_mapped_test_is_blocked(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        api = tmp_path / "api"
+        (api / "tests").mkdir(parents=True)
+        edited = [api / "alpha.py", api / "beta.py"]
+        for source in edited:
+            source.write_text("VALUE = 1\n")
+            (api / "tests" / f"test_{source.stem}.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(source) for source in edited])
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": [{
+                "path": "api", "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_alpha.py"],
+            }],
+        }, _cfg(mode="enforce"))
+        workspace = Workspace(
+            name="api", path="api", language="python", marker="pyproject.toml",
+            test_command="pytest tests/", test_roots=["tests"],
+        )
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=[workspace]))):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "did not cover every file edited in workspace api" in result.message
+
+    def test_workspace_impacted_stamp_covering_all_mapped_tests_allows(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        api = tmp_path / "api"
+        (api / "tests").mkdir(parents=True)
+        edited = [api / "alpha.py", api / "beta.py"]
+        for source in edited:
+            source.write_text("VALUE = 1\n")
+            (api / "tests" / f"test_{source.stem}.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(source) for source in edited])
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": [{
+                "path": "api", "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_alpha.py", "tests/test_beta.py"],
+            }],
+        }, _cfg())
+        workspace = Workspace(
+            name="api", path="api", language="python", marker="pyproject.toml",
+            test_command="pytest tests/", test_roots=["tests"],
+        )
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=[workspace]))):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_second_workspace_impacted_coverage_deficiency_is_blocked(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        workspaces = []
+        edited = []
+        records = []
+        for name in ("first", "second"):
+            root = tmp_path / name
+            (root / "tests").mkdir(parents=True)
+            source = root / "widget.py"
+            source.write_text("VALUE = 1\n")
+            (root / "tests" / "test_widget.py").write_text("")
+            edited.append(str(source))
+            workspaces.append(Workspace(
+                name=name, path=name, language="python", marker="pyproject.toml",
+                test_command="pytest tests/", test_roots=["tests"],
+            ))
+            records.append({
+                "path": name, "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"] if name == "first" else [],
+            })
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, edited)
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": records,
+        }, _cfg(mode="enforce"))
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=workspaces))):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "did not cover every file edited in workspace second" in result.message
+
+    def test_two_workspaces_with_complete_impacted_coverage_allow(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        workspaces = []
+        edited = []
+        records = []
+        for name in ("first", "second"):
+            root = tmp_path / name
+            (root / "tests").mkdir(parents=True)
+            source = root / "widget.py"
+            source.write_text("VALUE = 1\n")
+            (root / "tests" / "test_widget.py").write_text("")
+            edited.append(str(source))
+            workspaces.append(Workspace(
+                name=name, path=name, language="python", marker="pyproject.toml",
+                test_command="pytest tests/", test_roots=["tests"],
+            ))
+            records.append({
+                "path": name, "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"],
+            })
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, edited)
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": records,
+        }, _cfg())
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=workspaces))):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_workspace_unmapped_deficiency_is_not_overwritten_by_later_workspace(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        workspaces = []
+        edited = []
+        records = []
+        for name in ("a-covered", "b-unmapped", "c-later"):
+            root = tmp_path / name
+            (root / "tests").mkdir(parents=True)
+            source = root / "widget.py"
+            source.write_text("VALUE = 1\n")
+            if name != "b-unmapped":
+                (root / "tests" / "test_widget.py").write_text("")
+            edited.append(str(source))
+            workspaces.append(Workspace(
+                name=name, path=name, language="python", marker="pyproject.toml",
+                test_command="pytest tests/", test_roots=["tests"],
+            ))
+            records.append({
+                "path": name, "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"] if name == "a-covered" else [],
+            })
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, edited)
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": records,
+        }, _cfg(mode="enforce"))
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=workspaces))):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "b-unmapped/widget.py" in result.message
+        assert "workspace c-later" not in result.message
+
+    def test_workspace_coverage_deficiency_is_not_overwritten_by_later_workspace(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        workspaces = []
+        edited = []
+        records = []
+        for name in ("a-covered", "b-missing", "c-later"):
+            root = tmp_path / name
+            (root / "tests").mkdir(parents=True)
+            source = root / "widget.py"
+            source.write_text("VALUE = 1\n")
+            if name != "c-later":
+                (root / "tests" / "test_widget.py").write_text("")
+            edited.append(str(source))
+            workspaces.append(Workspace(
+                name=name, path=name, language="python", marker="pyproject.toml",
+                test_command="pytest tests/", test_roots=["tests"],
+            ))
+            records.append({
+                "path": name, "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"] if name == "a-covered" else [],
+            })
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, edited)
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": records,
+        }, _cfg(mode="enforce"))
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=workspaces))):
+            result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "workspace b-missing" in result.message
+        assert "c-later/widget.py" not in result.message
+
+    def test_deleted_file_does_not_make_root_impacted_stamp_unmapped(self, tmp_path):
+        from fettle.verify_gate import _write_stamp
+
+        live = tmp_path / "widget.py"
+        live.write_text("VALUE = 1\n")
+        deleted = tmp_path / "removed.py"
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(deleted), str(live)])
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
+            "impacted": ["tests/test_widget.py"],
+        }, _cfg())
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config())):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_deleted_file_does_not_make_workspace_impacted_stamp_unmapped(self, tmp_path):
+        from types import SimpleNamespace
+
+        from fettle.verify_gate import _write_stamp
+        from fettle.workspace import Workspace
+
+        api = tmp_path / "api"
+        (api / "tests").mkdir(parents=True)
+        live = api / "widget.py"
+        live.write_text("VALUE = 1\n")
+        deleted = api / "removed.py"
+        (api / "tests" / "test_widget.py").write_text("")
+        state = tmp_path / "state" / "sess-g"
+        _write_edits(state, [str(deleted), str(live)])
+        _write_stamp(str(tmp_path), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "workspaces": [{
+                "path": "api", "ok": True, "scope": "impacted",
+                "impacted": ["tests/test_widget.py"],
+            }],
+        }, _cfg())
+        workspace = Workspace(
+            name="api", path="api", language="python", marker="pyproject.toml",
+            test_command="pytest tests/", test_roots=["tests"],
+        )
+
+        with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.detect_profile",
+                    return_value=SimpleNamespace(workspaces=[workspace]))):
+            result = run_check(_gate_ctx(tmp_path, _cfg()))
+
+        assert result.decision == Decision.ALLOW
+
     def test_mtime_stale_stamp_redeemed_by_matching_tree(self, tmp_path):
         """Stamp older than edits but git tree identical to verify time — fresh."""
         import subprocess as sp
@@ -646,6 +1370,33 @@ class TestStopGate:
         os.utime(edits)  # edits mtime newer than stamp
         with patch("fettle.config.state_dir", return_value=state):
             assert run_check(_gate_ctx(tmp_path, _cfg())).decision == Decision.ALLOW
+
+    def test_mtime_stale_stamp_with_matching_head_but_different_tree_is_rejected(self, tmp_path):
+        from fettle.verify_gate import _dirty_digest, _head_sha, _write_stamp
+
+        repo = _git_repo(tmp_path)
+        src = repo / "src.py"
+        src.write_text("x = 1\n")
+        _commit_all(repo)
+        state = repo / "state" / "sess-g"
+        edits = _write_edits(state, [str(src)])
+        _write_stamp(str(repo), {
+            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "head_sha": _head_sha(str(repo)),
+            "dirty_digest": _dirty_digest(str(repo)),
+        }, _cfg(mode="enforce"))
+        src.write_text("x = 2\n")
+        stamp = repo / STAMP_RELPATH
+        import os
+        past = time.time() - 60
+        os.utime(stamp, (past, past))
+        os.utime(edits)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = run_check(_gate_ctx(repo, _cfg(mode="enforce")))
+
+        assert result.decision == Decision.BLOCK
+        assert "stale" in result.message
 
     def test_multi_workspace_stamp_omitting_affected_workspace_is_rejected(self, tmp_path):
         for path, marker, filename in (

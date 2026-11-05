@@ -27,10 +27,12 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -96,8 +98,26 @@ def impacted_tests(cwd: str, edited: list[str], test_roots: list[str]) -> list[s
     means the mapping found nothing — callers must treat that as "run the
     full suite", never as "nothing to test".
     """
+    return _impact_mapping(cwd, edited, test_roots).tests
+
+
+@dataclass(frozen=True)
+class _ImpactMapping:
+    tests: list[str]
+    unmapped: list[str]
+
+
+def _impact_mapping(
+    cwd: str,
+    edited: list[str],
+    test_roots: list[str],
+    *,
+    existing_only: bool = False,
+) -> _ImpactMapping:
+    """Return convention-mapped tests and existing implementation files without a match."""
     root = Path(cwd)
     out: dict[str, None] = {}
+    unmapped: dict[str, None] = {}
     for f in edited:
         abs_f = os.path.abspath(f) if not os.path.isabs(f) else f
         try:
@@ -106,11 +126,17 @@ def impacted_tests(cwd: str, edited: list[str], test_roots: list[str]) -> list[s
             continue
         if rel.startswith(".."):
             continue
+        exists = (root / rel).is_file()
+        if existing_only and not exists:
+            continue
         base = os.path.basename(rel)
         if classify_file(rel) == "test":
             out[rel] = None
             continue
+        if classify_file(rel) != "implementation":
+            continue
         stem = Path(base).stem
+        matched = False
         for tr in test_roots:
             tr_path = root / tr
             if not tr_path.is_dir():
@@ -118,7 +144,10 @@ def impacted_tests(cwd: str, edited: list[str], test_roots: list[str]) -> list[s
             for pattern in (f"test_{stem}.py", f"{stem}_test.py"):
                 for hit in sorted(tr_path.rglob(pattern)):
                     out[str(hit.relative_to(root))] = None
-    return list(out)
+                    matched = True
+        if not matched and exists:
+            unmapped[Path(rel).as_posix()] = None
+    return _ImpactMapping(list(out), list(unmapped))
 
 
 # ── fettle verify (minutes-world) ─────────────────────────────────────────
@@ -163,12 +192,16 @@ def run_verify(
         "session_id": session_id or "",
         "head_sha": _head_sha(cwd),
         "dirty_digest": _dirty_digest(cwd),
+        "edited": [_relative_path(cwd, path) for path in edited],
+        "unmapped": [],
     }
+    _capture_pre_run_state(cwd, stamp)
     if not tc.command:
         stamp["error"] = (
             "no test command discovered — set [profile] test_command "
             "in .fettle.toml"
         )
+        _capture_post_run_state(cwd, stamp)
         _write_stamp(cwd, stamp, config)
         return stamp
 
@@ -176,8 +209,18 @@ def run_verify(
     scope = "full"
     impacted: list[str] = []
     if not full and scope_cfg == "impacted" and tc.framework == "pytest":
-        impacted = impacted_tests(cwd, edited, tc.test_roots or ["tests"])
-        if impacted:
+        mapping = _impact_mapping(
+            cwd, edited, tc.test_roots or ["tests"], existing_only=True,
+        )
+        impacted = mapping.tests
+        stamp["unmapped"] = mapping.unmapped
+        if mapping.unmapped:
+            stamp["scope_reason"] = "unmapped_files"
+            sys.stdout.write(
+                "fettle verify: unmapped implementation file(s) "
+                f"{', '.join(mapping.unmapped)}; falling back to the full test suite\n"
+            )
+        elif impacted:
             scope = "impacted"
             # Replace any positional test-root path from discovery with the
             # impacted set (exact match only — "pytest" ends with "test").
@@ -209,6 +252,7 @@ def run_verify(
     except (OSError, FileNotFoundError) as e:
         stamp["error"] = f"could not launch test command: {e}"
     stamp["duration_s"] = round(time.monotonic() - start, 2)
+    _capture_post_run_state(cwd, stamp)
     stamp["ts"] = time.time()
     _write_stamp(cwd, stamp, config)
     return stamp
@@ -245,6 +289,8 @@ def _run_workspace_verification(
 ) -> dict:
     """Run reliable impacted tests or each affected workspace's full suite."""
     records: list[dict] = []
+    root_state: dict = {"ok": True, "error": ""}
+    _capture_pre_run_state(cwd, root_state)
     for workspace, edited in affected:
         workspace_root = Path(cwd) if workspace.path == "." else Path(cwd) / workspace.path
         record = {
@@ -258,18 +304,35 @@ def _run_workspace_verification(
             "impacted": [],
             "head_sha": _head_sha(cwd),
             "dirty_digest": _dirty_digest(str(workspace_root)),
+            "unmapped": [],
         }
+        _capture_pre_run_state(str(workspace_root), record)
         if not workspace.test_command:
             record["error"] = "no test command discovered for workspace"
+            _capture_post_run_state(str(workspace_root), record)
             records.append(record)
             continue
         argv = shlex.split(workspace.test_command)
         if impacted and workspace.language == "python":
             workspace_files = [str(Path(cwd) / file_path) for file_path in edited]
-            mapped = impacted_tests(
+            mapping = _impact_mapping(
                 str(workspace_root), workspace_files, workspace.test_roots or ["tests"],
+                existing_only=True,
             )
-            if mapped:
+            mapped = mapping.tests
+            record["unmapped"] = mapping.unmapped
+            if mapping.unmapped:
+                record["scope_reason"] = "unmapped_files"
+                display = [
+                    str(Path(workspace.path) / path) if workspace.path != "." else path
+                    for path in mapping.unmapped
+                ]
+                sys.stdout.write(
+                    "fettle verify: unmapped implementation file(s) "
+                    f"{', '.join(display)}; falling back to the full test suite "
+                    f"for workspace {workspace.path}\n"
+                )
+            elif mapped:
                 record["scope"] = "impacted"
                 record["impacted"] = mapped
                 argv = [
@@ -298,6 +361,7 @@ def _run_workspace_verification(
         except (OSError, FileNotFoundError) as error:
             record["error"] = f"could not launch test command: {error}"
         record["duration_s"] = round(time.monotonic() - start, 2)
+        _capture_post_run_state(str(workspace_root), record)
         evidence = build_evidence(
             "verify", command=record["command"], exit_code=record["exit_code"],
             duration_ms=record["duration_s"] * 1000, scope=record["scope"], workspace=workspace.path,
@@ -305,6 +369,7 @@ def _run_workspace_verification(
         record["evidence_id"] = evidence["evidence_id"]
         records.append(record)
 
+    _capture_post_run_state(cwd, root_state)
     failed = [record for record in records if not record["ok"]]
     stamp = {
         "ok": not failed,
@@ -319,9 +384,19 @@ def _run_workspace_verification(
         "ts": time.time(),
         "session_id": session_id or "",
         "head_sha": _head_sha(cwd),
-        "dirty_digest": _dirty_digest(cwd),
         "workspaces": records,
+        "source_snapshot_digest": root_state["source_snapshot_digest"],
+        "source_revision": root_state["source_revision"],
+        "dirty_digest": root_state["dirty_digest"],
+        "post_run_dirty_digest": root_state["post_run_dirty_digest"],
+        "post_run_snapshot_digest": root_state["post_run_snapshot_digest"],
+        "source_drift": root_state.get("source_drift", False),
     }
+    if root_state.get("source_drift"):
+        stamp["ok"] = False
+        stamp["error"] = "\n".join(filter(None, (
+            stamp["error"], str(root_state.get("error") or ""),
+        )))
     _write_stamp(cwd, stamp, config or {})
     return stamp
 
@@ -424,10 +499,59 @@ def _source_snapshot(cwd: str) -> tuple[str, str]:
     return _json_digest(snapshot), revision
 
 
+def _relative_path(cwd: str, path: str) -> str:
+    try:
+        relative = Path(path).resolve().relative_to(Path(cwd).resolve())
+    except ValueError:
+        return path
+    return relative.as_posix()
+
+
+def _snapshot_status(cwd: str) -> str:
+    return "\n".join(
+        line for line in _git_out(
+            cwd, "status", "--porcelain=v1", "--untracked-files=all",
+        ).splitlines()
+        if line[3:] != ".fettle" and not line[3:].startswith(".fettle/")
+    )
+
+
+def _capture_pre_run_state(cwd: str, target: dict) -> None:
+    digest, revision = _source_snapshot(cwd)
+    target["source_snapshot_digest"] = digest
+    target["source_revision"] = revision
+    target["dirty_digest"] = _dirty_digest(cwd)
+    target["_pre_run_status"] = _snapshot_status(cwd)
+
+
+def _capture_post_run_state(cwd: str, target: dict) -> None:
+    digest, _revision = _source_snapshot(cwd)
+    target["post_run_snapshot_digest"] = digest
+    target["post_run_dirty_digest"] = _dirty_digest(cwd)
+    before = str(target.pop("_pre_run_status", ""))
+    after = _snapshot_status(cwd)
+    if (
+        digest == target.get("source_snapshot_digest")
+        and target["post_run_dirty_digest"] == target.get("dirty_digest")
+    ):
+        return
+    changed = sorted({
+        line[3:] for line in {*before.splitlines(), *after.splitlines()} if len(line) > 3
+    })
+    detail = "source tree changed during verification"
+    if changed:
+        detail += ": " + ", ".join(changed)
+    target["ok"] = False
+    target["source_drift"] = True
+    target["error"] = "\n".join(filter(None, (str(target.get("error") or ""), detail)))
+
+
 def _scope_projection(stamp: dict) -> dict:
     projection: dict = {
         "scope": str(stamp.get("scope") or ""),
         "impacted": sorted(str(path) for path in stamp.get("impacted") or []),
+        "scope_reason": str(stamp.get("scope_reason") or ""),
+        "unmapped": sorted(str(path) for path in stamp.get("unmapped") or []),
     }
     if stamp.get("workspaces"):
         projection["workspaces"] = sorted((
@@ -435,6 +559,8 @@ def _scope_projection(stamp: dict) -> dict:
                 "path": str(record.get("path") or ""),
                 "scope": str(record.get("scope") or ""),
                 "impacted": sorted(str(path) for path in record.get("impacted") or []),
+                "scope_reason": str(record.get("scope_reason") or ""),
+                "unmapped": sorted(str(path) for path in record.get("unmapped") or []),
             }
             for record in stamp["workspaces"] if isinstance(record, dict)
         ), key=lambda record: record["path"])
@@ -446,12 +572,20 @@ def _producer_digest() -> str:
 
 
 def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtifact:
-    source_digest, revision = _source_snapshot(cwd)
+    source_digest = str(stamp.get("source_snapshot_digest") or "")
+    revision = str(stamp.get("source_revision") or "")
+    if not source_digest:
+        source_digest, revision = _source_snapshot(cwd)
     source = {"snapshot_digest": source_digest}
     if revision:
         source["revision"] = revision
+    post_run_digest = str(stamp.get("post_run_snapshot_digest") or "")
+    if post_run_digest:
+        source["post_run_snapshot_digest"] = post_run_digest
     exit_code = stamp.get("exit_code")
-    if stamp.get("ok"):
+    if stamp.get("source_drift"):
+        result_state = "tool_error"
+    elif stamp.get("ok"):
         result_state = "pass"
     elif isinstance(exit_code, int) and exit_code >= 0:
         result_state = "violation"
@@ -465,7 +599,11 @@ def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtif
             "implementation_digest": _producer_digest(),
         },
         result_state=result_state,
-        completeness="complete" if isinstance(exit_code, int) and exit_code >= 0 else "unknown",
+        completeness=(
+            "unknown" if stamp.get("source_drift")
+            else "complete" if isinstance(exit_code, int) and exit_code >= 0
+            else "unknown"
+        ),
         trust_class="authoritative",
         source=source,
         policy_digest=_policy_digest(config),
@@ -670,15 +808,61 @@ def run_check(ctx: HookContext) -> CheckResult:
             missing = sorted(needed - verified)
             if missing:
                 problem = "the last verification run omitted affected workspace(s): " + ", ".join(missing)
+            if not problem:
+                records = {
+                    str(record.get("path")): record
+                    for record in stamp.get("workspaces", [])
+                    if isinstance(record, dict)
+                }
+                for workspace, files in affected:
+                    record = records.get(workspace.path, {})
+                    if record.get("scope") != "impacted":
+                        continue
+                    workspace_root = (
+                        ctx.cwd if workspace.path == "." else ctx.cwd / workspace.path
+                    )
+                    workspace_files = [str(ctx.cwd / path) for path in files]
+                    mapping = _impact_mapping(
+                        str(workspace_root), workspace_files,
+                        workspace.test_roots or ["tests"],
+                        existing_only=True,
+                    )
+                    verified_tests = set(record.get("impacted") or [])
+                    if mapping.unmapped:
+                        names = [
+                            str(Path(workspace.path) / path)
+                            if workspace.path != "." else path
+                            for path in mapping.unmapped
+                        ]
+                        problem = (
+                            "the last verification run used impacted scope but "
+                            "currently unmapped file(s) require full scope: "
+                            + ", ".join(names)
+                        )
+                        break
+                    if not set(mapping.tests) <= verified_tests:
+                        problem = (
+                            "the last verification run did not cover every file "
+                            f"edited in workspace {workspace.path}"
+                        )
+                        break
         elif stamp.get("scope") == "impacted":
             # WP-7: everything edited this session must fall inside the
             # verified scope. Full-suite stamps are always a superset; an
             # impacted stamp must cover the impacted set as of NOW — and a
             # now-unmappable edit demands the full suite.
             tc = discover_test_config(str(ctx.cwd))
-            needed = impacted_tests(str(ctx.cwd), edited, tc.test_roots or ["tests"])
+            mapping = _impact_mapping(
+                str(ctx.cwd), edited, tc.test_roots or ["tests"], existing_only=True,
+            )
+            needed = mapping.tests
             verified = set(stamp.get("impacted") or [])
-            if not needed or not set(needed) <= verified:
+            if mapping.unmapped:
+                problem = (
+                    "the last verification run used impacted scope but currently "
+                    "unmapped file(s) require full scope: " + ", ".join(mapping.unmapped)
+                )
+            elif not needed or not set(needed) <= verified:
                 problem = ("the last verification run did not cover every "
                            "file edited this session")
         if not problem:

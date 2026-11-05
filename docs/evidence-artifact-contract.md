@@ -76,7 +76,7 @@ The JSON object has exactly these fields. Optional fields may be omitted; JSON
 | `result_state` | string | `pass`, `violation`, `overridden`, `tool_error`, `unknown`, or `not_applicable` |
 | `completeness` | string | `complete`, `partial`, or `unknown` |
 | `trust_class` | string | `authoritative`, `derived`, `heuristic`, or `external` |
-| `source` | object | Exactly one stable source binding: `snapshot_digest` and optional `revision` |
+| `source` | object | Exactly one stable source binding: `snapshot_digest`, optional `revision`, and optional diagnostic `post_run_snapshot_digest` |
 | `policy_digest` | string | Full SHA-256 of effective policy; required even when policy is empty |
 | `scope_digest` | string | Full SHA-256 of canonical selected scope |
 | `observation_id` | string | Unique execution occurrence ID, 1-128 UTF-8 bytes; not content identity |
@@ -175,6 +175,26 @@ surfaces may remain policy-controlled fail-open, but must expose the non-pass
 state and recovery action. CI and other consequential boundaries fail closed.
 A generic age TTL cannot establish freshness; the consumer evaluates exact
 source, policy, scope, producer, and kind-specific invalidation inputs.
+
+### `fettle.verify` snapshot boundary
+
+`fettle verify` captures its authoritative source snapshot immediately before
+launching the test command. The snapshot combines the current HEAD revision,
+the tracked binary diff against HEAD, Git's porcelain status, and SHA-256
+content digests for untracked files. `.fettle/` is excluded explicitly.
+Gitignored paths are absent because the status command uses Git's normal ignore
+rules; in this repository that excludes generated output including
+`.pytest_cache/`, `__pycache__/`, `*.pyc`, `.coverage*`, `coverage.xml`,
+`.venv/`, `build/`, and `dist/`. Fettle does not maintain a second broad
+generated-file exclusion list.
+
+The same snapshot and dirty-state checks run again after the command, including
+after timeout or launch failure. Drift makes the verification non-green with
+`result_state = "tool_error"` and `completeness = "unknown"`. The artifact's
+`source.snapshot_digest` remains the pre-run digest;
+`source.post_run_snapshot_digest` is diagnostic. This is drift detection, not
+immutable execution: a file changed and restored to identical bytes and status
+during the command is not detected.
 
 ## P69 Producer Payloads And Operations
 

@@ -3,6 +3,12 @@
 ## Unreleased
 
 - Add an isolated, lineage-bound `mode=d4` path for fresh 256-shard full-scope mutation evidence, retained indexing, and off-provider mirroring.
+- Fixed `fettle verify` and its Stop gate to fall back to full project or
+  workspace scope when any current implementation edit lacks a convention test
+  mapping, and to bind the fallback reason and unmapped files into evidence.
+- Verification evidence now binds the source snapshot captured before tests.
+  Source drift during the command, including tracked and untracked changes,
+  produces unknown, tool-error evidence and cannot satisfy the Stop gate.
 
 ## v1.14.0 — PR Advisory Evidence Hardening
 
