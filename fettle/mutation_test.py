@@ -74,6 +74,9 @@ _MUTATION_WATCH_NAMES = (
     "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "requirements-dev.txt",
 )
 _MUTATION_CACHE_DIR = Path(".fettle/mutation-cache")
+_D4_SHARD_COUNT = 256
+_D4_ENGINE_BUDGET_SECONDS = 20_100
+_D4_CONTAINER_DIGEST = "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12"
 
 
 def _run(argv: list[str], root: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -2944,6 +2947,52 @@ def run_resumable_mutation_shard(
         return _error("unknown", f"Cannot resume mutation shard: {exc}")
 
 
+def run_d4_mutation_shard(
+    root: str,
+    cfg: dict,
+    manifest_path: Path,
+    preflight_path: Path,
+    d4_id: str,
+    checkpoint_path: Path | None,
+    timeout: int,
+    *,
+    run_id: str,
+    run_attempt: str,
+    job_id: str,
+    container_digest: str,
+    runner_image_version: str,
+) -> dict:
+    """Execute one fresh D4 shard and bind its report to provider lineage."""
+    started = time.monotonic()
+    temporary = None
+    if checkpoint_path is None:
+        temporary = tempfile.TemporaryDirectory(prefix="fettle-d4-")
+        checkpoint_path = Path(temporary.name) / "mutation-checkpoint.json"
+    try:
+        report = run_resumable_mutation_shard(
+            root, cfg, manifest_path, preflight_path, d4_id, checkpoint_path, timeout, [],
+        )
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+    manifest_index = None
+    try:
+        manifest_index = load_partition_manifest(manifest_path)["shard_index"]
+    except ValueError:
+        pass
+    report.update({
+        "run_id": str(run_id),
+        "run_attempt": str(run_attempt),
+        "job_id": str(job_id),
+        "shard_index": report.get("shard_index", manifest_index),
+        "container_digest": container_digest,
+        "runner_image_version": runner_image_version,
+        "engine_wall_seconds": round(time.monotonic() - started, 3),
+        "fresh_execution": True,
+    })
+    return report
+
+
 def write_timeout_evidence(path: Path, timeout_s: int, manifest: dict | None = None) -> None:
     identity = {}
     if manifest is not None:
@@ -3310,6 +3359,99 @@ def write_partition_manifests(root: str, cfg: dict, output_dir: Path) -> list[Pa
         path.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         paths.append(path)
     return paths
+
+
+def build_d4_corpus_identity(
+    root: str,
+    cfg: dict,
+    manifests: list[dict],
+    preflight: dict,
+    *,
+    container_digest: str = _D4_CONTAINER_DIGEST,
+    engine_budget_seconds: int = _D4_ENGINE_BUDGET_SECONDS,
+    workflow_files: tuple[str, str] = (
+        ".github/workflows/mutation-d4.yml",
+        ".github/workflows/mutation-d4-shard.yml",
+    ),
+) -> dict:
+    """Seal every repository and runtime input that defines the D4 corpus."""
+    if (
+        len(manifests) != _D4_SHARD_COUNT
+        or [manifest.get("shard_index") for manifest in manifests] != list(range(_D4_SHARD_COUNT))
+        or any(manifest.get("shard_count") != _D4_SHARD_COUNT for manifest in manifests)
+    ):
+        raise ValueError("D4 corpus requires exactly 256 ordered manifests")
+    if (
+        preflight.get("status") != "completed" or preflight.get("passed") is not True
+        or preflight.get("shard_count") != _D4_SHARD_COUNT
+        or preflight.get("generated") != preflight.get("canonicalized")
+        or preflight.get("collisions") != 0
+        or preflight.get("manifest_digests") != [manifest.get("digest") for manifest in manifests]
+    ):
+        raise ValueError("D4 preflight corpus is incomplete or inconsistent")
+    root_path = Path(root)
+    revision = _revision(root)
+    tree_result = _run(["git", "rev-parse", "HEAD^{tree}"], root, 10)
+    tree = tree_result.stdout.strip()
+    if tree_result.returncode or not re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise ValueError("cannot resolve D4 source tree")
+    if preflight.get("revision") != revision or any(
+        manifest.get("revision") != revision for manifest in manifests
+    ):
+        raise ValueError("D4 corpus revision differs from the checkout")
+    files = sorted({file for manifest in manifests for file in manifest["files"]})
+    mapping = _mapped_tests(root, files, cfg.get("test_mappings", {}))
+    tests = sorted({test for mapped in mapping.values() for test in mapped})
+    if any(not mapped for mapped in mapping.values()):
+        raise ValueError("D4 corpus has unmapped mutation paths")
+
+    def digests(paths: list[str]) -> dict[str, str]:
+        result = {}
+        for relative in paths:
+            canonical = _canonical_path(relative)
+            path = root_path / canonical
+            if not path.is_file() or not path.resolve().is_relative_to(root_path.resolve()):
+                raise ValueError(f"D4 corpus path is unreadable: {relative}")
+            result[canonical] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return result
+
+    required_paths = ("requirements-mutation.txt", "pyproject.toml", *workflow_files)
+    required_digests = digests(list(required_paths))
+    identity = {
+        "schema_version": "1",
+        "kind": "d4_corpus_identity",
+        "revision": revision,
+        "tree": tree,
+        "manifest_count": len(manifests),
+        "manifests_digest": _canonical_digest(manifests),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+        "canonical_fingerprints_digest": _canonical_digest(preflight["fingerprints"]),
+        "corpus_digest": preflight["corpus_digest"],
+        "mutation_paths": files,
+        "source_digests": digests(files),
+        "mapped_test_paths": tests,
+        "mapped_test_digests": digests(tests),
+        "requirements_mutation_digest": required_digests["requirements-mutation.txt"],
+        "pyproject_digest": required_digests["pyproject.toml"],
+        "policy_digest": _canonical_digest({
+            key: cfg.get(key) for key in (
+                "mode", "paths", "exclude", "full_shards", "default_chunk_lines",
+                "chunk_lines", "test_mappings", "score_target", "minimum_scored_mutants",
+                "max_new_actionable_survivors", "max_untested", "max_mutant_timeouts",
+                "max_suspicious_mutants",
+            )
+        }),
+        "workflow_digests": {
+            Path(path).name: required_digests[path] for path in workflow_files
+        },
+        "container_digest": container_digest,
+        "python_version": platform.python_version(),
+        "mutmut_version": MUTMUT_VERSION,
+        "pytest_version": importlib.metadata.version("pytest"),
+        "engine_budget_seconds": engine_budget_seconds,
+    }
+    identity["digest"] = _canonical_digest(identity)
+    return identity
 
 
 def write_changed_partition_manifests(
@@ -5070,6 +5212,217 @@ def aggregate_shards(
     }
 
 
+def _d4_offending_shards(reports: list[dict], run_id: str, run_attempt: str) -> dict[str, list]:
+    """Classify report-set defects without losing the offending shard identities."""
+    indexes = [report.get("shard_index") if isinstance(report, dict) else None for report in reports]
+    valid_indexes = [index for index in indexes if type(index) is int and 0 <= index < _D4_SHARD_COUNT]
+    duplicates = sorted({index for index in valid_indexes if valid_indexes.count(index) > 1})
+    present = set(valid_indexes)
+    malformed = sorted({
+        index for index, report in zip(indexes, reports, strict=True)
+        if type(index) is not int or not isinstance(report, dict)
+        or report.get("status") != "completed"
+        or report.get("partial") is True
+        or report.get("checkpoint_only") is True
+    }, key=lambda value: (value is None, value if type(value) is int else str(value)))
+    lineage = sorted({
+        index for index, report in zip(indexes, reports, strict=True)
+        if isinstance(report, dict)
+        and (str(report.get("run_id", "")) != str(run_id)
+             or str(report.get("run_attempt", "")) != str(run_attempt))
+    }, key=lambda value: (value is None, value if type(value) is int else str(value)))
+    not_fresh = sorted({
+        index for index, report in zip(indexes, reports, strict=True)
+        if isinstance(report, dict)
+        and (report.get("fresh_execution") is not True or "reuse_provenance" in report)
+    }, key=lambda value: (value is None, value if type(value) is int else str(value)))
+    return {
+        "missing": sorted(set(range(_D4_SHARD_COUNT)) - present),
+        "duplicates": duplicates,
+        "malformed": malformed,
+        "lineage": lineage,
+        "not_fresh": not_fresh,
+    }
+
+
+def aggregate_d4_shards(
+    root: str,
+    reports: list[dict],
+    paths: list[str],
+    excluded: list[str],
+    threshold: float,
+    *,
+    run_id: str,
+    run_attempt: str,
+    d4_id: str,
+    manifests: list[dict],
+    preflight: dict,
+    corpus_identity: dict,
+    test_mappings: dict[str, list[str]] | None = None,
+    policy_config: dict | None = None,
+) -> dict:
+    """Aggregate exactly one fresh, current-attempt D4 report per frozen shard."""
+    defects = _d4_offending_shards(reports, run_id, run_attempt)
+    if len(reports) != _D4_SHARD_COUNT or any(defects.values()):
+        return _error(
+            "unknown", "D4 reports are incomplete, malformed, reused, or have incompatible lineage",
+            offending_shards=defects, reused_shards=[],
+        )
+    reports = sorted(reports, key=lambda report: report["shard_index"])
+    if (
+        len(manifests) != _D4_SHARD_COUNT
+        or [manifest.get("shard_index") for manifest in manifests] != list(range(_D4_SHARD_COUNT))
+        or preflight.get("status") != "completed"
+        or preflight.get("passed") is not True
+        or preflight.get("shard_count") != _D4_SHARD_COUNT
+        or preflight.get("manifest_digests") != [manifest.get("digest") for manifest in manifests]
+    ):
+        return _error("unknown", "D4 frozen preflight or manifest topology is invalid", reused_shards=[])
+    if (
+        corpus_identity.get("kind") != "d4_corpus_identity"
+        or corpus_identity.get("digest")
+        != _canonical_digest({key: value for key, value in corpus_identity.items() if key != "digest"})
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(corpus_identity.get("container_digest", "")))
+    ):
+        return _error("unknown", "D4 sealed corpus identity is invalid", reused_shards=[])
+    preflight_digest = _canonical_digest(preflight)
+    for index, (report, manifest) in enumerate(zip(reports, manifests, strict=True)):
+        shard_corpus = sorted(
+            (
+                record for record in preflight.get("corpus", [])
+                if isinstance(record, dict) and record.get("shard_index") == index
+            ),
+            key=lambda record: record.get("fingerprint", ""),
+        )
+        if (
+            report.get("shard_count") != _D4_SHARD_COUNT
+            or report.get("calibration_id") != d4_id
+            or report.get("manifest_digest") != manifest.get("digest")
+            or report.get("preflight_digest") != preflight_digest
+            or report.get("preflight_corpus_digest") != preflight.get("corpus_digest")
+            or report.get("corpus_digest") != _canonical_digest(shard_corpus)
+            or report.get("container_digest") != corpus_identity["container_digest"]
+        ):
+            return _error(
+                "unknown", f"D4 shard {index} is not bound to the frozen corpus and execution identity",
+                offending_shards={"identity": [index]}, reused_shards=[],
+            )
+    aggregate = aggregate_shards(
+        root, reports, paths, excluded, _D4_SHARD_COUNT, threshold,
+        test_mappings=test_mappings, policy_config=policy_config,
+    )
+    aggregate.update({
+        "aggregation_mode": "d4",
+        "d4_id": d4_id,
+        "run_id": str(run_id),
+        "run_attempt": str(run_attempt),
+        "reused_shards": [],
+        "fresh_execution": [
+            {
+                "shard_index": report["shard_index"],
+                "run_id": str(report["run_id"]),
+                "run_attempt": str(report["run_attempt"]),
+                "job_id": str(report["job_id"]),
+                "manifest_digest": report["manifest_digest"],
+                "container_digest": report["container_digest"],
+            }
+            for report in reports
+        ],
+    })
+    return aggregate
+
+
+def build_d4_evidence_index(
+    root: str,
+    retained_files: list[tuple[str, Path]],
+    *,
+    run_id: str,
+    run_attempt: str,
+    dispatch_timestamp: str,
+    complete_timestamp: str,
+    policy_digest: str,
+    corpus_identity_digest: str,
+) -> dict:
+    """Index retained D4 bytes; artifact IDs may be appended after provider upload."""
+    entries = []
+    for artifact_name, path in retained_files:
+        payload = path.read_bytes()
+        entries.append({
+            "artifact_name": artifact_name,
+            "path": path.as_posix(),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+        })
+    root_path = Path(root)
+    index = {
+        "schema_version": "1",
+        "kind": "d4_evidence_index",
+        "run_id": str(run_id),
+        "run_attempt": str(run_attempt),
+        "dispatch_timestamp": dispatch_timestamp,
+        "complete_timestamp": complete_timestamp,
+        "workflow_sha256": hashlib.sha256((root_path / ".github/workflows/mutation-d4.yml").read_bytes()).hexdigest(),
+        "d4_workflow_sha256": hashlib.sha256((root_path / ".github/workflows/mutation-d4-shard.yml").read_bytes()).hexdigest(),
+        "ledger_sha256": hashlib.sha256((root_path / ".github/mutation-observed-ledger.json").read_bytes()).hexdigest(),
+        "requirements_mutation_sha256": hashlib.sha256((root_path / "requirements-mutation.txt").read_bytes()).hexdigest(),
+        "pyproject_sha256": hashlib.sha256((root_path / "pyproject.toml").read_bytes()).hexdigest(),
+        "policy_digest": policy_digest,
+        "corpus_identity_digest": corpus_identity_digest,
+        "files": sorted(entries, key=lambda entry: (entry["artifact_name"], entry["path"])),
+        "provider_artifacts": [],
+    }
+    index["content_digest"] = _canonical_digest(index)
+    return index
+
+
+def append_d4_provider_artifacts(index: dict, provider_pages: list[dict]) -> dict:
+    """Append provider artifact identities and re-seal an evidence index."""
+    expected = index.get("content_digest")
+    content = {key: value for key, value in index.items() if key != "content_digest"}
+    if expected != _canonical_digest(content):
+        raise ValueError("D4 evidence index content digest is invalid")
+    artifacts = [item for page in provider_pages for item in page.get("artifacts", [])]
+    content["provider_artifacts"] = sorted(
+        ({"id": item["id"], "name": item["name"]} for item in artifacts
+         if str(item.get("name", "")).startswith("d4-")),
+        key=lambda item: (item["name"], item["id"]),
+    )
+    content["content_digest"] = _canonical_digest(content)
+    return content
+
+
+def evaluate_d4_admission(ledger: dict, ceiling_minutes: float) -> dict:
+    """Apply nearest-rank per-shard P95 and the fixed D4 cancellation reserve."""
+    try:
+        if (
+            ledger.get("p95_method") != "nearest_rank"
+            or ledger.get("shard_count") != _D4_SHARD_COUNT
+            or len(ledger.get("shards", [])) != _D4_SHARD_COUNT
+        ):
+            raise ValueError("ledger topology or P95 method is incompatible")
+        p95_seconds = []
+        for index, shard in enumerate(ledger["shards"]):
+            observations = sorted(float(item["engine_seconds"]) for item in shard["observations"])
+            minimum = int(ledger.get("minimum_observations", 1))
+            if shard.get("shard_index") != index or len(observations) < minimum:
+                raise ValueError(f"shard {index} has insufficient observations")
+            rank = max(1, math.ceil(0.95 * len(observations)))
+            p95_seconds.append(observations[rank - 1])
+        projected = sum(p95_seconds) / 60
+        required = projected + 1200
+        passed = math.isfinite(float(ceiling_minutes)) and float(ceiling_minutes) >= required
+        return {
+            "status": "completed", "passed": passed,
+            "p95_method": "nearest_rank", "projected_p95_total_minutes": projected,
+            "cancellation_reserve_minutes": 1200,
+            "required_ceiling_minutes": required,
+            "supplied_ceiling_minutes": float(ceiling_minutes),
+            "derivation": f"{projected:.6f} + 1200 = {required:.6f} runner-minutes",
+        }
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        return _error("unknown", f"Cannot derive D4 admission ceiling: {exc}", passed=False)
+
+
 def aggregate_preflight_shards(
     root: str,
     reports: list[dict],
@@ -5518,6 +5871,7 @@ def main() -> int:
     parser.add_argument("--engine-budget-seconds", type=int)
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
+    parser.add_argument("--aggregate-d4", metavar="DIRECTORY", help="Aggregate exactly 256 current-attempt D4 reports")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
     parser.add_argument("--aggregate-advisory", action="store_true", help="Validate a manifest-bound advisory aggregate")
     parser.add_argument("--advisory-execution", action="store_true", help="Bind one shard for advisory-only result reuse")
@@ -5526,6 +5880,21 @@ def main() -> int:
     parser.add_argument("--aggregate-preflight", metavar="DIRECTORY", help="Aggregate bounded preflight reports")
     parser.add_argument("--aggregate-capacity-enumeration", metavar="DIRECTORY", help="Aggregate isolated capacity enumeration")
     parser.add_argument("--resume-manifest", help="Run a resumable manifest-bound calibration shard")
+    parser.add_argument("--d4-manifest", help="Run one fresh manifest-bound D4 shard")
+    parser.add_argument("--d4-id", help="Logical D4 execution identity")
+    parser.add_argument("--d4-run-id", help="Provider run ID for D4 lineage")
+    parser.add_argument("--d4-run-attempt", help="Provider run attempt for D4 lineage")
+    parser.add_argument("--d4-job-id", help="Provider job ID for D4 lineage")
+    parser.add_argument("--d4-container-digest", default=_D4_CONTAINER_DIGEST)
+    parser.add_argument("--d4-runner-image-version", default="")
+    parser.add_argument("--write-d4-corpus-identity", metavar="PATH")
+    parser.add_argument("--d4-admission-ledger", metavar="PATH")
+    parser.add_argument("--d4-runner-minute-ceiling", type=float)
+    parser.add_argument("--d4-evidence-index", metavar="PATH")
+    parser.add_argument("--d4-retained-files", metavar="PATH")
+    parser.add_argument("--d4-dispatch-timestamp")
+    parser.add_argument("--d4-complete-timestamp")
+    parser.add_argument("--d4-corpus-identity", metavar="PATH")
     parser.add_argument("--retained-preflight", help="Complete retained preflight aggregate")
     parser.add_argument("--calibration-id", help="Logical calibration identity")
     parser.add_argument("--checkpoint-output", help="Atomic resumable checkpoint output")
@@ -5547,6 +5916,71 @@ def main() -> int:
     from fettle.config import load_config
 
     mutation = load_config(args.root)["mutation"]
+    if args.d4_evidence_index:
+        try:
+            if not args.d4_retained_files:
+                raise ValueError("--d4-evidence-index requires --d4-retained-files")
+            index_path = Path(args.d4_evidence_index)
+            retained_path = Path(args.d4_retained_files)
+            if index_path.exists():
+                pages = json.loads(retained_path.read_text(encoding="utf-8"))
+                if not isinstance(pages, list):
+                    raise ValueError("provider artifacts must be a JSON page list")
+                report = append_d4_provider_artifacts(
+                    json.loads(index_path.read_text(encoding="utf-8")), pages,
+                )
+            else:
+                if not all((args.d4_run_id, args.d4_run_attempt, args.d4_dispatch_timestamp,
+                            args.d4_complete_timestamp, args.d4_corpus_identity)):
+                    raise ValueError(
+                        "new D4 evidence index requires run lineage, timestamps, and corpus identity"
+                    )
+                corpus = json.loads(Path(args.d4_corpus_identity).read_text(encoding="utf-8"))
+                aggregate_paths = list(retained_path.rglob("d4-mutation-report.json"))
+                if len(aggregate_paths) != 1:
+                    raise ValueError("retained D4 evidence requires exactly one aggregate report")
+                aggregate = json.loads(aggregate_paths[0].read_text(encoding="utf-8"))
+                retained_files = []
+                for path in sorted(item for item in retained_path.rglob("*") if item.is_file()):
+                    relative = path.relative_to(retained_path)
+                    category = relative.parts[0]
+                    if category == "shards":
+                        artifact_name = relative.parts[1]
+                    elif category == "gate":
+                        artifact_name = f"d4-gate-report-{args.d4_run_id}-{args.d4_run_attempt}"
+                    elif category == "corpus":
+                        artifact_name = f"d4-current-corpus-{args.d4_run_id}"
+                    elif category == "aggregate":
+                        artifact_name = f"d4-aggregate-{args.d4_run_id}-{args.d4_run_attempt}"
+                    elif category == "admission":
+                        artifact_name = f"d4-admission-{args.d4_run_id}-{args.d4_run_attempt}"
+                    else:
+                        artifact_name = f"d4-{category}-{args.d4_run_id}-{args.d4_run_attempt}"
+                    retained_files.append((artifact_name, path))
+                report = build_d4_evidence_index(
+                    args.root, retained_files, run_id=args.d4_run_id,
+                    run_attempt=args.d4_run_attempt,
+                    dispatch_timestamp=args.d4_dispatch_timestamp,
+                    complete_timestamp=args.d4_complete_timestamp,
+                    policy_digest=aggregate.get("policy_digest", ""),
+                    corpus_identity_digest=corpus["digest"],
+                )
+            _write_json_atomic(index_path, report)
+        except (KeyError, OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Cannot build D4 evidence index: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(report, indent=2) if args.json else str(index_path))
+        return 0
+    if args.d4_admission_ledger:
+        try:
+            if args.d4_runner_minute_ceiling is None:
+                raise ValueError("D4 admission requires --d4-runner-minute-ceiling")
+            ledger = json.loads(Path(args.d4_admission_ledger).read_text(encoding="utf-8"))
+            report = evaluate_d4_admission(ledger, args.d4_runner_minute_ceiling)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot evaluate D4 admission: {exc}", passed=False)
+        print(json.dumps(report, indent=2))
+        return 0 if report.get("passed") is True else 2
     if args.initialize_timeout_report:
         manifest = load_partition_manifest(Path(args.manifest)) if args.manifest else None
         write_timeout_evidence(Path(args.initialize_timeout_report), args.timeout or 720, manifest)
@@ -5687,7 +6121,38 @@ def main() -> int:
         mutation["full_timeout_s"] if args.all else mutation["timeout_s"]
     )
     base = args.base or mutation["base"]
-    if args.capacity_plan and args.capacity_unit is None:
+    if args.write_d4_corpus_identity:
+        try:
+            if not args.aggregate_scope or not args.aggregate_preflight_evidence:
+                raise ValueError("D4 corpus identity requires --aggregate-scope and --aggregate-preflight-evidence")
+            manifests = [
+                load_partition_manifest(path) for path in sorted(
+                    Path(args.aggregate_scope).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            preflight = json.loads(Path(args.aggregate_preflight_evidence).read_text(encoding="utf-8"))
+            report = build_d4_corpus_identity(args.root, mutation, manifests, preflight)
+            _write_json_atomic(Path(args.write_d4_corpus_identity), report)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot write D4 corpus identity: {exc}")
+    elif args.d4_manifest:
+        missing = [name for name, value in (
+            ("--retained-preflight", args.retained_preflight), ("--d4-id", args.d4_id),
+            ("--d4-run-id", args.d4_run_id),
+            ("--d4-run-attempt", args.d4_run_attempt), ("--d4-job-id", args.d4_job_id),
+        ) if not value]
+        if missing:
+            report = _error("unknown", "--d4-manifest requires " + ", ".join(missing))
+        else:
+            report = run_d4_mutation_shard(
+                args.root, mutation, Path(args.d4_manifest), Path(args.retained_preflight),
+                args.d4_id, Path(args.checkpoint_output) if args.checkpoint_output else None, timeout,
+                run_id=args.d4_run_id, run_attempt=args.d4_run_attempt,
+                job_id=args.d4_job_id, container_digest=args.d4_container_digest,
+                runner_image_version=args.d4_runner_image_version,
+            )
+    elif args.capacity_plan and args.capacity_unit is None:
         try:
             if not all((args.retained_preflight, args.capacity_experiment_id, args.capacity_history, args.capacity_predictions, args.capacity_manifests)):
                 raise ValueError("capacity plan requires retained preflight, experiment ID, history, predictions, and manifests")
@@ -5778,6 +6243,36 @@ def main() -> int:
                 report = _error("unknown", f"Cannot read preflight shard reports: {exc}")
             else:
                 report = aggregate_preflight_shards(args.root, reports, paths, excluded, args.shard_count)
+    elif args.aggregate_d4:
+        try:
+            if not all((args.aggregate_scope, args.aggregate_preflight_evidence, args.d4_id,
+                        args.d4_run_id, args.d4_run_attempt, args.d4_corpus_identity)):
+                raise ValueError(
+                    "D4 aggregation requires scope, preflight, corpus identity, D4 ID, run ID, and run attempt"
+                )
+            report_paths = sorted(Path(args.aggregate_d4).rglob("mutation-report.json"))
+            reports = [json.loads(path.read_text(encoding="utf-8")) for path in report_paths]
+            manifests = [
+                load_partition_manifest(path) for path in sorted(
+                    Path(args.aggregate_scope).glob("partition-*.json"),
+                    key=lambda path: int(path.stem.split("-")[1]),
+                )
+            ]
+            retained_preflight = json.loads(
+                Path(args.aggregate_preflight_evidence).read_text(encoding="utf-8")
+            )
+            corpus_identity = json.loads(
+                Path(args.d4_corpus_identity).read_text(encoding="utf-8")
+            )
+            report = aggregate_d4_shards(
+                args.root, reports, paths, excluded, threshold,
+                run_id=args.d4_run_id, run_attempt=args.d4_run_attempt, d4_id=args.d4_id,
+                manifests=manifests, preflight=retained_preflight,
+                corpus_identity=corpus_identity,
+                test_mappings=mutation["test_mappings"], policy_config=mutation,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot read D4 evidence: {exc}", reused_shards=[])
     elif args.aggregate:
         if args.shard_count is None or args.shard_count < 1:
             report = _error("unknown", "--aggregate requires a positive --shard-count")

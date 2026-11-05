@@ -3,6 +3,7 @@
 import os
 import hashlib
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -241,6 +242,88 @@ def test_capacity_validation_route_is_registered_dormant_and_isolated():
     for name in ("prepare", "calibration-launch-gate", "full-shard", "aggregate"):
         assert "mode != 'capacity-validation'" in jobs[name]["if"]
     assert "mode != 'capacity-validation'" in jobs["evidence-readback"]["if"]
+
+
+def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
+    root = Path(PLUGIN_DIR)
+    workflow = yaml.safe_load((root / ".github/workflows/mutation-d4.yml").read_text())
+    dispatch = workflow[True]["workflow_dispatch"]["inputs"]
+    jobs = workflow["jobs"]
+    graph_names = {"d4-admit", "d4-gate", "d4-shards", "d4-aggregate", "d4-retain"}
+    graph = {name: jobs[name] for name in graph_names}
+    d4_jobs = {name: job for name, job in jobs.items() if name.startswith("d4-")}
+
+    assert list(dispatch) == [
+        "d4_phase", "candidate_sha", "d4_id", "d4_preflight_run_id",
+        "d4_runner_minute_ceiling",
+    ]
+    assert dispatch["d4_phase"]["options"] == ["preflight", "execute", "gate"]
+    assert jobs["d4-shards"]["needs"] == ["d4-admit", "d4-gate"]
+    assert jobs["d4-shards"]["strategy"]["matrix"] == "${{ fromJSON(needs.d4-admit.outputs.matrix) }}"
+    assert "execute" in jobs["d4-gate"]["if"] and "gate" in jobs["d4-gate"]["if"]
+    for name, job in d4_jobs.items():
+        if name != "d4-gate":
+            assert "gate" not in job.get("if", "")
+    for job in graph.values():
+        assert "execute" in job.get("if", "")
+        for step in job.get("steps", []):
+            text = yaml.safe_dump(step).lower()
+            assert "checkpoint" not in text
+            assert "resume" not in text
+            assert "stage_1" not in text
+            assert "stage_2" not in text
+            if step.get("uses", "").startswith("actions/download-artifact") and "run-id" in step.get("with", {}):
+                assert step["with"]["run-id"] == "${{ inputs.d4_preflight_run_id }}"
+
+    assert workflow["concurrency"] == {
+        "group": "mutation-authoritative-${{ github.repository }}",
+        "cancel-in-progress": False,
+    }
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
+    assert jobs["d4-retain"]["permissions"] == {"actions": "read", "contents": "write"}
+    cross_run_downloads = []
+    for name, job in d4_jobs.items():
+        for step in job.get("steps", []):
+            if step.get("uses", "").startswith("actions/download-artifact") and "run-id" in step.get("with", {}):
+                cross_run_downloads.append((name, step))
+    assert len(cross_run_downloads) == 1
+    _, cross_run = cross_run_downloads[0]
+    assert cross_run["with"]["run-id"] == "${{ inputs.d4_preflight_run_id }}"
+    assert cross_run["with"]["name"] == "d4-corpus-${{ inputs.d4_id }}-${{ inputs.d4_preflight_run_id }}"
+
+    shard = yaml.safe_load((root / ".github/workflows/mutation-d4-shard.yml").read_text())
+    execute = shard["jobs"]["execute"]
+    assert execute["runs-on"] == "ubuntu-24.04"
+    assert execute["timeout-minutes"] == 360
+    assert re.fullmatch(r"python:3\.12\.13-bookworm@sha256:[0-9a-f]{64}", execute["container"]["image"])
+    scripts = "\n".join(step.get("run", "") for step in execute["steps"])
+    assert "git --version" in execute["steps"][1]["run"]
+    assert "git rev-parse HEAD" in execute["steps"][1]["run"]
+    assert "--timeout 20100" in scripts
+    assert "--resume-checkpoints" not in scripts
+    assert "d4-shard-report-" not in yaml.safe_dump(execute)
+
+
+def test_d4_container_digest_has_one_value_across_python_and_workflow():
+    import ast
+
+    root = Path(PLUGIN_DIR)
+    source = ast.parse((root / "fettle/mutation_test.py").read_text())
+    constants = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in source.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in {"_D4_CONTAINER_DIGEST", "_D4_ENGINE_BUDGET_SECONDS"}
+    }
+    shard = yaml.safe_load((root / ".github/workflows/mutation-d4-shard.yml").read_text())
+    execute = shard["jobs"]["execute"]
+    image_digest = execute["container"]["image"].split("@", 1)[1]
+    run_step = next(step for step in execute["steps"] if step.get("name") == "Execute fresh D4 shard")
+
+    assert image_digest == run_step["env"]["CONTAINER_DIGEST"] == constants["_D4_CONTAINER_DIGEST"]
+    assert constants["_D4_ENGINE_BUDGET_SECONDS"] == 20100
 
 
 def test_capacity_validation_measurement_batches_are_exact_once_and_bounded():

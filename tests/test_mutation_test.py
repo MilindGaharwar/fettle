@@ -31,6 +31,9 @@ from fettle.mutation_test import (
     _patch_for_ranges,
     _mapped_tests,
     aggregate_shards,
+    aggregate_d4_shards,
+    build_d4_evidence_index,
+    evaluate_d4_admission,
     aggregate_capacity_validation_shards,
     _get_all_py_files,
     _get_changed_py_files,
@@ -5061,6 +5064,190 @@ def test_aggregate_shards_rejects_wrong_checkout_revision(tmp_path):
 
     assert result["status"] == "unknown"
     assert "checkout" in result["message"]
+
+
+def _d4_fixture(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "fettle/a.py").write_text("\n".join(f"VALUE_{index} = {index}" for index in range(256)) + "\n")
+    (tmp_path / "tests/test_a.py").write_text("import fettle.a\n")
+    reports = []
+    manifests = []
+    corpus = []
+    for index in range(256):
+        manifest = {
+            "schema_version": "1", "revision": "a" * 40,
+            "shard_index": index, "shard_count": 256, "files": ["fettle/a.py"],
+            "ranges": [{"file": "fettle/a.py", "start": index + 1, "end": index + 1}],
+        }
+        manifest["digest"] = _canonical_digest(manifest)
+        manifests.append(manifest)
+        corpus.append({"fingerprint": f"{index:064x}", "shard_index": index})
+        reports.append(_shard_report(
+            index, ["fettle/a.py"], shard_count=256,
+            tests_run=["tests/test_a.py"], line_ranges=manifest["ranges"],
+            manifest_digest=manifest["digest"], calibration_id="d4-fixture",
+            run_id="900", run_attempt="1", job_id=str(10_000 + index),
+            container_digest="sha256:" + "f" * 64,
+            runner_image_version="20261001.1", fresh_execution=True,
+            non_killed=[], survived=0, timeout=0, suspicious=0, untested=0,
+        ))
+    preflight = {
+        "status": "completed", "passed": True, "revision": "a" * 40,
+        "shard_count": 256, "generated": 256, "canonicalized": 256, "collisions": 0,
+        "corpus": corpus, "fingerprints": [item["fingerprint"] for item in corpus],
+        "corpus_digest": _canonical_digest(corpus),
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+    digest = _canonical_digest(preflight)
+    for report in reports:
+        report["preflight_digest"] = digest
+        report["preflight_corpus_digest"] = preflight["corpus_digest"]
+        report["corpus_digest"] = _canonical_digest([
+            item for item in corpus if item["shard_index"] == report["shard_index"]
+        ])
+    corpus_identity = {
+        "schema_version": "1", "kind": "d4_corpus_identity",
+        "container_digest": reports[0]["container_digest"],
+    }
+    corpus_identity["digest"] = _canonical_digest(corpus_identity)
+    return reports, manifests, preflight, corpus_identity
+
+
+@pytest.mark.parametrize(
+    ("change", "category", "shard"),
+    [
+        (lambda reports: reports[4].update(run_id="901"), "lineage", 4),
+        (lambda reports: reports[5].update(run_attempt="2"), "lineage", 5),
+        (lambda reports: reports.pop(6), "missing", 6),
+        (lambda reports: reports.append(deepcopy(reports[7])), "duplicates", 7),
+        (lambda reports: reports[8].update(status="tool_error", checkpoint_only=True), "malformed", 8),
+        (lambda reports: reports[9].update(reuse_provenance={"run_id": "899"}), "not_fresh", 9),
+        (lambda reports: reports[10].update(fresh_execution=False), "not_fresh", 10),
+    ],
+)
+def test_d4_aggregate_rejects_incomplete_or_unrelated_reports(tmp_path, change, category, shard):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+    change(reports)
+
+    result = aggregate_d4_shards(
+        str(tmp_path), reports, ["fettle/"], [], 70,
+        run_id="900", run_attempt="1", d4_id="d4-fixture",
+        manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+        test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+    )
+
+    assert result["status"] == "unknown"
+    assert shard in result["offending_shards"][category]
+    assert result["reused_shards"] == []
+
+
+def test_d4_aggregate_accepts_exact_fresh_lineage_and_preserves_outcomes(tmp_path):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
+        result = aggregate_d4_shards(
+            str(tmp_path), reports, ["fettle/"], [], 70,
+            run_id="900", run_attempt="1", d4_id="d4-fixture",
+            manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+            test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+        )
+
+    assert result["status"] == "completed"
+    assert result["reused_shards"] == []
+    assert len(result["fresh_execution"]) == 256
+    assert result["killed"] == sum(report["killed"] for report in reports)
+    assert result["non_killed"] == []
+
+
+def test_d4_aggregate_rejects_report_container_outside_sealed_identity(tmp_path):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+    reports[12]["container_digest"] = "sha256:" + "e" * 64
+
+    result = aggregate_d4_shards(
+        str(tmp_path), reports, ["fettle/"], [], 70,
+        run_id="900", run_attempt="1", d4_id="d4-fixture",
+        manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+        test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+    )
+
+    assert result["status"] == "unknown"
+    assert result["offending_shards"]["identity"] == [12]
+
+
+def test_d4_evidence_index_digests_round_trip(tmp_path):
+    root = Path(__file__).parents[1]
+    retained = tmp_path / "mutation-report.json"
+    retained.write_bytes(b'{"status":"completed"}\n')
+
+    index = build_d4_evidence_index(
+        str(root), [("d4-aggregate-900-1", retained)],
+        run_id="900", run_attempt="1",
+        dispatch_timestamp="2026-11-03T00:00:00Z",
+        complete_timestamp="2026-11-03T01:00:00Z",
+        policy_digest="a" * 64, corpus_identity_digest="b" * 64,
+    )
+
+    entry = index["files"][0]
+    assert entry["sha256"] == __import__("hashlib").sha256(retained.read_bytes()).hexdigest()
+    assert entry["size"] == retained.stat().st_size
+    content = {key: value for key, value in index.items() if key != "content_digest"}
+    assert index["content_digest"] == _canonical_digest(content)
+
+
+def test_d4_evidence_index_cli_builds_appends_and_redigests(tmp_path, monkeypatch, capsys):
+    root = Path(__file__).parents[1]
+    retained = tmp_path / "retained"
+    aggregate = retained / "aggregate"
+    aggregate.mkdir(parents=True)
+    (aggregate / "d4-mutation-report.json").write_text(
+        json.dumps({"policy_digest": "a" * 64}) + "\n", encoding="utf-8"
+    )
+    gate = retained / "gate"
+    gate.mkdir()
+    (gate / "mutation-report.json").write_text("{}\n", encoding="utf-8")
+    corpus = tmp_path / "corpus-identity.json"
+    corpus.write_text(json.dumps({"digest": "b" * 64}) + "\n", encoding="utf-8")
+    index_path = tmp_path / "d4-evidence-index.json"
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--root", str(root), "--d4-evidence-index", str(index_path),
+        "--d4-retained-files", str(retained), "--d4-run-id", "900",
+        "--d4-run-attempt", "1", "--d4-dispatch-timestamp", "2026-11-03T00:00:00Z",
+        "--d4-complete-timestamp", "2026-11-03T01:00:00Z",
+        "--d4-corpus-identity", str(corpus), "--json",
+    ])
+    assert main() == 0
+    capsys.readouterr()
+
+    pages = tmp_path / "provider-artifacts.json"
+    pages.write_text(json.dumps([
+        {"artifacts": [
+            {"id": 2, "name": "unrelated"},
+            {"id": 1, "name": "d4-gate-report-900-1"},
+        ]},
+    ]), encoding="utf-8")
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--root", str(root), "--d4-evidence-index", str(index_path),
+        "--d4-retained-files", str(pages), "--json",
+    ])
+    assert main() == 0
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["provider_artifacts"] == [{"id": 1, "name": "d4-gate-report-900-1"}]
+    content = {key: value for key, value in index.items() if key != "content_digest"}
+    assert index["content_digest"] == _canonical_digest(content)
+
+
+def test_d4_admission_requires_projected_p95_plus_reserve():
+    manifests = [{"shard_index": index, "files": ["fettle/a.py"]} for index in range(256)]
+    ledger = _projection_ledger(manifests, durations=(100.0, 110.0, 120.0))
+    projected = sum(120.0 + index for index in range(256)) / 60
+
+    below = evaluate_d4_admission(ledger, projected + 1199.99)
+    exact = evaluate_d4_admission(ledger, projected + 1200)
+
+    assert below["passed"] is False
+    assert exact["passed"] is True
+    assert exact["derivation"] == f"{projected:.6f} + 1200 = {projected + 1200:.6f} runner-minutes"
 
 
 def test_stability_requires_three_identical_completed_full_reports():

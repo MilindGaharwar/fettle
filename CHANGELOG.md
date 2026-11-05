@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add an isolated, lineage-bound `mode=d4` path for fresh 256-shard full-scope mutation evidence, retained indexing, and off-provider mirroring.
+
 ## v1.14.0 — PR Advisory Evidence Hardening
 
 **Released 2026-10-26**
