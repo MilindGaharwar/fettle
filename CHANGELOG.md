@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Run D4 shard steps under Bash and route Python through the pinned uv environment.
 - Register D4 shard container workspaces as explicit Git safe directories.
 - Remove verification timing races and cover canonical non-drift and multi-workspace evidence states.
 - Add an isolated, lineage-bound `mode=d4` path for fresh 256-shard full-scope mutation evidence, retained indexing, and off-provider mirroring.
