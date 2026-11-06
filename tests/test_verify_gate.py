@@ -179,12 +179,59 @@ class TestRunVerify:
         assert not stamp["ok"] and stamp["exit_code"] == 1
         assert "boom" in stamp["error"]
 
+    def test_red_pytest_without_drift_is_complete_violation(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_failure.py").write_text(
+            "def test_failure():\n    assert False\n"
+        )
+        _commit_all(repo)
+
+        with patch(
+            "fettle.verify_gate.discover_test_config", return_value=_pytest_config(),
+        ):
+            stamp = run_verify(str(repo), _cfg(), full=True)
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is False
+        assert artifact.result_state == "violation"
+        assert artifact.completeness == "complete"
+
     def test_timeout_is_visible_not_silent(self, tmp_path):
         repo = _project(
             tmp_path, f"{sys.executable} -c \\\"import time; time.sleep(5)\\\"")
         stamp = run_verify(str(repo), _cfg(timeout_s=1))
         assert not stamp["ok"]
         assert "timeout" in stamp["error"]
+
+    def test_timeout_without_drift_is_unknown_tool_error(self, tmp_path):
+        repo = _git_repo(tmp_path)
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_pass.py").write_text(
+            "def test_pass():\n    assert True\n"
+        )
+        _commit_all(repo)
+        real_run = subprocess.run
+
+        def pass_git_then_timeout(cmd, **kwargs):
+            if cmd[0] == "git":
+                return real_run(cmd, **kwargs)
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+        with (
+            patch("fettle.verify_gate.discover_test_config", return_value=_pytest_config()),
+            patch("fettle.verify_gate.subprocess.run", side_effect=pass_git_then_timeout),
+        ):
+            stamp = run_verify(str(repo), _cfg(timeout_s=30), full=True)
+        artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
+
+        assert stamp["ok"] is False
+        assert artifact.result_state == "tool_error"
+        assert artifact.completeness == "unknown"
+        assert (
+            artifact.source["snapshot_digest"]
+            == artifact.source["post_run_snapshot_digest"]
+        )
 
     def test_no_command_discovered(self, tmp_path):
         (tmp_path / ".git").mkdir()
@@ -1139,7 +1186,7 @@ class TestStopGate:
         workspaces = []
         edited = []
         records = []
-        for name in ("first", "second"):
+        for name in ("a-full", "b-impacted"):
             root = tmp_path / name
             (root / "tests").mkdir(parents=True)
             source = root / "widget.py"
@@ -1151,8 +1198,10 @@ class TestStopGate:
                 test_command="pytest tests/", test_roots=["tests"],
             ))
             records.append({
-                "path": name, "ok": True, "scope": "impacted",
-                "impacted": ["tests/test_widget.py"] if name == "first" else [],
+                "path": name,
+                "ok": True,
+                "scope": "full" if name == "a-full" else "impacted",
+                "impacted": [],
             })
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
@@ -1167,9 +1216,9 @@ class TestStopGate:
             result = run_check(_gate_ctx(tmp_path, _cfg(mode="enforce")))
 
         assert result.decision == Decision.BLOCK
-        assert "did not cover every file edited in workspace second" in result.message
+        assert "did not cover every file edited in workspace b-impacted" in result.message
 
-    def test_two_workspaces_with_complete_impacted_coverage_allow(self, tmp_path):
+    def test_full_then_complete_impacted_workspace_allows(self, tmp_path):
         from types import SimpleNamespace
 
         from fettle.verify_gate import _write_stamp
@@ -1178,7 +1227,7 @@ class TestStopGate:
         workspaces = []
         edited = []
         records = []
-        for name in ("first", "second"):
+        for name in ("a-full", "b-impacted"):
             root = tmp_path / name
             (root / "tests").mkdir(parents=True)
             source = root / "widget.py"
@@ -1190,8 +1239,12 @@ class TestStopGate:
                 test_command="pytest tests/", test_roots=["tests"],
             ))
             records.append({
-                "path": name, "ok": True, "scope": "impacted",
-                "impacted": ["tests/test_widget.py"],
+                "path": name,
+                "ok": True,
+                "scope": "full" if name == "a-full" else "impacted",
+                "impacted": (
+                    [] if name == "a-full" else ["tests/test_widget.py"]
+                ),
             })
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
