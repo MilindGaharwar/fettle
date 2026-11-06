@@ -297,7 +297,7 @@ def test_eventual_polling_reruns_only_mismatching_observers(tmp_path):
 def test_eventual_observer_that_misses_deadline_is_stale(tmp_path):
     contract = replace(
         _contract(tmp_path, observer="stale", model="eventual"),
-        deadline_ms=300,
+        deadline_ms=3000,
         poll_interval_ms=100,
     )
 
