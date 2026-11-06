@@ -31,6 +31,9 @@ jobs:
   execute:
     if: inputs.execute
     name: mutation (D4 shard ${{ inputs.shard }})
+    defaults:
+      run:
+        shell: bash
     runs-on: ubuntu-24.04
     container:
       image: python:3.12.13-bookworm@sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12
@@ -77,7 +80,7 @@ jobs:
             --prepare-manifests d4-corpus/manifests --json > d4-manifest-summary.json
           uv run --no-sync python -m fettle.mutation_test --root d4-gate \
             --preflight-manifest d4-corpus/manifests/partition-0.json --json > d4-corpus/mutation-preflight.json
-          python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import json
           from pathlib import Path
           from fettle.mutation_test import _canonical_digest
@@ -109,7 +112,7 @@ jobs:
             --d4-runner-image-version "${ImageVersion:-unknown}" --json > mutation-report.json.tmp
           uv run --no-sync python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
           mv mutation-report.json.tmp mutation-report.json
-          python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import json, os
           report = json.load(open("mutation-report.json"))
           valid = (

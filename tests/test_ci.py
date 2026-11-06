@@ -294,12 +294,18 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
     shard = yaml.safe_load((root / ".github/workflows/mutation-d4-shard.yml").read_text())
     execute = shard["jobs"]["execute"]
     assert execute["runs-on"] == "ubuntu-24.04"
+    assert execute["defaults"]["run"]["shell"] == "bash"
     assert execute["timeout-minutes"] == 360
     assert re.fullmatch(r"python:3\.12\.13-bookworm@sha256:[0-9a-f]{64}", execute["container"]["image"])
     scripts = "\n".join(step.get("run", "") for step in execute["steps"])
     assert "git --version" in execute["steps"][1]["run"]
     assert 'safe.directory "$GITHUB_WORKSPACE"' in execute["steps"][1]["run"]
     assert "git rev-parse HEAD" in execute["steps"][1]["run"]
+    assert not any(
+        line.lstrip().startswith("python ")
+        for step in execute["steps"]
+        for line in step.get("run", "").splitlines()
+    )
     assert "--timeout 20100" in scripts
     assert "--resume-checkpoints" not in scripts
     assert "d4-shard-report-" not in yaml.safe_dump(execute)
