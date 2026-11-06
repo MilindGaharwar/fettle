@@ -298,6 +298,7 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
     assert re.fullmatch(r"python:3\.12\.13-bookworm@sha256:[0-9a-f]{64}", execute["container"]["image"])
     scripts = "\n".join(step.get("run", "") for step in execute["steps"])
     assert "git --version" in execute["steps"][1]["run"]
+    assert 'safe.directory "$GITHUB_WORKSPACE"' in execute["steps"][1]["run"]
     assert "git rev-parse HEAD" in execute["steps"][1]["run"]
     assert "--timeout 20100" in scripts
     assert "--resume-checkpoints" not in scripts

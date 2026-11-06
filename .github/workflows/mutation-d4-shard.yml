@@ -40,7 +40,14 @@ jobs:
       - name: Verify Git checkout
         run: |
           git --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/d4-gate"
           git rev-parse HEAD
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status"
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - name: Install pinned mutation tools
         run: |
