@@ -306,6 +306,16 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
         for step in execute["steps"]
         for line in step.get("run", "").splitlines()
     )
+    synthetic_step = next(
+        step for step in execute["steps"]
+        if step.get("name") == "Prepare one-manifest synthetic D4 corpus"
+    )
+    assert 'report["revision"]' in synthetic_step["run"]
+    upload_step = next(
+        step for step in execute["steps"]
+        if step.get("name") == "Retain D4 shard report"
+    )
+    assert "mutation-report.json.tmp" in upload_step["with"]["path"].splitlines()
     assert "--timeout 20100" in scripts
     assert "--resume-checkpoints" not in scripts
     assert "d4-shard-report-" not in yaml.safe_dump(execute)

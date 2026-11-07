@@ -85,6 +85,9 @@ jobs:
           from pathlib import Path
           from fettle.mutation_test import _canonical_digest
           report = json.loads(Path("d4-corpus/mutation-preflight.json").read_text())
+          from fettle.mutation_test import load_partition_manifest
+          manifest = load_partition_manifest(Path("d4-corpus/manifests/partition-0.json"))
+          report["revision"] = manifest["revision"]
           report.update(shard_count=1, manifest_digests=[report["manifest_digest"]])
           report["corpus"] = [dict(item, shard_index=0) for item in report["corpus"]]
           report["corpus_digest"] = _canonical_digest(report["corpus"])
@@ -102,6 +105,7 @@ jobs:
           uv run --no-sync python -m fettle.mutation_test --root "$ROOT" \
             --manifest "d4-corpus/manifests/partition-${SHARD}.json" \
             --initialize-timeout-report mutation-report.json --timeout 20100
+          set +e
           uv run --no-sync python -m fettle.mutation_test --root "$ROOT" \
             --d4-manifest "d4-corpus/manifests/partition-${SHARD}.json" \
             --retained-preflight d4-corpus/mutation-preflight.json \
@@ -110,6 +114,10 @@ jobs:
             --d4-run-attempt "$GITHUB_RUN_ATTEMPT" --d4-job-id '${{ job.check_run_id }}' \
             --d4-container-digest "$CONTAINER_DIGEST" \
             --d4-runner-image-version "${ImageVersion:-unknown}" --json > mutation-report.json.tmp
+          shard_exit=$?
+          set -e
+          cat mutation-report.json.tmp
+          if (( shard_exit != 0 )); then exit "$shard_exit"; fi
           uv run --no-sync python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
           mv mutation-report.json.tmp mutation-report.json
           uv run --no-sync python - <<'PY'
@@ -128,6 +136,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.report_artifact }}
-          path: mutation-report.json
+          path: |
+            mutation-report.json
+            mutation-report.json.tmp
           if-no-files-found: error
           retention-days: 90
