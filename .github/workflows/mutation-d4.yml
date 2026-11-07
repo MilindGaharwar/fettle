@@ -88,6 +88,9 @@ jobs:
     if: inputs.d4_phase == 'preflight'
     needs: d4-preflight-prepare
     name: mutation (D4 preflight shard ${{ matrix.shard }})
+    defaults:
+      run:
+        shell: bash
     runs-on: ubuntu-24.04
     container:
       image: python:3.12.13-bookworm@sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12
@@ -97,13 +100,30 @@ jobs:
       matrix: ${{ fromJSON(needs.d4-preflight-prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify Git checkout
+        run: |
+          git --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/d4-gate"
+          git rev-parse HEAD
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status"
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
       - run: uv venv --python 3.12.13 && uv pip install --quiet --require-hashes -r requirements-mutation.txt && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: d4-preflight-manifests-${{ github.run_id }}
           path: d4-manifests
-      - run: uv run --no-sync python -m fettle.mutation_test --root . --preflight-manifest d4-manifests/partition-${{ matrix.shard }}.json --json > mutation-preflight.json
+      - run: |
+          set +e
+          uv run --no-sync python -m fettle.mutation_test --root . --preflight-manifest d4-manifests/partition-${{ matrix.shard }}.json --json > mutation-preflight.json
+          preflight_exit=$?
+          set -e
+          cat mutation-preflight.json
+          if (( preflight_exit != 0 )); then exit "$preflight_exit"; fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -134,8 +154,25 @@ jobs:
           path: d4-preflight-reports
       - name: Aggregate and seal corpus
         run: |
+          set +e
           uv run --no-sync python -m fettle.mutation_test --root . --aggregate-preflight d4-preflight-reports --shard-count 256 --json > d4-corpus/mutation-preflight.json
+          aggregate_exit=$?
+          set -e
+          cat d4-corpus/mutation-preflight.json
+          if (( aggregate_exit != 0 )); then exit "$aggregate_exit"; fi
+          set +e
           uv run --no-sync python -m fettle.mutation_test --root . --write-d4-corpus-identity d4-corpus/corpus-identity.json --aggregate-scope d4-corpus/manifests --aggregate-preflight-evidence d4-corpus/mutation-preflight.json --json
+          identity_exit=$?
+          set -e
+          if [ -f d4-corpus/corpus-identity.json ]; then cat d4-corpus/corpus-identity.json; fi
+          if (( identity_exit != 0 )); then exit "$identity_exit"; fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: d4-corpus-partial-${{ inputs.d4_id }}-${{ github.run_id }}
+          path: d4-corpus
+          if-no-files-found: error
+          retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: d4-corpus-${{ inputs.d4_id }}-${{ github.run_id }}
