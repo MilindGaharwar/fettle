@@ -343,6 +343,39 @@ def test_d4_container_digest_has_one_value_across_python_and_workflow():
     assert constants["_D4_ENGINE_BUDGET_SECONDS"] == 20100
 
 
+def test_d4_container_jobs_are_bash_safe_and_use_pinned_python_entrypoints():
+    root = Path(PLUGIN_DIR) / ".github/workflows"
+    workflows = {
+        path.name: yaml.safe_load(path.read_text())
+        for path in (root / "mutation-d4.yml", root / "mutation-d4-shard.yml")
+    }
+    container_jobs = {
+        (workflow_name, job_name): job
+        for workflow_name, workflow in workflows.items()
+        for job_name, job in workflow["jobs"].items()
+        if "container" in job
+    }
+
+    assert set(container_jobs) == {
+        ("mutation-d4.yml", "d4-preflight-shards"),
+        ("mutation-d4-shard.yml", "execute"),
+    }
+    for job in container_jobs.values():
+        assert job["defaults"]["run"]["shell"] == "bash"
+        checkout_index = next(
+            index for index, step in enumerate(job["steps"])
+            if step.get("uses", "").startswith("actions/checkout@")
+        )
+        checkout_verification = job["steps"][checkout_index + 1]["run"]
+        assert 'safe.directory "$GITHUB_WORKSPACE"' in checkout_verification
+        assert "git rev-parse HEAD" in checkout_verification
+        assert not any(
+            line.lstrip().startswith("python ")
+            for step in job["steps"]
+            for line in step.get("run", "").splitlines()
+        )
+
+
 def test_capacity_validation_measurement_batches_are_exact_once_and_bounded():
     workflow = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation.yml").read_text()

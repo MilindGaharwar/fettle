@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Harden D4 preflight containers and retain partial corpus diagnostics on seal failures.
 - Seal synthetic D4 gate preflight revisions and retain failed shard diagnostics.
 - Run D4 shard steps under Bash and route Python through the pinned uv environment.
 - Register D4 shard container workspaces as explicit Git safe directories.
