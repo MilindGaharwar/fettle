@@ -3153,7 +3153,7 @@ def test_mutation_execution_skips_redundant_preflight_and_schedule_is_preflight_
 def test_mutation_hotspot_chunks_preserve_authoritative_worker_bound():
     config = (Path(PLUGIN_DIR) / ".fettle.toml").read_text()
 
-    assert "full_timeout_s = 1800" in config
+    assert "full_timeout_s = 7200" in config
     assert "full_shards = 256" in config
     assert '"fettle/ci.py" = 20' in config
     assert '"fettle/coverage_gate.py" = 20' in config

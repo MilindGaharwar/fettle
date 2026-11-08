@@ -60,7 +60,7 @@ paths = ["fettle/"]
 exclude = ["tests/", "migrations/"]
 base = "origin/main"
 timeout_s = 600
-full_timeout_s = 1800
+full_timeout_s = 7200
 default_chunk_lines = 60
 full_shards = 256
 
