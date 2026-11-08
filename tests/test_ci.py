@@ -280,7 +280,18 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
         "cancel-in-progress": False,
     }
     assert workflow["permissions"] == {"actions": "read", "contents": "read"}
-    assert jobs["d4-retain"]["permissions"] == {"actions": "read", "contents": "write"}
+    upload_jobs = {
+        "d4-preflight-prepare", "d4-preflight-shards", "d4-preflight-seal",
+        "d4-admit", "d4-gate", "d4-shards", "d4-aggregate", "d4-retain",
+    }
+    for name, job in d4_jobs.items():
+        expected_contents = "write" if name == "d4-retain" else "read"
+        if name in upload_jobs:
+            assert job["permissions"] == {
+                "actions": "write", "contents": expected_contents,
+            }
+        else:
+            assert "permissions" not in job
     cross_run_downloads = []
     for name, job in d4_jobs.items():
         for step in job.get("steps", []):
@@ -311,14 +322,86 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
         if step.get("name") == "Prepare one-manifest synthetic D4 corpus"
     )
     assert 'report["revision"]' in synthetic_step["run"]
-    upload_step = next(
-        step for step in execute["steps"]
-        if step.get("name") == "Retain D4 shard report"
-    )
+    upload_step = next(step for step in execute["steps"] if step.get("id") == "shard_report_attempt_1")
     assert "mutation-report.json.tmp" in upload_step["with"]["path"].splitlines()
     assert "--timeout 20100" in scripts
     assert "--resume-checkpoints" not in scripts
     assert "d4-shard-report-" not in yaml.safe_dump(execute)
+
+    workflows = {
+        "mutation-d4.yml": workflow,
+        "mutation-d4-shard.yml": shard,
+    }
+    expected_uploads = {
+        "preflight_manifests", "preflight_report", "corpus_partial", "corpus",
+        "current_corpus", "admission", "aggregate", "retained_evidence",
+        "evidence_index", "shard_report",
+    }
+    upload_contracts = {}
+    all_upload_steps = []
+    for workflow_name, document in workflows.items():
+        for job_name, job in document["jobs"].items():
+            for index, step in enumerate(job.get("steps", [])):
+                if step.get("uses", "").startswith("actions/upload-artifact@"):
+                    all_upload_steps.append(step)
+                step_id = step.get("id", "")
+                match = re.fullmatch(r"(.+)_attempt_([123])", step_id)
+                if not match:
+                    continue
+                upload_id, attempt_text = match.groups()
+                assert step["uses"] == (
+                    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+                )
+                assert step.get("continue-on-error") is True
+                assert step["with"].get("overwrite") is not True
+                upload_contracts.setdefault(upload_id, []).append(
+                    (int(attempt_text), workflow_name, job_name, index, step)
+                )
+
+    assert len(all_upload_steps) == 30
+    assert all(re.fullmatch(r"(.+)_attempt_([123])", step["id"]) for step in all_upload_steps)
+    assert set(upload_contracts) == expected_uploads
+    for upload_id, attempts in upload_contracts.items():
+        attempts.sort()
+        assert [attempt for attempt, *_ in attempts] == [1, 2, 3]
+        _, workflow_name, job_name, _, first = attempts[0]
+        expected_with = {
+            key: first["with"][key]
+            for key in ("name", "path", "retention-days", "if-no-files-found")
+        }
+        steps = workflows[workflow_name]["jobs"][job_name]["steps"]
+        for attempt, current_workflow, current_job, _, step in attempts:
+            assert (current_workflow, current_job) == (workflow_name, job_name)
+            assert {
+                key: step["with"][key]
+                for key in ("name", "path", "retention-days", "if-no-files-found")
+            } == expected_with
+            assert "overwrite" not in step["with"]
+            if attempt > 1:
+                assert f"steps.{upload_id}_attempt_{attempt - 1}.outcome == 'failure'" in step["if"]
+                assert f"steps.{upload_id}_recover_{attempt}.outcome == 'success'" in step["if"]
+        final = next(
+            step for step in steps
+            if step.get("id") == f"{upload_id}_verify"
+        )
+        assert final["if"] == "always()"
+        assert "exit 1" in final["run"]
+        assert "actions/runs/$GITHUB_RUN_ID/artifacts" in final["run"]
+        for recover_attempt in (2, 3):
+            recover = next(
+                step for step in steps
+                if step.get("id") == f"{upload_id}_recover_{recover_attempt}"
+            )
+            assert "sleep 30" in recover["run"]
+            assert "actions/runs/$GITHUB_RUN_ID/artifacts" in recover["run"]
+            assert "select(.name == env.ARTIFACT_NAME" in recover["run"]
+            assert ".size_in_bytes > 0" in recover["run"]
+            assert ".size_in_bytes == 0" in recover["run"]
+            assert "actions/artifacts/$artifact_id" in recover["run"]
+            assert "-X DELETE" in recover["run"]
+
+    assert shard["permissions"] == {"actions": "read", "contents": "read"}
+    assert execute["permissions"] == {"actions": "write", "contents": "read"}
 
 
 def test_d4_container_digest_has_one_value_across_python_and_workflow():

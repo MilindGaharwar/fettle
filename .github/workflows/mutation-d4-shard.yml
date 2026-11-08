@@ -38,6 +38,9 @@ jobs:
     container:
       image: python:3.12.13-bookworm@sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12
     timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify Git checkout
@@ -52,6 +55,8 @@ jobs:
             exit 1
           fi
       - uses: astral-sh/setup-uv@eb1897b8dc4b5d5bfe39a428a8f2304605e0983c # v7.0.0
+      - name: Install artifact recovery tools
+        run: apt-get update && apt-get install --yes gh jq
       - name: Install pinned mutation tools
         run: |
           uv venv --python 3.12.13
@@ -131,8 +136,10 @@ jobs:
           )
           raise SystemExit(0 if valid else 2)
           PY
-      - name: Retain D4 shard report
+      - name: Retain D4 shard report (attempt 1)
+        id: shard_report_attempt_1
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.report_artifact }}
@@ -141,3 +148,64 @@ jobs:
             mutation-report.json.tmp
           if-no-files-found: error
           retention-days: 90
+      - name: Recover D4 shard report before attempt 2
+        id: shard_report_recover_2
+        if: always() && steps.shard_report_attempt_1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ inputs.report_artifact }}
+        run: |
+          sleep 30
+          artifacts="$(gh api --method GET --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -f name="$ARTIFACT_NAME" -f per_page=100)"
+          if jq -e '[.[].artifacts[] | select(.name == env.ARTIFACT_NAME and .size_in_bytes > 0)] | length > 0' <<<"$artifacts" >/dev/null; then echo "artifact_ready=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          jq -r '.[].artifacts[] | select(.name == env.ARTIFACT_NAME and .size_in_bytes == 0) | .id' <<<"$artifacts" |
+            while read -r artifact_id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"; done
+      - name: Retain D4 shard report (attempt 2)
+        id: shard_report_attempt_2
+        if: always() && steps.shard_report_attempt_1.outcome == 'failure' && steps.shard_report_recover_2.outcome == 'success' && steps.shard_report_recover_2.outputs.artifact_ready != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.report_artifact }}
+          path: |
+            mutation-report.json
+            mutation-report.json.tmp
+          if-no-files-found: error
+          retention-days: 90
+      - name: Recover D4 shard report before attempt 3
+        id: shard_report_recover_3
+        if: always() && steps.shard_report_attempt_2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ inputs.report_artifact }}
+        run: |
+          sleep 30
+          artifacts="$(gh api --method GET --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -f name="$ARTIFACT_NAME" -f per_page=100)"
+          if jq -e '[.[].artifacts[] | select(.name == env.ARTIFACT_NAME and .size_in_bytes > 0)] | length > 0' <<<"$artifacts" >/dev/null; then echo "artifact_ready=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          jq -r '.[].artifacts[] | select(.name == env.ARTIFACT_NAME and .size_in_bytes == 0) | .id' <<<"$artifacts" |
+            while read -r artifact_id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"; done
+      - name: Retain D4 shard report (attempt 3)
+        id: shard_report_attempt_3
+        if: always() && steps.shard_report_attempt_2.outcome == 'failure' && steps.shard_report_recover_3.outcome == 'success' && steps.shard_report_recover_3.outputs.artifact_ready != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.report_artifact }}
+          path: |
+            mutation-report.json
+            mutation-report.json.tmp
+          if-no-files-found: error
+          retention-days: 90
+      - name: Verify D4 shard report upload
+        id: shard_report_verify
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ inputs.report_artifact }}
+          ATTEMPT_1: ${{ steps.shard_report_attempt_1.outcome }}
+          ATTEMPT_2: ${{ steps.shard_report_attempt_2.outcome }}
+          ATTEMPT_3: ${{ steps.shard_report_attempt_3.outcome }}
+        run: |
+          if [[ "$ATTEMPT_1" == success || "$ATTEMPT_2" == success || "$ATTEMPT_3" == success ]]; then exit 0; fi
+          artifacts="$(gh api --method GET --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -f name="$ARTIFACT_NAME" -f per_page=100)"
+          jq -e '[.[].artifacts[] | select(.name == env.ARTIFACT_NAME and .size_in_bytes > 0)] | length > 0' <<<"$artifacts" >/dev/null || exit 1
