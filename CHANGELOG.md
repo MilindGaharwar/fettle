@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Raise mutation preflight per-shard and local `fettle mutation --all` budgets from 1,800 s to 7,200 s; D4 execute shards retain their explicit 20,100 s timeout and the D4 policy digest is unchanged.
 - Harden D4 preflight containers and retain partial corpus diagnostics on seal failures.
 - Seal synthetic D4 gate preflight revisions and retain failed shard diagnostics.
 - Run D4 shard steps under Bash and route Python through the pinned uv environment.
