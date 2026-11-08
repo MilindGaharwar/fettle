@@ -6136,6 +6136,13 @@ def main() -> int:
             _write_json_atomic(Path(args.write_d4_corpus_identity), report)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             report = _error("unknown", f"Cannot write D4 corpus identity: {exc}")
+            print(json.dumps(report, indent=2) if args.json else format_report(report))
+            return 2
+        print(
+            json.dumps(report, indent=2)
+            if args.json else str(Path(args.write_d4_corpus_identity))
+        )
+        return 0
     elif args.d4_manifest:
         missing = [name for name, value in (
             ("--retained-preflight", args.retained_preflight), ("--d4-id", args.d4_id),
@@ -6184,6 +6191,10 @@ def main() -> int:
             _write_json_atomic(Path(args.capacity_plan), report)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             report = _error("unknown", f"Cannot prepare capacity validation: {exc}")
+            print(json.dumps(report, indent=2) if args.json else format_report(report))
+            return 2
+        print(json.dumps(report, indent=2) if args.json else str(Path(args.capacity_plan)))
+        return 0
     elif args.capacity_unit is not None:
         if not args.capacity_plan or not args.retained_preflight or not args.capacity_result:
             report = _error("unknown", "capacity unit requires plan, retained preflight, and result output")
@@ -6194,6 +6205,11 @@ def main() -> int:
                 Path(args.capacity_checkpoint) if args.capacity_checkpoint else None,
             )
             _write_json_atomic(Path(args.capacity_result), report)
+        if report.get("kind") != "capacity_validation_unit_result":
+            print(json.dumps(report, indent=2) if args.json else format_report(report))
+            return 2
+        print(json.dumps(report, indent=2) if args.json else str(Path(args.capacity_result)))
+        return 0
     elif args.resume_manifest:
         missing = [
             name for name, value in (
