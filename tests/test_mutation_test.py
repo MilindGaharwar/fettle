@@ -5196,6 +5196,10 @@ def test_d4_evidence_index_digests_round_trip(tmp_path):
     assert index["content_digest"] == _canonical_digest(content)
 
 
+def _forbid_real_mutation_run(root, cfg):
+    pytest.fail(f"CLI fell through to a real mutation run against {root}")
+
+
 def test_write_d4_corpus_identity_cli_writes_canonical_identity(
     tmp_path, monkeypatch, capsys,
 ):
@@ -5232,6 +5236,8 @@ def test_write_d4_corpus_identity_cli_writes_canonical_identity(
 
     mutation = load_config(str(root))["mutation"]
     expected = build_d4_corpus_identity(str(root), mutation, manifests, preflight)
+    # Real-root CLI test: a routing mutant must fail fast, never mutate this checkout.
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
     monkeypatch.setattr("sys.argv", [
         "mutation_test", "--root", str(root),
         "--write-d4-corpus-identity", str(identity_path),
@@ -5269,6 +5275,7 @@ def test_capacity_plan_cli_returns_after_writing_non_status_output(
     monkeypatch.setattr(
         "fettle.mutation_test.build_capacity_validation_plan", lambda *args, **kwargs: expected,
     )
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
     monkeypatch.setattr("sys.argv", [
         "mutation_test", "--root", str(root), "--capacity-plan", str(plan),
         "--retained-preflight", str(preflight), "--capacity-experiment-id", "experiment-a",
@@ -5290,6 +5297,7 @@ def test_capacity_unit_cli_returns_after_writing_non_status_output(
     monkeypatch.setattr(
         "fettle.mutation_test.run_capacity_validation_unit", lambda *args, **kwargs: expected,
     )
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
     monkeypatch.setattr("sys.argv", [
         "mutation_test", "--root", str(root), "--capacity-unit", "0",
         "--capacity-plan", str(tmp_path / "plan.json"),
@@ -5316,6 +5324,7 @@ def test_d4_evidence_index_cli_builds_appends_and_redigests(tmp_path, monkeypatc
     corpus = tmp_path / "corpus-identity.json"
     corpus.write_text(json.dumps({"digest": "b" * 64}) + "\n", encoding="utf-8")
     index_path = tmp_path / "d4-evidence-index.json"
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
     monkeypatch.setattr("sys.argv", [
         "mutation_test", "--root", str(root), "--d4-evidence-index", str(index_path),
         "--d4-retained-files", str(retained), "--d4-run-id", "900",
