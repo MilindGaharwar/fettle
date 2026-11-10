@@ -32,6 +32,7 @@ from fettle.mutation_test import (
     _mapped_tests,
     aggregate_shards,
     aggregate_d4_shards,
+    build_d4_corpus_identity,
     build_d4_evidence_index,
     evaluate_d4_admission,
     aggregate_capacity_validation_shards,
@@ -5195,6 +5196,120 @@ def test_d4_evidence_index_digests_round_trip(tmp_path):
     assert index["content_digest"] == _canonical_digest(content)
 
 
+def _forbid_real_mutation_run(root, cfg):
+    pytest.fail(f"CLI fell through to a real mutation run against {root}")
+
+
+def test_write_d4_corpus_identity_cli_writes_canonical_identity(
+    tmp_path, monkeypatch, capsys,
+):
+    root = Path(__file__).parents[1]
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    manifests = []
+    for index in range(256):
+        manifest = {
+            "schema_version": "1", "revision": revision,
+            "shard_index": index, "shard_count": 256,
+            "files": ["fettle/mutation_test.py"],
+            "ranges": [{"file": "fettle/mutation_test.py", "start": 1, "end": 1}],
+        }
+        manifest["digest"] = _canonical_digest(manifest)
+        manifests.append(manifest)
+        (manifests_dir / f"partition-{index}.json").write_text(
+            json.dumps(manifest) + "\n", encoding="utf-8",
+        )
+    preflight = {
+        "status": "completed", "passed": True, "revision": revision,
+        "shard_count": 256, "generated": 1, "canonicalized": 1, "collisions": 0,
+        "fingerprints": ["a" * 64], "corpus_digest": "b" * 64,
+        "manifest_digests": [manifest["digest"] for manifest in manifests],
+    }
+    preflight_path = tmp_path / "mutation-preflight.json"
+    preflight_path.write_text(json.dumps(preflight) + "\n", encoding="utf-8")
+    identity_path = tmp_path / "corpus-identity.json"
+
+    from fettle.config import load_config
+
+    mutation = load_config(str(root))["mutation"]
+    expected = build_d4_corpus_identity(str(root), mutation, manifests, preflight)
+    # Real-root CLI test: a routing mutant must fail fast, never mutate this checkout.
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--root", str(root),
+        "--write-d4-corpus-identity", str(identity_path),
+        "--aggregate-scope", str(manifests_dir),
+        "--aggregate-preflight-evidence", str(preflight_path), "--json",
+    ])
+
+    assert main() == 0
+    written = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert written == expected
+    assert json.loads(capsys.readouterr().out) == expected
+    assert written["kind"] == "d4_corpus_identity"
+    content = {key: value for key, value in written.items() if key != "digest"}
+    assert written["digest"] == _canonical_digest(content)
+
+
+def test_capacity_plan_cli_returns_after_writing_non_status_output(
+    tmp_path, monkeypatch, capsys,
+):
+    root = Path(__file__).parents[1]
+    preflight = tmp_path / "preflight.json"
+    history = tmp_path / "history.json"
+    predictions = tmp_path / "predictions.json"
+    manifests = tmp_path / "manifests"
+    plan = tmp_path / "plan.json"
+    manifests.mkdir()
+    (manifests / "partition-0.json").write_text("{}\n", encoding="utf-8")
+    preflight.write_text("{}\n", encoding="utf-8")
+    history.write_text(
+        json.dumps({"measured_files": [], "source": {}}) + "\n", encoding="utf-8",
+    )
+    predictions.write_text("{}\n", encoding="utf-8")
+    expected = {"schema_version": "1", "kind": "capacity_validation_plan"}
+    monkeypatch.setattr("fettle.mutation_test.load_partition_manifest", lambda path: {})
+    monkeypatch.setattr(
+        "fettle.mutation_test.build_capacity_validation_plan", lambda *args, **kwargs: expected,
+    )
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--root", str(root), "--capacity-plan", str(plan),
+        "--retained-preflight", str(preflight), "--capacity-experiment-id", "experiment-a",
+        "--capacity-history", str(history), "--capacity-predictions", str(predictions),
+        "--capacity-manifests", str(manifests), "--json",
+    ])
+
+    assert main() == 0
+    assert json.loads(plan.read_text(encoding="utf-8")) == expected
+    assert json.loads(capsys.readouterr().out) == expected
+
+
+def test_capacity_unit_cli_returns_after_writing_non_status_output(
+    tmp_path, monkeypatch, capsys,
+):
+    root = Path(__file__).parents[1]
+    result_path = tmp_path / "result.json"
+    expected = {"schema_version": "1", "kind": "capacity_validation_unit_result"}
+    monkeypatch.setattr(
+        "fettle.mutation_test.run_capacity_validation_unit", lambda *args, **kwargs: expected,
+    )
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
+    monkeypatch.setattr("sys.argv", [
+        "mutation_test", "--root", str(root), "--capacity-unit", "0",
+        "--capacity-plan", str(tmp_path / "plan.json"),
+        "--retained-preflight", str(tmp_path / "preflight.json"),
+        "--capacity-result", str(result_path), "--json",
+    ])
+
+    assert main() == 0
+    assert json.loads(result_path.read_text(encoding="utf-8")) == expected
+    assert json.loads(capsys.readouterr().out) == expected
+
+
 def test_d4_evidence_index_cli_builds_appends_and_redigests(tmp_path, monkeypatch, capsys):
     root = Path(__file__).parents[1]
     retained = tmp_path / "retained"
@@ -5209,6 +5324,7 @@ def test_d4_evidence_index_cli_builds_appends_and_redigests(tmp_path, monkeypatc
     corpus = tmp_path / "corpus-identity.json"
     corpus.write_text(json.dumps({"digest": "b" * 64}) + "\n", encoding="utf-8")
     index_path = tmp_path / "d4-evidence-index.json"
+    monkeypatch.setattr("fettle.mutation_test.run_mutation_test", _forbid_real_mutation_run)
     monkeypatch.setattr("sys.argv", [
         "mutation_test", "--root", str(root), "--d4-evidence-index", str(index_path),
         "--d4-retained-files", str(retained), "--d4-run-id", "900",
