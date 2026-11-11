@@ -886,7 +886,6 @@ jobs:
             git switch -C evidence/d4 FETCH_HEAD
           else
             git switch --orphan evidence/d4
-            git rm -rf .
           fi
           destination="runs/$GITHUB_RUN_ID/attempt-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$destination"
