@@ -5161,6 +5161,69 @@ def test_d4_aggregate_accepts_exact_fresh_lineage_and_preserves_outcomes(tmp_pat
     assert result["non_killed"] == []
 
 
+def test_d4_aggregate_accepts_one_bounded_failed_job_rerun(tmp_path):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+    reports[97]["run_attempt"] = "2"
+    reports[99]["run_attempt"] = "2"
+
+    with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
+        result = aggregate_d4_shards(
+            str(tmp_path), reports, ["fettle/"], [], 70,
+            run_id="900", run_attempt="2", d4_id="d4-fixture",
+            manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+            test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+        )
+
+    assert result["status"] == "completed"
+    assert result["accepted_attempts"] == ["1", "2"]
+    assert result["fresh_execution"][97]["run_attempt"] == "2"
+
+
+def test_d4_aggregate_rejects_more_than_one_failed_job_rerun(tmp_path):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+
+    result = aggregate_d4_shards(
+        str(tmp_path), reports, ["fettle/"], [], 70,
+        run_id="900", run_attempt="3", d4_id="d4-fixture",
+        manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+        test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+    )
+
+    assert result["status"] == "unknown"
+    assert result["message"] == "D4 permits at most one bounded failed-job rerun"
+
+
+@pytest.mark.parametrize("report_attempt", ["0", "x"])
+def test_d4_aggregate_rejects_invalid_report_attempt(tmp_path, report_attempt):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+    reports[11]["run_attempt"] = report_attempt
+
+    result = aggregate_d4_shards(
+        str(tmp_path), reports, ["fettle/"], [], 70,
+        run_id="900", run_attempt="2", d4_id="d4-fixture",
+        manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+        test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+    )
+
+    assert result["offending_shards"]["lineage"] == [11]
+
+
+def test_d4_aggregate_rejects_duplicate_completed_attempts(tmp_path):
+    reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
+    rerun = deepcopy(reports[12])
+    rerun["run_attempt"] = "2"
+    reports.append(rerun)
+
+    result = aggregate_d4_shards(
+        str(tmp_path), reports, ["fettle/"], [], 70,
+        run_id="900", run_attempt="2", d4_id="d4-fixture",
+        manifests=manifests, preflight=preflight, corpus_identity=corpus_identity,
+        test_mappings={"fettle/a.py": ["tests/test_a.py"]},
+    )
+
+    assert result["offending_shards"]["duplicates"] == [12]
+
+
 def test_d4_aggregate_rejects_report_container_outside_sealed_identity(tmp_path):
     reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
     reports[12]["container_digest"] = "sha256:" + "e" * 64

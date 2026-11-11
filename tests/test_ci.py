@@ -403,6 +403,30 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
     assert shard["permissions"] == {"actions": "read", "contents": "read"}
     assert execute["permissions"] == {"actions": "write", "contents": "read"}
 
+    for job_name in ("d4-aggregate", "d4-retain"):
+        shard_downloads = [
+            step for step in jobs[job_name]["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact")
+            and step.get("with", {}).get("pattern", "").startswith("d4-shard-report-")
+        ]
+        assert len(shard_downloads) == 1
+        pattern = shard_downloads[0]["with"]["pattern"]
+        assert pattern == "d4-shard-report-${{ github.run_id }}-*"
+        assert "${{ github.run_attempt }}" not in pattern
+    retain_downloads = [
+        step["with"] for step in jobs["d4-retain"]["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact")
+    ]
+    for prefix in ("d4-gate-report-", "d4-admission-"):
+        download = next(item for item in retain_downloads if item.get("pattern", "").startswith(prefix))
+        assert download["pattern"] == prefix + "${{ github.run_id }}-*"
+        assert download["merge-multiple"] is True
+    singleton_step = next(
+        step for step in jobs["d4-retain"]["steps"]
+        if step.get("name") == "Require exactly one gate and one admission artifact"
+    )
+    assert "exit 2" in singleton_step["run"]
+
 
 def test_d4_retain_orphan_mirror_path_executes_on_first_branch_creation(tmp_path):
     if shutil.which("git") is None:
