@@ -1,0 +1,15 @@
+{
+  "id": "mutation-artifact-string",
+  "name": "mutation-artifact-string",
+  "conclusion": "failure",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success"
+    },
+    {
+      "name": "Execute one manifest-bound advisory attempt",
+      "conclusion": "failure"
+    }
+  ]
+}
