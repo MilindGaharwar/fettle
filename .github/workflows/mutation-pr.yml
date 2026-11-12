@@ -218,7 +218,30 @@ jobs:
           uv venv --python 3.12.13
           uv pip install --quiet --require-hashes -r requirements-mutation.txt
           uv pip install --quiet --no-deps -e .
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download advisory manifests (attempt 1)
+        id: manifests_download_1
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-pr-manifests-${{ github.run_id }}
+          path: mutation-pr-source
+      - name: Back off before manifest download attempt 2
+        if: steps.manifests_download_1.outcome == 'failure'
+        run: sleep 30
+      - name: Download advisory manifests (attempt 2)
+        id: manifests_download_2
+        if: steps.manifests_download_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutation-pr-manifests-${{ github.run_id }}
+          path: mutation-pr-source
+      - name: Back off before manifest download attempt 3
+        if: steps.manifests_download_1.outcome == 'failure' && steps.manifests_download_2.outcome == 'failure'
+        run: sleep 60
+      - name: Download advisory manifests (attempt 3)
+        if: steps.manifests_download_1.outcome == 'failure' && steps.manifests_download_2.outcome == 'failure'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-pr-manifests-${{ github.run_id }}
           path: mutation-pr-source
@@ -239,8 +262,34 @@ jobs:
           python -c 'import json; value=json.load(open("mutation-report.json.tmp")); assert isinstance(value,dict)'
           mv mutation-report.json.tmp mutation-report.json
           exit "$status"
-      - name: Retain shard report
+      - name: Retain shard report (attempt 1)
+        id: shard_report_upload_1
         if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: mutation-report.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Back off before shard report upload attempt 2
+        if: always() && steps.shard_report_upload_1.outcome == 'failure'
+        run: sleep 30
+      - name: Retain shard report (attempt 2)
+        id: shard_report_upload_2
+        if: always() && steps.shard_report_upload_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: mutation-report.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Back off before shard report upload attempt 3
+        if: always() && steps.shard_report_upload_1.outcome == 'failure' && steps.shard_report_upload_2.outcome == 'failure'
+        run: sleep 60
+      - name: Retain shard report (attempt 3)
+        if: always() && steps.shard_report_upload_1.outcome == 'failure' && steps.shard_report_upload_2.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}

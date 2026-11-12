@@ -1922,6 +1922,39 @@ def test_pr_mutation_workflow_executes_one_bounded_attempt_per_full_scope_shard(
     assert "mutation-pr-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}" in workflow
 
 
+def test_pr_advisory_retries_manifest_download_and_report_upload_fail_closed():
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    shard = parsed["jobs"]["changed-shard"]
+    downloads = [
+        step for step in shard["steps"]
+        if str(step.get("name", "")).startswith("Download advisory manifests")
+    ]
+    uploads = [
+        step for step in shard["steps"]
+        if str(step.get("name", "")).startswith("Retain shard report")
+    ]
+
+    assert len(downloads) == len(uploads) == 3
+    assert all(
+        step["uses"]
+        == "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+        for step in downloads
+    )
+    assert all(
+        step["uses"]
+        == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        for step in uploads
+    )
+    assert [step.get("continue-on-error") for step in downloads] == [True, True, None]
+    assert [step.get("continue-on-error") for step in uploads] == [True, True, None]
+    assert {step["run"] for step in shard["steps"] if step.get("name", "").startswith("Back off")} == {
+        "sleep 30", "sleep 60",
+    }
+    assert all(step["with"]["path"] == "mutation-report.json" for step in uploads)
+
+
 def test_pr_advisory_fanout_needs_real_bounded_admission_gate():
     parsed = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()

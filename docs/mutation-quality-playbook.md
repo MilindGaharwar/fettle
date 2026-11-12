@@ -121,6 +121,10 @@ uv run fettle mutation status --report .fettle/mutation-report.json
 
 ## Recovery
 
+The PR advisory retries manifest downloads and shard-report uploads twice with
+short backoff. Exhausted retries still fail without synthesizing evidence;
+long provider outages require the bounded failed-job recovery path.
+
 | Symptom | Recovery |
 |---|---|
 | Mutation disabled | Set `[mutation] enabled = true`, then rerun `fettle doctor` |
