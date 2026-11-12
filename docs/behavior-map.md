@@ -32,6 +32,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Demonstrate the complete control loop without setup or network | `fettle demo` (`fettle/demo.py` over the bundled fixture and independent behavioral verifier) |
 | Inspect the composed gate/check pipeline with provenance | `fettle pipeline` (`fettle/pipeline_dump.py` over `dispatcher_registry.CHECKS` + policy layers) |
 | Add a user-facing CLI command | `cmd_*` function + subparser + entry in `cli.py::commands` dispatch dict + tests (`tests/test_cli.py`) |
+| Classify retained pull-request mutation-advisory failures | `fettle ci classify-mutation-advisory --input <corpus.json>` loads source fetch outcomes and retained evidence through `fettle/ci_ingest.py`; classification is step-scoped, cites the matched file and line, and preserves unknown or incomplete evidence as non-pass; fixture evidence in `tests/test_ci_ingest.py` and CLI evidence in `tests/test_cli.py` |
 | Add an agent host transport | `fettle/agents/<host>.py` translator + conformance fixtures + `fettle init` registration |
 | Add a workspace language adapter | `fettle/adapters/` + workspace marker detection in `fettle/workspace.py` |
 | Add a UAT surface driver | Capability probe in `fettle/uat/doctor.py`, driver gating in `fettle/uat/session.py`, and a `fettle uat manual` fallback walkthrough |

@@ -1,0 +1,5 @@
+{
+  "status": "completed",
+  "passed": false,
+  "message": "Mutation score below threshold"
+}

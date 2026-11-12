@@ -1,0 +1,15 @@
+{
+  "id": "survivors",
+  "name": "survivors",
+  "conclusion": "failure",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success"
+    },
+    {
+      "name": "Execute one manifest-bound advisory attempt",
+      "conclusion": "failure"
+    }
+  ]
+}
