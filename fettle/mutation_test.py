@@ -5229,7 +5229,8 @@ def _d4_offending_shards(reports: list[dict], run_id: str, run_attempt: str) -> 
         index for index, report in zip(indexes, reports, strict=True)
         if isinstance(report, dict)
         and (str(report.get("run_id", "")) != str(run_id)
-             or str(report.get("run_attempt", "")) != str(run_attempt))
+             or not re.fullmatch(r"[1-9][0-9]*", str(report.get("run_attempt", "")))
+             or not (1 <= int(report["run_attempt"]) <= int(run_attempt)))
     }, key=lambda value: (value is None, value if type(value) is int else str(value)))
     not_fresh = sorted({
         index for index, report in zip(indexes, reports, strict=True)
@@ -5261,7 +5262,12 @@ def aggregate_d4_shards(
     test_mappings: dict[str, list[str]] | None = None,
     policy_config: dict | None = None,
 ) -> dict:
-    """Aggregate exactly one fresh, current-attempt D4 report per frozen shard."""
+    """Aggregate exactly one fresh D4 report per frozen shard from the current run, accepting attempt 1 or one bounded failed-job rerun."""
+    if not re.fullmatch(r"[1-9][0-9]*", str(run_attempt)) or int(run_attempt) > 2:
+        return _error(
+            "unknown", "D4 permits at most one bounded failed-job rerun",
+            offending_shards={}, reused_shards=[],
+        )
     defects = _d4_offending_shards(reports, run_id, run_attempt)
     if len(reports) != _D4_SHARD_COUNT or any(defects.values()):
         return _error(
@@ -5316,6 +5322,7 @@ def aggregate_d4_shards(
         "d4_id": d4_id,
         "run_id": str(run_id),
         "run_attempt": str(run_attempt),
+        "accepted_attempts": sorted({str(report["run_attempt"]) for report in reports}, key=int),
         "reused_shards": [],
         "fresh_execution": [
             {
@@ -5871,7 +5878,7 @@ def main() -> int:
     parser.add_argument("--engine-budget-seconds", type=int)
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
-    parser.add_argument("--aggregate-d4", metavar="DIRECTORY", help="Aggregate exactly 256 current-attempt D4 reports")
+    parser.add_argument("--aggregate-d4", metavar="DIRECTORY", help="Aggregate exactly 256 fresh same-run D4 reports (attempt 1 or one bounded rerun)")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
     parser.add_argument("--aggregate-advisory", action="store_true", help="Validate a manifest-bound advisory aggregate")
     parser.add_argument("--advisory-execution", action="store_true", help="Bind one shard for advisory-only result reuse")

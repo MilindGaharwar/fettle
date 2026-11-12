@@ -653,7 +653,7 @@ jobs:
       - run: uv venv --python 3.12.13 && uv pip install --quiet --require-hashes -r requirements-mutation.txt && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: d4-shard-report-${{ github.run_id }}-${{ github.run_attempt }}-*
+          pattern: d4-shard-report-${{ github.run_id }}-*
           path: d4-shard-reports
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -730,11 +730,12 @@ jobs:
       - run: uv venv --python 3.12.13 && uv pip install --quiet --require-hashes -r requirements-mutation.txt && uv pip install --quiet --no-deps -e .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: d4-shard-report-${{ github.run_id }}-${{ github.run_attempt }}-*
+          pattern: d4-shard-report-${{ github.run_id }}-*
           path: retained/shards
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: d4-gate-report-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: d4-gate-report-${{ github.run_id }}-*
+          merge-multiple: true
           path: retained/gate
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -746,8 +747,16 @@ jobs:
           path: retained/aggregate
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: d4-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: d4-admission-${{ github.run_id }}-*
+          merge-multiple: true
           path: retained/admission
+      - name: Require exactly one gate and one admission artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gate_count="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq "[.artifacts[] | select(.name | test(\"^d4-gate-report-${GITHUB_RUN_ID}-\"))] | length" | awk '{sum += $1} END {print sum + 0}')"
+          admission_count="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq "[.artifacts[] | select(.name | test(\"^d4-admission-${GITHUB_RUN_ID}-\"))] | length" | awk '{sum += $1} END {print sum + 0}')"
+          [[ "$gate_count" == 1 && "$admission_count" == 1 ]] || exit 2
       - name: Build D4 evidence index
         env:
           GH_TOKEN: ${{ github.token }}
@@ -886,7 +895,6 @@ jobs:
             git switch -C evidence/d4 FETCH_HEAD
           else
             git switch --orphan evidence/d4
-            git rm -rf .
           fi
           destination="runs/$GITHUB_RUN_ID/attempt-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$destination"

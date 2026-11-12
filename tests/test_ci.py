@@ -403,6 +403,80 @@ def test_d4_workflow_graph_is_fresh_lineage_bound_and_digest_pinned():
     assert shard["permissions"] == {"actions": "read", "contents": "read"}
     assert execute["permissions"] == {"actions": "write", "contents": "read"}
 
+    for job_name in ("d4-aggregate", "d4-retain"):
+        shard_downloads = [
+            step for step in jobs[job_name]["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact")
+            and step.get("with", {}).get("pattern", "").startswith("d4-shard-report-")
+        ]
+        assert len(shard_downloads) == 1
+        pattern = shard_downloads[0]["with"]["pattern"]
+        assert pattern == "d4-shard-report-${{ github.run_id }}-*"
+        assert "${{ github.run_attempt }}" not in pattern
+    retain_downloads = [
+        step["with"] for step in jobs["d4-retain"]["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact")
+    ]
+    for prefix in ("d4-gate-report-", "d4-admission-"):
+        download = next(item for item in retain_downloads if item.get("pattern", "").startswith(prefix))
+        assert download["pattern"] == prefix + "${{ github.run_id }}-*"
+        assert download["merge-multiple"] is True
+    singleton_step = next(
+        step for step in jobs["d4-retain"]["steps"]
+        if step.get("name") == "Require exactly one gate and one admission artifact"
+    )
+    assert "exit 2" in singleton_step["run"]
+
+
+def test_d4_retain_orphan_mirror_path_executes_on_first_branch_creation(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git is required")
+    workflow = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-d4.yml").read_text()
+    )
+    step = next(
+        step for step in workflow["jobs"]["d4-retain"]["steps"]
+        if step.get("name") == "Mirror D4 evidence index and digests off provider"
+    )
+    script = step["run"]
+    assert "git switch --orphan evidence/d4" in script
+    assert "git rm -rf ." not in script
+
+    remote = tmp_path / "remote.git"
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "init"],
+        cwd=work, check=True, capture_output=True,
+    )
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=work, check=True)
+    mirror = work / "mirror"
+    mirror.mkdir()
+    (mirror / "d4-evidence-index.json").write_bytes(b"{}\n")
+    (mirror / "retained-files.sha256").write_bytes(b"digest\n")
+    start = script.index("if git ls-remote")
+    push = "git push origin HEAD:evidence/d4"
+    exact_path = script[start:script.index(push, start) + len(push)]
+    env = {**os.environ, "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1"}
+
+    result = subprocess.run(
+        "set -euo pipefail\n" + exact_path,
+        cwd=work, env=env, shell=True, executable="/bin/bash",
+        capture_output=True, text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    subprocess.run(
+        ["git", "-C", str(remote), "rev-parse", "--verify", "refs/heads/evidence/d4"],
+        check=True, capture_output=True,
+    )
+    tree = subprocess.run(
+        ["git", "-C", str(remote), "ls-tree", "-r", "--name-only", "evidence/d4"],
+        check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert "runs/1/attempt-1/d4-evidence-index.json" in tree
+
 
 def test_d4_container_digest_has_one_value_across_python_and_workflow():
     import ast
