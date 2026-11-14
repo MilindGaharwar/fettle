@@ -16,7 +16,6 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config  # noqa: E402
 from fettle.paths import classify_file  # noqa: E402
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -407,109 +406,9 @@ def sniff_lr012(file_path: str, tree: ast.Module | None, cwd: str,
 
 
 def main() -> None:
-    start_time = time.monotonic()
+    from fettle.hook_cli import run_main
 
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, EOFError):
-        sys.exit(0)
-
-    file_path: str = data.get("tool_input", {}).get("file_path", "")
-    if not file_path:
-        sys.exit(0)
-
-    cwd: str = data.get("cwd", ".")
-    session_id: str = data.get("session_id", "unknown")
-
-    # Extension guard
-    ext = os.path.splitext(file_path)[1].lower()
-    is_manifest = _is_manifest(file_path)
-    if classify_file(file_path) not in ("implementation", "test") and not is_manifest:
-        sys.exit(0)
-
-    # Ignore patterns
-    if _is_ignored(file_path):
-        sys.exit(0)
-
-    # File existence and size
-    if not os.path.isfile(file_path):
-        sys.exit(0)
-    if os.path.getsize(file_path) > MAX_FILE_BYTES:
-        sys.exit(0)
-
-    # Config
-    cfg = load_config(cwd)
-    lean_cfg = cfg.get("gates", {}).get("lean_review", {})
-    if not lean_cfg.get("enabled", True):
-        sys.exit(0)
-    tier1_cfg = lean_cfg.get("tier1", {})
-    if not tier1_cfg.get("enabled", True):
-        sys.exit(0)
-    thresholds = {**DEFAULT_THRESHOLDS, **tier1_cfg.get("thresholds", {})}
-    max_runtime_ms = tier1_cfg.get("max_runtime_ms", 200)
-
-    # Read content
-    try:
-        with open(file_path, encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
-    except OSError:
-        sys.exit(0)
-
-    # Changed lines
-    changed_lines = _get_changed_lines(file_path, cwd)
-
-    # AST (Python only)
-    tree: ast.Module | None = None
-    if ext == ".py":
-        with contextlib.suppress(SyntaxError):
-            tree = ast.parse(content)
-
-    # State dir
-    state_dir = os.environ.get(
-        "FETTLE_LEAN_STATE_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state"),
-    )
-
-    # Run sniffers
-    candidates: list[dict] = []
-
-    def _budget_ok() -> bool:
-        return (time.monotonic() - start_time) * 1000 < max_runtime_ms
-
-    # LR001 — dependency manifest
-    if _budget_ok() and is_manifest:
-        candidates.extend(sniff_lr001(file_path, content, changed_lines, cwd, session_id))
-
-    # LR002 — abstraction names (regex, all languages)
-    if _budget_ok() and classify_file(file_path) in ("implementation", "test"):
-        candidates.extend(sniff_lr002(file_path, content, changed_lines, cwd, session_id))
-
-    # LR003 — pass-through wrapper (Python AST)
-    if _budget_ok() and tree is not None:
-        candidates.extend(sniff_lr003(file_path, tree, changed_lines, cwd, session_id))
-
-    # LR004 — single-method class (Python AST)
-    if _budget_ok() and tree is not None:
-        candidates.extend(sniff_lr004(file_path, tree, changed_lines, cwd, session_id))
-
-    # LR008 — large addition
-    if _budget_ok():
-        candidates.extend(sniff_lr008(file_path, content, changed_lines, tree, cwd, session_id, thresholds))
-
-    # LR012 — duplicate helper name (Python AST + git grep)
-    if _budget_ok() and tree is not None:
-        candidates.extend(sniff_lr012(file_path, tree, cwd, session_id))
-
-    # Suppress candidates near fettle:lean: markers
-    if candidates:
-        candidates = _suppress_near_lean_markers(candidates, content)
-
-    # Write state
-    if candidates:
-        with contextlib.suppress(OSError):
-            _append_candidates(state_dir, session_id, candidates)
-
-    sys.exit(0)
+    run_main(run_check)
 
 
 def run_check(ctx):

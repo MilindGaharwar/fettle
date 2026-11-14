@@ -449,7 +449,7 @@ def _bootstrap_already_warned(cwd: str) -> bool:
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 
-def main():
+def _script_main():
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError, EOFError):
@@ -585,12 +585,14 @@ def run_check(ctx):
         payload["session_id"] = ctx.input.session_id
 
     try:
+        env = {**os.environ, "FETTLE_CHECK_SUBPROCESS": "1"}
         proc = subprocess.run(
             [sys.executable, script_path],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         # Silent allow() here disabled the Stage-0 failure-visibility trace
@@ -607,6 +609,8 @@ def run_check(ctx):
 
     if not proc.stdout.strip():
         if proc.returncode == 0:
+            if proc.stderr.strip():
+                return CheckResult.advisory(proc.stderr.strip())
             return CheckResult.allow()
         return CheckResult.tool_error(
             f"quality gate subprocess crashed (exit {proc.returncode}): "
@@ -640,8 +644,14 @@ def run_check(ctx):
     return CheckResult.allow()
 
 
+def main() -> None:
+    from fettle.hook_cli import run_main
+
+    run_main(run_check, advisory_to_stderr=True)
+
+
 if __name__ == "__main__":
     try:
-        main()
+        _script_main() if os.environ.get("FETTLE_CHECK_SUBPROCESS") == "1" else main()
     except (json.JSONDecodeError, OSError, ValueError):
         sys.exit(0)

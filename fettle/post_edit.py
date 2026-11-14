@@ -20,7 +20,7 @@ def _resolve_tool(name: str) -> str | None:
     return resolve_tool(name)
 
 
-def main() -> None:
+def _script_main() -> None:
     hook_start = time.monotonic_ns()
 
     # ── Parse stdin ──────────────────────────────────────────────────────
@@ -407,12 +407,14 @@ def run_check(ctx):
     payload = ctx.input.raw
 
     try:
+        env = {**os.environ, "FETTLE_CHECK_SUBPROCESS": "1"}
         proc = subprocess.run(
             [sys.executable, script_path],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return CheckResult.allow()
@@ -435,9 +437,15 @@ def run_check(ctx):
     return CheckResult.allow()
 
 
+def main() -> None:
+    from fettle.hook_cli import run_main
+
+    run_main(run_check)
+
+
 if __name__ == "__main__":
     try:
-        main()
+        _script_main() if os.environ.get("FETTLE_CHECK_SUBPROCESS") == "1" else main()
     except (json.JSONDecodeError, OSError, ValueError) as e:
         print(f"fettle gate warning: post_edit hook failed: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(0)

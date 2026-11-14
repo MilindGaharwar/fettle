@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ast
 from pathlib import Path
 
 from fettle import bridge
@@ -86,6 +87,26 @@ def test_enforce_capable_checks_declare_policy_owners():
 
 def test_lsp_main_remains_the_server_entry_point():
     assert lsp_main.__doc__ == "Entry point for the LSP server."
+
+
+def test_hook_modules_expose_only_thin_public_main_wrappers():
+    modules = (
+        "commit_message", "config_protect", "destructive_guard", "lean_sniffers",
+        "loop_detect", "mcp_trust_gate", "post_bash_doc_check", "post_edit",
+        "quality_gate", "scope_creep", "stop_quality_gate",
+    )
+
+    for name in modules:
+        tree = ast.parse((ROOT / "fettle" / f"{name}.py").read_text(encoding="utf-8"))
+        main = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+        )
+        assert len(main.body) <= 5, name
+        assert any(
+            isinstance(node, ast.Name) and node.id == "run_check"
+            for node in ast.walk(main)
+        ), name
 
 
 def test_enforcement_readers_preserve_malformed_journal_as_unknown(tmp_path, monkeypatch):

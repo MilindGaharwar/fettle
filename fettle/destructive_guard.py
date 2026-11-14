@@ -8,13 +8,11 @@ Fail-open on all errors. Never crashes the session.
 """
 
 import contextlib
-import json
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config  # noqa: E402
 
 DESTRUCTIVE_PATTERNS = [
     r"rm\s+(-[^\s]*r[^\s]*f|--recursive\s+--force|--force\s+--recursive|-[^\s]*f[^\s]*r)\b",
@@ -81,70 +79,9 @@ def _is_allowed(segment: str, allow_list: list[str]) -> bool:
 
 
 def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, EOFError):
-        sys.exit(0)
+    from fettle.hook_cli import run_main
 
-    tool_input = data.get("tool_input", {})
-    command = tool_input.get("command", "")
-    if not command:
-        sys.exit(0)
-
-    cwd = data.get("cwd", ".")
-    cfg = load_config(cwd)
-
-    gate_cfg = cfg.get("gates", {}).get("destructive", {})
-    if not gate_cfg.get("enabled", True):
-        sys.exit(0)
-
-    mode = gate_cfg.get("mode", "advisory")
-    allow_commands = gate_cfg.get("allow_commands", [])
-    extra_patterns = gate_cfg.get("extra_patterns", [])
-
-    if extra_patterns:
-        for pat in extra_patterns:
-            with contextlib.suppress(re.error):
-                COMPILED_PATTERNS.append(re.compile(pat, re.IGNORECASE))
-
-    segments = _normalize_command(command)
-    matched = None
-    for seg in segments:
-        if _is_allowed(seg, allow_commands):
-            continue
-        matched = _check_segment(seg)
-        if matched:
-            break
-
-    if not matched:
-        sys.exit(0)
-
-    matched_display = matched[:80]
-    if mode == "enforce":
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "additionalContext": (
-                    f"Destructive command blocked: `{matched_display}`. "
-                    f'Set [gates.destructive].mode = "advisory" to allow with warning.'
-                ),
-            }
-        }
-        print(json.dumps(output))
-        sys.exit(2)
-
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": (
-                f"Destructive command detected: `{matched_display}`. "
-                f"Consider a safer alternative."
-            ),
-        }
-    }
-    print(json.dumps(output))
-    sys.exit(0)
+    run_main(run_check)
 
 
 def run_check(ctx):
