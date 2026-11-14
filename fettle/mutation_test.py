@@ -4818,13 +4818,17 @@ def select_bounded_shard_attempts(
     *,
     run_id: str | None = None,
     allow_successful_reuse: bool = False,
+    report_sources: list[str] | None = None,
 ) -> tuple[list[dict], dict]:
     """Select attempt 1 or one explicit attempt-2 supersession per shard."""
     if not isinstance(shard_count, int) or isinstance(shard_count, bool) or shard_count < 1:
         raise ValueError("bounded attempt selection has invalid shard topology")
+    if report_sources is not None and len(report_sources) != len(reports):
+        raise ValueError("bounded attempt selection source count differs from reports")
     by_shard: dict[int, dict[str, dict]] = {index: {} for index in range(shard_count)}
     reused_by_shard: dict[int, dict] = {}
-    for report in reports:
+    provider_attempts: set[tuple[int, str]] = set()
+    for position, report in enumerate(reports):
         index = report.get("shard_index") if isinstance(report, dict) else None
         attempt = str(report.get("run_attempt", "")) if isinstance(report, dict) else ""
         if (
@@ -4840,13 +4844,38 @@ def select_bounded_shard_attempts(
                 raise ValueError(f"shard {index} has conflicting fresh and reused reports")
             reused_by_shard[index] = report
             continue
+        if report_sources is not None:
+            source = Path(report_sources[position])
+            match = re.fullmatch(
+                r"(?:d4-shard-report|mutation-pr-shard)-(\d+)-([12])-(\d+)",
+                source.parent.name,
+            ) if source.name == "mutation-report.json" else None
+            if match is None:
+                raise ValueError(f"shard {index} artifact lineage is malformed")
+            source_run, source_attempt, source_shard = match.groups()
+            if run_id is not None and source_run != str(run_id):
+                raise ValueError(f"shard {index} has conflicting run lineage")
+            if "run_id" in report and str(report["run_id"]) != source_run:
+                raise ValueError(f"shard {index} has conflicting run lineage")
+            if "run_attempt" in report and str(report["run_attempt"]) != source_attempt:
+                raise ValueError(f"shard {index} has conflicting attempt lineage")
+            if int(source_shard) != index:
+                raise ValueError(f"shard {index} has conflicting shard lineage")
+            attempt = source_attempt
+            provider_attempts.add((index, attempt))
         if attempt not in {"1", "2"}:
             raise ValueError(f"shard {index} attempt {attempt or 'missing'} is outside the bounded policy")
         if attempt in by_shard[index]:
             raise ValueError(f"shard {index} has duplicate attempt {attempt}")
-        if run_id is not None and str(report.get("run_id", "")) != str(run_id):
+        if run_id is not None and report_sources is None and str(report.get("run_id", "")) != str(run_id):
             raise ValueError(f"shard {index} has conflicting run lineage")
-        if report.get("fresh_execution") is not True or "reuse_provenance" in report:
+        provider_partial = (
+            (index, attempt) in provider_attempts
+            and report.get("status") != "completed"
+            and report.get("partial") is True
+            and "fresh_execution" not in report
+        )
+        if (report.get("fresh_execution") is not True and not provider_partial) or "reuse_provenance" in report:
             raise ValueError(f"shard {index} attempt {attempt} is not a fresh execution")
         by_shard[index][attempt] = report
 
@@ -4876,9 +4905,14 @@ def select_bounded_shard_attempts(
         second = attempts.get("2")
         if first is None:
             if second is not None:
-                raise ValueError(f"shard {index} attempt 2 has no attempt 1 to supersede")
-            raise ValueError(f"shard {index} has no attempt report")
-        if second is None:
+                if (index, "2") not in provider_attempts:
+                    raise ValueError(f"shard {index} attempt 2 has no attempt 1 to supersede")
+                chosen = second
+                superseded = None
+                reason = "provider_retained_attempt_2"
+            else:
+                raise ValueError(f"shard {index} has no attempt report")
+        elif second is None:
             if first.get("status") != "completed":
                 raise ValueError(f"shard {index} has no completed attempt")
             chosen = first
@@ -4905,7 +4939,11 @@ def select_bounded_shard_attempts(
             "shard_index": index,
             "selected_attempt": str(chosen["run_attempt"]),
             "selected_digest": _canonical_digest(chosen),
-            "superseded_attempt": None if superseded is None else str(superseded["run_attempt"]),
+            "superseded_attempt": (
+                "1" if first is None and second is chosen
+                else None if superseded is None
+                else "1"
+            ),
             "superseded_digest": None if superseded is None else _canonical_digest(superseded),
             "reason": reason,
         })
@@ -6186,6 +6224,7 @@ def main() -> int:
             selected, report = select_bounded_shard_attempts(
                 reports, args.shard_count, run_id=args.d4_run_id,
                 allow_successful_reuse=args.allow_successful_reuse,
+                report_sources=[str(path) for path in report_paths],
             )
             output_root = Path(args.selected_reports_output)
             for selected_report in selected:
