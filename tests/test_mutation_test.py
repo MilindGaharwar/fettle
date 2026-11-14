@@ -5010,6 +5010,84 @@ def test_bounded_attempt_selection_records_timeout_supersession():
     assert record["selections"][0]["superseded_digest"] == _canonical_digest(first)
 
 
+def test_bounded_attempt_selection_uses_validated_artifact_lineage_for_partial_report():
+    first = {
+        "status": "tool_error", "partial": True, "revision": "a" * 40,
+        "shard_index": 0, "shard_count": 1,
+    }
+    second = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "revision": "a" * 40, "run_id": "900", "run_attempt": "2",
+        "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts(
+        [first, second], 1, run_id="900",
+        report_sources=[
+            "d4-shard-report-900-1-0/mutation-report.json",
+            "d4-shard-report-900-2-0/mutation-report.json",
+        ],
+    )
+
+    assert selected == [second]
+    assert record["selections"][0]["selected_attempt"] == "2"
+    assert record["selections"][0]["superseded_attempt"] == "1"
+    assert record["selections"][0]["superseded_digest"] == _canonical_digest(first)
+
+
+def test_bounded_attempt_selection_accepts_provider_retained_attempt_2_only():
+    second = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "2", "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts(
+        [second], 1, run_id="900",
+        report_sources=["d4-shard-report-900-2-0/mutation-report.json"],
+    )
+
+    assert selected == [second]
+    assert record["selections"][0]["selected_attempt"] == "2"
+    assert record["selections"][0]["superseded_attempt"] == "1"
+    assert record["selections"][0]["superseded_digest"] is None
+    assert record["selections"][0]["reason"] == "provider_retained_attempt_2"
+
+
+def test_bounded_attempt_selection_accepts_pr_advisory_artifact_lineage():
+    report = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+
+    selected, _ = select_bounded_shard_attempts(
+        [report], 1, run_id="900",
+        report_sources=["mutation-pr-shard-900-1-0/mutation-report.json"],
+    )
+
+    assert selected == [report]
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("unexpected/mutation-report.json", "artifact lineage is malformed"),
+        ("d4-shard-report-901-1-0/mutation-report.json", "conflicting run lineage"),
+        ("d4-shard-report-900-2-0/mutation-report.json", "conflicting attempt lineage"),
+        ("d4-shard-report-900-1-1/mutation-report.json", "conflicting shard lineage"),
+    ],
+)
+def test_bounded_attempt_selection_rejects_artifact_lineage_conflicts(source, message):
+    report = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        select_bounded_shard_attempts(
+            [report], 1, run_id="900", report_sources=[source],
+        )
+
+
 @pytest.mark.parametrize(
     ("reports", "message"),
     [
