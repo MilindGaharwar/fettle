@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "source_revision": "1ffff5c01900bee48d1225c8799eed0b91e6c083",
+  "corpus_identity_digest": "0dc6bde061b5f59901e81f183ff486760df9a5f5d10746a58ac0bcdb50b38712",
+  "container_digest": "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12",
+  "runs": {
+    "run_1": {
+      "preflight": 43208008121,
+      "gate": 43213746562,
+      "execute": 43213960751,
+      "attempts": [
+        1
+      ],
+      "mirror_commit": "e26a507f7cd96cd1ba7b9847b380b135c6262c6e"
+    },
+    "run_2": {
+      "preflight": 43382729275,
+      "gate": 43388047736,
+      "execute": 43388442136,
+      "attempts": [
+        1,
+        2
+      ],
+      "mirror_commit": "caaa526522ee654a3f0440d63453917f09c87ff7"
+    }
+  },
+  "kind": "d4_closeout_targeted_replays",
+  "fingerprint": "b040e702664fcd23db54b42826a5ce0c22560ca5877b40bf360f71bb4b9c4eae",
+  "file": "fettle/graph_cli.py",
+  "line": 231,
+  "before": "'impact'",
+  "after": "'XXimpactXX'",
+  "mapped_tests": [
+    "tests/test_graph_cli.py"
+  ],
+  "replays": [
+    {
+      "iteration": 1,
+      "state": "suspicious",
+      "fresh_cache": true,
+      "engine_id": "2",
+      "unmutated_wall_seconds": 2.4797141551971436,
+      "mutant_test_wall_seconds": 15.652452230453491,
+      "time_limit_seconds": 24.797141551971436,
+      "command_wall_seconds": 18.545007944107056,
+      "exit_code": 8
+    },
+    {
+      "iteration": 2,
+      "state": "suspicious",
+      "fresh_cache": true,
+      "engine_id": "2",
+      "unmutated_wall_seconds": 2.219212055206299,
+      "mutant_test_wall_seconds": 9.727902173995972,
+      "time_limit_seconds": 22.19212055206299,
+      "command_wall_seconds": 12.3594810962677,
+      "exit_code": 8
+    },
+    {
+      "iteration": 3,
+      "state": "suspicious",
+      "fresh_cache": true,
+      "engine_id": "2",
+      "unmutated_wall_seconds": 2.1800501346588135,
+      "mutant_test_wall_seconds": 9.707566738128662,
+      "time_limit_seconds": 21.800501346588135,
+      "command_wall_seconds": 12.311828851699829,
+      "exit_code": 8
+    },
+    {
+      "iteration": 4,
+      "state": "suspicious",
+      "fresh_cache": true,
+      "engine_id": "2",
+      "unmutated_wall_seconds": 2.1994497776031494,
+      "mutant_test_wall_seconds": 10.111278772354126,
+      "time_limit_seconds": 21.994497776031494,
+      "command_wall_seconds": 12.709150075912476,
+      "exit_code": 8
+    },
+    {
+      "iteration": 5,
+      "state": "suspicious",
+      "fresh_cache": true,
+      "engine_id": "2",
+      "unmutated_wall_seconds": 2.3336431980133057,
+      "mutant_test_wall_seconds": 10.288381099700928,
+      "time_limit_seconds": 23.336431980133057,
+      "command_wall_seconds": 13.049163103103638,
+      "exit_code": 8
+    }
+  ]
+}

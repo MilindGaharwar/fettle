@@ -149,11 +149,13 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [~] D3. P43 narrow formal verification — Policy Capsule and Work Item Claims
       implemented; Verify Gate, Dispatcher, TDD Gate, property/state-machine
       tests, and refinement maps remain
-- [~] D4. P34 mutation evidence integrity — fail-closed wrapper, seeded weak
-      assertion, and automatic PR advisory workflow implemented. In progress,
-      pending P0-ERA packages 1–3 and a stable definition before three fresh,
-      complete, retained, consecutive, same-corpus, non-reused full-scope runs on
-      `main`; only then may baseline and ratchet proposals proceed
+- [x] D4. P34 mutation evidence integrity — run 1 passed; run 2 is a formal
+      non-pass because its aggregate rejected a rescued shard, a defect fixed by
+      the bounded selector. No third run was made. On 2026-11-14 the owner
+      amended the criterion from three consecutive passing runs to the two
+      executions measured here. Full-corpus qualification remains
+      `CLOSED_NON_PASS`; no baseline or ratchet is proposed. Open mutation
+      programme questions are deferred to TR-8 of the trust remediation plan.
 - [x] D5. P35 seeded-defect and recorded-override contract — promoted
       `ci.verdict` seeded evidence and fail-closed, revision/evidence/policy-bound
       enforcing override path verified

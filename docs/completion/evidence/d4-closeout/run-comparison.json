@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "source_revision": "1ffff5c01900bee48d1225c8799eed0b91e6c083",
+  "corpus_identity_digest": "0dc6bde061b5f59901e81f183ff486760df9a5f5d10746a58ac0bcdb50b38712",
+  "container_digest": "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12",
+  "runs": {
+    "run_1": {
+      "preflight": 43208008121,
+      "gate": 43213746562,
+      "execute": 43213960751,
+      "attempts": [
+        1
+      ],
+      "mirror_commit": "e26a507f7cd96cd1ba7b9847b380b135c6262c6e"
+    },
+    "run_2": {
+      "preflight": 43382729275,
+      "gate": 43388047736,
+      "execute": 43388442136,
+      "attempts": [
+        1,
+        2
+      ],
+      "mirror_commit": "caaa526522ee654a3f0440d63453917f09c87ff7"
+    }
+  },
+  "kind": "d4_closeout_comparison",
+  "run_1": {
+    "run_id": "43213960751",
+    "killed": 31969,
+    "survived": 23478,
+    "timeout": 17,
+    "suspicious": 0,
+    "untested": 0,
+    "skipped": 0,
+    "total": 55464
+  },
+  "run_2": {
+    "run_id": "43388442136",
+    "attempts": [
+      "1",
+      "2"
+    ],
+    "killed": 31968,
+    "survived": 23478,
+    "timeout": 18,
+    "suspicious": 0,
+    "untested": 0,
+    "skipped": 0,
+    "total": 55464
+  },
+  "differing_mutant_count": 1,
+  "differing_mutants": [
+    {
+      "fingerprint": "b040e702664fcd23db54b42826a5ce0c22560ca5877b40bf360f71bb4b9c4eae",
+      "file": "fettle/graph_cli.py",
+      "line": 231,
+      "before": "'impact'",
+      "after": "'XXimpactXX'",
+      "run_1_state": "killed",
+      "run_2_state": "timeout",
+      "mapped_tests": [
+        "tests/test_graph_cli.py"
+      ]
+    }
+  ],
+  "manifest_count_run_1": 256,
+  "manifest_count_run_2": 256,
+  "every_manifest_digest_identical": true,
+  "corpus_container_digest_run_1": "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12",
+  "corpus_container_digest_run_2": "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12",
+  "corpus_container_digest_identical": true,
+  "corpus_identity_digest_run_1": "0dc6bde061b5f59901e81f183ff486760df9a5f5d10746a58ac0bcdb50b38712",
+  "corpus_identity_digest_run_2": "0dc6bde061b5f59901e81f183ff486760df9a5f5d10746a58ac0bcdb50b38712",
+  "corpus_identity_digest_identical": true
+}
