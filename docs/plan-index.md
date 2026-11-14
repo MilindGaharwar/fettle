@@ -22,6 +22,7 @@ this index is the navigation layer.
 | Add-in assurance pilot | `add-in-assurance-implementation-plan.md` + `add-in-assurance.ux-spec.md` | Proposed; implementation not authorized; blocked by CS-6 | Review the plan only; do not implement without separate explicit operator approval |
 | Evidence-guided handoffs pilot | `evidence-guided-handoffs-plan.md` + `evidence-guided-handoffs.ux-spec.md` + hypothesis tree | Proposed research program; planning complete; implementation and execution blocked by CS-6 | After CS-6, seek separate authorization for EH-0 contract/fixture freeze; do not add orchestration or enforcement |
 | Assurance Record v1 | `assurance-record-plan.md` | P80-P83 delivered; authority limitations superseded by Assurance Integrity | Preserve compatibility while hardening the aggregate boundary |
+| Trust remediation (2026-11-13 audit) | `trust-remediation-implementation-plan.md` | Proposed; sequenced after the D4 mutation hardening closes; implementation not started | Review the plan; start TR-0 when `main` is no longer frozen for D4 |
 | Improvement program (audit) | `improvement-plan.md` | Items 1–6 done; 5 index done; 8 partial | Positioning motion capture (operator) |
 
 ## Standing rules

@@ -125,6 +125,13 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       projection from the observed runner ledger only. Recorded 2026-10-25 after
       three commit-bound ~12 h runs were lost to offline-reproducible defects.
       No scope, pass-semantics, or qualification change.
+- [ ] P0-TR. Trust remediation, from the 2026-11-13 full audit
+      (docs/trust-remediation-implementation-plan.md). Next in line after D4
+      closes; nothing in this program starts while D4 runs are in flight.
+      Packages run in the order listed under Phase E. Owner decisions recorded
+      2026-11-13: hardening first; README claims are made true, not reduced;
+      the trust root is provider-neutral; the implementing agent opens each
+      pull request and the independent reviewer verifies and merges it.
 - [ ] P4. Research briefs, documents/slides, browser side effects, remote artifacts,
       MCP/non-code desktop hosts, and in-toto/PROV alignment remain deferred.
       Revisit a physical core/pack split only after a second workflow demonstrates
@@ -158,6 +165,42 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
 - [ ] D8. P53-P61 state consistency contracts — P53-P54 scheduled for the next
       minor and P55-P56 for the following minor; review and authorize P53/SC1
       before any runner, browser adapter, static heuristic, or enforcement work
+
+## Phase E — Trust remediation (2026-11-13 audit)
+
+Plan: docs/trust-remediation-implementation-plan.md. Starts after D4 closes.
+Order is priority order; each package is one pull request unless the plan says
+otherwise. Finding IDs refer to the plan's register.
+
+- [ ] E0. TR-0 Baseline harness and confirmations — end-to-end tests that run
+      the hook command exactly as `fettle init` registers it, in both launch
+      modes; host failure-mode table; one-time confirmation of M5. No behaviour
+      change.
+- [ ] E1. TR-1 Shipped hook path (P0: E1, E21, T1, E3, E4, E5) — dispatcher
+      records edits; one entry point per check; project-root policy
+      resolution; tool taxonomy with multi-target events; isolated launch.
+- [ ] E2. TR-2 Control plane and policy floors (P0: E2) — protect Fettle's own
+      config, state and hook wiring; fail-closed checks cannot be disabled from
+      the repository layer; organisation, remote and capsule policy become
+      floors; remote policy fails closed.
+- [ ] E3. TR-3 Truthful verification (P0: V2, V3a) — gates read the validated
+      artifact, never the stamp's `ok`; test counts recorded and zero executed
+      tests is a non-pass; CI evidence bound to the assessed commit.
+- [ ] E4. TR-4 First-run correctness (P0: G3, P2, P3) — secret-guard false
+      blocks; `init --dry-run` writes nothing; `explain` no longer crashes;
+      the demo runs the real engine. Independent; may be pulled forward.
+- [ ] E5. TR-5 Trust root — provider-neutral signed attestations, policy read
+      from the base ref, assurance levels A0-A3, signed overrides, completion
+      manifests and ledger checkpoints. Four rollout steps.
+- [ ] E6. TR-6 Guards — secret boundary model, destructive guard, spawn gate,
+      MCP gate, role separation, output guard.
+- [ ] E7. TR-7 Coordination — worktree scanning, claim ownership and scope,
+      worker attribution, session-bound plans.
+- [ ] E8. TR-8 Pipeline and mutation decisions — advisory serialisation guard,
+      fingerprint portability, admission accounting; owner decisions D1-D5 on
+      the mutation programme. Starts after D4 closes.
+- [ ] E9. TR-9 Polish — all P3 items and survivor triage in trust-critical
+      modules.
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
