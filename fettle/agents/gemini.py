@@ -21,20 +21,13 @@ from pathlib import Path
 from typing import Any
 
 from fettle.dispatcher_types import HookInput
+from fettle.agents.tools import canonical_tool, targets
 
 _EVENT_MAP = {
     "BeforeTool": "PreToolUse",
     "AfterTool": "PostToolUse",
     "AfterAgent": "Stop",
 }
-
-_TOOL_MAP = {
-    "run_shell_command": "Bash",
-    "write_file": "Write",
-    "replace": "Edit",
-    "read_file": "Read",
-}
-
 
 def matches(payload: dict[str, Any]) -> bool:
     """Gemini payloads carry a Gemini-vocabulary ``hook_event_name``."""
@@ -45,7 +38,7 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
     event = _EVENT_MAP.get(str(payload.get("hook_event_name")), "")
 
     tool_raw = payload.get("tool_name")
-    tool_name = _TOOL_MAP.get(tool_raw, tool_raw) if isinstance(tool_raw, str) else None
+    tool_name = canonical_tool(tool_raw)
 
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
@@ -66,4 +59,6 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
         cwd=Path(cwd_raw),
         session_id=session_id,
         raw=payload,
+        invocation_cwd=Path(cwd_raw),
+        targets=targets(tool_input),
     )

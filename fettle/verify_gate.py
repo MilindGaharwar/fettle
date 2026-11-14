@@ -767,12 +767,12 @@ def run_check(ctx: HookContext) -> CheckResult:
     if not cfg.get("enabled", False):
         return CheckResult.allow()
 
-    edits_path = _edits_path(ctx.session_id or "unknown")
-    if edits_path is None or not edits_path.is_file():
-        return CheckResult.allow()
-    edited = _edited_code_files(edits_path)
-    if not edited:
+    from fettle.edit_journal import entries, needs_verification, path
+    journal = entries(ctx.session_id)
+    if not needs_verification(ctx.session_id, ctx.cwd):
         return CheckResult.allow()  # docs-only session — nothing to verify
+    edits_path = path(ctx.session_id)
+    edited = _edited_code_files(edits_path) if edits_path.is_file() and not journal.malformed_lines else []
 
     stamp_path = ctx.cwd / STAMP_RELPATH
     problem = ""
@@ -789,7 +789,7 @@ def run_check(ctx: HookContext) -> CheckResult:
             # WP-7: a stamp from another session (or a hand-written one
             # without a session) proves nothing about THIS session's edits.
             problem = "verification stamp was written by another session"
-        elif (stamp_path.stat().st_mtime < edits_path.stat().st_mtime
+        elif (edits_path.is_file() and stamp_path.stat().st_mtime < edits_path.stat().st_mtime
               and not _tree_matches_stamp(str(ctx.cwd), stamp)):
             problem = "code was edited after the last verification run (stale)"
         elif not stamp.get("ok", False):

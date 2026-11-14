@@ -16,6 +16,8 @@ import os
 import sys
 import time
 import traceback
+import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent  # repo root (clone mode)
@@ -25,7 +27,8 @@ if str(_REPO_ROOT) not in sys.path:
 from fettle.config import load_config  # noqa: E402
 from fettle.dispatcher_aggregate import Aggregator  # noqa: E402
 from fettle.dispatcher_registry import CHECKS, select_checks  # noqa: E402
-from fettle.dispatcher_types import CheckResult, HookContext  # noqa: E402
+from fettle.dispatcher_types import CheckResult, Decision, HookContext  # noqa: E402
+from fettle.paths import find_project_root  # noqa: E402
 from fettle.trace import build_evidence, log_decision, log_evidenced_decision, read_tail  # noqa: E402
 
 
@@ -107,8 +110,6 @@ def _empty_output(event_name: str = "") -> str:
 
 
 def main() -> int:
-    start = time.monotonic()
-
     if os.environ.get("FETTLE_DISABLE_DISPATCHER") == "1":
         print(_empty_output())
         return 0
@@ -121,6 +122,19 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
         logger.error("fettle: stdin parse failed: %s", exc, exc_info=True)
         _trace_dispatch_failure("input_error", f"{type(exc).__name__}: {exc}")
+        if '"PreToolUse"' in raw_stdin:
+            failure = Aggregator(total_budget_ms=0, hook_event_name="PreToolUse")
+            failure.add_result(
+                "dispatcher",
+                CheckResult.block(
+                    "Malformed PreToolUse input; policy checks could not run. "
+                    "Run `fettle doctor` and retry."
+                ),
+                0,
+            )
+            output, exit_code = failure.finish()
+            print(json.dumps(output, separators=(",", ":")))
+            return exit_code
         print(_empty_output())
         return 0
 
@@ -134,11 +148,28 @@ def main() -> int:
         _trace_dispatch_failure("input_error", f"normalize: {type(exc).__name__}: {exc}")
         print(_empty_output(str(payload.get("hook_event_name") or "")))
         return 0
-    cwd = hook_input.cwd
+    invocation_cwd = hook_input.invocation_cwd or hook_input.cwd
+    cwd = find_project_root(invocation_cwd)
+    hook_input = replace(hook_input, cwd=cwd, invocation_cwd=invocation_cwd)
+    if (
+        hook_input.hook_event_name == "PreToolUse"
+        and hook_input.targets
+        and hook_input.tool_name not in {"Bash", "Write", "Edit", "Read", "Search"}
+    ):
+        hook_input = replace(hook_input, tool_name="Edit")
     session_id = hook_input.session_id or ""
 
     try:
         config = load_config(str(cwd), strict=True)
+        from fettle.edit_journal import record, record_session_start
+        policy_digest = hashlib.sha256(
+            json.dumps(config, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
+        record_session_start(session_id, cwd, policy_digest)
+        if hook_input.hook_event_name == "PostToolUse" and hook_input.tool_name in {"Write", "Edit"}:
+            for target in hook_input.targets:
+                record(session_id, target if target.is_absolute() else invocation_cwd / target, hook_input.tool_name)
+        start = time.monotonic()
         budget_ms = _event_budget_ms(config, hook_input.hook_event_name)
         deadline = start + (budget_ms / 1000.0)
         ctx = HookContext(
@@ -214,10 +245,23 @@ def main() -> int:
         ctx.check_deadline_monotonic = check_deadline
 
         try:
-            result = spec.run(ctx)
-            if result is None:
-                result = (CheckResult.unknown("Required check returned no result", action="retry")
-                          if spec.requires_execution_for(ctx) else CheckResult.allow())
+            target_contexts = [ctx]
+            if len(hook_input.targets) > 1 and spec.tools is not None:
+                target_contexts = [
+                    replace(ctx, input=replace(hook_input, targets=(target,)))
+                    for target in hook_input.targets
+                ]
+            result = CheckResult.allow()
+            for target_ctx in target_contexts:
+                result = spec.run(target_ctx)
+                if result is None:
+                    result = (
+                        CheckResult.unknown("Required check returned no result", action="retry")
+                        if spec.requires_execution_for(target_ctx) else CheckResult.allow()
+                    )
+                if result.decision != Decision.ALLOW:
+                    ctx = target_ctx
+                    break
         except Exception as exc:  # noqa: BLE001 — isolate check failures
             if spec.requires_execution_for(ctx):
                 logger.error("fettle: security check %s failed closed", spec.name)

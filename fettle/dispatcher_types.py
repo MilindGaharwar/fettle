@@ -28,6 +28,8 @@ class HookInput:
     cwd: Path
     session_id: str | None
     raw: dict[str, Any]
+    invocation_cwd: Path | None = None
+    targets: tuple[Path, ...] = ()
 
 
 @dataclass
@@ -61,11 +63,15 @@ class HookContext:
 
     @property
     def target_path(self) -> Path | None:
+        if self.input.targets:
+            p = self.input.targets[0]
+            base = self.input.invocation_cwd or self.cwd
+            return p if p.is_absolute() else base / p
         for key in ("file_path", "path", "notebook_path"):
             value = self.tool_input.get(key)
             if isinstance(value, str) and value:
                 p = Path(value)
-                return p if p.is_absolute() else self.cwd / p
+                return p if p.is_absolute() else (self.input.invocation_cwd or self.cwd) / p
         return None
 
     @property

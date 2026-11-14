@@ -133,9 +133,10 @@ def run_check(ctx):
     """Dispatcher-compatible entry point. Returns CheckResult."""
     from fettle.dispatcher_types import CheckResult
 
-    file_path = ctx.tool_input.get("file_path", "")
-    if not file_path:
+    target = ctx.target_path
+    if target is None:
         return CheckResult.allow()
+    file_path = str(target)
 
     gate_cfg = ctx.config.get("gates", {}).get("config_protect", {})
     if not gate_cfg.get("enabled", True):
