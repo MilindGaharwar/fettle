@@ -1,12 +1,15 @@
 # Trust Remediation Implementation Plan
 
 Date: 2026-11-13
-Status: proposed. Implementation starts only after the mutation hardening (D4)
-closes; see [TODO](engagement/TODO.md).
+Status: authorized by the owner on 2026-11-14 for implementation package by
+package, in the order of section 4. Local implementation may begin before the
+mutation hardening (D4) closes; nothing from this program merges before the D4
+close-out does. See [TODO](engagement/TODO.md).
 Owner: Milind (approval and merge authority); implementing engineer (delivery);
 independent reviewer in a separate session (verification before merge).
 
-Related artifacts: [program index](plan-index.md),
+Related artifacts: [UX acceptance contract](trust-remediation.ux-spec.md),
+[program index](plan-index.md),
 [extension ownership](behavior-map.md), [roadmap](ROADMAP.md),
 [evidence contract](evidence-artifact-contract.md), [security policy](../SECURITY.md).
 
@@ -65,13 +68,16 @@ Two audit items changed during planning:
 
 - **Closed, not a defect:** "block reasons may be invisible on Claude Code".
   The host documentation shows the JSON reason is used on exit 2.
-- **Downgraded:** "a label event may turn a failed `mutation evidence` check
-  green". The job name is written as an expression
-  (`name: ${{ 'mutation evidence' }}`, `mutation-pr.yml:254`), and
-  `tests/test_doc_claims.py` and `tests/test_ci.py:1906,2392` pin that form.
-  That is consistent with deliberate containment, if a skipped job reports
-  under its unevaluated name; this plan has not confirmed that behaviour. It
-  stays as a one-time confirmation in TR-0.
+- **Confirmed on 2026-11-14:** "a label event may replace the result of the
+  required `mutation evidence` check". The job name is written as an
+  expression (`name: ${{ 'mutation evidence' }}`, `mutation-pr.yml:254`), but
+  a constant expression is still evaluated for a skipped job. On pull request
+  #73, adding the label `documentation` started run `43557646055`, whose jobs
+  were all skipped, and it published a second check run named exactly
+  `mutation evidence` with conclusion `skipped`, newer than the successful
+  one. GitHub documents that a job skipped by a condition reports success to
+  required checks. The final step, a failed check becoming mergeable, was not
+  tested on a failing pull request. The fix is in TR-0.
 
 ## 3. Assumptions, boundaries and decisions
 
@@ -114,7 +120,7 @@ Packages run in this order. Each is one pull request unless noted.
 
 | Order | Package | Contains P0 | Depends on |
 |---|---|---|---|
-| 1 | TR-0 Baseline harness and confirmations | harness (T2) | — |
+| 1 | TR-0 Baseline harness and required-check containment | harness (T2) | — |
 | 2 | TR-1 Shipped hook path | E1, E21, T1, E3, E4, E5 | TR-0 |
 | 3 | TR-2 Control plane and policy floors | E2 | TR-1 |
 | 4 | TR-3 Truthful verification | V2, V3a | TR-1 |
@@ -495,7 +501,7 @@ commands is present and only for tokens that `shlex.split` yields
 
 ### TR-0 Baseline harness and confirmations
 
-Fixes: T2. Confirms: M5. Size: M. No behaviour change.
+Fixes: T2, M5. Size: M. No behaviour change in `fettle/`; one workflow change.
 
 Changes:
 
@@ -515,9 +521,18 @@ Changes:
   the findings, with the date read, in `fettle/host-capabilities.json`. Also
   record the input field names of the Claude Code `PowerShell` and
   `NotebookEdit` tools, which D-3 needs.
-- M5 confirmation: on a documentation-only draft pull request, let
-  `mutation evidence` complete, add an ordinary label, and record the check
-  runs for the head SHA. Close the finding or move it to TR-8.
+- M5 containment. The label probe on pull request #73 confirmed that a
+  non-authorising label event publishes a skipped check run under the required
+  name. Change the aggregate job's name in `mutation-pr.yml` so that it is
+  `mutation evidence` only when the job is meant to run, and a different name
+  (`mutation evidence (label no-op)`) for a non-authorising label event. A
+  constant name expression was observed to be evaluated for a skipped job;
+  the same is expected for the `github` context, and the probe below is what
+  proves it.
+  Update the pins in `tests/test_doc_claims.py` and `tests/test_ci.py`. Prove
+  it on the TR-0 pull request itself: after its checks are green, add one
+  ordinary label and record that no new check run named exactly
+  `mutation evidence` appears.
 
 Acceptance: the harness runs in CI on every supported Python; the host table is
 complete or lists what could not be determined; M5 has a recorded outcome.
@@ -865,7 +880,7 @@ Priority: P0 fix first; P1 trust; P2 hardening; P3 polish; V verify first.
 | G3 | P0 | TR-4 | | G2 | P1 | TR-6 |
 | P2 | P0 | TR-4 | | G4 | P1 | TR-2, TR-5 |
 | P3 | P0 | TR-4 | | G8 | P1 | TR-2 |
-| M5 | V | TR-0 | | G9 | P1 | TR-6 |
+| M5 | P1 | TR-0 | | G9 | P1 | TR-6 |
 | E6 | P1 | TR-1 | | P1 | P1 | TR-4 |
 | E8 | P1 | TR-3 | | P4 | P1 | TR-4 |
 | E11 | P1 | TR-1 | | P13 | P1 | TR-3 |
