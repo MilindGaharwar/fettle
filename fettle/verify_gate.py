@@ -714,8 +714,8 @@ def _canonical_evidence_validity(cwd: str, config: dict, stamp: dict) -> Validit
 def _edits_path(session_id: str | None) -> Path | None:
     if not session_id:
         return None
-    from fettle.config import state_dir
-    return state_dir(session_id) / "edits.jsonl"
+    from fettle.edit_journal import path
+    return path(session_id)
 
 
 # ── Stamp binding (WP-7, audit M-04) ──────────────────────────────────

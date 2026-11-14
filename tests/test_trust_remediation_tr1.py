@@ -7,11 +7,31 @@ from pathlib import Path
 
 from fettle import bridge
 from fettle.dispatcher_registry import CHECKS
+from fettle.dispatcher_types import HookContext, HookInput
+from fettle.finding import ResultState
 from fettle.lsp_server import main as lsp_main
 from fettle.paths import find_project_root
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def _ctx(root: Path, *, event: str = "Stop", tool: str | None = None,
+         tool_input: dict | None = None, gates: dict | None = None) -> HookContext:
+    return HookContext(
+        input=HookInput(
+            hook_event_name=event,
+            tool_name=tool,
+            tool_input=tool_input or {},
+            cwd=root,
+            session_id="tr1-malformed-reader",
+            raw={},
+        ),
+        config={"gates": gates or {}},
+        plugin_root=ROOT,
+        hook_start_monotonic=0.0,
+        global_deadline_monotonic=999999.0,
+    )
 
 
 def test_find_project_root_prefers_git_over_nested_policy(tmp_path):
@@ -66,3 +86,30 @@ def test_enforce_capable_checks_declare_policy_owners():
 
 def test_lsp_main_remains_the_server_entry_point():
     assert lsp_main.__doc__ == "Entry point for the LSP server."
+
+
+def test_enforcement_readers_preserve_malformed_journal_as_unknown(tmp_path, monkeypatch):
+    journal = tmp_path / "edits.jsonl"
+    journal.write_text("not-json\n", encoding="utf-8")
+    monkeypatch.setenv("FETTLE_EDIT_TRACKING", str(journal))
+    (tmp_path / "coverage.json").write_text('{"files": {}}', encoding="utf-8")
+
+    from fettle.coverage_gate import run_check as coverage_check
+    from fettle.post_bash_doc_check import run_check as docs_check
+    from fettle.quality_gate import run_check as quality_check
+    from fettle.stop_quality_gate import run_check as stop_quality_check
+
+    results = (
+        coverage_check(_ctx(tmp_path, gates={"coverage": {"enabled": True}})),
+        docs_check(_ctx(
+            tmp_path,
+            event="PostToolUse",
+            tool="Bash",
+            tool_input={"command": "git push"},
+            gates={"docs": {"enabled": True, "mode": "enforce"}},
+        )),
+        quality_check(_ctx(tmp_path, gates={})),
+        stop_quality_check(_ctx(tmp_path)),
+    )
+
+    assert all(result.result_state == ResultState.UNKNOWN for result in results)

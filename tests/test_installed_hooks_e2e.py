@@ -363,4 +363,4 @@ def test_registered_hook_treats_malformed_journal_as_unknown(installed_hook_repo
     result = _run(_event_command(mode, "Stop"), stop, root, env)
 
     assert result.returncode == 2, result.stderr
-    assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+    assert "evidence is malformed" in json.loads(result.stdout)["reason"]

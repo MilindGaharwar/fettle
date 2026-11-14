@@ -225,21 +225,15 @@ def run_check(ctx):
     if ctx.input.raw.get("stop_hook_active") is True:
         return CheckResult.allow()
 
-    session_id = ctx.session_id or "unknown"
-    tracking_path = os.environ.get(
-        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
-    )
+    from fettle.edit_journal import entries as journal_entries
 
-    entries: list[dict] = []
-    try:
-        with open(tracking_path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entries.append(json.loads(line))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return CheckResult.allow()
-
+    journal = journal_entries(ctx.session_id)
+    if journal.malformed_lines:
+        return CheckResult.unknown(
+            "Cross-file quality edit evidence is malformed.",
+            action="Repair the session edit journal and retry.",
+        )
+    entries = journal.entries
     if not entries:
         return CheckResult.allow()
 

@@ -355,8 +355,8 @@ def test_metric_entry_logged_to_jsonl():
 
 
 # ─── 14. test_edit_tracking_appended ────────────────────────────────────────
-def test_edit_tracking_appended():
-    """PostToolUse hook appends edited file path to session tracking file."""
+def test_legacy_post_edit_does_not_append_tracking():
+    """The dispatcher, not the legacy check process, owns edit journaling."""
     fixture = os.path.join(FIXTURES, 'clean.py')
     tmpdir = tempfile.mkdtemp()
     tracking_path = os.path.join(tmpdir, 'fettle-edits.jsonl')
@@ -366,15 +366,7 @@ def test_edit_tracking_appended():
             extra_env={'QUALITY_GATE_MODE': 'advisory', 'FETTLE_EDIT_TRACKING': tracking_path},
             cwd=tmpdir,
         )
-        assert os.path.isfile(tracking_path), 'Tracking file was not created'
-        with open(tracking_path) as fh:
-            lines = fh.readlines()
-        assert len(lines) >= 1
-        entry = json.loads(lines[-1])
-        assert entry['file'] == fixture
-        assert entry['tested'] is False
-        assert 'ts' in entry
-        assert entry['tool'] in ('Write', 'Edit')
+        assert not os.path.exists(tracking_path)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -395,8 +387,8 @@ def test_edit_tracking_non_python_skipped():
 
 
 # ─── 16. test_edit_tracking_multiple_appends ────────────────────────────────
-def test_edit_tracking_multiple_appends():
-    """Multiple edits append multiple entries to the same tracking file."""
+def test_legacy_post_edit_never_duplicates_dispatcher_entries():
+    """Repeated legacy checks cannot duplicate dispatcher-owned entries."""
     fixture = os.path.join(FIXTURES, 'clean.py')
     tmpdir = tempfile.mkdtemp()
     tracking_path = os.path.join(tmpdir, 'fettle-edits.jsonl')
@@ -407,12 +399,7 @@ def test_edit_tracking_multiple_appends():
                 extra_env={'QUALITY_GATE_MODE': 'advisory', 'FETTLE_EDIT_TRACKING': tracking_path},
                 cwd=tmpdir,
             )
-        with open(tracking_path) as fh:
-            lines = fh.readlines()
-        assert len(lines) == 3
-        for line in lines:
-            entry = json.loads(line)
-            assert entry['file'] == fixture
+        assert not os.path.exists(tracking_path)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

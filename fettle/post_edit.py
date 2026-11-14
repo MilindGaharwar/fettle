@@ -10,7 +10,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
+from fettle.config import load_config, trace_path as project_trace_path  # noqa: E402
 from fettle.project_rules import extra_rule_configs  # noqa: E402
 from fettle.semgrep_util import anchored_semgrep_args  # noqa: E402
 from fettle.tool_paths import resolve_tool  # noqa: E402
@@ -51,17 +51,6 @@ def main() -> None:
 
     if not os.path.isfile(file_path):
         sys.exit(0)
-
-    # ── Edit tracking (consumed by coverage_gate, verify_gate, doc check) ──────────
-    tracking_path: str = os.environ.get(
-        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
-    )
-    try:
-        tool_name: str = data.get("tool_name", "Edit")
-        with open(tracking_path, "a") as fh:
-            fh.write(json.dumps({"file": file_path, "ts": time.time(), "tool": tool_name, "tested": False}) + chr(10))
-    except OSError:
-        pass
 
     # .fettle-ignore
     ignore_file = os.path.join(cwd, ".fettle-ignore")

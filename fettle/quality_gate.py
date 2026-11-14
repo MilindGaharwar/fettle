@@ -387,17 +387,9 @@ def _save_tracking(files: list[str]):
 def _load_edit_tracking() -> list[dict]:
     """Load per-file edit tracking JSONL (for test gate)."""
     _ensure_state()
-    entries = []
-    try:
-        if os.path.isfile(EDIT_TRACKING_FILE):
-            with open(EDIT_TRACKING_FILE) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        entries.append(json.loads(line))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    return entries
+    from fettle.edit_journal import read
+
+    return list(read(Path(EDIT_TRACKING_FILE)).entries)
 
 
 def _save_edit_tracking(entries: list[dict]):
@@ -563,6 +555,18 @@ def run_check(ctx):
     delegation preserves all behavior while enabling the single-dispatcher model.
     """
     from fettle.dispatcher_types import CheckResult
+
+    from fettle.edit_journal import entries
+
+    journal = entries(ctx.session_id)
+    if journal.malformed_lines and (
+        ctx.event == "Stop"
+        or ctx.tool_name == "Bash"
+    ):
+        return CheckResult.unknown(
+            "Test freshness evidence is malformed.",
+            action="Repair the session edit journal and rerun tests.",
+        )
 
     script_path = os.path.abspath(__file__)
     # Canonical payload: the raw agent payload may use any host's field

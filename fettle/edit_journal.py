@@ -39,10 +39,14 @@ def record(session_id: str | None, target: Path, tool: str | None) -> None:
 
 
 def entries(session_id: str | None) -> JournalRead:
+    return read(path(session_id))
+
+
+def read(source: Path) -> JournalRead:
     parsed: list[dict] = []
     malformed = 0
     try:
-        lines = path(session_id).read_text(encoding="utf-8").splitlines()
+        lines = source.read_text(encoding="utf-8").splitlines()
     except OSError:
         return JournalRead(())
     for line in lines:
