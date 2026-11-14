@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "source_revision": "1ffff5c01900bee48d1225c8799eed0b91e6c083",
+  "corpus_identity_digest": "0dc6bde061b5f59901e81f183ff486760df9a5f5d10746a58ac0bcdb50b38712",
+  "container_digest": "sha256:3cd9086bdb30f7c9bc08a3fa621d9842e0d3f6f9291aeb4677e0547817c10b12",
+  "runs": {
+    "run_1": {
+      "preflight": 43208008121,
+      "gate": 43213746562,
+      "execute": 43213960751,
+      "attempts": [
+        1
+      ],
+      "mirror_commit": "e26a507f7cd96cd1ba7b9847b380b135c6262c6e"
+    },
+    "run_2": {
+      "preflight": 43382729275,
+      "gate": 43388047736,
+      "execute": 43388442136,
+      "attempts": [
+        1,
+        2
+      ],
+      "mirror_commit": "caaa526522ee654a3f0440d63453917f09c87ff7"
+    }
+  },
+  "kind": "d4_closeout_reaggregation",
+  "run_1": {
+    "status": "completed",
+    "passed": true,
+    "selected_reports": 256,
+    "equals_accepted_aggregate_except_new_selection_record": true
+  },
+  "run_2": {
+    "status": "completed",
+    "passed": true,
+    "selected_reports": 256,
+    "historical_outcome": "formal_non_pass",
+    "offline_proof_changes_historical_outcome": false,
+    "selected_attempt_2_shards": [
+      110,
+      138,
+      206
+    ],
+    "shard_206": {
+      "shard_index": 206,
+      "selected_attempt": "2",
+      "selected_digest": "1c887ddef5452619f33c9f5dffc3c8bae99deb2bf0c24b8e61324a6faea4d2a3",
+      "superseded_attempt": "1",
+      "superseded_digest": "69bd235e476cd6aaf23bedd702abb5af2f3eccea48b0f82e2859d2b47ad96faa",
+      "reason": "completed_attempt_2_supersedes_non_completed_attempt_1"
+    }
+  }
+}
