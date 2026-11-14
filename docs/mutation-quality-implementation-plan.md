@@ -170,6 +170,9 @@ Extend schema version 2 with:
   tests, and rerun command for every non-killed mutant;
 - a bounded `survivor_preview` for terminal output;
 - shard manifest identity and timing per module/range;
+- raw attempt retention plus a digest-bound selected view: attempt 2 supersedes
+  only a compatible non-completed attempt 1; attempt 3+, two completed reports,
+  lineage conflict, and content conflict remain non-pass;
 - explicit comparison decision separate from raw mutation outcome.
 
 Reports expose raw counts without relabeling. The primary mutation score uses

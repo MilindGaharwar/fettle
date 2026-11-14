@@ -4812,6 +4812,114 @@ def select_shard_attempts(reports: list[dict], shard_count: int) -> list[dict]:
     return select_shard_subset_attempts(reports, shard_count, list(range(shard_count)))
 
 
+def select_bounded_shard_attempts(
+    reports: list[dict],
+    shard_count: int,
+    *,
+    run_id: str | None = None,
+    allow_successful_reuse: bool = False,
+) -> tuple[list[dict], dict]:
+    """Select attempt 1 or one explicit attempt-2 supersession per shard."""
+    if not isinstance(shard_count, int) or isinstance(shard_count, bool) or shard_count < 1:
+        raise ValueError("bounded attempt selection has invalid shard topology")
+    by_shard: dict[int, dict[str, dict]] = {index: {} for index in range(shard_count)}
+    reused_by_shard: dict[int, dict] = {}
+    for report in reports:
+        index = report.get("shard_index") if isinstance(report, dict) else None
+        attempt = str(report.get("run_attempt", "")) if isinstance(report, dict) else ""
+        if (
+            not isinstance(index, int) or isinstance(index, bool)
+            or not 0 <= index < shard_count
+            or report.get("shard_count") != shard_count
+        ):
+            raise ValueError("bounded shard attempt has invalid topology")
+        if allow_successful_reuse and isinstance(report.get("reuse_provenance"), dict):
+            if report.get("status") != "completed" or report.get("fresh_execution") is True:
+                raise ValueError(f"shard {index} has malformed successful-run reuse")
+            if index in reused_by_shard or by_shard[index]:
+                raise ValueError(f"shard {index} has conflicting fresh and reused reports")
+            reused_by_shard[index] = report
+            continue
+        if attempt not in {"1", "2"}:
+            raise ValueError(f"shard {index} attempt {attempt or 'missing'} is outside the bounded policy")
+        if attempt in by_shard[index]:
+            raise ValueError(f"shard {index} has duplicate attempt {attempt}")
+        if run_id is not None and str(report.get("run_id", "")) != str(run_id):
+            raise ValueError(f"shard {index} has conflicting run lineage")
+        if report.get("fresh_execution") is not True or "reuse_provenance" in report:
+            raise ValueError(f"shard {index} attempt {attempt} is not a fresh execution")
+        by_shard[index][attempt] = report
+
+    selected = []
+    selections = []
+    compatibility_fields = (
+        "revision", "calibration_id", "manifest_digest", "preflight_digest",
+        "preflight_corpus_digest", "corpus_digest", "container_digest",
+    )
+    for index in range(shard_count):
+        attempts = by_shard[index]
+        reused = reused_by_shard.get(index)
+        if reused is not None:
+            if attempts:
+                raise ValueError(f"shard {index} has conflicting fresh and reused reports")
+            selected.append(reused)
+            selections.append({
+                "shard_index": index,
+                "selected_attempt": None,
+                "selected_digest": _canonical_digest(reused),
+                "superseded_attempt": None,
+                "superseded_digest": None,
+                "reason": "validated_successful_run_reuse",
+            })
+            continue
+        first = attempts.get("1")
+        second = attempts.get("2")
+        if first is None:
+            if second is not None:
+                raise ValueError(f"shard {index} attempt 2 has no attempt 1 to supersede")
+            raise ValueError(f"shard {index} has no attempt report")
+        if second is None:
+            if first.get("status") != "completed":
+                raise ValueError(f"shard {index} has no completed attempt")
+            chosen = first
+            superseded = None
+            reason = "completed_attempt_1"
+        else:
+            if first.get("status") == "completed" and second.get("status") == "completed":
+                raise ValueError(f"shard {index} has two completed reports")
+            if first.get("status") == "completed" and second.get("status") != "completed":
+                chosen = first
+                superseded = None
+                reason = "completed_attempt_1_retained_over_non_completed_attempt_2"
+            elif second.get("status") != "completed":
+                raise ValueError(f"shard {index} attempt 2 does not supersede a non-completed attempt 1")
+            else:
+                for field in compatibility_fields:
+                    if field in first and field in second and first[field] != second[field]:
+                        raise ValueError(f"shard {index} has conflicting {field.removesuffix('_digest')}")
+                chosen = second
+                superseded = first
+                reason = "completed_attempt_2_supersedes_non_completed_attempt_1"
+        selected.append(chosen)
+        selections.append({
+            "shard_index": index,
+            "selected_attempt": str(chosen["run_attempt"]),
+            "selected_digest": _canonical_digest(chosen),
+            "superseded_attempt": None if superseded is None else str(superseded["run_attempt"]),
+            "superseded_digest": None if superseded is None else _canonical_digest(superseded),
+            "reason": reason,
+        })
+    selection_record = {
+        "schema_version": "1",
+        "kind": "mutation_attempt_selection",
+        "status": "completed",
+        "shard_count": shard_count,
+        "selections": selections,
+    }
+    selection_record["content_digest"] = _canonical_digest(selection_record)
+    return selected, selection_record
+
+
 def select_shard_subset_attempts(
     reports: list[dict],
     shard_count: int,
@@ -5259,6 +5367,7 @@ def aggregate_d4_shards(
     manifests: list[dict],
     preflight: dict,
     corpus_identity: dict,
+    attempt_selection: dict | None = None,
     test_mappings: dict[str, list[str]] | None = None,
     policy_config: dict | None = None,
 ) -> dict:
@@ -5268,6 +5377,48 @@ def aggregate_d4_shards(
             "unknown", "D4 permits at most one bounded failed-job rerun",
             offending_shards={}, reused_shards=[],
         )
+    if attempt_selection is None:
+        try:
+            reports, attempt_selection = select_bounded_shard_attempts(
+                reports, _D4_SHARD_COUNT, run_id=run_id,
+            )
+        except ValueError as exc:
+            raw_defects = _d4_offending_shards(reports, run_id, run_attempt)
+            return _error(
+                "unknown", f"D4 attempt selection failed: {exc}",
+                offending_shards=raw_defects, reused_shards=[],
+            )
+    else:
+        selections = attempt_selection.get("selections", [])
+        if (
+            attempt_selection.get("kind") != "mutation_attempt_selection"
+            or attempt_selection.get("status") != "completed"
+            or attempt_selection.get("shard_count") != _D4_SHARD_COUNT
+            or len(selections) != _D4_SHARD_COUNT
+            or attempt_selection.get("content_digest") != _canonical_digest({
+                key: value for key, value in attempt_selection.items()
+                if key != "content_digest"
+            })
+        ):
+            return _error(
+                "unknown", "D4 attempt selection record is malformed",
+                offending_shards={}, reused_shards=[],
+            )
+        selected_by_shard = {
+            selection.get("shard_index"): selection for selection in selections
+            if isinstance(selection, dict)
+        }
+        for report in reports:
+            selection = selected_by_shard.get(report.get("shard_index"))
+            if (
+                selection is None
+                or selection.get("selected_attempt") != str(report.get("run_attempt", ""))
+                or selection.get("selected_digest") != _canonical_digest(report)
+            ):
+                return _error(
+                    "unknown", "D4 selected reports do not match the attempt selection record",
+                    offending_shards={}, reused_shards=[],
+                )
     defects = _d4_offending_shards(reports, run_id, run_attempt)
     if len(reports) != _D4_SHARD_COUNT or any(defects.values()):
         return _error(
@@ -5323,6 +5474,7 @@ def aggregate_d4_shards(
         "run_id": str(run_id),
         "run_attempt": str(run_attempt),
         "accepted_attempts": sorted({str(report["run_attempt"]) for report in reports}, key=int),
+        "attempt_selection": attempt_selection,
         "reused_shards": [],
         "fresh_execution": [
             {
@@ -5877,6 +6029,10 @@ def main() -> int:
     parser.add_argument("--advisory-projection-matrix", metavar="PATH")
     parser.add_argument("--engine-budget-seconds", type=int)
     parser.add_argument("--prepare-replay-matrix", metavar="DIRECTORY", help="Select incomplete initial shards for retry")
+    parser.add_argument("--select-bounded-attempts", metavar="DIRECTORY", help="Select one bounded attempt per shard")
+    parser.add_argument("--selected-reports-output", metavar="DIRECTORY")
+    parser.add_argument("--attempt-selection-record", metavar="PATH")
+    parser.add_argument("--allow-successful-reuse", action="store_true")
     parser.add_argument("--aggregate", metavar="DIRECTORY", help="Aggregate reports; requires --shard-count")
     parser.add_argument("--aggregate-d4", metavar="DIRECTORY", help="Aggregate exactly 256 fresh same-run D4 reports (attempt 1 or one bounded rerun)")
     parser.add_argument("--aggregate-scope", metavar="DIRECTORY", help="Digest-bound manifests defining aggregate scope")
@@ -6016,6 +6172,36 @@ def main() -> int:
             report = _error("unknown", f"Cannot prepare mutation replay: {exc}")
         print(json.dumps(report, indent=2) if args.json else format_report(report))
         return 0 if report["status"] == "completed" else 2
+    if args.select_bounded_attempts:
+        try:
+            if args.shard_count is None or args.shard_count < 1:
+                raise ValueError("--select-bounded-attempts requires a positive --shard-count")
+            if not args.selected_reports_output or not args.attempt_selection_record:
+                raise ValueError(
+                    "--select-bounded-attempts requires selected output and a selection record"
+                )
+            raw_root = Path(args.select_bounded_attempts)
+            report_paths = sorted(raw_root.rglob("mutation-report.json"))
+            reports = [json.loads(path.read_text(encoding="utf-8")) for path in report_paths]
+            selected, report = select_bounded_shard_attempts(
+                reports, args.shard_count, run_id=args.d4_run_id,
+                allow_successful_reuse=args.allow_successful_reuse,
+            )
+            output_root = Path(args.selected_reports_output)
+            for selected_report in selected:
+                destination = output_root / str(selected_report["shard_index"])
+                destination.mkdir(parents=True, exist_ok=False)
+                _write_json_atomic(destination / "mutation-report.json", selected_report)
+            _write_json_atomic(Path(args.attempt_selection_record), report)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            report = _error("unknown", f"Cannot select bounded shard attempts: {exc}")
+            if args.attempt_selection_record:
+                try:
+                    _write_json_atomic(Path(args.attempt_selection_record), report)
+                except OSError:
+                    pass
+        print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0 if report.get("status") == "completed" else 2
     if args.advisory_projection_ledger:
         try:
             if not args.advisory_projection_manifests or not args.advisory_projection_matrix:
@@ -6287,11 +6473,17 @@ def main() -> int:
             corpus_identity = json.loads(
                 Path(args.d4_corpus_identity).read_text(encoding="utf-8")
             )
+            attempt_selection = None
+            if args.attempt_selection_record:
+                attempt_selection = json.loads(
+                    Path(args.attempt_selection_record).read_text(encoding="utf-8")
+                )
             report = aggregate_d4_shards(
                 args.root, reports, paths, excluded, threshold,
                 run_id=args.d4_run_id, run_attempt=args.d4_run_attempt, d4_id=args.d4_id,
                 manifests=manifests, preflight=retained_preflight,
                 corpus_identity=corpus_identity,
+                attempt_selection=attempt_selection,
                 test_mappings=mutation["test_mappings"], policy_config=mutation,
             )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
