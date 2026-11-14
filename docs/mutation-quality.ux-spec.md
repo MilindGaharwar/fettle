@@ -80,6 +80,10 @@ seconds, excluding mutation execution time.
 - Interrupted PR evidence: completed shard reports remain immutable, only
   incomplete shard indexes receive one bounded retry, and the aggregate remains
   unusable until every index has one compatible completed report.
+- A bounded failed-job rerun retains both raw shard reports. Attempt 2 may
+  replace attempt 1 only when attempt 1 is non-completed and both reports have
+  compatible lineage. The retained selection record names both digests and the
+  reason; later attempts and two completed reports are visible non-passes.
 - Stale or conflicting checkpoint: evidence from another calibration or input
   identity is rejected without executing or scoring it; conflicting terminal
   outcomes require a fresh calibration rather than majority voting.

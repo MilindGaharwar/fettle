@@ -1,7 +1,12 @@
 # Mutation Quality Implementation Plan
 
-Status: advisory PR evidence is implemented and automatic; D4 is in progress
-pending P0-ERA. Full-corpus qualification remains `CLOSED_NON_PASS`.
+Status: advisory PR evidence is implemented and automatic. D4 is closed: run 1
+passed; run 2 is a formal non-pass because its aggregate rejected a rescued
+shard, a defect fixed by the bounded selector. No third run was made. On
+2026-11-14 the owner amended the criterion from three consecutive passing runs
+to the two executions measured here. Full-corpus qualification remains
+`CLOSED_NON_PASS`; no baseline or ratchet is proposed. Open mutation programme
+questions are deferred to TR-8 of the trust remediation plan.
 
 Related UX contract: [mutation-quality.ux-spec.md](mutation-quality.ux-spec.md)
 
@@ -170,6 +175,9 @@ Extend schema version 2 with:
   tests, and rerun command for every non-killed mutant;
 - a bounded `survivor_preview` for terminal output;
 - shard manifest identity and timing per module/range;
+- raw attempt retention plus a digest-bound selected view: attempt 2 supersedes
+  only a compatible non-completed attempt 1; attempt 3+, two completed reports,
+  lineage conflict, and content conflict remain non-pass;
 - explicit comparison decision separate from raw mutation outcome.
 
 Reports expose raw counts without relabeling. The primary mutation score uses

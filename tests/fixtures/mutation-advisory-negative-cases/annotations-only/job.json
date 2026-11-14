@@ -1,0 +1,15 @@
+{
+  "id": "annotations-only",
+  "name": "annotations-only",
+  "conclusion": "failure",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/download-artifact@pinned",
+      "conclusion": "failure"
+    }
+  ]
+}

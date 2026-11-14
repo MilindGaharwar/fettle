@@ -2224,6 +2224,10 @@ def test_changed_mutation_workflow_aggregates_fail_closed_retained_evidence():
     assert "Aggregate mutation evidence is missing or malformed" in workflow
     assert "--github-summary mutation-report.json" in workflow
     assert "pattern: mutation-pr-shard-${{ github.run_id }}-*-*" in workflow
+    assert "--select-bounded-attempts mutation-pr-raw-reports" in workflow
+    assert "--allow-successful-reuse" in workflow
+    assert "mutation-pr-attempt-selection.json" in workflow
+    assert 'run_attempt=os.environ["GITHUB_RUN_ATTEMPT"]' in workflow
     assert "mutation-pr-advisory-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "retention-days: 90" in workflow
     assert "if-no-files-found: error" in workflow

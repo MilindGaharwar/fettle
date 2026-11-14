@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -362,6 +363,52 @@ def test_cli_help(capsys):
         main()
     assert exc_info.value.code == 0
     assert "consistency         State-consistency contracts (P53/SC2)" in capsys.readouterr().out
+
+
+def test_ci_classify_mutation_advisory_emits_json(monkeypatch, capsys):
+    from fettle.cli import main
+
+    corpus = (
+        Path(__file__).parent
+        / "fixtures"
+        / "mutation-advisory-run-42991579234"
+        / "corpus.json"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fettle", "ci", "classify-mutation-advisory", "--input", str(corpus)],
+    )
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["passed"] is True
+    assert payload["rerun_eligible"] is True
+    assert payload["needs_diagnosis"] == [181]
+    assert len(payload["jobs"]) == 21
+
+
+def test_ci_classify_mutation_advisory_unknown_exits_one(monkeypatch, capsys):
+    from fettle.cli import main
+
+    corpus = (
+        Path(__file__).parent
+        / "fixtures"
+        / "mutation-advisory-negative-cases"
+        / "corpus.json"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fettle", "ci", "classify-mutation-advisory", "--input", str(corpus)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert json.loads(capsys.readouterr().out)["passed"] is False
 
 
 def test_assurance_baseline_help_lists_review_and_summary(capsys):

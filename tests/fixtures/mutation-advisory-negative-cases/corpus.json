@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "run_id": "negative",
+  "head_sha": "fixture",
+  "jobs": [
+    {
+      "shard": "mutation-artifact-string",
+      "job_id": "mutation-artifact-string",
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "mutation-artifact-string/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "mutation-artifact-string/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "mutation-artifact-string/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "mutation-artifact-string/mutation-report.json"
+        }
+      }
+    },
+    {
+      "shard": "survivors",
+      "job_id": "survivors",
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "survivors/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "survivors/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "survivors/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "survivors/mutation-report.json"
+        }
+      }
+    },
+    {
+      "shard": "log-only",
+      "job_id": "log-only",
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "log-only/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "log-only/log.txt"
+        },
+        "annotations": {
+          "outcome": "http_error",
+          "http_status": 404,
+          "path": null
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": "annotations-only",
+      "job_id": "annotations-only",
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "annotations-only/job.json"
+        },
+        "log": {
+          "outcome": "http_error",
+          "http_status": 404,
+          "path": null
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "annotations-only/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    }
+  ]
+}

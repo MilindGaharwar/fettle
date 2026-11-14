@@ -1,0 +1,561 @@
+{
+  "schema_version": 1,
+  "run_id": 42991579234,
+  "head_sha": "bce22a47ab584942320d891a238462ca4342f625",
+  "description": {
+    "upload_create_artifact": [173, 178],
+    "download_signed_artifact_url": [191, 201, 202],
+    "download_list_artifacts": [194, 195, 196, 197]
+  },
+  "jobs": [
+    {
+      "shard": 158,
+      "job_id": 130433104583,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/158/job.json"
+        },
+        "log": {
+          "outcome": "http_error",
+          "http_status": 404,
+          "path": null,
+          "detail": "log not found: 130433104583"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/158/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 169,
+      "job_id": 130433107688,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/169/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/169/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/169/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 172,
+      "job_id": 130433108701,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/172/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/172/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/172/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 173,
+      "job_id": 130433108764,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/173/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/173/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/173/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 175,
+      "job_id": 130433109015,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/175/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/175/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/175/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 177,
+      "job_id": 130433109558,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/177/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/177/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/177/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 178,
+      "job_id": 130433109871,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/178/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/178/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/178/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 180,
+      "job_id": 130433110026,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/180/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/180/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/180/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 181,
+      "job_id": 130433110161,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/181/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/181/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/181/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/181/mutation-report.json"
+        }
+      }
+    },
+    {
+      "shard": 183,
+      "job_id": 130433111057,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/183/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/183/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/183/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 189,
+      "job_id": 130433112502,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/189/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/189/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/189/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 190,
+      "job_id": 130433112641,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/190/job.json"
+        },
+        "log": {
+          "outcome": "http_error",
+          "http_status": 404,
+          "path": null,
+          "detail": "log not found: 130433112641"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/190/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 191,
+      "job_id": 130433113565,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/191/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/191/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/191/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 194,
+      "job_id": 130433114174,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/194/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/194/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/194/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 195,
+      "job_id": 130433114201,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/195/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/195/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/195/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 196,
+      "job_id": 130433114378,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/196/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/196/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/196/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 197,
+      "job_id": 130433114521,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/197/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/197/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/197/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 201,
+      "job_id": 130433115718,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/201/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/201/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/201/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 202,
+      "job_id": 130433115769,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/202/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/202/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/202/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 203,
+      "job_id": 130433115882,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/203/job.json"
+        },
+        "log": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/203/log.txt"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/203/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    },
+    {
+      "shard": 205,
+      "job_id": 130433116264,
+      "sources": {
+        "metadata": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/205/job.json"
+        },
+        "log": {
+          "outcome": "http_error",
+          "http_status": 404,
+          "path": null,
+          "detail": "log not found: 130433116264"
+        },
+        "annotations": {
+          "outcome": "success",
+          "http_status": 200,
+          "path": "jobs/205/annotations.json"
+        },
+        "shard_report": {
+          "outcome": "not_provided",
+          "http_status": null,
+          "path": null
+        }
+      }
+    }
+  ]
+}
