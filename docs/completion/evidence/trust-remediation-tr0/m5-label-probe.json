@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "observed_at": "2026-11-14",
+  "pull_request": 73,
+  "head_sha": "dbd8bd4d8ecec89f7ccd2864a9bf7fca1a94d5e1",
+  "probe": {
+    "action": "Added the ordinary documentation label after required checks passed.",
+    "workflow_run_id": 43557646055,
+    "workflow_conclusion": "skipped",
+    "exact_check": "mutation evidence",
+    "exact_check_id": 132334009567,
+    "exact_check_conclusion": "skipped"
+  },
+  "prior_required_check": {
+    "workflow_run_id": 43556105770,
+    "workflow_conclusion": "success",
+    "exact_check": "mutation evidence",
+    "exact_check_id": 132330481492,
+    "exact_check_conclusion": "success"
+  },
+  "conclusion": "M5 is closed as containment confirmed for this probe: the label-triggered run and its exact mutation evidence check were skipped, not green. The skipped result did not replace or create a successful required check; the earlier pull_request run remained the successful required evidence.",
+  "source_snapshot": "/var/folders/yl/81tj0mm94qgbgvt8q_0r97100000gn/T/phase-hl/q1/label-probe-summary.json"
+}

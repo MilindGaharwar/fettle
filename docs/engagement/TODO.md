@@ -174,10 +174,11 @@ Plan: docs/trust-remediation-implementation-plan.md. Starts after D4 closes.
 Order is priority order; each package is one pull request unless the plan says
 otherwise. Finding IDs refer to the plan's register.
 
-- [ ] E0. TR-0 Baseline harness and confirmations — end-to-end tests that run
+- [x] E0. TR-0 Baseline harness and confirmations — end-to-end tests that run
       the hook command exactly as `fettle init` registers it, in both launch
       modes; host failure-mode table; one-time confirmation of M5. No behaviour
-      change.
+      change. Local completion evidence recorded 2026-11-14; review and merge
+      remain separate actions.
 - [ ] E1. TR-1 Shipped hook path (P0: E1, E21, T1, E3, E4, E5) — dispatcher
       records edits; one entry point per check; project-root policy
       resolution; tool taxonomy with multi-target events; isolated launch.

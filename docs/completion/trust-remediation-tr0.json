@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "revision": "trust-remediation-tr0-2026-11-14",
+  "scope_digest_version": 2,
+  "scope_digest": "11e4d520a8baee3fd36f1121eef2937ceddc4a073226bfb41828d3bb1f517343",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "installed-hook-harness",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The exact plugin and installed-bridge commands blocked protected edits, destructive commands, secret reads, malformed policy, and missing explicitly configured policy across the supported host payloads.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
+        "sha256": "ed75deede504c8e6c8065c21417b35d7a8faf1655049f3c19840ec0af131c3c8",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun the focused installed-hook, translator, and host-parity suites."
+    },
+    {
+      "id": "host-failure-mode-table",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Dated official-source findings record crash, timeout, and working-directory semantics where documented and preserve undetermined OpenCode and Gemini details as unknown.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/host-failure-modes.json",
+        "sha256": "148fd272bcce2b504247c285769920de6bbfd5e4f3cb7f542c0f47efa33cfb12",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Re-read each cited official host reference and preserve undocumented semantics as unknown."
+    },
+    {
+      "id": "m5-label-probe",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The label-triggered workflow and exact mutation evidence check were skipped rather than successful, and did not replace the earlier successful required check.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-label-probe.json",
+        "sha256": "66c8d7f9a1e4cb2f08bb089bc8529a7fba55c45b1ddd93537ba7096a8e702802",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Inspect the retained run and exact-check IDs without retriggering the consumed one-time label probe."
+    },
+    {
+      "id": "full-regression-and-quality-gates",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Ruff passed, the full suite reported 5127 passed and 23 skipped, and every origin/main pre-commit hook passed under isolated state.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
+        "sha256": "ed75deede504c8e6c8065c21417b35d7a8faf1655049f3c19840ec0af131c3c8",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun Ruff, the unexcluded full suite, and origin/main pre-commit hooks under isolated XDG state."
+    }
+  ]
+}
