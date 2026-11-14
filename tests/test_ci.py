@@ -1903,7 +1903,36 @@ def test_pr_advisory_publishes_the_protected_check_context():
 
     assert "pull_request:" not in authoritative
     assert "pull_request:" in advisory
-    assert "name: ${{ 'mutation evidence' }}" in advisory
+    assert (
+        "name: ${{ (github.event.action != 'labeled' || "
+        "github.event.label.name == 'mutation-full-matrix-authorized') && "
+        "'mutation evidence' || 'mutation evidence (label no-op)' }}"
+    ) in advisory
+
+
+@pytest.mark.parametrize(
+    ("action", "label", "expected"),
+    [
+        ("opened", "", "mutation evidence"),
+        ("labeled", "mutation-full-matrix-authorized", "mutation evidence"),
+        ("labeled", "documentation", "mutation evidence (label no-op)"),
+    ],
+)
+def test_pr_advisory_check_name_separates_authorized_runs_from_label_noops(
+    action, label, expected,
+):
+    parsed = yaml.safe_load(
+        (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+    )
+    aggregate = parsed["jobs"]["aggregate"]
+    authorized = action != "labeled" or label == "mutation-full-matrix-authorized"
+
+    assert aggregate["name"] == (
+        "${{ (github.event.action != 'labeled' || "
+        "github.event.label.name == 'mutation-full-matrix-authorized') && "
+        "'mutation evidence' || 'mutation evidence (label no-op)' }}"
+    )
+    assert expected == ("mutation evidence" if authorized else "mutation evidence (label no-op)")
 
 
 def test_pr_mutation_workflow_executes_one_bounded_attempt_per_full_scope_shard():
@@ -2426,7 +2455,15 @@ def test_mutation_workflows_have_one_check_producer_per_event_route():
     )
 
     assert sum(job.get("name") == "mutation evidence" for job in authoritative["jobs"].values()) == 1
-    assert sum(job.get("name") == "${{ 'mutation evidence' }}" for job in advisory["jobs"].values()) == 1
+    assert sum(
+        job.get("name")
+        == (
+            "${{ (github.event.action != 'labeled' || "
+            "github.event.label.name == 'mutation-full-matrix-authorized') && "
+            "'mutation evidence' || 'mutation evidence (label no-op)' }}"
+        )
+        for job in advisory["jobs"].values()
+    ) == 1
     assert "pull_request" not in authoritative[True]
     assert "pull_request" in advisory[True]
 

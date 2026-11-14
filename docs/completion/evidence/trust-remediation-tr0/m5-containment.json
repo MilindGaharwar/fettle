@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "revision": "trust-remediation-tr0-2026-11-14",
+  "contract": {
+    "red": {
+      "command": "python -m pytest -q tests/test_doc_claims.py::test_readme_advisory_claim_matches_pr_workflow tests/test_ci.py::test_pr_advisory_publishes_the_protected_check_context tests/test_ci.py::test_pr_advisory_check_name_separates_authorized_runs_from_label_noops tests/test_ci.py::test_mutation_workflows_have_one_check_producer_per_event_route",
+      "result": "6 failed",
+      "exit_code": 1,
+      "source_revision": "87370f45ff413b91b7ffddf116cc9ca6b03b68fe"
+    },
+    "green": {
+      "command": "python -m pytest -q tests/test_doc_claims.py::test_readme_advisory_claim_matches_pr_workflow tests/test_ci.py::test_pr_advisory_publishes_the_protected_check_context tests/test_ci.py::test_pr_advisory_check_name_separates_authorized_runs_from_label_noops tests/test_ci.py::test_mutation_workflows_have_one_check_producer_per_event_route",
+      "result": "6 passed in 0.23s",
+      "exit_code": 0
+    },
+    "normal_pull_request_name": "mutation evidence",
+    "authorizing_label_name": "mutation evidence",
+    "ordinary_label_name": "mutation evidence (label no-op)"
+  },
+  "live_probe": {
+    "status": "pending",
+    "reason": "The required checks and one-time ordinary-label probe must run on the TR-0 pull request before containment can be confirmed."
+  }
+}

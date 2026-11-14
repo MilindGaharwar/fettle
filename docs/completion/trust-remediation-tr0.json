@@ -3,9 +3,9 @@
   "milestone": "trust-remediation-tr0",
   "revision": "trust-remediation-tr0-2026-11-14",
   "scope_digest_version": 2,
-  "scope_digest": "11e4d520a8baee3fd36f1121eef2937ceddc4a073226bfb41828d3bb1f517343",
-  "status": "complete",
-  "uat_decision": "SHIP",
+  "scope_digest": "72d2ab151d2802794e3121315172e97b577e88ca07af0f5a39640ce69c31e5c5",
+  "status": "in_progress",
+  "uat_decision": "FIX_FIRST",
   "criteria": [
     {
       "id": "installed-hook-harness",
@@ -34,17 +34,43 @@
       "recovery": "Re-read each cited official host reference and preserve undocumented semantics as unknown."
     },
     {
-      "id": "m5-label-probe",
+      "id": "m5-finding-confirmed",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "The label-triggered workflow and exact mutation evidence check were skipped rather than successful, and did not replace the earlier successful required check.",
+      "observed": "Pull request #73 confirmed M5: an ordinary label event published a second exact mutation evidence check with conclusion skipped, which GitHub may satisfy as a required check. Whether a failed check then became mergeable was not tested.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr0/m5-label-probe.json",
-        "sha256": "66c8d7f9a1e4cb2f08bb089bc8529a7fba55c45b1ddd93537ba7096a8e702802",
+        "sha256": "b1a7d8a1856ab37d165002f9d753c682e99b6e3d747c5cb5f02960d387c2335c",
         "revision": "trust-remediation-tr0-2026-11-14"
       },
-      "recovery": "Inspect the retained run and exact-check IDs without retriggering the consumed one-time label probe."
+      "recovery": "Inspect the retained pull request #73 run and exact-check IDs without repeating that historical probe."
+    },
+    {
+      "id": "m5-containment-contract",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Contract tests confirm normal and authorizing-label runs keep the exact mutation evidence name while an ordinary label no-op uses mutation evidence (label no-op).",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
+        "sha256": "5a7da89d29822585df86f53aac32be13dd78c30a4af224d2b3bd3e1bb3325833",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun the focused workflow and documentation contract tests."
+    },
+    {
+      "id": "m5-live-containment-probe",
+      "kind": "success",
+      "required": true,
+      "verdict": "unobserved",
+      "observed": "Pending: the TR-0 pull request has not yet completed its one-time ordinary-label containment probe.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
+        "sha256": "5a7da89d29822585df86f53aac32be13dd78c30a4af224d2b3bd3e1bb3325833",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "After both required checks pass on the TR-0 pull request, add the documentation label once and retain every resulting workflow and check run before confirming this criterion."
     },
     {
       "id": "full-regression-and-quality-gates",

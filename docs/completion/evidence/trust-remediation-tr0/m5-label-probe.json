@@ -19,6 +19,6 @@
     "exact_check_id": 132330481492,
     "exact_check_conclusion": "success"
   },
-  "conclusion": "M5 is closed as containment confirmed for this probe: the label-triggered run and its exact mutation evidence check were skipped, not green. The skipped result did not replace or create a successful required check; the earlier pull_request run remained the successful required evidence.",
+  "conclusion": "The probe confirmed M5: the label event published a second check run named exactly mutation evidence with conclusion skipped, and GitHub reports a job skipped by a condition as success to required checks. Whether this made a pull request with a failed required check mergeable was not tested.",
   "source_snapshot": "/var/folders/yl/81tj0mm94qgbgvt8q_0r97100000gn/T/phase-hl/q1/label-probe-summary.json"
 }
