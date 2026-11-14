@@ -63,7 +63,7 @@ def emit(result: CheckResult) -> int:
     elif result.decision == Decision.ADVISORY:
         output.setdefault("decision", "continue")
         output.setdefault("reason", "[ADVISORY] " + (result.message or ""))
-    print(json.dumps(output))
+    print(json.dumps(output))  # nosemgrep: debug-print-statement -- hook stdout protocol
     return 2 if result.decision == Decision.BLOCK else 0
 
 
