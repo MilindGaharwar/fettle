@@ -1,7 +1,7 @@
 ---
 fettle-work-item: v2
 id: trust-remediation-tr1
-status: claimed
+status: done
 scope:
   - fettle/
   - hooks/hooks.json
@@ -30,9 +30,9 @@ normalisation, multi-target fan-out, and required-check failure semantics.
 
 ## Resolution
 
-In progress. Both installed launch modes now exercise the same dispatcher and
-canonical check entry points. Focused evidence covers journal deletion and
-malformation, subdirectory invocation, edit aliases, multi-target patches,
-repository-local import shadowing, malformed PreToolUse input, and missing
-interpreter failure. Final full-suite, quality, completion, UAT, and narrow
-mutation evidence remains to be attached before this item is marked done.
+Done. Both installed launch modes exercise the same dispatcher and canonical
+check entry points. Retained evidence covers journal deletion and malformation,
+subdirectory invocation, edit aliases, multi-target patches, repository-local
+import shadowing, malformed PreToolUse input, missing interpreter failure, the
+full regression and quality gates, and a bounded narrow mutation replay. The
+replay completed with 144 survivors, retained as explicit test-strength debt.
