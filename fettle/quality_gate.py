@@ -92,8 +92,9 @@ def _is_implementation_file(path: str, cwd: str = "") -> bool:
     if classify_file(path) != "implementation":
         return False
     if cwd and os.path.isabs(path):
-        root = os.path.abspath(cwd)
-        if not os.path.abspath(path).startswith(root + os.sep):
+        root = os.path.realpath(cwd)
+        candidate = os.path.realpath(path)
+        if candidate != root and not candidate.startswith(root + os.sep):
             return False
     elif any(path.startswith(p) for p in EXEMPT_PATH_PREFIXES):
         return False

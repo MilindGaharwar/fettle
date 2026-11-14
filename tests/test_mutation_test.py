@@ -2630,6 +2630,9 @@ def test_every_production_module_has_targeted_tests():
         "fettle/agents/codex.py": ["tests/test_agents.py"],
         "fettle/agents/gemini.py": ["tests/test_agents.py"],
         "fettle/agents/opencode.py": ["tests/test_agents.py"],
+        "fettle/agents/tools.py": ["tests/test_agents.py", "tests/test_trust_remediation_tr1.py"],
+        "fettle/edit_journal.py": ["tests/test_installed_hooks_e2e.py"],
+        "fettle/hook_cli.py": ["tests/test_bootstrap_gate.py"],
         "fettle/runners/_subprocess.py": ["tests/test_runners.py"],
         "fettle/uat/__init__.py": ["tests/test_uat_surfaces.py"],
     }
