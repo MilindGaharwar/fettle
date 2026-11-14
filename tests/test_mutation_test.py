@@ -4647,6 +4647,59 @@ def test_advisory_aggregate_retains_reuse_provenance_and_stays_ineligible(tmp_pa
     assert [item["shard_index"] for item in result["reuse_provenance"]] == [0, 1]
 
 
+def test_stamped_advisory_reports_reuse_through_selection_and_aggregation(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    stamped = [
+        {
+            **report,
+            "run_id": "900",
+            "run_attempt": "1",
+            "fresh_execution": True,
+        }
+        for report in reports
+    ]
+
+    with (
+        patch("fettle.mutation_test._revision", return_value="b" * 40),
+        patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")),
+    ):
+        reused = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, stamped,
+            source_run_id="900", source_run_attempt="1",
+        )["reports"]
+        selected, selection = select_bounded_shard_attempts(
+            reused, 2, run_id="901", allow_successful_reuse=True,
+        )
+        result = aggregate_shards(
+            str(tmp_path), selected, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert [item["reason"] for item in selection["selections"]] == [
+        "validated_successful_run_reuse",
+        "validated_successful_run_reuse",
+    ]
+    assert result["status"] == "completed"
+    assert result["reused_shards"] == [0, 1]
+
+
+def test_bounded_attempt_selection_rejects_incomplete_stamped_reuse():
+    reused = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "status": "tool_error",
+        "run_id": "900",
+        "run_attempt": "1",
+        "fresh_execution": True,
+        "reuse_provenance": {"source_run_id": "900", "source_run_attempt": "1"},
+    }
+
+    with pytest.raises(ValueError, match="malformed successful-run reuse"):
+        select_bounded_shard_attempts(
+            [reused], 1, run_id="901", allow_successful_reuse=True,
+        )
+
+
 @pytest.mark.parametrize(
     "provenance",
     [

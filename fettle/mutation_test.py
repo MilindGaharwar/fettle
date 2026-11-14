@@ -4838,7 +4838,7 @@ def select_bounded_shard_attempts(
         ):
             raise ValueError("bounded shard attempt has invalid topology")
         if allow_successful_reuse and isinstance(report.get("reuse_provenance"), dict):
-            if report.get("status") != "completed" or report.get("fresh_execution") is True:
+            if report.get("status") != "completed":
                 raise ValueError(f"shard {index} has malformed successful-run reuse")
             if index in reused_by_shard or by_shard[index]:
                 raise ValueError(f"shard {index} has conflicting fresh and reused reports")
