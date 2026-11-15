@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr2",
+  "revision": "trust-remediation-tr2-2026-11-15",
+  "diagnostic_outcome": "Make one changed-range attempt capped at 3600 seconds per file and 7200 seconds total; a non-result is retained but does not block package completion.",
+  "engine_version": "2.5.1",
+  "authoritative_preflight": {
+    "status": "tool_error",
+    "passed": false,
+    "deadline_exhausted": true,
+    "timeout_seconds": 7200,
+    "artifact_sha256": "21b7a282faeb982d257e70337baa53832c1899775b46da0607df6c0d31057f6e",
+    "artifact_location": "$TMPDIR/phase-hl/hl3/tr2-mutation-preflight-race-fixed.json"
+  },
+  "narrow_replay": {
+    "status": "not_authorized",
+    "reason": "The required preflight did not complete successfully."
+  },
+  "result": "timeout",
+  "interpretation": "The diagnostic attempt did not finish. No replay was authorized, no mutation credit is claimed, and HL-4 classifies this criterion as non-required."
+}

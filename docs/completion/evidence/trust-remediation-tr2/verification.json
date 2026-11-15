@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr2",
+  "revision": "trust-remediation-tr2-2026-11-15",
+  "expected_outcome": "Installed hooks protect the control plane and apply modeled policy floors without blocking malformed-policy repair.",
+  "observations": [
+    "Both installed launch modes passed the control-plane enforce, advisory, malformed-policy repair, and remote-policy failure scenarios.",
+    "Repository disables cannot suppress policy_integrity, while synthetic explicit check selection remains available.",
+    "Ignored repository weakening attempts are visible in fettle config --explain.",
+    "Policy changes after session start block Stop and make Assurance Record policy integrity fail.",
+    "The final installed-path UAT run reported 86 passed in 27.41 seconds."
+  ],
+  "result": "confirmed"
+}

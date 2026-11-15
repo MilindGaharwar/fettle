@@ -27,13 +27,12 @@ a malformed root policy instead of being locked out by that malformed file.
 ## Automated evidence
 
 - Installed-path acceptance: 86 passed in 27.41 seconds.
-- Full regression after the mutation cleanup change: 5,195 passed, 20 skipped
-  in 623.86 seconds.
+- Full regression on the secured TR-2 commit: 5,191 passed, 20 skipped, with
+  the one known `test_module_cli_validates_reports` wall-clock failure inherited
+  from `main`.
 - Ruff: clean.
 - Fettle scan: successful with the same three legacy protocol-print warnings
   already present in TR-1.
-- Mutation cleanup regressions: 338 passed, including restored bytes,
-  mode-only restoration, and delayed backup visibility.
 
 ## Manual protocol
 
@@ -50,6 +49,6 @@ not a hidden UAT pass.
 
 ## Decision
 
-FIX_FIRST. User acceptance behavior passes, but TR-2 cannot ship until a
-successful mutation preflight authorizes the required narrow replay and that
-replay completes within 60 minutes.
+FIX_FIRST pending the item-B clock-test repair and rebase. User acceptance
+behavior passes. The diagnostic mutation attempt timed out and is retained as
+non-required evidence under the HL-4 package method.
