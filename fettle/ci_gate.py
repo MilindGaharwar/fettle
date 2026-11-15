@@ -175,6 +175,8 @@ def summarize(runs: list[dict]) -> tuple[str, str]:
             for r in bad
         )
         return "failure", detail
+    if not any(r.get("conclusion") == "success" for r in runs):
+        return "failure", "no successful workflow run; every completed run was skipped or neutral"
     return "success", f"{len(runs)} run(s) green"
 
 
@@ -647,23 +649,31 @@ def run_check(ctx: HookContext) -> CheckResult:
             problem = "CI status is for a different commit than the last push"
         elif not problem and stamp_ts is not None and push_ts is not None and stamp_ts < push_ts:
             problem = "CI status predates the last push (stale)"
-        elif not problem and not stamp.get("ok", False):
-            detail = str(stamp.get("error", "")).strip()
-            repro = str(stamp.get("reproduce", "")).strip()
-            problem = f"remote CI is not green ({stamp.get('overall', '?')})"
-            if detail:
-                problem += f":\n{detail}"
-            if repro:
-                problem += f"\nReproduce locally: {repro}"
         elif not problem and "canonical_evidence" not in stamp:
             # The stamp writer always embeds a canonical reference (or forces
             # ok=false) — a green stamp without one is forged or pre-canonical.
             problem = "canonical CI evidence is missing"
+            detail = str(stamp.get("error", "")).strip()
+            repro = str(stamp.get("reproduce", "")).strip()
+            if detail:
+                problem += f"; remote CI is not green:\n{detail}"
+            if repro:
+                problem += f"\nReproduce locally: {repro}"
         elif not problem:
-            validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
-            if validity != Validity.VALID:
-                problem = f"canonical CI evidence is {validity.value}"
-                _log_canonical_inspection(str(ctx.cwd), stamp, validity, accepted=False)
+            evidence_result = validate_canonical_evidence(str(ctx.cwd), ctx.config, stamp)
+            if evidence_result.validity != Validity.VALID:
+                problem = f"canonical CI evidence is {evidence_result.validity.value}"
+                _log_canonical_inspection(
+                    str(ctx.cwd), stamp, evidence_result.validity, accepted=False,
+                )
+            elif evidence_result.result_state != ResultState.PASS:
+                problem = f"canonical CI result is {evidence_result.result_state.value}"
+                detail = str(stamp.get("error", "")).strip()
+                repro = str(stamp.get("reproduce", "")).strip()
+                if detail:
+                    problem += f":\n{detail}"
+                if repro:
+                    problem += f"\nReproduce locally: {repro}"
 
     if not problem:
         return CheckResult.allow()
@@ -689,7 +699,7 @@ def run_check(ctx: HookContext) -> CheckResult:
             and stamp_ts is not None
             and push_ts is not None
             and stamp_ts >= push_ts
-            and not stamp.get("ok", False)
+            and problem.startswith("canonical CI result is violation")
             and evidence_id
         ):
             ledger = load_override_ledger(ctx.cwd)

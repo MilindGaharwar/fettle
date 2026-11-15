@@ -1,6 +1,5 @@
 """Tests for fettle.brief — orchestrator poll endpoint."""
 
-import json
 import subprocess
 from unittest.mock import patch
 

@@ -278,6 +278,6 @@ def test_tracking_helpers_bind_state_lazily(monkeypatch, tmp_path):
                  "BROWSER_TEST_MARKER", "BOOTSTRAP_WARNED_MARKER"):
         monkeypatch.setattr(qg, name, "")
     monkeypatch.setattr(qg, "state_dir", lambda session_id: tmp_path)
-    qg.stamp_tests("npx playwright test")  # pre-fix: Path("").touch() crash
+    qg.record_browser_test("npx playwright test")  # pre-fix: Path("").touch() crash
     assert (tmp_path / "browser-tested.timestamp").is_file()
     assert qg._load_edit_tracking() == []
