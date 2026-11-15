@@ -241,13 +241,13 @@ def _entries(state, session):
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def test_pytest_command_stamps_entries_tested(proj, state):
+def test_pytest_command_does_not_stamp_entries_without_verified_result(proj, state):
     seed_edits(state, "tp", [{"file": str(proj / "src/mod.py"), "ts": 1, "tested": False}])
     rc, _, _ = run_gate(bash_payload(proj, "uv run pytest tests/ -q", "tp"), state)
     assert rc == 0
     entry = _entries(state, "tp")[0]
-    assert entry["tested"] is True
-    assert "tested_ts" in entry
+    assert entry["tested"] is False
+    assert "tested_ts" not in entry
 
 
 def test_non_test_command_does_not_stamp(proj, state):

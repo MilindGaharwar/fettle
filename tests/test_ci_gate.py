@@ -71,6 +71,14 @@ class TestSummarize:
         overall, _ = ci_gate.summarize([_run("CI"), _run("Docs", conclusion="skipped")])
         assert overall == "success"
 
+    def test_all_skipped_is_not_green(self) -> None:
+        overall, detail = ci_gate.summarize([
+            _run("CI", conclusion="skipped"),
+            _run("Docs", conclusion="skipped"),
+        ])
+        assert overall == "failure"
+        assert "no successful workflow run" in detail
+
     def test_any_red_names_the_run(self) -> None:
         overall, detail = ci_gate.summarize([_run("CI"), _run("Lint", conclusion="failure")])
         assert overall == "failure"
