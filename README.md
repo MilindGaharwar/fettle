@@ -157,7 +157,7 @@ invalidates an older assurance record so stale approval cannot look current.
 | Polyglot workspaces | Python, JavaScript/TypeScript, Go, and Rust post-edit and verification routing | Native toolchains remain external |
 | Verification | Test execution with canonical source, policy, scope, producer, and occurrence bindings | Local evidence does not replace remote CI |
 | Assurance | Nine-dimension canonical Assurance Record and frozen baseline comparison tooling | Graduation of stronger security enforcement still requires real shadow evidence |
-| Mutation quality | Python preflight, explicit-dispatch replay/full execution, stable fingerprints, baseline comparison, and automatic manifest-bound PR advisory evidence for changed scope | Python and pinned `mutmut==2.5.1` only; current PR aggregates are advisory and qualification-ineligible; full-corpus qualification remains `CLOSED_NON_PASS` |
+| Mutation quality | Python preflight, explicit-dispatch replay/full execution, stable fingerprints, baseline comparison, and automatic manifest-bound PR advisory evidence for configured changed scope | Python and pinned `mutmut==2.5.1` only; repositories may configure PR-only exclusions; current PR aggregates are advisory and qualification-ineligible; full-corpus qualification remains `CLOSED_NON_PASS` |
 | Delegated work | Plans, worktrees, claims, topology, role-aware spawn, policy capsules, lineage, completion reports | Defense in depth, not OS isolation |
 | Specifications | Markdown specs, lint, scenario inventory, trace coverage, and canonical drift evidence | Declared links count only when execution evidence passes |
 | User acceptance | CLI, API, web, and library sessions; manual walkthroughs; artifact-bound verdicts; seeded benchmark | Report-only unless separately promoted by policy |
@@ -174,7 +174,10 @@ exact head, base, and merge base, automatically dispatches the applicable shard
 matrix, and retains attempt-scoped artifacts. A failed shard job may receive one
 bounded rerun; aggregation still selects exactly one compatible completed attempt
 per shard and fails closed on missing or conflicting evidence. Reports declare
-`aggregation_mode: "advisory"` and `qualification_eligible: false`.
+`aggregation_mode: "advisory"` and `qualification_eligible: false`. A repository
+may use `[mutation].advisory_exclude` to omit named path prefixes from PR-only
+preparation while leaving deliberate full-corpus preparation unchanged; retained
+PR evidence names the applied exclusions.
 
 A pull request with no mutation-relevant Python change dispatches no mutation
 shards; after validating the zero-scope identity, it publishes retained
