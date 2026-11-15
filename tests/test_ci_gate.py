@@ -354,6 +354,27 @@ def _override(
 
 
 class TestStopGate:
+    def test_edited_ok_cannot_turn_canonical_ci_failure_green(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        config = _cfg(mode="enforce")
+        with patch.object(
+            ci_gate, "_query_runs", return_value=([_run("CI", conclusion="failure")], ""),
+        ):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        _record(state, stamp["sha"], ts=stamp["ts"] - 1)
+        stamp_path = repo / ci_gate.STAMP_RELPATH
+        edited = json.loads(stamp_path.read_text())
+        edited["ok"] = True
+        stamp_path.write_text(json.dumps(edited))
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "block"
+        assert "canonical CI result is violation" in result.message
+
     def test_disabled_allows(self, tmp_path: Path) -> None:
         assert ci_gate.run_check(_ctx(tmp_path, _cfg(enabled=False))).decision.value == "allow"
 

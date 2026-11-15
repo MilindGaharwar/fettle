@@ -6,6 +6,8 @@ import shlex
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from fettle.evidence import ResultState
+
 
 def invokes_pytest(argv: list[str]) -> bool:
     """Return whether an argument vector invokes pytest."""
@@ -82,3 +84,24 @@ def portable_argv(argv: list[str], *, cwd: str) -> list[str]:
         except ValueError:
             projected.append(path.name if index == 0 else f"<external>/{path.name}")
     return projected
+
+
+def classify_test_result(
+    returncode: int,
+    counts: dict[str, int] | None,
+) -> tuple[ResultState, str]:
+    """Classify one completed test command without inferring execution."""
+    if returncode != 0:
+        return ResultState.VIOLATION, ""
+    if counts is None:
+        return (
+            ResultState.UNKNOWN,
+            "the test command exited 0 but no test count is available. "
+            "Set [gates.verify] report to a JUnit XML path.",
+        )
+    if counts["executed"] == 0:
+        return (
+            ResultState.VIOLATION,
+            f"no tests executed (collected {counts['collected']}, skipped {counts['skipped']})",
+        )
+    return ResultState.PASS, ""

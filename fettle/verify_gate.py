@@ -49,7 +49,12 @@ from fettle.evidence import (
 from fettle.paths import classify_file
 from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
-from fettle.test_evidence import portable_argv, prepare_test_command, read_junit_counts
+from fettle.test_evidence import (
+    classify_test_result,
+    portable_argv,
+    prepare_test_command,
+    read_junit_counts,
+)
 from fettle.test_runner_opts import build_pytest_args, record_failures
 from fettle.trace import build_evidence, log_evidenced_decision
 from fettle.workspace import Workspace, route_file_to_workspace
@@ -186,6 +191,9 @@ def run_verify(
         )
 
     tc = discover_test_config(cwd)
+    effective_command = config.get("profile", {}).get("test_command", "")
+    if isinstance(effective_command, str) and effective_command:
+        tc.command = effective_command
     stamp: dict = {
         "ok": False, "command": "", "exit_code": -1, "duration_s": 0.0,
         "scope": "full", "impacted": [], "error": "", "ts": time.time(),
@@ -246,22 +254,10 @@ def run_verify(
         )
         stamp["exit_code"] = proc.returncode
         stamp["tests"] = read_junit_counts(report_path)
-        if proc.returncode == 0 and stamp["tests"] is None:
-            stamp["result_state"] = ResultState.UNKNOWN
-            stamp["error"] = (
-                "the test command exited 0 but no test count is available. "
-                "Set [gates.verify] report to a JUnit XML path."
-            )
-        elif proc.returncode == 0 and stamp["tests"]["executed"] == 0:
-            stamp["result_state"] = ResultState.VIOLATION
-            stamp["error"] = (
-                "no tests executed "
-                f"(collected {stamp['tests']['collected']}, skipped {stamp['tests']['skipped']})"
-            )
-        elif proc.returncode == 0:
-            stamp["result_state"] = ResultState.PASS
-        else:
-            stamp["result_state"] = ResultState.VIOLATION
+        stamp["result_state"], classification_error = classify_test_result(
+            proc.returncode, stamp["tests"],
+        )
+        stamp["error"] = classification_error
         stamp["ok"] = stamp["result_state"] == ResultState.PASS
         if proc.returncode != 0:
             tail = (proc.stdout + proc.stderr).strip().splitlines()[-15:]
@@ -336,7 +332,9 @@ def _run_workspace_verification(
             _capture_post_run_state(str(workspace_root), record)
             records.append(record)
             continue
-        argv = shlex.split(workspace.test_command)
+        argv, report_path = prepare_test_command(
+            workspace.test_command, cwd=str(workspace_root),
+        )
         if impacted and workspace.language == "python":
             workspace_files = [str(Path(cwd) / file_path) for file_path in edited]
             mapping = _impact_mapping(
@@ -377,13 +375,22 @@ def _run_workspace_verification(
                 capture_output=True, text=True, timeout=timeout_s,
             )
             record["exit_code"] = proc.returncode
-            record["ok"] = proc.returncode == 0
+            record["tests"] = read_junit_counts(report_path)
+            record["result_state"], classification_error = classify_test_result(
+                proc.returncode, record["tests"],
+            )
+            record["ok"] = record["result_state"] == ResultState.PASS
+            record["error"] = classification_error
             if proc.returncode != 0:
                 record["error"] = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
         except subprocess.TimeoutExpired:
             record["error"] = f"test run exceeded timeout ({timeout_s}s) — result unknown"
+            record["tests"] = None
+            record["result_state"] = ResultState.TOOL_ERROR
         except (OSError, FileNotFoundError) as error:
             record["error"] = f"could not launch test command: {error}"
+            record["tests"] = None
+            record["result_state"] = ResultState.TOOL_ERROR
         record["duration_s"] = round(time.monotonic() - start, 2)
         _capture_post_run_state(str(workspace_root), record)
         evidence = build_evidence(
@@ -395,8 +402,26 @@ def _run_workspace_verification(
 
     _capture_post_run_state(cwd, root_state)
     failed = [record for record in records if not record["ok"]]
+    result_states = {record.get("result_state") for record in records}
+    if ResultState.TOOL_ERROR in result_states:
+        result_state = ResultState.TOOL_ERROR
+    elif ResultState.VIOLATION in result_states:
+        result_state = ResultState.VIOLATION
+    elif ResultState.UNKNOWN in result_states:
+        result_state = ResultState.UNKNOWN
+    else:
+        result_state = ResultState.PASS
+    counted = [record.get("tests") for record in records]
+    aggregate_tests = None
+    if counted and all(isinstance(counts, dict) for counts in counted):
+        aggregate_tests = {
+            key: sum(counts[key] for counts in counted)
+            for key in ("collected", "executed", "passed", "failed", "errors", "skipped")
+        }
     stamp = {
-        "ok": not failed,
+        "ok": result_state == ResultState.PASS,
+        "result_state": result_state,
+        "tests": aggregate_tests,
         "command": " && ".join(record["command"] for record in records),
         "exit_code": max((record["exit_code"] for record in failed), default=0),
         "duration_s": round(sum(record.get("duration_s", 0.0) for record in records), 2),
@@ -418,6 +443,7 @@ def _run_workspace_verification(
     }
     if root_state.get("source_drift"):
         stamp["ok"] = False
+        stamp["result_state"] = ResultState.TOOL_ERROR
         stamp["error"] = "\n".join(filter(None, (
             stamp["error"], str(root_state.get("error") or ""),
         )))
@@ -828,7 +854,7 @@ def run_check(ctx: HookContext) -> CheckResult:
             verified = {
                 str(record.get("path"))
                 for record in stamp.get("workspaces", [])
-                if isinstance(record, dict) and record.get("ok", False)
+                if isinstance(record, dict) and record.get("result_state") == ResultState.PASS
             }
             missing = sorted(needed - verified)
             if missing:
