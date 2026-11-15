@@ -80,6 +80,7 @@ from fettle.mutation_test import (
     validate_capacity_recovery_results,
     validate_captured_runtime_environment,
     reconcile_capacity_provider_accounting,
+    write_partition_manifests,
     write_changed_partition_manifests,
 )
 
@@ -2205,6 +2206,149 @@ def test_changed_manifests_keep_configured_topology_for_content_reuse(tmp_path, 
         "src/a.py", "src/b.py", "src/unchanged.py",
     }
     assert sum(item["end"] - item["start"] + 1 for manifest in manifests for item in manifest["ranges"]) == 15
+
+
+def _advisory_scope_fixture(tmp_path):
+    (tmp_path / "fettle").mkdir()
+    (tmp_path / "tests").mkdir()
+    for name in ("mutation_test", "staged_preflight", "product"):
+        (tmp_path / f"fettle/{name}.py").write_text(f"{name.upper()} = 1\n")
+        (tmp_path / f"tests/test_{name}.py").write_text(f"import fettle.{name}\n")
+    (tmp_path / "requirements-mutation.txt").write_text("mutmut==2.5.1\n")
+    return {
+        "paths": ["fettle/"],
+        "exclude": [],
+        "advisory_exclude": ["fettle/mutation_test.py", "fettle/staged_preflight.py"],
+        "default_chunk_lines": 60,
+        "full_shards": 2,
+    }
+
+
+def test_changed_manifests_engine_only_change_uses_zero_scope(tmp_path, monkeypatch):
+    config = _advisory_scope_fixture(tmp_path)
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "b" * 40,
+        "files": ["fettle/mutation_test.py", "fettle/staged_preflight.py"], "deleted": [],
+    })
+
+    paths, changed = write_changed_partition_manifests(
+        str(tmp_path), config, tmp_path / "manifests", "origin/main",
+    )
+
+    assert paths == []
+    assert changed == []
+
+
+def test_changed_manifests_mixed_change_omits_advisory_exclusions(tmp_path, monkeypatch):
+    config = _advisory_scope_fixture(tmp_path)
+    config["full_shards"] = 1
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "b" * 40,
+        "files": ["fettle/mutation_test.py", "fettle/product.py"], "deleted": [],
+    })
+
+    paths, changed = write_changed_partition_manifests(
+        str(tmp_path), config, tmp_path / "manifests", "origin/main",
+    )
+    manifests = [json.loads(path.read_text()) for path in paths]
+
+    assert changed == ["fettle/product.py"]
+    assert len(paths) == 1
+    assert {file for manifest in manifests for file in manifest["files"]} == {"fettle/product.py"}
+
+
+def test_advisory_exclude_does_not_change_full_corpus_manifests(tmp_path, monkeypatch):
+    config = _advisory_scope_fixture(tmp_path)
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+
+    without_key = write_partition_manifests(
+        str(tmp_path), {key: value for key, value in config.items() if key != "advisory_exclude"},
+        tmp_path / "without-key",
+    )
+    with_key = write_partition_manifests(str(tmp_path), config, tmp_path / "with-key")
+
+    assert [path.read_bytes() for path in with_key] == [path.read_bytes() for path in without_key]
+    assert [json.loads(path.read_text())["digest"] for path in with_key] == [
+        json.loads(path.read_text())["digest"] for path in without_key
+    ]
+
+
+def test_empty_advisory_exclude_preserves_changed_scope(tmp_path, monkeypatch):
+    config = _advisory_scope_fixture(tmp_path)
+    config["advisory_exclude"] = []
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "a" * 40)
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "b" * 40,
+        "files": ["fettle/mutation_test.py"], "deleted": [],
+    })
+
+    paths, changed = write_changed_partition_manifests(
+        str(tmp_path), config, tmp_path / "manifests", "origin/main",
+    )
+
+    assert changed == ["fettle/mutation_test.py"]
+    assert {file for path in paths for file in json.loads(path.read_text())["files"]} == {
+        "fettle/mutation_test.py", "fettle/product.py", "fettle/staged_preflight.py",
+    }
+
+
+def test_reduced_advisory_scope_flows_through_reuse_projection_selection_and_aggregate(
+    tmp_path, monkeypatch,
+):
+    config = {
+        **_advisory_scope_fixture(tmp_path),
+        "full_shards": 1,
+        "mode": "advisory",
+        "score_target": 70,
+        "test_mappings": {"fettle/product.py": ["tests/test_product.py"]},
+    }
+    monkeypatch.setattr("fettle.mutation_test._revision", lambda root: "b" * 40)
+    monkeypatch.setattr("fettle.mutation_test._get_changed_py_files", lambda *args: {
+        "status": "completed", "merge_base": "a" * 40,
+        "files": ["fettle/mutation_test.py", "fettle/product.py"], "deleted": [],
+    })
+    paths, changed = write_changed_partition_manifests(
+        str(tmp_path), config, tmp_path / "manifests", "origin/main",
+    )
+    manifests = [json.loads(path.read_text()) for path in paths]
+    reports = [
+        _shard_report(
+            manifest["shard_index"], manifest["files"], shard_count=len(manifests),
+            revision="a" * 40, manifest_digest="f" * 64,
+            advisory_reuse_identity=build_advisory_reuse_identity(
+                str(tmp_path), manifest, config,
+            ),
+        )
+        for manifest in manifests
+    ]
+
+    reused = prepare_advisory_reuse(
+        str(tmp_path), config, manifests, reports,
+        source_run_id="700", source_run_attempt="1",
+    )
+    projection = evaluate_advisory_projection(
+        manifests, reused["matrix"], _projection_ledger(manifests),
+        engine_budget_seconds=200,
+    )
+    selected, selection = select_bounded_shard_attempts(
+        reused["reports"], len(manifests), run_id="701", allow_successful_reuse=True,
+    )
+    with patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")):
+        aggregate = aggregate_shards(
+            str(tmp_path), selected, config["paths"],
+            [*config["exclude"], *config["advisory_exclude"]], len(manifests), 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert changed == ["fettle/product.py"]
+    assert reused["reused_shards"] == [0]
+    assert projection["dispatch_shards"] == []
+    assert len(selection["selections"]) == 1
+    assert aggregate["status"] == "completed", aggregate
+    assert aggregate["advisory_exclude"] == config["advisory_exclude"]
 
 
 def test_changed_manifest_preparation_preserves_selection_failure(tmp_path, monkeypatch):

@@ -3464,15 +3464,20 @@ def write_changed_partition_manifests(
     selection = _get_changed_py_files(root, cfg.get("paths", ["src/"]), base)
     if selection["status"] != "completed":
         raise ValueError(selection["message"])
+    excluded = [
+        *cfg.get("exclude", ["tests/", "migrations/"]),
+        *cfg.get("advisory_exclude", []),
+    ]
     files = [
         path for path in selection["files"]
-        if not any(path.startswith(item) for item in cfg.get("exclude", ["tests/", "migrations/"]))
+        if not any(path.startswith(item) for item in excluded)
     ]
     if not files:
         return [], []
     # Changed files decide applicability. Stable configured partitions let the
     # five content digests decide which shards can be reused versus executed.
-    return write_partition_manifests(root, cfg, output_dir), files
+    advisory_cfg = {**cfg, "exclude": excluded}
+    return write_partition_manifests(root, advisory_cfg, output_dir), files
 
 
 def _advisory_policy_digest(config: dict) -> str:
@@ -5284,6 +5289,7 @@ def aggregate_shards(
             report["shard_index"] for report in reports if "reuse_provenance" in report
         ]
         evidence_identity = {
+            "advisory_exclude": policy.get("advisory_exclude", []),
             "policy_digest": _advisory_policy_digest(policy),
             "source_scope_digest": _canonical_digest({
                 file: hashlib.sha256((Path(root) / file).read_bytes()).hexdigest()
@@ -6340,7 +6346,10 @@ def main() -> int:
             report = {
                 "status": "completed", "passed": True, "shard_count": len(paths),
                 "matrix": {"shard": list(range(len(paths)))},
-                **({"files": changed_files} if args.prepare_changed_manifests else {}),
+                **({
+                    "files": changed_files,
+                    "advisory_exclude": mutation.get("advisory_exclude", []),
+                } if args.prepare_changed_manifests else {}),
             }
         except (OSError, ValueError) as exc:
             report = _error("unknown", f"Cannot prepare mutation manifests: {exc}")
@@ -6555,9 +6564,13 @@ def main() -> int:
                         raise ValueError("aggregate scope manifests are incomplete")
                     paths = sorted({file for manifest in manifests for file in manifest["files"]})
                     if args.aggregate_preflight_evidence or args.aggregate_advisory:
+                        aggregate_excluded = [
+                            *excluded,
+                            *(mutation.get("advisory_exclude", []) if args.aggregate_advisory else []),
+                        ]
                         expected = [
                             file for file in _get_all_py_files(args.root, mutation["paths"])
-                            if not any(file.startswith(item) for item in excluded)
+                            if not any(file.startswith(item) for item in aggregate_excluded)
                         ]
                     else:
                         selection = _get_changed_py_files(
@@ -6597,7 +6610,9 @@ def main() -> int:
                     sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
                     return 2
                 report = aggregate_shards(
-                    args.root, reports, paths, excluded, args.shard_count, threshold,
+                    args.root, reports, paths,
+                    [*excluded, *(mutation.get("advisory_exclude", []) if args.aggregate_advisory else [])],
+                    args.shard_count, threshold,
                     mutation["test_mappings"], mutation, manifests, retained_preflight,
                     args.calibration_id, advisory=args.aggregate_advisory,
                 )
