@@ -64,10 +64,9 @@ def run_check(ctx):
     critical_threshold = gate_cfg.get("critical_threshold", 25)
     reset_on_commit = gate_cfg.get("reset_on_commit", True)
 
-    state_dir = os.environ.get(
-        "FETTLE_SCOPE_STATE_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state", "sessions"),
-    )
+    from fettle.config import state_dir as session_state_dir
+
+    state_dir = os.environ.get("FETTLE_SCOPE_STATE_DIR", str(session_state_dir(session_id)))
     state_path = _get_state_path(state_dir, session_id)
     state = _load_state(state_path)
 

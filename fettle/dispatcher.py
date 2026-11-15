@@ -109,6 +109,17 @@ def _empty_output(event_name: str = "") -> str:
     )
 
 
+def _is_policy_repair(hook_input, root: Path) -> bool:
+    if hook_input.hook_event_name != "PreToolUse" or hook_input.tool_name not in {"Write", "Edit"}:
+        return False
+    if len(hook_input.targets) != 1:
+        return False
+    target = hook_input.targets[0]
+    if not target.is_absolute():
+        target = (hook_input.invocation_cwd or root) / target
+    return target.resolve(strict=False) == (root / ".fettle.toml").resolve(strict=False)
+
+
 def main() -> int:
     if os.environ.get("FETTLE_DISABLE_DISPATCHER") == "1":
         print(_empty_output())
@@ -196,9 +207,23 @@ def main() -> int:
             "config_error", f"{type(exc).__name__}: {exc}", session_id
         )
         failure = Aggregator(total_budget_ms=0, hook_event_name=hook_input.hook_event_name)
+        if _is_policy_repair(hook_input, cwd):
+            failure.add_result(
+                "dispatcher",
+                CheckResult.advisory(
+                    "Fettle policy is invalid; allowing this policy-file repair only. "
+                    "Run `fettle doctor` after the repair."
+                ),
+                0,
+            )
+            output, exit_code = failure.finish()
+            print(json.dumps(output, separators=(",", ":")))
+            return exit_code
         failure.add_result("dispatcher", CheckResult.block(
-            "Policy configuration could not be loaded; required checks are unknown. "
-            "Run `fettle doctor` and retry."
+            "Org policy is declared but not available locally. Run: fettle policy sync"
+             if "policy sync" in str(exc)
+             else "Policy configuration could not be loaded; required checks are unknown. "
+                  "Run `fettle doctor` and retry."
         ), 0)
         output, exit_code = failure.finish()
         print(json.dumps(output, separators=(",", ":")))
@@ -313,6 +338,7 @@ def main() -> int:
                         duration_ms=elapsed_ms,
                         session_id=session_id,
                         role=str(ctx.config.get("role", "")),
+                        root=str(ctx.cwd),
                     )
 
         # WP-D: Log overruns for observability — and trace them, so chronic
@@ -329,6 +355,7 @@ def main() -> int:
                                "budget_ms": spec.budget_ms or 0,
                                "actual_ms": elapsed_ms}],
                     session_id=session_id,
+                    root=str(ctx.cwd),
                 )
 
         if aggregator.has_block:

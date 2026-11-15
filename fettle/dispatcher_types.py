@@ -193,6 +193,7 @@ class CheckSpec:
     enabled_by_default: bool = True
     budget_ms: int | None = None
     fail_closed: bool = False
+    protected_from_repo_disable: bool = False
     policy_gates: tuple[str, ...] = ()
     required_when: Callable[[HookContext], bool] | None = None
 
@@ -224,6 +225,10 @@ class CheckSpec:
         return True
 
     def is_enabled(self, config: dict[str, Any]) -> bool:
+        if (self.fail_closed or self.protected_from_repo_disable) and hasattr(
+            config, "floor_disabled_checks"
+        ):
+            return self.name not in getattr(config, "floor_disabled_checks", frozenset())
         checks_cfg = config.get("dispatcher", {}).get("checks", {})
         check_cfg = checks_cfg.get(self.name, {})
         enabled = check_cfg.get("enabled")

@@ -436,10 +436,34 @@ def _authorization_dimension(root: Path) -> dict:
     return _dimension("PASS", evidence)
 
 
-def _policy_integrity_dimension(policy_digest: str) -> dict:
-    return _dimension(
-        "PASS", [{"path": "effective-policy", "digest": policy_digest}],
+def _policy_integrity_dimension(root: Path, config: dict, policy_digest: str) -> dict:
+    from fettle.config import state_root
+
+    evidence = [{"path": "effective-policy", "digest": policy_digest}]
+    sessions_root = state_root()
+    records = sorted(
+        sessions_root.glob("*/session-start.json"), key=lambda item: item.stat().st_mtime,
+        reverse=True,
     )
+    if not records:
+        return _dimension("UNKNOWN", evidence, reason="no session-start policy evidence")
+    start = None
+    for record in records:
+        try:
+            candidate = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if candidate.get("root") == str(root.resolve()):
+            start = candidate
+            break
+    if start is None:
+        return _dimension("UNKNOWN", evidence, reason="no valid session-start policy evidence for this repository")
+    start_digest = str(start.get("policy_digest", ""))
+    if start_digest and not start_digest.startswith("sha256:"):
+        start_digest = "sha256:" + start_digest
+    if start_digest != policy_digest:
+        return _dimension("FAIL", evidence, reason="effective policy changed during the session")
+    return _dimension("PASS", evidence)
 
 
 def _scope_dimension(scope_digest: str) -> dict:
@@ -558,7 +582,9 @@ def build_assurance_record(root: str = ".",
         return context
     dimensions = {
         "authorization": _authorization_dimension(root_path),
-        "policy_integrity": _policy_integrity_dimension(context["policy"]["digest"]),
+        "policy_integrity": _policy_integrity_dimension(
+            root_path, context["config"], context["policy"]["digest"]
+        ),
         "scope": _scope_dimension(context["scope"]["digest"]),
         "behavior": _behavior_dimension(root_path, context["config"]),
         "security": _security_dimension(root_path, context["config"]),

@@ -76,7 +76,7 @@ CHECKS: tuple[CheckSpec, ...] = (
         policy_gates=("config_protect",),
         run=_lazy("fettle.config_protect"),
         events=frozenset({"PreToolUse"}),
-        tools=frozenset({"Write", "Edit"}),
+        tools=frozenset({"Bash", "Write", "Edit"}),
         order=10,
         budget_ms=50,
     ),
@@ -311,6 +311,16 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=52,
         budget_ms=100,
+    ),
+    CheckSpec(
+        name="policy_integrity",
+        policy_gates=("config_protect",),
+        run=_lazy("fettle.policy_integrity"),
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=51,
+        budget_ms=50,
+        protected_from_repo_disable=True,
     ),
     # PostToolUse(Bash) — record `git push` for the CI gate (Stage 8)
     CheckSpec(

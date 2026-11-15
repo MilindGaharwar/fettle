@@ -6,6 +6,27 @@
   "x-fettle-schema-version": 1,
   "type": "object",
   "properties": {
+    "dispatcher": {
+      "type": "object",
+      "properties": {
+        "disabled_checks": {
+          "type": "array"
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "global_budget_ms": {
+          "type": "integer",
+          "default": 0
+        },
+        "event_budgets_ms": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
     "gates": {
       "type": "object",
       "properties": {

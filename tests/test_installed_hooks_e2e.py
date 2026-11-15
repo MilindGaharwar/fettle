@@ -364,3 +364,57 @@ def test_registered_hook_treats_malformed_journal_as_unknown(installed_hook_repo
 
     assert result.returncode == 2, result.stderr
     assert "evidence is malformed" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("case_name", "tool_input", "protected_name"),
+    (
+        ("pre_edit", {"file_path": ".fettle.toml"}, ".fettle.toml"),
+        ("pre_edit", {"file_path": ".fettle/new-evidence.json"}, "new-evidence.json"),
+        ("pre_edit", {"file_path": ".claude/settings.local.json"}, "settings.local.json"),
+        ("pre_bash", {"command": "rm .fettle.toml"}, ".fettle.toml"),
+        ("pre_bash", {"command": "printf x > .codex/hooks.json"}, "hooks.json"),
+    ),
+)
+def test_registered_hook_blocks_control_plane_writes(
+    installed_hook_repo, mode, case_name, tool_input, protected_name,
+):
+    root, env = installed_hook_repo
+    payload = _payload("claude_code", case_name, root, **tool_input)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    reason = json.loads(result.stdout)["reason"]
+    assert "Fettle policy modification blocked:" in reason
+    assert protected_name in reason
+    assert "Disable:" not in reason
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_repair_of_broken_root_policy(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text("[gates.config_protect\n")
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+    assert "repair" in json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_on_control_plane_write(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+    )
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "Fettle policy modification blocked:" in output["additionalContext"]
+    assert output.get("permissionDecision") != "deny"

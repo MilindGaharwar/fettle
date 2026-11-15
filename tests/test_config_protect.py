@@ -89,21 +89,21 @@ class TestBlocksConfigModification:
         assert out is not None
 
 
-class TestAllowsCreation:
-    def test_allows_eslintrc_creation(self, tmp_path) -> None:
+class TestProtectsCreation:
+    def test_protects_eslintrc_creation(self, tmp_path) -> None:
         proj = tmp_path / "proj"
         proj.mkdir()
         # File does NOT exist yet
         rc, out, _ = _run_hook(str(proj / ".eslintrc.json"), cwd=str(proj))
         assert rc == 0
-        assert out is None
+        assert out is not None
 
-    def test_allows_ruff_toml_creation(self, tmp_path) -> None:
+    def test_protects_ruff_toml_creation(self, tmp_path) -> None:
         proj = tmp_path / "proj"
         proj.mkdir()
         rc, out, _ = _run_hook(str(proj / "ruff.toml"), cwd=str(proj))
         assert rc == 0
-        assert out is None
+        assert out is not None
 
 
 class TestPyprojectToml:

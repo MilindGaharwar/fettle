@@ -140,7 +140,7 @@ class TestLoadConfigIntegration:
         cfg = load_config(str(repo))
         assert cfg["gates"]["lint"]["mode"] == "enforce"      # from org policy
         assert cfg["gates"]["plan"]["enabled"] is True        # from org policy
-        assert cfg["gates"]["plan"]["threshold"] == 9         # repo wins over org (=2)
+        assert cfg["gates"]["plan"]["threshold"] == 2         # org floor is stricter than repo (=9)
 
     def test_unsynced_policy_degrades_to_local(self, repo, cache, monkeypatch) -> None:
         monkeypatch.setattr(policy_remote.urllib.request, "urlopen",
