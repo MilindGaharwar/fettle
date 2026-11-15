@@ -125,8 +125,9 @@ def render_brief(data: dict) -> str:
             lines.append(f"            {w['item']:<24} blocks {w['blocks']:>2}"
                          f"/{w['decisions']:<4}{flag}")
     ci = data["ci"]
-    lines.append(f"  ci        {ci['overall'] or ('green' if ci['ok'] else 'red')} "
-                 f"@ {ci['sha'][:12]}" if ci else "  ci        no cached verdict")
+    ci_label = (ci["overall"] if ci["ok"] else ci.get("state", "red")) if ci else ""
+    lines.append(f"  ci        {ci_label} "
+                  f"@ {ci['sha'][:12]}" if ci else "  ci        no cached verdict")
     verify = data["verify"]
     lines.append(f"  verify    {'green' if verify['ok'] else verify.get('state', 'red')}"
                  if verify else "  verify    no stamp")

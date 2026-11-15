@@ -192,8 +192,14 @@ def test_brief_surfaces_plan_ci_and_reports(tmp_path, monkeypatch):
     from fettle.brief import compute_brief, render_brief
     data = compute_brief(tmp_path)
     assert data["plan"]["title"] == "Brief plan"
-    assert data["ci"] == {"ok": True, "sha": "abc123def456", "overall": "success"}
+    assert data["ci"] == {
+        "ok": False,
+        "state": "stale",
+        "reason": "malformed",
+        "sha": "abc123def456",
+        "overall": "success",
+    }
     assert data["completion_reports"][0]["session_id"] == "child-1"
     out = render_brief(data)
-    assert "success @ abc123def456" in out
+    assert "stale @ abc123def456" in out
     assert "completion report(s)" in out

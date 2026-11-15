@@ -2634,6 +2634,9 @@ def test_every_production_module_has_targeted_tests():
         "fettle/edit_journal.py": ["tests/test_installed_hooks_e2e.py"],
         "fettle/hook_cli.py": ["tests/test_bootstrap_gate.py"],
         "fettle/runners/_subprocess.py": ["tests/test_runners.py"],
+        "fettle/test_evidence.py": [
+            "tests/test_trust_remediation_tr3.py", "tests/test_verify_gate.py",
+        ],
         "fettle/uat/__init__.py": ["tests/test_uat_surfaces.py"],
     }
 

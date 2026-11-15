@@ -82,6 +82,7 @@ full_shards = 256
 ]
 "fettle/mutation_test.py" = ["tests/test_mutation_test.py"]
 "fettle/staged_preflight.py" = ["tests/test_staged_preflight.py"]
+"fettle/test_evidence.py" = ["tests/test_trust_remediation_tr3.py", "tests/test_verify_gate.py"]
 "fettle/agents/claude_code.py" = ["tests/test_agents.py"]
 "fettle/agents/codex.py" = ["tests/test_agents.py"]
 "fettle/agents/gemini.py" = ["tests/test_agents.py"]
