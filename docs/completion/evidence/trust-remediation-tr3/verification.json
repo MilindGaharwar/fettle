@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-15",
+  "expected_outcome": "Verification and CI consumers derive outcomes from current canonical evidence and prove that tests executed.",
+  "observations": [
+    "Committed red regressions cover edited verification and CI stamps, zero executed tests, unavailable counts, stale CI and brief state, real trace timestamps, policy command precedence, and workspace aggregation.",
+    "The final targeted TR-3 suite reported 298 passed in 85.62 seconds.",
+    "Counted pytest evidence binds collected, executed, passed, failed, errors, skipped, and portable argv in the canonical artifact.",
+    "A zero-count custom command remains UNKNOWN during the compatibility window; an all-skipped pytest run is a violation.",
+    "Effective policy owns the test command, full is the default verification scope, and explicit impacted scope remains partial.",
+    "Assurance and brief use canonical validators; all-skipped CI, edited ok fields, stale source, and pushed commits without retained status remain non-pass."
+  ],
+  "result": "confirmed"
+}

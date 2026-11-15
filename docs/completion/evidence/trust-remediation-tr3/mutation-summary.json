@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-15",
+  "diagnostic_outcome": "Run one bounded, non-authoritative mutation preflight and retain its terminal outcome without changing mutation tooling or configuration.",
+  "authoritative_preflight": {
+    "status": "unknown",
+    "passed": false,
+    "exit_code": 2,
+    "message": "No targeted tests mapped for: fettle/test_evidence.py",
+    "artifact_location": "$TMPDIR/phase-hl/hl4/tr3-mutation-preflight.json"
+  },
+  "narrow_replay": {
+    "status": "not_authorized",
+    "reason": "The diagnostic preflight did not complete successfully."
+  },
+  "result": "indeterminate",
+  "interpretation": "No mutation credit is claimed. The attempt is non-required for TR-3, and mutation configuration remains outside this package."
+}

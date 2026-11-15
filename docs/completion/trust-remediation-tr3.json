@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-15",
+  "scope_digest_version": 2,
+  "scope_digest": "e196b8aaf115e3c9319d7b2d429ad2052e30e3a502ea7e9f4d3e188a6e5b8845",
+  "status": "in_progress",
+  "uat_decision": "FIX_FIRST",
+  "criteria": [
+    {
+      "id": "canonical-counted-verification",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Canonical evidence owns verification and CI outcomes, pytest execution is counted, zero execution is red, unavailable counts are UNKNOWN, effective policy owns the command, and workspace results use the same classification.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr3/verification.json",
+        "sha256": "dc121583346a0925eda065bc3cbfda3642d8b1abe087d949b665a3efc4005280",
+        "revision": "trust-remediation-tr3-2026-11-15"
+      },
+      "recovery": "Rerun the focused TR-3, verify, CI, assurance, brief, quality, baseline, and installed-hook suites under isolated XDG state."
+    },
+    {
+      "id": "installed-and-cli-uat",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Manual CLI flows passed for counted success, all-skipped failure, unavailable-count UNKNOWN, stale brief state, and edited-stamp rejection through both installed launch modes.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr3/uat.json",
+        "sha256": "4daf875c7c9ce2c5b946b9eb3d160260c5a6b62827b5e645f78e8555728498ae",
+        "revision": "trust-remediation-tr3-2026-11-15"
+      },
+      "recovery": "Repeat the manual protocol in docs/uat/trust-remediation-tr3.md and retain the transcript under the phase evidence directory."
+    },
+    {
+      "id": "full-regression-and-quality",
+      "kind": "success",
+      "required": true,
+      "verdict": "blocked",
+      "observed": "Targeted tests, Ruff, range pre-commit, and Fettle scan passed. The full suite reported 5204 passed and 20 skipped with exactly the authorized inherited clock failure; this criterion awaits PR #75 and rebase.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
+        "sha256": "5f08ddb96c14a6d9ae8545d487290e489dfe276cfb025f1e02c49914af957a4b",
+        "revision": "trust-remediation-tr3-2026-11-15"
+      },
+      "recovery": "After PR #75 merges, rebase the trust-remediation stack and rerun the unexcluded full suite, targeted suite, Ruff, installed UAT, range pre-commit, and fettle check --all under isolated XDG state."
+    },
+    {
+      "id": "candidate-range-precommit",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on the committed candidate range.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
+        "sha256": "5f08ddb96c14a6d9ae8545d487290e489dfe276cfb025f1e02c49914af957a4b",
+        "revision": "trust-remediation-tr3-2026-11-15"
+      },
+      "recovery": "Rerun the same committed-range gate after rebasing onto the PR #75 main commit."
+    },
+    {
+      "id": "bounded-diagnostic-mutation-attempt",
+      "kind": "success",
+      "required": false,
+      "verdict": "indeterminate",
+      "observed": "The bounded diagnostic preflight terminated with exit 2 and UNKNOWN because fettle/test_evidence.py has no mutation mapping. No replay was authorized, no mutation credit is claimed, and mutation configuration remains out of scope.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr3/mutation-summary.json",
+        "sha256": "764a86c7e0e647244fae60d0566f338dccf0a1b0277a9e535b255655b5651021",
+        "revision": "trust-remediation-tr3-2026-11-15"
+      },
+      "recovery": "No TR-3 completion recovery is required. Authoritative pull-request advisory evidence is evaluated only after the sequential merge gate permits a push."
+    }
+  ]
+}
