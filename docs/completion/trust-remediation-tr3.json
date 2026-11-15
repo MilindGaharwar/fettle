@@ -4,8 +4,8 @@
   "revision": "trust-remediation-tr3-2026-11-15",
   "scope_digest_version": 2,
   "scope_digest": "e196b8aaf115e3c9319d7b2d429ad2052e30e3a502ea7e9f4d3e188a6e5b8845",
-  "status": "in_progress",
-  "uat_decision": "FIX_FIRST",
+  "status": "complete",
+  "uat_decision": "SHIP",
   "criteria": [
     {
       "id": "canonical-counted-verification",
@@ -37,27 +37,27 @@
       "id": "full-regression-and-quality",
       "kind": "success",
       "required": true,
-      "verdict": "blocked",
-      "observed": "Targeted tests, Ruff, range pre-commit, and Fettle scan passed. The full suite reported 5204 passed and 20 skipped with exactly the authorized inherited clock failure; this criterion awaits PR #75 and rebase.",
+      "verdict": "confirmed",
+      "observed": "On rebased head bec1ade, targeted tests and Ruff passed. The first full run had one installed-hook deadline failure; the exact scenario passed in isolation, and the unexcluded rerun reported 5206 passed and 20 skipped without a code edit. Current-head range pre-commit and Fettle scan passed with only the three documented inherited warning-only findings.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "5f08ddb96c14a6d9ae8545d487290e489dfe276cfb025f1e02c49914af957a4b",
+        "sha256": "6800070e814d7c87a478812fdbec88a236056b53578f3bed6583686fdcfd27df",
         "revision": "trust-remediation-tr3-2026-11-15"
       },
-      "recovery": "After PR #75 merges, rebase the trust-remediation stack and rerun the unexcluded full suite, targeted suite, Ruff, installed UAT, range pre-commit, and fettle check --all under isolated XDG state."
+      "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
     },
     {
       "id": "candidate-range-precommit",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on the committed candidate range.",
+      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on rebased committed candidate bec1ade.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "5f08ddb96c14a6d9ae8545d487290e489dfe276cfb025f1e02c49914af957a4b",
+        "sha256": "6800070e814d7c87a478812fdbec88a236056b53578f3bed6583686fdcfd27df",
         "revision": "trust-remediation-tr3-2026-11-15"
       },
-      "recovery": "Rerun the same committed-range gate after rebasing onto the PR #75 main commit."
+      "recovery": "Rerun the same committed-range gate after the sequential merge gate permits the final rebase."
     },
     {
       "id": "bounded-diagnostic-mutation-attempt",
