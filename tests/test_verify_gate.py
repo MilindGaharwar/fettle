@@ -35,6 +35,13 @@ def _project(tmp_path: Path, test_command: str) -> Path:
     return tmp_path
 
 
+def _passing_project(tmp_path: Path) -> Path:
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_pass.py").write_text("def test_pass():\n    assert True\n")
+    return _project(tmp_path, f"{sys.executable} -m pytest tests")
+
+
 def _cfg(**tests) -> dict:
     base = {"enabled": True, "mode": "advisory", "scope": "impacted",
             "timeout_s": 30, "parallel": False}
@@ -107,7 +114,7 @@ class TestImpactedMapping:
 
 class TestRunVerify:
     def test_green_run_writes_ok_stamp(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         stamp = run_verify(str(repo), _cfg())
         assert stamp["ok"] and stamp["exit_code"] == 0
         assert stamp["evidence_id"].startswith("ev-")
@@ -115,7 +122,7 @@ class TestRunVerify:
         assert on_disk["ok"] is True
 
     def test_green_run_writes_bound_canonical_sidecar_and_reference(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
 
         stamp = run_verify(str(repo), _cfg(), session_id="sess-1")
         artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
@@ -128,10 +135,10 @@ class TestRunVerify:
         assert artifact.policy_digest == stamp["canonical_evidence"]["expected"]["policy_digest"]
         assert artifact.scope_digest == stamp["canonical_evidence"]["expected"]["scope_digest"]
         assert artifact.observation_id
-        assert set(artifact.payload) == {"exit_code", "scope"}
+        assert set(artifact.payload) == {"argv", "exit_code", "scope", "tests"}
 
     def test_canonical_sidecar_write_failure_cannot_leave_green_run(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
 
         with patch(
             "fettle.verify_gate._write_bytes_atomic",
@@ -145,7 +152,7 @@ class TestRunVerify:
         assert not (repo / EVIDENCE_RELPATH).exists()
 
     def test_stamp_write_failure_cannot_make_new_sidecar_authoritative(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         src = repo / "src.py"
         src.write_text("x = 1\n")
         state = repo / "state" / "sess-g"
@@ -547,7 +554,7 @@ class TestRunVerify:
         assert result.validity.value == "wrong_scope"
 
     def test_full_flag_ignores_scoping(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         stamp = run_verify(str(repo), _cfg(), full=True)
         assert stamp["scope"] == "full"
 
@@ -865,7 +872,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
         sidecar = repo / EVIDENCE_RELPATH
@@ -885,7 +892,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
 
@@ -900,7 +907,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
         stamp_path = repo / STAMP_RELPATH
@@ -920,8 +927,14 @@ class TestStopGate:
         subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
         src = tmp_path / "src.py"
         src.write_text("x = 1\n")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_pass.py").write_text("def test_pass():\n    assert True\n")
+        (tmp_path / ".gitignore").write_text(
+            ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\nstate/\n"
+        )
         (tmp_path / ".fettle.toml").write_text(
-            f'[profile]\ntest_command = "{sys.executable} -c pass"\n'
+            f'[profile]\ntest_command = "{sys.executable} -m pytest tests"\n'
         )
         subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
@@ -1504,7 +1517,7 @@ class TestRegistryAndCLI:
         assert spec.budget_ms <= 100  # reads a stamp; never runs tests
 
     def test_cli_verify_green_exit_0(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         r = subprocess.run([*CLI, "verify"], cwd=repo,
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stderr

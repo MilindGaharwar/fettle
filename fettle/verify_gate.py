@@ -270,7 +270,7 @@ def run_verify(
     except subprocess.TimeoutExpired:
         stamp["error"] = f"test run exceeded timeout ({timeout_s}s) — result unknown"
         stamp["tests"] = None
-        stamp["result_state"] = ResultState.UNKNOWN
+        stamp["result_state"] = ResultState.TOOL_ERROR
     except (OSError, FileNotFoundError) as e:
         stamp["error"] = f"could not launch test command: {e}"
         stamp["tests"] = None
@@ -895,6 +895,9 @@ def run_check(ctx: HookContext) -> CheckResult:
             # ok=false) — a green stamp without one is forged or pre-canonical.
             if "canonical_evidence" not in stamp:
                 problem = "canonical verification evidence is missing"
+                detail = str(stamp.get("error") or "").strip()
+                if detail:
+                    problem += f":\n{detail}"
             else:
                 evidence_result = validate_canonical_evidence(str(ctx.cwd), ctx.config, stamp)
                 if evidence_result.validity != Validity.VALID:
