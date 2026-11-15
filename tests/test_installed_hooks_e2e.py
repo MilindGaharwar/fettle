@@ -254,6 +254,46 @@ def test_registered_hook_records_edit_and_stop_requires_verify(installed_hook_re
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_stop_rejects_edited_ok_on_failed_verification(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[profile]\ntest_command = \"python -c 'raise SystemExit(1)'\"\n"
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\nscope = \"full\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    target.write_text("value = 2\n", encoding="utf-8")
+    session = "tr3-edited-stamp"
+    post = _payload("claude_code", "post_write", root, file_path=str(target))
+    post["session_id"] = session
+    assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
+    verify = subprocess.run(
+        [sys.executable, "-m", "fettle.cli", "verify"], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert verify.returncode == 1
+    stamp_path = root / ".fettle" / "verify.json"
+    stamp = json.loads(stamp_path.read_text())
+    stamp["session_id"] = session
+    stamp["ok"] = True
+    stamp_path.write_text(json.dumps(stamp))
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "last verification evidence is violation" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_detects_edit_after_journal_is_deleted(installed_hook_repo, mode):
     root, env = installed_hook_repo
     (root / ".fettle.toml").write_text(
