@@ -62,7 +62,7 @@ by `tests/test_doc_claims.py::test_behavior_map_covers_public_commands`).
 | Add an assurance input or release criterion | Produce a canonical `EvidenceArtifact`, aggregate it in `fettle assurance`, and compare evaluator changes with `fettle assurance-baseline` |
 | Add operational reporting | Derive retained evidence through `fettle report`, `fettle insights`, or `fettle brief`; measure noise separately with `fettle bench` |
 | Add anonymous operational metrics | Define bounded counters and aggregation in `fettle telemetry`; keep collection off unless organization policy enables it |
-| Add CI or verification behavior | Keep local selection in `fettle verify`; partial convention mappings fall back to the owning project/workspace's full suite, impacted stamps must cover every current implementation edit, and canonical evidence binds the pre-test source snapshot while pre/post drift is a tool error; put remote gate orchestration in `fettle ci` and baseline management in `fettle baseline` |
+| Add CI or verification behavior | Keep local selection and counted test execution in `fettle verify`; resolve commands through effective policy; partial convention mappings fall back to the owning project/workspace's full suite; impacted stamps must cover every current implementation edit; and canonical evidence binds source, policy, scope, portable argv, test counts, and result state while pre/post drift is a tool error. Put remote gate orchestration in `fettle ci`, consume verify/CI state through the same canonical validators in gates, assurance, and brief, and put quality-finding baseline management in `fettle baseline` |
 
 ## Delegation and coordination
 
