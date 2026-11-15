@@ -4,8 +4,8 @@
   "revision": "trust-remediation-tr2-2026-11-15",
   "scope_digest_version": 2,
   "scope_digest": "8004660ba4c4d669469d00f815108db14f98609bc565c63ba0f7b43bbf586651",
-  "status": "in_progress",
-  "uat_decision": "FIX_FIRST",
+  "status": "complete",
+  "uat_decision": "SHIP",
   "criteria": [
     {
       "id": "installed-control-plane-and-policy-floors",
@@ -24,27 +24,27 @@
       "id": "full-regression-and-quality",
       "kind": "success",
       "required": true,
-      "verdict": "blocked",
-      "observed": "Ruff, installed UAT, range pre-commit, and Fettle scan passed. The full suite reported 5191 passed and 20 skipped with exactly the authorized inherited expired command-test failure; this criterion awaits item B and rebase.",
+      "verdict": "confirmed",
+      "observed": "On rebased head 2f2a83c, Ruff passed, the targeted suite reported 235 passed, and the unexcluded full suite reported 5193 passed and 20 skipped. Current-head range pre-commit passed. A Semgrep timeout made the first Fettle scan non-pass; one diagnostic retry completed with only the three documented inherited warning-only findings.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "398769b0c1c0b50fa4743eccc3c22ee1cca6676b304ec6c39f3f03460d7a09ce",
+        "sha256": "f3d15a5682238b57358a54e03bc23514e6d82040978308a15f8890ba8edf7d06",
         "revision": "trust-remediation-tr2-2026-11-15"
       },
-      "recovery": "After item B merges, rebase TR-2 and rerun the unexcluded suite, Ruff, installed UAT, range pre-commit, and fettle check --all under isolated XDG state."
+      "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
     },
     {
       "id": "candidate-range-precommit",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on committed candidate 928bbaf.",
+      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on rebased committed candidate 2f2a83c.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "398769b0c1c0b50fa4743eccc3c22ee1cca6676b304ec6c39f3f03460d7a09ce",
+        "sha256": "f3d15a5682238b57358a54e03bc23514e6d82040978308a15f8890ba8edf7d06",
         "revision": "trust-remediation-tr2-2026-11-15"
       },
-      "recovery": "Rerun the same range gate after rebasing onto the item-B main commit."
+      "recovery": "Rerun the same range gate after the sequential merge gate permits the final rebase."
     },
     {
       "id": "bounded-narrow-mutation-replay",
