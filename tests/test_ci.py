@@ -2401,7 +2401,7 @@ def test_pr_advisory_real_prepare_distinguishes_docs_and_one_source_file(tmp_pat
     assert docs.returncode == 0, docs.stderr
     assert json.loads(docs.stdout) == {
         "status": "completed", "passed": True, "shard_count": 0,
-        "matrix": {"shard": []}, "files": [],
+        "matrix": {"shard": []}, "files": [], "advisory_exclude": [],
     }
     assert not (repo / "docs-manifests").exists()
 
