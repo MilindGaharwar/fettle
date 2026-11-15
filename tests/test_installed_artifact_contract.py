@@ -1,7 +1,7 @@
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,7 +29,7 @@ def _host(*, live_state="pass", observed_at="2026-08-16T12:00:00Z"):
     }
 
 
-def _report(stage="candidate"):
+def _report(stage="candidate", *, observed_at="2026-08-16T12:00:00Z"):
     return {
         "schema_version": "1",
         "stage": stage,
@@ -56,10 +56,10 @@ def _report(stage="candidate"):
         },
         "doctor": "pass",
         "hosts": {
-            "claude-code": _host(),
-            "codex-cli": _host(),
+            "claude-code": _host(observed_at=observed_at),
+            "codex-cli": _host(observed_at=observed_at),
             "gemini-cli": _host(live_state="blocked", observed_at=None),
-            "opencode": _host(),
+            "opencode": _host(observed_at=observed_at),
         },
     }
 
@@ -142,10 +142,11 @@ def test_json_parser_rejects_duplicate_keys():
 
 
 def test_module_cli_validates_reports(tmp_path):
+    observed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     candidate = tmp_path / "candidate.json"
     public = tmp_path / "public.json"
-    candidate.write_text(json.dumps(_report()))
-    public.write_text(json.dumps(_report("public")))
+    candidate.write_text(json.dumps(_report(observed_at=observed_at)))
+    public.write_text(json.dumps(_report("public", observed_at=observed_at)))
 
     result = subprocess.run(
         [sys.executable, "-m", "fettle.installed_artifact_contract", str(candidate), str(public)],
@@ -156,3 +157,26 @@ def test_module_cli_validates_reports(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "installed artifact evidence passed"
+
+
+def test_module_cli_rejects_stale_live_evidence(tmp_path):
+    maximum_age_days = load_capability_policy().hosts["codex-cli"].live_evidence_max_age_days
+    stale_observed_at = (
+        datetime.now(UTC) - timedelta(days=maximum_age_days + 1)
+    ).isoformat().replace(
+        "+00:00", "Z",
+    )
+    candidate = tmp_path / "candidate.json"
+    public = tmp_path / "public.json"
+    candidate.write_text(json.dumps(_report(observed_at=stale_observed_at)))
+    public.write_text(json.dumps(_report("public", observed_at=stale_observed_at)))
+
+    result = subprocess.run(
+        [sys.executable, "-m", "fettle.installed_artifact_contract", str(candidate), str(public)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "live evidence is stale" in result.stdout
