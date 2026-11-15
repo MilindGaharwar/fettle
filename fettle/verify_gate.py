@@ -49,6 +49,7 @@ from fettle.evidence import (
 from fettle.paths import classify_file
 from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
+from fettle.test_evidence import portable_argv, prepare_test_command, read_junit_counts
 from fettle.test_runner_opts import build_pytest_args, record_failures
 from fettle.trace import build_evidence, log_evidenced_decision
 from fettle.workspace import Workspace, route_file_to_workspace
@@ -168,7 +169,7 @@ def run_verify(
     """
     gate_cfg = config.get("gates", {}).get("verify", {})
     timeout_s = int(gate_cfg.get("timeout_s", 120))
-    scope_cfg = str(gate_cfg.get("scope", "impacted"))
+    scope_cfg = str(gate_cfg.get("scope", "full"))
 
     edits_path = _edits_path(session_id)
     edited = _edited_code_files(edits_path) if edits_path else []
@@ -205,7 +206,9 @@ def run_verify(
         _write_stamp(cwd, stamp, config)
         return stamp
 
-    argv = shlex.split(tc.command)
+    argv, report_path = prepare_test_command(
+        tc.command, cwd=cwd, report=str(gate_cfg.get("report", "")),
+    )
     scope = "full"
     impacted: list[str] = []
     if not full and scope_cfg == "impacted" and tc.framework == "pytest":
@@ -242,15 +245,36 @@ def run_verify(
             argv, cwd=cwd, capture_output=True, text=True, timeout=timeout_s,
         )
         stamp["exit_code"] = proc.returncode
-        stamp["ok"] = proc.returncode == 0
+        stamp["tests"] = read_junit_counts(report_path)
+        if proc.returncode == 0 and stamp["tests"] is None:
+            stamp["result_state"] = ResultState.UNKNOWN
+            stamp["error"] = (
+                "the test command exited 0 but no test count is available. "
+                "Set [gates.verify] report to a JUnit XML path."
+            )
+        elif proc.returncode == 0 and stamp["tests"]["executed"] == 0:
+            stamp["result_state"] = ResultState.VIOLATION
+            stamp["error"] = (
+                "no tests executed "
+                f"(collected {stamp['tests']['collected']}, skipped {stamp['tests']['skipped']})"
+            )
+        elif proc.returncode == 0:
+            stamp["result_state"] = ResultState.PASS
+        else:
+            stamp["result_state"] = ResultState.VIOLATION
+        stamp["ok"] = stamp["result_state"] == ResultState.PASS
         if proc.returncode != 0:
             tail = (proc.stdout + proc.stderr).strip().splitlines()[-15:]
             stamp["error"] = "\n".join(tail)
             _record_pytest_failures(cwd, proc.stdout)
     except subprocess.TimeoutExpired:
         stamp["error"] = f"test run exceeded timeout ({timeout_s}s) — result unknown"
+        stamp["tests"] = None
+        stamp["result_state"] = ResultState.UNKNOWN
     except (OSError, FileNotFoundError) as e:
         stamp["error"] = f"could not launch test command: {e}"
+        stamp["tests"] = None
+        stamp["result_state"] = ResultState.TOOL_ERROR
     stamp["duration_s"] = round(time.monotonic() - start, 2)
     _capture_post_run_state(cwd, stamp)
     stamp["ts"] = time.time()
@@ -585,6 +609,8 @@ def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtif
     exit_code = stamp.get("exit_code")
     if stamp.get("source_drift"):
         result_state = "tool_error"
+    elif stamp.get("result_state") in set(ResultState):
+        result_state = str(stamp["result_state"])
     elif stamp.get("ok"):
         result_state = "pass"
     elif isinstance(exit_code, int) and exit_code >= 0:
@@ -613,6 +639,10 @@ def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtif
         payload={
             "exit_code": exit_code if isinstance(exit_code, int) else -1,
             "scope": str(stamp.get("scope") or ""),
+            "tests": stamp.get("tests"),
+            "argv": portable_argv(
+                shlex.split(str(stamp.get("command") or "")), cwd=cwd,
+            ),
         },
     )
 
@@ -792,11 +822,6 @@ def run_check(ctx: HookContext) -> CheckResult:
         elif (edits_path.is_file() and stamp_path.stat().st_mtime < edits_path.stat().st_mtime
               and not _tree_matches_stamp(str(ctx.cwd), stamp)):
             problem = "code was edited after the last verification run (stale)"
-        elif not stamp.get("ok", False):
-            detail = str(stamp.get("error", "")).strip()
-            problem = "last verification run failed" + (
-                f":\n{detail}" if detail else ""
-            )
         elif stamp.get("workspaces"):
             affected = _affected_workspaces(str(ctx.cwd), edited)
             needed = {workspace.path for workspace, _files in affected}
@@ -871,9 +896,11 @@ def run_check(ctx: HookContext) -> CheckResult:
             if "canonical_evidence" not in stamp:
                 problem = "canonical verification evidence is missing"
             else:
-                validity = _canonical_evidence_validity(str(ctx.cwd), ctx.config, stamp)
-                if validity != Validity.VALID:
-                    problem = f"canonical verification evidence is {validity.value}"
+                evidence_result = validate_canonical_evidence(str(ctx.cwd), ctx.config, stamp)
+                if evidence_result.validity != Validity.VALID:
+                    problem = f"canonical verification evidence is {evidence_result.validity.value}"
+                elif evidence_result.result_state != ResultState.PASS:
+                    problem = f"last verification evidence is {evidence_result.result_state.value}"
 
     if not problem:
         return CheckResult.allow()
@@ -892,6 +919,6 @@ def run_check(ctx: HookContext) -> CheckResult:
         "hookEventName": ctx.input.hook_event_name,
         "additionalContext": msg,
     }
-    if cfg.get("mode", "advisory") == "enforce":
+    if "last verification evidence is unknown" not in problem and cfg.get("mode", "advisory") == "enforce":
         return CheckResult.block(msg, hook_specific_output=hso)
     return CheckResult.advisory(msg, hook_specific_output=hso)

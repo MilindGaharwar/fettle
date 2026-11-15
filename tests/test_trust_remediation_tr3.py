@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -85,4 +84,5 @@ def test_pytest_evidence_binds_counts_and_argv(tmp_path):
 
     assert stamp["ok"] is True
     assert artifact["payload"]["tests"]["executed"] == 1
-    assert artifact["payload"]["argv"][:3] == [sys.executable, "-m", "pytest"]
+    assert artifact["payload"]["argv"][:3] == [Path(sys.executable).name, "-m", "pytest"]
+    assert artifact["payload"]["argv"][-1] == "--junitxml=.fettle/verify-junit.xml"
