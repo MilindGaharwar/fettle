@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "milestone": "installed-artifact-test-clock",
+  "revision": "installed-artifact-test-clock-2026-11-15",
+  "implementation": {
+    "pull_request": 75,
+    "head_sha": "c86217d44ff6c5abe4d16d51107d8082367f2c53",
+    "merge_commit": "40f01b24755d1228a9cf031b3e9920e6959e7d87",
+    "merged_at": "2026-11-15T06:12:49Z",
+    "change": "The command success fixture derives observed_at from current UTC time, while a companion subprocess test supplies evidence one day beyond the configured 90-day limit and confirms rejection as stale. Fixed-clock tests remain unchanged."
+  },
+  "verification": {
+    "ci_run_id": 43673403084,
+    "ci_required_check_id": 132691628339,
+    "ci_required_conclusion": "success",
+    "completion_check_id": 132688186662,
+    "completion_check_conclusion": "success",
+    "mutation_run_id": 43673403045,
+    "mutation_evidence_check_id": 132689629280,
+    "mutation_evidence_conclusion": "success",
+    "dispatched_shards": 0
+  }
+}

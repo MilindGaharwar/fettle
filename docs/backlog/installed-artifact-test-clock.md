@@ -1,7 +1,7 @@
 ---
 fettle-work-item: v2
 id: installed-artifact-test-clock
-status: claimed
+status: done
 scope:
   - docs/backlog/installed-artifact-test-clock.md
   - tests/test_installed_artifact_contract.py

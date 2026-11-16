@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "milestone": "installed-artifact-test-clock",
+  "revision": "installed-artifact-test-clock-2026-11-15",
+  "scope_digest_version": 2,
+  "scope_digest": "e8433559f661e064497989baf70f3b5c333ded3c4512785177b4edd0bf6a3f1d",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "current-success-evidence",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The installed-artifact command success fixture derives observed_at from the current UTC instant.",
+      "evidence": {
+        "path": "docs/completion/evidence/installed-artifact-test-clock.json",
+        "sha256": "a416339f735c830fdc6b3898c9e03e75e80e755fde2649e4dbfdcf5989cf2176",
+        "revision": "installed-artifact-test-clock-2026-11-15"
+      },
+      "recovery": "Rerun the installed-artifact contract tests and inspect the successful subprocess fixture."
+    },
+    {
+      "id": "stale-evidence-rejected",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "A command-level subprocess test supplies evidence older than the configured 90-day limit and confirms rejection as stale.",
+      "evidence": {
+        "path": "docs/completion/evidence/installed-artifact-test-clock.json",
+        "sha256": "a416339f735c830fdc6b3898c9e03e75e80e755fde2649e4dbfdcf5989cf2176",
+        "revision": "installed-artifact-test-clock-2026-11-15"
+      },
+      "recovery": "Rerun the stale live-evidence subprocess test and require its rejection message."
+    },
+    {
+      "id": "merged-quality-gates",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Pull request #75 merged after CI required, strict completion, and mutation evidence all concluded success; its documentation-only advisory scope dispatched zero shards.",
+      "evidence": {
+        "path": "docs/completion/evidence/installed-artifact-test-clock.json",
+        "sha256": "a416339f735c830fdc6b3898c9e03e75e80e755fde2649e4dbfdcf5989cf2176",
+        "revision": "installed-artifact-test-clock-2026-11-15"
+      },
+      "recovery": "Inspect pull request #75 and retained CI runs 43673403084 and 43673403045."
+    }
+  ]
+}
