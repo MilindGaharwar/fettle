@@ -19,7 +19,297 @@
     "ordinary_label_name": "mutation evidence (label no-op)"
   },
   "live_probe": {
-    "status": "pending",
-    "reason": "The required checks and one-time ordinary-label probe must run on the TR-0 pull request before containment can be confirmed."
+    "status": "indeterminate",
+    "probed_head_sha": "e17d5ab553f5cb1f04b5fbd7e2dc08670d39eb52",
+    "label": "documentation",
+    "label_actions": 1,
+    "before": {
+      "workflow_runs": [
+        {
+          "id": 43792127800,
+          "name": "Mutation PR advisory",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 43792127785,
+          "name": "CI",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure"
+        }
+      ],
+      "check_runs": [
+        {
+          "id": 133058003782,
+          "name": "CI required",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133054278570,
+          "name": "mutation (changed shard ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133054277459,
+          "name": "mutation evidence",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133054008994,
+          "name": "mutation (prepare advisory scope)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721811,
+          "name": "test (macos-latest, py3.12, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133052721710,
+          "name": "test (ubuntu-latest, py3.11, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721695,
+          "name": "coverage (branch, floor 65)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721689,
+          "name": "test (ubuntu-latest, py3.13, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721652,
+          "name": "test (ubuntu-latest, py3.14, semgrep 1.168.0, canary)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721638,
+          "name": "Linux wheel via pipx",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721629,
+          "name": "Windows installed bridge",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721597,
+          "name": "test (ubuntu-latest, py3.12, semgrep latest, canary)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721573,
+          "name": "test (ubuntu-latest, py3.12, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721565,
+          "name": "typecheck (mypy, non-blocking)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721553,
+          "name": "Completion evidence (strict)",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133052721540,
+          "name": "lint (ruff)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721336,
+          "name": "mutation (admission gate)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "after": {
+      "workflow_runs": [
+        {
+          "id": 43802404049,
+          "name": "Mutation PR advisory",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 43792127800,
+          "name": "Mutation PR advisory",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 43792127785,
+          "name": "CI",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure"
+        }
+      ],
+      "check_runs": [
+        {
+          "id": 133085482390,
+          "name": "(github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized') && 'mutation evidence' || 'mutation evidence (label no-op)'",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133085482243,
+          "name": "mutation (prepare advisory scope)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133085482033,
+          "name": "mutation (changed shard ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133085481362,
+          "name": "mutation (admission gate)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133058003782,
+          "name": "CI required",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133054278570,
+          "name": "mutation (changed shard ${{ matrix.shard }})",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 133054277459,
+          "name": "mutation evidence",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133054008994,
+          "name": "mutation (prepare advisory scope)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721811,
+          "name": "test (macos-latest, py3.12, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133052721710,
+          "name": "test (ubuntu-latest, py3.11, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721695,
+          "name": "coverage (branch, floor 65)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721689,
+          "name": "test (ubuntu-latest, py3.13, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721652,
+          "name": "test (ubuntu-latest, py3.14, semgrep 1.168.0, canary)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721638,
+          "name": "Linux wheel via pipx",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721629,
+          "name": "Windows installed bridge",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721597,
+          "name": "test (ubuntu-latest, py3.12, semgrep latest, canary)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721573,
+          "name": "test (ubuntu-latest, py3.12, semgrep 1.168.0)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721565,
+          "name": "typecheck (mypy, non-blocking)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721553,
+          "name": "Completion evidence (strict)",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "id": 133052721540,
+          "name": "lint (ruff)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 133052721336,
+          "name": "mutation (admission gate)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "new_workflow_run_id": 43802404049,
+    "new_exact_mutation_evidence_checks": [],
+    "expected_label_noop_check": "mutation evidence (label no-op)",
+    "observed_aggregate_check": {
+      "id": 133085482390,
+      "name": "(github.event.action != 'labeled' || github.event.label.name == 'mutation-full-matrix-authorized') && 'mutation evidence' || 'mutation evidence (label no-op)'",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    "verdict": "non-pass",
+    "reason": "No new exact mutation evidence check appeared, but the aggregate check used the literal expression as its name rather than mutation evidence (label no-op). The specified pass and fail outcomes were both absent, so conflicting containment evidence remains a non-pass.",
+    "workflow_identity": "The post-probe commits represented by this evidence change tests and documentation only; .github/workflows/mutation-pr.yml is identical to the probed head.",
+    "smallest_correction": "Replace the dynamic skipped-job name expression with event-route-specific aggregate jobs whose names are static strings, keeping mutation evidence only on executable routes and mutation evidence (label no-op) on ordinary-label no-ops; then obtain a newly authorized live observation."
   }
 }

@@ -857,6 +857,10 @@ non-Python edits, documentation navigation, synchronous `spawn`, the thin
 work-item model, and cross-machine sharing. Each is confirmed against the code
 before it is changed. Size: S each; L in total.
 
+Also assigned to TR-9 is E24: under load the default `PreToolUse` budget
+expires before the first check; a required check becomes a generic deadline
+block and non-required checks are skipped. Its priority is owner to decide.
+
 Also in TR-9: triage of the roughly 10,300 non-message mutation survivors in
 the trust-critical modules (`verify_gate` 125, `completion` 92, `assurance` 94,
 `mcp_trust_gate` 84, `dispatcher` 82), using the D4 run 1 report.
@@ -892,6 +896,7 @@ Priority: P0 fix first; P1 trust; P2 hardening; P3 polish; V verify first.
 | E22 | P2 | TR-1 | | P5, P6 | P2 | TR-4 |
 | V11 | P2 | TR-3 | | C2–C5 | P2 | TR-7 |
 | V13 | P2 | TR-3 | | all P3 items | P3 | TR-9 |
+| E24 | owner to decide | TR-9 | | | | |
 
 Remaining P2 items not owned above are scheduled as follows: E7 (blocks
 missing from the audit trail), E9 (budget behaviour under load), E13

@@ -54,7 +54,7 @@
       "observed": "Contract tests confirm normal and authorizing-label runs keep the exact mutation evidence name while an ordinary label no-op uses mutation evidence (label no-op).",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
-        "sha256": "5a7da89d29822585df86f53aac32be13dd78c30a4af224d2b3bd3e1bb3325833",
+        "sha256": "7beee08054cf59e2487aa5935406b4d04b242a53930d914dadf019f2210ca150",
         "revision": "trust-remediation-tr0-2026-11-14"
       },
       "recovery": "Rerun the focused workflow and documentation contract tests."
@@ -64,13 +64,13 @@
       "kind": "success",
       "required": true,
       "verdict": "unobserved",
-      "observed": "Pending: the TR-0 pull request has not yet completed its one-time ordinary-label containment probe.",
+      "observed": "The one-time probe was indeterminate and is a non-pass: no new exact mutation evidence check appeared, but the skipped aggregate used the literal workflow expression as its name rather than mutation evidence (label no-op).",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
-        "sha256": "5a7da89d29822585df86f53aac32be13dd78c30a4af224d2b3bd3e1bb3325833",
+        "sha256": "7beee08054cf59e2487aa5935406b4d04b242a53930d914dadf019f2210ca150",
         "revision": "trust-remediation-tr0-2026-11-14"
       },
-      "recovery": "After both required checks pass on the TR-0 pull request, add the documentation label once and retain every resulting workflow and check run before confirming this criterion."
+      "recovery": "Obtain owner/reviewer direction on the recorded static-name workflow correction and authorization for any new live observation; do not repeat the consumed label action."
     },
     {
       "id": "full-regression-and-quality-gates",
