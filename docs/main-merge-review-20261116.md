@@ -47,3 +47,9 @@ errors; completion validation passed; privacy scrub and whitespace checks passed
 264 local Markdown links/anchors resolved in the staged candidate. Focused test
 results are retained in the PR. Live VM/Docker opt-in tests are skipped in this
 merge-focused run; their earlier candidate-specific evidence is preserved.
+
+Integration correction: CI matrix pins were still 1.168.0 while the incoming
+package requires >=1.185. The three pins now use 1.185.0, with a regression
+checking blocking matrix versions against the package floor. Main advisory and
+D4 workflows remain intact. A sandboxed local parser recheck failed on missing
+certificate trust access; its unchanged trusted rerun is retained separately.

@@ -24,3 +24,21 @@ def test_scanner_budgets_remain_bounded_and_timeouts_fail(monkeypatch):
     for scan in (quality_scan.execute_ruff, quality_scan.execute_semgrep):
         assert scan([__file__]).status == ResultStatus.TOOL_ERROR
     assert budgets == [120.0, 600.0]
+
+
+def test_blocking_ci_parser_meets_package_minimum():
+    from pathlib import Path
+    import tomllib
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    package = tomllib.loads((root / "pyproject.toml").read_text())
+    minimum = next(item.split(">=", 1)[1] for item in package["project"]["dependencies"]
+                   if item.startswith("semgrep>="))
+    workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
+    matrix = workflow["jobs"]["test"]["strategy"]["matrix"]
+    versions = matrix["semgrep"] + [row["semgrep"] for row in matrix["include"]
+                                     if not row.get("canary", False)]
+    floor = tuple(int(part) for part in minimum.split("."))
+    assert all(tuple(int(part) for part in version.split(".")) >= floor
+               for version in versions)

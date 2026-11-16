@@ -81,12 +81,12 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python: ["3.11", "3.12", "3.13"]
-        semgrep: ["1.168.0"]
+        semgrep: ["1.185.0"]
         canary: [false]
         include:
           - os: macos-latest
             python: "3.12"
-            semgrep: "1.168.0"
+            semgrep: "1.185.0"
             canary: false
           - os: ubuntu-latest
             python: "3.12"
@@ -94,7 +94,7 @@ jobs:
             canary: true
           - os: ubuntu-latest
             python: "3.14"
-            semgrep: "1.168.0"
+            semgrep: "1.185.0"
             canary: true
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.canary }}
