@@ -125,6 +125,12 @@ The PR advisory retries manifest downloads and shard-report uploads twice with
 short backoff. Exhausted retries still fail without synthesizing evidence;
 long provider outages require the bounded failed-job recovery path.
 
+For a failed pull-request advisory, first run `fettle ci
+classify-mutation-advisory --input <corpus.json>`. If `rerun_eligible` is true
+and `needs_diagnosis` is empty, trigger at most one `rerun-failed-jobs`. If any
+shard needs diagnosis, complete a narrow replay before that one rerun. Never
+trigger a second rerun.
+
 | Symptom | Recovery |
 |---|---|
 | Mutation disabled | Set `[mutation] enabled = true`, then rerun `fettle doctor` |

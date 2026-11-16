@@ -654,14 +654,23 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: d4-shard-report-${{ github.run_id }}-*
-          path: d4-shard-reports
+          path: d4-raw-shard-reports
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: d4-current-corpus-${{ github.run_id }}
           path: d4-corpus
-      - name: Aggregate current-attempt D4 evidence
+      - name: Select bounded D4 shard attempts
         continue-on-error: true
-        run: uv run --no-sync python -m fettle.mutation_test --root . --aggregate-d4 d4-shard-reports --aggregate-scope d4-corpus/manifests --aggregate-preflight-evidence d4-corpus/mutation-preflight.json --d4-corpus-identity d4-corpus/corpus-identity.json --d4-id '${{ inputs.d4_id }}' --d4-run-id '${{ github.run_id }}' --d4-run-attempt '${{ github.run_attempt }}' --json > d4-mutation-report.json
+        run: >-
+          uv run --no-sync python -m fettle.mutation_test --root .
+          --select-bounded-attempts d4-raw-shard-reports
+          --selected-reports-output d4-selected-shard-reports
+          --attempt-selection-record d4-attempt-selection.json
+          --shard-count 256 --d4-run-id '${{ github.run_id }}' --json
+      - name: Aggregate selected D4 evidence
+        if: always()
+        continue-on-error: true
+        run: uv run --no-sync python -m fettle.mutation_test --root . --aggregate-d4 d4-selected-shard-reports --aggregate-scope d4-corpus/manifests --aggregate-preflight-evidence d4-corpus/mutation-preflight.json --d4-corpus-identity d4-corpus/corpus-identity.json --d4-id '${{ inputs.d4_id }}' --d4-run-id '${{ github.run_id }}' --d4-run-attempt '${{ github.run_attempt }}' --attempt-selection-record d4-attempt-selection.json --json > d4-mutation-report.json
       - name: Upload D4 aggregate (attempt 1)
         id: aggregate_attempt_1
         if: always()
@@ -669,7 +678,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: d4-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: d4-mutation-report.json
+          path: |
+            d4-mutation-report.json
+            d4-attempt-selection.json
           if-no-files-found: error
           retention-days: 90
       - name: Recover D4 aggregate before attempt 2
@@ -686,7 +697,13 @@ jobs:
         if: always() && steps.aggregate_attempt_1.outcome == 'failure' && steps.aggregate_recover_2.outcome == 'success' && steps.aggregate_recover_2.outputs.artifact_ready != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: {name: "d4-aggregate-${{ github.run_id }}-${{ github.run_attempt }}", path: d4-mutation-report.json, if-no-files-found: error, retention-days: 90}
+        with:
+          name: d4-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            d4-mutation-report.json
+            d4-attempt-selection.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Recover D4 aggregate before attempt 3
         id: aggregate_recover_3
         if: always() && steps.aggregate_attempt_2.outcome == 'failure'
@@ -701,7 +718,13 @@ jobs:
         if: always() && steps.aggregate_attempt_2.outcome == 'failure' && steps.aggregate_recover_3.outcome == 'success' && steps.aggregate_recover_3.outputs.artifact_ready != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: {name: "d4-aggregate-${{ github.run_id }}-${{ github.run_attempt }}", path: d4-mutation-report.json, if-no-files-found: error, retention-days: 90}
+        with:
+          name: d4-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            d4-mutation-report.json
+            d4-attempt-selection.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Verify D4 aggregate upload
         id: aggregate_verify
         if: always()

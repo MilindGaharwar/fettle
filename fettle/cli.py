@@ -170,6 +170,18 @@ def cmd_ci(args: argparse.Namespace) -> None:
     """Reproduce CI locally, scaffold the workflow, or verify the remote verdict."""
     from fettle import ci as ci_mod
     action = getattr(args, "ci_action", None)
+    if action == "classify-mutation-advisory":
+        from fettle.ci_ingest import classify_mutation_advisory_corpus
+
+        try:
+            result = classify_mutation_advisory_corpus(args.input)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"passed": False, "error": str(exc)}, indent=2))
+            sys.exit(2)
+        print(json.dumps(result, indent=2))
+        if not result["passed"]:
+            sys.exit(1)
+        return
     if action == "init":
         out = ci_mod.init_ci(args.root, dry_run=getattr(args, "dry_run", False))
         if getattr(args, "dry_run", False):
@@ -2036,6 +2048,13 @@ def main() -> None:
     p_ci_init = ci_sub.add_parser("init", help="Write .github/workflows/fettle.yml")
     p_ci_init.add_argument("--dry-run", action="store_true")
     p_ci_init.add_argument("--root", default=".")
+    p_ci_classify = ci_sub.add_parser(
+        "classify-mutation-advisory",
+        help="Classify retained mutation-advisory job evidence",
+    )
+    p_ci_classify.add_argument(
+        "--input", required=True, help="Path to a retained mutation-advisory corpus",
+    )
     for _action, _help in (("status", "One-shot remote CI verdict for a commit"),
                            ("wait", "Poll remote CI to completion, then report")):
         p_ci_a = ci_sub.add_parser(_action, help=_help)

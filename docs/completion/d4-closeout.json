@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "milestone": "d4-closeout",
+  "revision": "d4-closeout-2026-11-14",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "retained-reaggregation",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Run 1 reproduces the accepted aggregate apart from the new selection record; run 2 selects 256 completed reports while remaining a historical formal non-pass.",
+      "evidence": {
+        "path": "docs/completion/evidence/d4-closeout/reaggregation.json",
+        "sha256": "b7a89f52ca69aedb6144d6e858675bdc98b0ea539bf5147c9fd203872bdd7d8b",
+        "revision": "d4-closeout-2026-11-14"
+      },
+      "recovery": "Re-run selection and aggregation against both retained evidence directories."
+    },
+    {
+      "id": "same-corpus-comparison",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Both executions contain 55,464 mutants on identical manifest and corpus digests, with exactly one killed-to-timeout difference.",
+      "evidence": {
+        "path": "docs/completion/evidence/d4-closeout/run-comparison.json",
+        "sha256": "e5c59495b417e802e5ed9c84899432478c1cc01f680bd7d8263ec15cff3bdecf",
+        "revision": "d4-closeout-2026-11-14"
+      },
+      "recovery": "Recompute the fingerprint-keyed comparison from retained selected reports."
+    },
+    {
+      "id": "disagreeing-mutant-replay",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Five fresh-cache targeted replays produced determinate suspicious outcomes with unmodified baseline-derived limits.",
+      "evidence": {
+        "path": "docs/completion/evidence/d4-closeout/targeted-replays.json",
+        "sha256": "c669c3e3d54e71dc7b23824794b26ad89280d5677422b4b580a1ec0d5b448ece",
+        "revision": "d4-closeout-2026-11-14"
+      },
+      "recovery": "Repeat five fresh-cache fingerprint-targeted replays on the sealed source revision."
+    }
+  ],
+  "scope_digest_version": 2,
+  "scope_digest": "c030f61f3896ea16d65a2c8f06cfd86cfc73f0d268506698fd4986f13a017ee4"
+}

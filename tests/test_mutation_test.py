@@ -73,6 +73,7 @@ from fettle.mutation_test import (
     prepare_advisory_reuse_candidates,
     select_shard_attempts,
     select_shard_subset_attempts,
+    select_bounded_shard_attempts,
     run_resumable_mutation_shard,
     validate_capacity_validation_results,
     validate_capacity_recovery_lineage,
@@ -4646,6 +4647,59 @@ def test_advisory_aggregate_retains_reuse_provenance_and_stays_ineligible(tmp_pa
     assert [item["shard_index"] for item in result["reuse_provenance"]] == [0, 1]
 
 
+def test_stamped_advisory_reports_reuse_through_selection_and_aggregation(tmp_path):
+    config, manifests, reports = _advisory_reuse_fixture(tmp_path)
+    stamped = [
+        {
+            **report,
+            "run_id": "900",
+            "run_attempt": "1",
+            "fresh_execution": True,
+        }
+        for report in reports
+    ]
+
+    with (
+        patch("fettle.mutation_test._revision", return_value="b" * 40),
+        patch("fettle.mutation_test._run", return_value=_proc(out="b" * 40 + "\n")),
+    ):
+        reused = prepare_advisory_reuse(
+            str(tmp_path), config, manifests, stamped,
+            source_run_id="900", source_run_attempt="1",
+        )["reports"]
+        selected, selection = select_bounded_shard_attempts(
+            reused, 2, run_id="901", allow_successful_reuse=True,
+        )
+        result = aggregate_shards(
+            str(tmp_path), selected, ["fettle/"], [], 2, 70,
+            test_mappings=config["test_mappings"], policy_config=config,
+            manifests=manifests, advisory=True,
+        )
+
+    assert [item["reason"] for item in selection["selections"]] == [
+        "validated_successful_run_reuse",
+        "validated_successful_run_reuse",
+    ]
+    assert result["status"] == "completed"
+    assert result["reused_shards"] == [0, 1]
+
+
+def test_bounded_attempt_selection_rejects_incomplete_stamped_reuse():
+    reused = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "status": "tool_error",
+        "run_id": "900",
+        "run_attempt": "1",
+        "fresh_execution": True,
+        "reuse_provenance": {"source_run_id": "900", "source_run_attempt": "1"},
+    }
+
+    with pytest.raises(ValueError, match="malformed successful-run reuse"):
+        select_bounded_shard_attempts(
+            [reused], 1, run_id="901", allow_successful_reuse=True,
+        )
+
+
 @pytest.mark.parametrize(
     "provenance",
     [
@@ -4986,6 +5040,223 @@ def test_shard_attempt_selection_requires_one_completed_attempt_per_index():
         select_shard_attempts([timeout], 1)
 
 
+def test_bounded_attempt_selection_records_timeout_supersession():
+    first = {
+        "status": "tool_error", "partial": True, "revision": "a" * 40,
+        "shard_index": 0, "shard_count": 1, "run_id": "900", "run_attempt": "1",
+        "fresh_execution": True,
+    }
+    second = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "revision": "a" * 40, "run_id": "900", "run_attempt": "2",
+        "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts([second, first], 1, run_id="900")
+
+    assert selected == [second]
+    assert record["status"] == "completed"
+    assert record["selections"][0]["selected_attempt"] == "2"
+    assert record["selections"][0]["superseded_attempt"] == "1"
+    assert record["selections"][0]["reason"] == "completed_attempt_2_supersedes_non_completed_attempt_1"
+    assert record["selections"][0]["selected_digest"] == _canonical_digest(second)
+    assert record["selections"][0]["superseded_digest"] == _canonical_digest(first)
+
+
+def test_bounded_attempt_selection_uses_validated_artifact_lineage_for_partial_report():
+    first = {
+        "status": "tool_error", "partial": True, "revision": "a" * 40,
+        "shard_index": 0, "shard_count": 1,
+    }
+    second = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "revision": "a" * 40, "run_id": "900", "run_attempt": "2",
+        "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts(
+        [first, second], 1, run_id="900",
+        report_sources=[
+            "d4-shard-report-900-1-0/mutation-report.json",
+            "d4-shard-report-900-2-0/mutation-report.json",
+        ],
+    )
+
+    assert selected == [second]
+    assert record["selections"][0]["selected_attempt"] == "2"
+    assert record["selections"][0]["superseded_attempt"] == "1"
+    assert record["selections"][0]["superseded_digest"] == _canonical_digest(first)
+
+
+def test_bounded_attempt_selection_accepts_provider_retained_attempt_2_only():
+    second = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "2", "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts(
+        [second], 1, run_id="900",
+        report_sources=["d4-shard-report-900-2-0/mutation-report.json"],
+    )
+
+    assert selected == [second]
+    assert record["selections"][0]["selected_attempt"] == "2"
+    assert record["selections"][0]["superseded_attempt"] == "1"
+    assert record["selections"][0]["superseded_digest"] is None
+    assert record["selections"][0]["reason"] == "provider_retained_attempt_2"
+
+
+def test_bounded_attempt_selection_accepts_pr_advisory_artifact_lineage():
+    report = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+
+    selected, _ = select_bounded_shard_attempts(
+        [report], 1, run_id="900",
+        report_sources=["mutation-pr-shard-900-1-0/mutation-report.json"],
+    )
+
+    assert selected == [report]
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("unexpected/mutation-report.json", "artifact lineage is malformed"),
+        ("d4-shard-report-901-1-0/mutation-report.json", "conflicting run lineage"),
+        ("d4-shard-report-900-2-0/mutation-report.json", "conflicting attempt lineage"),
+        ("d4-shard-report-900-1-1/mutation-report.json", "conflicting shard lineage"),
+    ],
+)
+def test_bounded_attempt_selection_rejects_artifact_lineage_conflicts(source, message):
+    report = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        select_bounded_shard_attempts(
+            [report], 1, run_id="900", report_sources=[source],
+        )
+
+
+@pytest.mark.parametrize(
+    ("reports", "message"),
+    [
+        ([{"status": "completed", "shard_index": 0, "shard_count": 1,
+           "revision": "a" * 40, "run_id": "900", "run_attempt": "3",
+           "fresh_execution": True}], "attempt 3 is outside the bounded policy"),
+        ([{"status": "completed", "shard_index": 0, "shard_count": 1,
+           "revision": "a" * 40, "run_id": "900", "run_attempt": "2",
+           "fresh_execution": True}], "attempt 2 has no attempt 1 to supersede"),
+    ],
+)
+def test_bounded_attempt_selection_rejects_unbounded_or_orphan_replay(reports, message):
+    with pytest.raises(ValueError, match=message):
+        select_bounded_shard_attempts(reports, 1, run_id="900")
+
+
+def test_bounded_attempt_selection_rejects_two_completed_reports():
+    first = {**_shard_report(0, ["fettle/a.py"], shard_count=1),
+             "run_id": "900", "run_attempt": "1", "fresh_execution": True}
+    second = {**first, "run_attempt": "2"}
+
+    with pytest.raises(ValueError, match="two completed reports"):
+        select_bounded_shard_attempts([first, second], 1, run_id="900")
+
+
+def test_bounded_attempt_selection_keeps_completed_attempt_1_over_failed_attempt_2():
+    first = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+    second = {
+        "status": "tool_error", "partial": True, "revision": "a" * 40,
+        "shard_index": 0, "shard_count": 1, "run_id": "900", "run_attempt": "2",
+        "fresh_execution": True,
+    }
+
+    selected, record = select_bounded_shard_attempts([first, second], 1, run_id="900")
+
+    assert selected == [first]
+    assert record["selections"][0]["selected_attempt"] == "1"
+    assert record["selections"][0]["superseded_attempt"] is None
+    assert record["selections"][0]["reason"] == (
+        "completed_attempt_1_retained_over_non_completed_attempt_2"
+    )
+
+
+def test_bounded_attempt_selection_rejects_lineage_mismatch():
+    first = {"status": "tool_error", "revision": "a" * 40, "shard_index": 0,
+             "shard_count": 1, "run_id": "900", "run_attempt": "1",
+             "fresh_execution": True}
+    second = {**_shard_report(0, ["fettle/a.py"], shard_count=1),
+              "revision": "b" * 40, "run_id": "900", "run_attempt": "2",
+              "fresh_execution": True}
+
+    with pytest.raises(ValueError, match="conflicting revision"):
+        select_bounded_shard_attempts([first, second], 1, run_id="900")
+
+
+def test_bounded_attempt_selection_accepts_validated_successful_run_reuse():
+    reused = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "reuse_provenance": {"source_run_id": "899", "source_run_attempt": "1"},
+    }
+
+    selected, record = select_bounded_shard_attempts(
+        [reused], 1, run_id="900", allow_successful_reuse=True,
+    )
+
+    assert selected == [reused]
+    assert record["selections"][0]["reason"] == "validated_successful_run_reuse"
+
+
+def test_bounded_attempt_selection_rejects_fresh_reuse_collision():
+    reused = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "reuse_provenance": {"source_run_id": "899", "source_run_attempt": "1"},
+    }
+    fresh = {
+        **_shard_report(0, ["fettle/a.py"], shard_count=1),
+        "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+    }
+
+    with pytest.raises(ValueError, match="conflicting fresh and reused reports"):
+        select_bounded_shard_attempts(
+            [reused, fresh], 1, run_id="900", allow_successful_reuse=True,
+        )
+
+
+def test_saved_257_report_gap_is_resolved_by_bounded_selection():
+    gap = Path(__file__).parent / "fixtures/mutation_d4_rerun_gap.json"
+    shape = json.loads(gap.read_text(encoding="utf-8"))
+    target = shape["target_shard"]
+    reports = []
+    for index in range(256):
+        report = {
+            **_shard_report(index, ["fettle/a.py"], shard_count=256),
+            "run_id": "900", "run_attempt": "1", "fresh_execution": True,
+        }
+        reports.append(report)
+    reports[target] = {
+        **reports[target], "status": "tool_error", "partial": True,
+        "message": shape["target_reports"][1]["message"],
+    }
+    reports.append({
+        **_shard_report(target, ["fettle/a.py"], shard_count=256),
+        "run_id": "900", "run_attempt": "2", "fresh_execution": True,
+    })
+
+    selected, record = select_bounded_shard_attempts(reports, 256, run_id="900")
+
+    assert len(reports) == shape["report_count"]
+    assert len(selected) == 256
+    assert selected[target]["run_attempt"] == "2"
+    assert record["selections"][target]["superseded_attempt"] == "1"
+
+
 def test_shard_subset_selection_accepts_only_explicit_stage_members():
     first = {"shard_index": 8, "shard_count": 256, "status": "completed"}
     second = {"shard_index": 27, "shard_count": 256, "status": "completed"}
@@ -5163,8 +5434,15 @@ def test_d4_aggregate_accepts_exact_fresh_lineage_and_preserves_outcomes(tmp_pat
 
 def test_d4_aggregate_accepts_one_bounded_failed_job_rerun(tmp_path):
     reports, manifests, preflight, corpus_identity = _d4_fixture(tmp_path)
-    reports[97]["run_attempt"] = "2"
-    reports[99]["run_attempt"] = "2"
+    placeholders = []
+    for index in (97, 99):
+        placeholders.append({
+            "status": "tool_error", "partial": True, "revision": "a" * 40,
+            "shard_index": index, "shard_count": 256, "run_id": "900",
+            "run_attempt": "1", "fresh_execution": True,
+        })
+        reports[index]["run_attempt"] = "2"
+    reports.extend(placeholders)
 
     with patch("fettle.mutation_test._run", return_value=_proc(out="a" * 40 + "\n")):
         result = aggregate_d4_shards(
@@ -5177,6 +5455,8 @@ def test_d4_aggregate_accepts_one_bounded_failed_job_rerun(tmp_path):
     assert result["status"] == "completed"
     assert result["accepted_attempts"] == ["1", "2"]
     assert result["fresh_execution"][97]["run_attempt"] == "2"
+    assert len(result["attempt_selection"]["selections"]) == 256
+    assert result["attempt_selection"]["selections"][97]["superseded_attempt"] == "1"
 
 
 def test_d4_aggregate_rejects_more_than_one_failed_job_rerun(tmp_path):
