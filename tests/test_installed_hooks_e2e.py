@@ -385,6 +385,30 @@ def test_registered_hook_adapter_fanout_uses_most_severe_result(
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_patch_move_to_protected_config(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / "safe.txt").write_text("safe\n", encoding="utf-8")
+    payload = _payload(
+        "claude_code",
+        "pre_edit",
+        root,
+        command=(
+            "*** Begin Patch\n"
+            "*** Update File: safe.txt\n"
+            "*** Move to: ruff.toml\n"
+            "@@\n-safe\n+unsafe\n"
+            "*** End Patch"
+        ),
+    )
+    payload["tool_name"] = "apply_patch"
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Config modification blocked" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_uses_project_policy_from_subdirectory(installed_hook_repo, mode):
     root, env = installed_hook_repo
     subdir = root / "nested"
