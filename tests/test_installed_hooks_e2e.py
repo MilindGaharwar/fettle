@@ -32,6 +32,9 @@ def installed_hook_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     (root / ".fettle.toml").write_text(
+        "# Content assertions need deterministic enforcement; latency is tested separately.\n"
+        "[dispatcher]\n"
+        "global_budget_ms = 5000\n"
         "[gates.config_protect]\n"
         "enabled = true\n"
         "mode = \"enforce\"\n"
@@ -110,6 +113,30 @@ def test_registered_hook_commands_block_baseline_cases(
     output = json.loads(result.stdout)
     assert output["decision"] == "block"
     assert reason in output["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_commands_fail_closed_when_budget_expires(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    config = root / ".fettle.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "global_budget_ms = 5000", "global_budget_ms = 1"
+        ),
+        encoding="utf-8",
+    )
+    payload = _payload(
+        "codex", "pre_edit", root, file_path="ruff.toml", filePath="ruff.toml"
+    )
+
+    result = _run(_command(mode), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    output = json.loads(result.stdout)
+    assert output["decision"] == "block"
+    assert "could not run before the deadline" in output["reason"]
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
