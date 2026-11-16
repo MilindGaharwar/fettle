@@ -1,5 +1,17 @@
 # UX Spec: Scoped Formal Verification Evidence
 
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/formal.md).
+
 Status: PROPOSED, 2026-10-11; planning only, no interface change or live evaluation
 authorized. Implements the experience boundary for the
 [conformance plan](formal-verification-conformance-plan.md).

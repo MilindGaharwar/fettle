@@ -1,6 +1,15 @@
 # State Consistency Contracts Implementation Plan
 
-Status: PROPOSED; implementation requires package-by-package acceptance
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
+Status: SC1-SC4a/P53-P56a recorded complete; SC4b and later packages require separate acceptance
 
 Related documents:
 
@@ -180,7 +189,7 @@ unknown-field rejection where digest semantics could change, and bounded text.
 | SC5 | Add cross-view web/UAT adapter | SC3, SC4 | 5-8 days | Proposed |
 | SC6 | Add optional stateful sequence generation | SC3, SC4 | 5-8 days | Proposed |
 | SC7 | Add duplicate-state and invalidation heuristics | SC1, measured corpus | 5-8 days | Evidence-gated |
-| SC8 | Bind specs, reports, and changed-scope CI selection | P35 complete, P38 complete, SC4 | 5-8 days | Blocked on P35 -> P38 |
+| SC8 | Bind specs, reports, and changed-scope CI selection | P35 complete, P38 complete, SC4 | 5-8 days | P35/P38 satisfied; applicable SC4 scope and separate SC8 authorization required |
 | SC9 | Advisory pilot and graduation decision | SC5-SC8 as applicable | 20+ repositories or 30 qualifying runs | Evidence-gated |
 
 ```text
@@ -196,11 +205,11 @@ P35 + P38 + SC4 --------------------------> SC8 CI/traceability
 SC5-SC8 evidence -------------------------> SC9 graduation
 ```
 
-No activity is authorized merely because it appears here. SC1 should be the
-first package considered for acceptance. SC3 and later require a separate
-proposal review after real contract fixtures validate SC1/SC2 ergonomics. SC8
-is a separate blocked track: this program does not implement or bypass P35 or
-P38, and specification/CI binding cannot begin until both have graduated.
+No pending activity is authorized merely because it appears here. SC1-SC4a
+are recorded complete. Later packages require separate proposal review. SC8
+remains separately authorization-gated: this program does not implement or bypass P35 or
+P38. Both prerequisites are recorded complete; specification/CI binding still
+requires separate SC8 authorization.
 
 ## 8. Work Packages
 

@@ -1,5 +1,13 @@
 # UI Spec: Fettle Review
 
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/review.md).
+
 Status: PROPOSED visual contract; no frontend implementation is authorized
 
 UX contract: [fettle-review.ux-spec.md](fettle-review.ux-spec.md)

@@ -40,6 +40,8 @@ WARNING_PREFIXES = {"SIM", "UP"}
 # Directories that are never part of the project's own code.
 _SKIP_DIRS = {"node_modules", "__pycache__", "venv", "build", "dist"}
 _TOOL_TIMEOUT_S = 120.0
+# Full-project Semgrep needs a larger finite wall-clock budget than Ruff.
+_SEMGREP_TIMEOUT_S = 600.0
 
 
 @dataclass(frozen=True)
@@ -214,7 +216,7 @@ def execute_semgrep(root: str | list[str]) -> ToolScanResult:
     for rules_file in rules_files:
         cmd.extend(["--config", rules_file])
     cmd.extend(["--json", *targets])
-    result = ToolRunner(timeout_s=_TOOL_TIMEOUT_S).run(cmd)
+    result = ToolRunner(timeout_s=_SEMGREP_TIMEOUT_S).run(cmd)
     if result.tool_missing:
         return ToolScanResult("semgrep", ResultStatus.TOOL_ERROR, message="semgrep not found")
     if result.timed_out:

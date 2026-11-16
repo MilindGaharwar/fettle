@@ -40,3 +40,8 @@ this index is the navigation layer.
 - Work is claimed through `fettle work` before edits (claim-before-work).
 - Assurance Integrity is the only authorized new feature program until it
   graduates; maintenance and defect correction continue.
+
+## November 16 integration review
+
+See the [integration review](main-merge-review-20261116.md). The November 14
+sequencing decision and trust-remediation ownership remain authoritative.

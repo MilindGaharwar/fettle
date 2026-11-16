@@ -1,6 +1,15 @@
 # Assurance Integrity Implementation Plan
 
-Status: AI-0 and AI-1 authorized; production implementation not authorized
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
+Status: graduated per the recorded 2026-09-08 decision in [plan-index.md](plan-index.md); later extensions require separate authorization
 
 UX contract: [assurance-integrity.ux-spec.md](assurance-integrity.ux-spec.md)
 
