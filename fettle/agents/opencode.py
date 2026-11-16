@@ -25,21 +25,13 @@ from pathlib import Path
 from typing import Any
 
 from fettle.dispatcher_types import HookInput
+from fettle.agents.tools import canonical_tool, targets
 
 _EVENT_MAP = {
     "tool.execute.before": "PreToolUse",
     "tool.execute.after": "PostToolUse",
     "session.idle": "Stop",
 }
-
-_TOOL_MAP = {
-    "bash": "Bash",
-    "shell": "Bash",
-    "edit": "Edit",
-    "read": "Read",
-    "write": "Write",
-}
-
 
 def matches(payload: dict[str, Any]) -> bool:
     """OpenCode native events carry `type` from the plugin event vocabulary."""
@@ -59,7 +51,9 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
     event = _EVENT_MAP.get(str(payload.get("type")), "")
 
     tool_raw = payload.get("tool")
-    tool_name = _TOOL_MAP.get(str(tool_raw).lower()) if isinstance(tool_raw, str) else None
+    tool_name = canonical_tool(tool_raw)
+    if tool_name == tool_raw and tool_name not in {"Bash", "Write", "Edit", "Read", "Search"}:
+        tool_name = None
 
     args = payload.get("args")
     tool_input = _normalize_args(args) if isinstance(args, dict) else {}
@@ -82,4 +76,6 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
         cwd=Path(cwd_raw),
         session_id=session_id,
         raw=payload,
+        invocation_cwd=Path(cwd_raw),
+        targets=targets(tool_input),
     )

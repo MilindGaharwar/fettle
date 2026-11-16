@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "expected_outcome": "Malformed or missing enforcement evidence remains visible and non-pass.",
+  "observations": [
+    "Malformed PreToolUse input blocks in both installed launch modes.",
+    "Malformed edit journals remain unknown and block in enforce mode.",
+    "Deleting or emptying the journal after an edit does not release the Stop gate.",
+    "A missing Python interpreter produces readable stderr and exit 1."
+  ],
+  "result": "confirmed"
+}

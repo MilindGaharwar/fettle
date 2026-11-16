@@ -42,38 +42,17 @@ def _is_deploy_command(command: str) -> bool:
 
 
 def _check_tests_ran(session_id: str) -> bool:
-    from fettle.config import state_dir
-    edits_path = state_dir(session_id) / "edits.jsonl"
-    if not edits_path.is_file():
-        return False
-    try:
-        import json
-        for line in edits_path.read_text().splitlines():
-            if line.strip():
-                entry = json.loads(line)
-                if entry.get("tested"):
-                    return True
-    except (OSError, ValueError):
-        pass
-    return False
+    from fettle.edit_journal import entries
+    journal = entries(session_id)
+    return not journal.malformed_lines and any(entry.get("tested") for entry in journal.entries)
 
 
 def _check_changelog_edited(session_id: str) -> bool:
-    from fettle.config import state_dir
-    edits_path = state_dir(session_id) / "edits.jsonl"
-    if not edits_path.is_file():
-        return False
-    try:
-        import json
-        for line in edits_path.read_text().splitlines():
-            if line.strip():
-                entry = json.loads(line)
-                fpath = str(entry.get("file", ""))
-                if "changelog" in fpath.lower():
-                    return True
-    except (OSError, ValueError):
-        pass
-    return False
+    from fettle.edit_journal import entries
+    journal = entries(session_id)
+    return not journal.malformed_lines and any(
+        "changelog" in str(entry.get("file", "")).lower() for entry in journal.entries
+    )
 
 
 def _check_health_endpoint(cwd: str) -> bool:

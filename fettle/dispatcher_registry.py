@@ -53,6 +53,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="runtime_output_guard",
+        policy_gates=("runtime_output",),
         run=_lazy("fettle.runtime_output_guard"),
         events=frozenset({"PostToolUse"}),
         tools=None,
@@ -147,6 +148,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — Bash (tool-backed)
     CheckSpec(
         name="post_bash_doc_check",
+        policy_gates=("docs",),
         run=_lazy("fettle.post_bash_doc_check"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Bash"}),
@@ -282,6 +284,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — architecture boundary rules
     CheckSpec(
         name="boundary_rules",
+        policy_gates=("boundary",),
         run=_lazy("fettle.boundary_rules"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -292,6 +295,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — provenance (new files only)
     CheckSpec(
         name="provenance_gate",
+        policy_gates=("provenance",),
         run=_lazy("fettle.provenance_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write"}),
@@ -369,6 +373,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # Stop — worklog (advisory by default)
     CheckSpec(
         name="worklog",
+        policy_gates=("worklog",),
         run=_lazy("fettle.worklog"),
         events=frozenset({"Stop"}),
         tools=None,

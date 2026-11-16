@@ -55,6 +55,7 @@ def installed_hook_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "XDG_CONFIG_HOME": str(tmp_path / "config"),
         "XDG_DATA_HOME": str(tmp_path / "data"),
         "FETTLE_PYTHON": sys.executable,
+        "PYTHONPATH": str(ROOT),
     }
     return root, env
 
@@ -63,6 +64,14 @@ def _command(mode: str) -> str:
     if mode == "plugin":
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        return command.replace("${CLAUDE_PLUGIN_ROOT}", shlex.quote(str(ROOT)))
+    return bridge.dispatcher_command()
+
+
+def _event_command(mode: str, event: str) -> str:
+    if mode == "plugin":
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+        command = hooks["hooks"][event][0]["hooks"][0]["command"]
         return command.replace("${CLAUDE_PLUGIN_ROOT}", shlex.quote(str(ROOT)))
     return bridge.dispatcher_command()
 
@@ -88,6 +97,13 @@ def _run(command: str, payload: dict, root: Path, env: dict[str, str]) -> subpro
         capture_output=True,
         shell=True,
         timeout=15,
+    )
+
+
+def _run_raw(command: str, payload: str, root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command, cwd=root, env=env, input=payload, text=True,
+        capture_output=True, shell=True, timeout=15,
     )
 
 
@@ -186,3 +202,165 @@ def test_conformance_fixture_covers_each_hosts_required_events():
 
     for name in ("pre_edit", "pre_bash", "pre_read", "stop"):
         assert set(HOSTS) <= by_name[name].keys()
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_records_edit_and_stop_requires_verify(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    session = "tr1-edit"
+    pre = _payload("claude_code", "pre_edit", root, file_path=str(target))
+    pre["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), pre, root, env).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    post = _payload("claude_code", "post_write", root, file_path=str(target))
+    post["session_id"] = session
+    assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_detects_edit_after_journal_is_deleted(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    session = "tr1-deleted"
+    pre = _payload("claude_code", "pre_edit", root, file_path=str(target))
+    pre["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), pre, root, env).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    post = _payload("claude_code", "post_write", root, file_path=str(target))
+    post["session_id"] = session
+    assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
+    journal = Path(env["XDG_STATE_HOME"]) / "fettle" / session / "edits.jsonl"
+    journal.unlink()
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_uses_project_policy_from_subdirectory(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    subdir = root / "nested"
+    subdir.mkdir()
+    payload = _payload("claude_code", "pre_edit", root, file_path="../ruff.toml")
+    payload["cwd"] = str(subdir)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, subdir, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Config modification blocked" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "hook_event_name": "PreToolUse", "tool_name": "NotebookEdit",
+            "tool_input": {"notebook_path": "ruff.toml"}, "session_id": "tr1-notebook",
+        },
+        {
+            "hook_event_name": "PreToolUse", "tool_name": "apply_patch", "turn_id": "tr1",
+            "tool_input": {"command": "*** Begin Patch\n*** Update File: ruff.toml\n+x\n*** Update File: safe.txt\n+y\n*** End Patch"},
+            "session_id": "tr1-codex",
+        },
+        {
+            "type": "tool.execute.before", "tool": "multiedit",
+            "args": {"edits": [{"filePath": "safe.txt"}, {"filePath": "ruff.toml"}]},
+            "sessionID": "tr1-opencode",
+        },
+    ),
+)
+def test_registered_hook_blocks_edit_aliases_and_multi_target_events(
+    installed_hook_repo, mode, payload,
+):
+    root, env = installed_hook_repo
+    payload = {**payload, "cwd": str(root), "directory": str(root)}
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Config modification blocked" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_ignores_repository_local_fettle_package(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    local = root / "fettle"
+    local.mkdir()
+    (local / "__init__.py").write_text("", encoding="utf-8")
+    (local / "dispatcher.py").write_text("print('{}')\n", encoding="utf-8")
+    payload = _payload("claude_code", "pre_bash", root, command="rm -rf build")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Destructive command blocked" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_malformed_pretool_input(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+
+    result = _run_raw(
+        _event_command(mode, "PreToolUse"),
+        '{"hook_event_name":"PreToolUse",',
+        root,
+        env,
+    )
+
+    assert result.returncode == 2, result.stderr
+    assert "Malformed PreToolUse input" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_treats_malformed_journal_as_unknown(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    session = "tr1-malformed-journal"
+    journal = Path(env["XDG_STATE_HOME"]) / "fettle" / session / "edits.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text("not-json\n", encoding="utf-8")
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "evidence is malformed" in json.loads(result.stdout)["reason"]

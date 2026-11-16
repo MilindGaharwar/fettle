@@ -61,7 +61,7 @@ def _is_link_like(path: Path) -> bool:
 def dispatcher_command() -> str:
     """Return a shell-safe command containing no event-controlled data."""
     executable = os.path.abspath(sys.executable)
-    return _shell_command([executable, "-m", "fettle.dispatcher"])
+    return _shell_command([executable, "-P", "-m", "fettle.dispatcher"])
 
 
 def _source_subagent_hook() -> Path:
@@ -94,7 +94,7 @@ function normalizeArgs(args: Record<string, unknown>) {{
 
 function runFettle(event: string, tool: string | undefined, args: Record<string, unknown>, directory: string, sessionID: string) {{
   return new Promise<{{ blocked: boolean; message: string }}>((resolve) => {{
-    const child = spawn(python, ["-m", "fettle.dispatcher"], {{ cwd: directory, env: process.env, stdio: ["pipe", "pipe", "pipe"] }})
+    const child = spawn(python, ["-P", "-m", "fettle.dispatcher"], {{ cwd: directory, env: process.env, stdio: ["pipe", "pipe", "pipe"] }})
     let stdout = ""
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += chunk))
@@ -195,8 +195,8 @@ def _write_tree(root: Path, published_root: Path) -> None:
     hooks = {
         "description": "Fettle installed-package hooks",
         "hooks": {
-            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
-            "PostToolUse": [{"matcher": "Write|Edit|Bash|Read", "hooks": [{"type": "command", "command": command, "timeout": 15}]}],
+            "PreToolUse": [{"matcher": "*", "onFailure": "block", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+            "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 15}]}],
             "SubagentStart": [{"hooks": [{"type": "command", "command": _shell_command(["node", str(published_root / "hooks" / "subagent_inject.js")]), "timeout": 5}]}],
             "Stop": [{"hooks": [{"type": "command", "command": command, "timeout": 60}]}],
         },

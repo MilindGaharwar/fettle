@@ -10,6 +10,8 @@ import re
 import sys
 from typing import NoReturn
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
+
 
 DEFAULT_ALLOWLIST_PATH = "~/.config/fettle/mcp-allowlist.json"
 
@@ -248,43 +250,9 @@ def check_file_tool(
 
 
 def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, EOFError):
-        sys.exit(0)
+    from fettle.hook_cli import run_main
 
-    tool_name: str = data.get("tool_name", "")
-    tool_input: dict[str, str] = data.get("tool_input", {})
-
-    # Opt-in gate: with an empty default allowlist this gate would block ALL
-    # package installs — it must never run unless explicitly enabled.
-    import os as _os
-    import sys as _sys
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo root
-    from fettle.config import load_config
-    cfg = load_config(data.get("cwd", "."))
-    if not cfg["gates"]["mcp_trust"]["enabled"]:
-        sys.exit(0)
-    configured = cfg["gates"]["mcp_trust"].get("allowlist_path") or None
-
-    allowlist, allowlist_error = load_allowlist(configured)
-    if allowlist_error:
-        deny(
-            "MCP trust gate is enabled but its allowlist could not be read "
-            f"({allowlist_error}). Failing closed. Fix or restore {_allowlist_path(configured)}."
-        )
-
-    if tool_name == "Bash":
-        command: str = tool_input.get("command", "")
-        if command:
-            check_bash(command, allowlist)
-
-    elif tool_name in ("Write", "Edit"):
-        file_path: str = tool_input.get("file_path", "")
-        if file_path:
-            check_file_tool(file_path, allowlist, configured)
-
-    sys.exit(0)
+    run_main(run_check)
 
 
 def _check_bash_result(command: str, allowlist: dict) -> str | None:

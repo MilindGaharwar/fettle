@@ -2,7 +2,7 @@
 
 Pins the contract: resolve a Python >= 3.11 (FETTLE_PYTHON override first),
 forward arguments, and when no interpreter exists fail loud on stderr but
-exit 0 — a hook must never hard-fail the session over environment issues.
+exit 1 so a required host registration cannot silently bypass enforcement.
 """
 
 import os
@@ -58,8 +58,8 @@ def test_invalid_fettle_python_falls_back():
         shutil.rmtree(shim_dir, ignore_errors=True)
 
 
-def test_no_interpreter_is_loud_but_exits_0():
-    """No usable Python anywhere: readable stderr, exit 0, target never runs."""
+def test_no_interpreter_is_loud_and_fails():
+    """No usable Python anywhere: readable stderr, exit 1, target never runs."""
     shim_dir = tempfile.mkdtemp()
     fake_home = tempfile.mkdtemp()
     try:
@@ -78,7 +78,7 @@ def test_no_interpreter_is_loud_but_exits_0():
             "quality_scan.py", "--help",
             env={"PATH": shim_dir, "HOME": fake_home},
         )
-        assert rc == 0
+        assert rc == 1
         assert "no Python >= 3.11" in stderr
         assert "FETTLE_PYTHON" in stderr  # tells the user how to fix it
         assert "--baseline" not in stdout  # target must not have run

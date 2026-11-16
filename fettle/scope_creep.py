@@ -15,7 +15,6 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config  # noqa: E402
 
 
 def _get_state_path(state_dir: str, session_id: str) -> str:
@@ -44,80 +43,9 @@ def _is_commit(command: str) -> bool:
 
 
 def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, EOFError):
-        sys.exit(0)
+    from fettle.hook_cli import run_main
 
-    tool_name: str = data.get("tool_name", "")
-    tool_input: dict = data.get("tool_input", {})
-    cwd = data.get("cwd", ".")
-    session_id: str = data.get("session_id", "unknown")
-
-    cfg = load_config(cwd)
-    gate_cfg = cfg.get("gates", {}).get("scope_creep", {})
-    if not gate_cfg.get("enabled", True):
-        sys.exit(0)
-
-    warning_threshold = gate_cfg.get("warning_threshold", 15)
-    critical_threshold = gate_cfg.get("critical_threshold", 25)
-    reset_on_commit = gate_cfg.get("reset_on_commit", True)
-
-    state_dir = os.environ.get(
-        "FETTLE_SCOPE_STATE_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state", "sessions"),
-    )
-    state_path = _get_state_path(state_dir, session_id)
-    state = _load_state(state_path)
-
-    # Handle commit reset
-    if tool_name == "Bash" and reset_on_commit:
-        command = tool_input.get("command", "")
-        if _is_commit(command):
-            state["files"] = []
-            state["warned_at"] = []
-            _save_state(state_path, state)
-            sys.exit(0)
-
-    # Track file edits
-    if tool_name in ("Write", "Edit"):
-        file_path = tool_input.get("file_path", "")
-        if file_path and file_path not in state["files"]:
-            state["files"].append(file_path)
-
-    file_count = len(state["files"])
-
-    # Check thresholds
-    output = None
-    if file_count >= critical_threshold and critical_threshold not in state.get("warned_at", []):
-        state.setdefault("warned_at", []).append(critical_threshold)
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": (
-                    f"Scope creep risk: {file_count} files modified (threshold: {critical_threshold}). "
-                    f"Strongly consider stopping, reviewing, and committing before continuing."
-                ),
-            }
-        }
-    elif file_count >= warning_threshold and warning_threshold not in state.get("warned_at", []):
-        state.setdefault("warned_at", []).append(warning_threshold)
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": (
-                    f"Scope check: {file_count} files modified this session (threshold: {warning_threshold}). "
-                    f"Is this still on-task? Consider committing current changes."
-                ),
-            }
-        }
-
-    _save_state(state_path, state)
-
-    if output:
-        print(json.dumps(output))
-
-    sys.exit(0)
+    run_main(run_check)
 
 
 def run_check(ctx):

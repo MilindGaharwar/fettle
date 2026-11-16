@@ -10,7 +10,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config, state_dir, trace_path as project_trace_path  # noqa: E402
+from fettle.config import load_config, trace_path as project_trace_path  # noqa: E402
 from fettle.project_rules import extra_rule_configs  # noqa: E402
 from fettle.semgrep_util import anchored_semgrep_args  # noqa: E402
 from fettle.tool_paths import resolve_tool  # noqa: E402
@@ -20,7 +20,7 @@ def _resolve_tool(name: str) -> str | None:
     return resolve_tool(name)
 
 
-def main() -> None:
+def _script_main() -> None:
     hook_start = time.monotonic_ns()
 
     # ── Parse stdin ──────────────────────────────────────────────────────
@@ -51,17 +51,6 @@ def main() -> None:
 
     if not os.path.isfile(file_path):
         sys.exit(0)
-
-    # ── Edit tracking (consumed by coverage_gate, verify_gate, doc check) ──────────
-    tracking_path: str = os.environ.get(
-        "FETTLE_EDIT_TRACKING", str(state_dir(session_id) / "edits.jsonl")
-    )
-    try:
-        tool_name: str = data.get("tool_name", "Edit")
-        with open(tracking_path, "a") as fh:
-            fh.write(json.dumps({"file": file_path, "ts": time.time(), "tool": tool_name, "tested": False}) + chr(10))
-    except OSError:
-        pass
 
     # .fettle-ignore
     ignore_file = os.path.join(cwd, ".fettle-ignore")
@@ -418,12 +407,14 @@ def run_check(ctx):
     payload = ctx.input.raw
 
     try:
+        env = {**os.environ, "FETTLE_CHECK_SUBPROCESS": "1"}
         proc = subprocess.run(
             [sys.executable, script_path],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return CheckResult.allow()
@@ -446,9 +437,15 @@ def run_check(ctx):
     return CheckResult.allow()
 
 
+def main() -> None:
+    from fettle.hook_cli import run_main
+
+    run_main(run_check)
+
+
 if __name__ == "__main__":
     try:
-        main()
+        _script_main() if os.environ.get("FETTLE_CHECK_SUBPROCESS") == "1" else main()
     except (json.JSONDecodeError, OSError, ValueError) as e:
         print(f"fettle gate warning: post_edit hook failed: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(0)

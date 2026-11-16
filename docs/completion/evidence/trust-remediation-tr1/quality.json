@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "expected_outcome": "The unexcluded regression and repository quality gates pass.",
+  "commands": [
+    {"command": "ruff check .", "result": "All checks passed", "exit_code": 0},
+    {"command": "python -m pytest -q", "result": "5157 passed, 23 skipped in 592.60s", "exit_code": 0},
+    {"command": "pre-commit run --from-ref 3179e2e --to-ref HEAD", "result": "All applicable hooks passed", "exit_code": 0},
+    {"command": "python -m fettle.cli check --all", "result": "Exit 0; three pre-existing legacy protocol-print warnings", "exit_code": 0}
+  ],
+  "result": "confirmed"
+}

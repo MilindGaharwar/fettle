@@ -23,9 +23,9 @@ package.
 
 | Host | Events | Transport | Timeout unit | Installed command |
 |---|---|---|---|---|
-| Claude Code | PreToolUse, PostToolUse, Stop | Generated `hooks/hooks.json` | seconds | absolute interpreter + `-m fettle.dispatcher` |
+| Claude Code | PreToolUse, PostToolUse, Stop | Generated `hooks/hooks.json` | seconds | absolute interpreter + `-P -m fettle.dispatcher` |
 | Claude Code | SubagentStart | Bundled JavaScript transport | seconds | Node script in bridge |
-| Codex CLI | PreToolUse, PostToolUse, Stop | `~/.codex/hooks.json` | seconds | absolute interpreter + `-m fettle.dispatcher` |
+| Codex CLI | PreToolUse, PostToolUse, Stop | `~/.codex/hooks.json` | seconds | absolute interpreter + `-P -m fettle.dispatcher` |
 | Gemini CLI | BeforeTool, AfterTool, AfterAgent | `~/.gemini/settings.json` | milliseconds | absolute interpreter + `-m fettle.dispatcher` |
 | OpenCode | tool before/after, session idle | Generated TypeScript plugin | host/plugin-defined | absolute interpreter + `-m fettle.dispatcher` |
 
