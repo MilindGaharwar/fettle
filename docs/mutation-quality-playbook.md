@@ -53,6 +53,13 @@ passing source checks do not authorize a direct protected-branch push. Full-scop
 qualification remains a separate, fresh, held-out path and never reuses advisory
 terminal outcomes.
 
+A non-authorising pull-request label event must create no check named exactly
+`mutation evidence`. Its skipped aggregate may be displayed under the unevaluated
+name expression or under `mutation evidence (label no-op)`; either is contained
+because neither publishes the protected context. Do not make the aggregate name
+static, because a skipped static `mutation evidence` job would recreate the
+required-check bypass.
+
 ```bash
 pipx install finefettle
 fettle doctor

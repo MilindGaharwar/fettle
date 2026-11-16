@@ -525,10 +525,13 @@ Changes:
   non-authorising label event publishes a skipped check run under the required
   name. Change the aggregate job's name in `mutation-pr.yml` so that it is
   `mutation evidence` only when the job is meant to run, and a different name
-  (`mutation evidence (label no-op)`) for a non-authorising label event. A
-  constant name expression was observed to be evaluated for a skipped job;
-  the same is expected for the `github` context, and the probe below is what
-  proves it.
+  for a non-authorising label event. GitHub displayed the skipped aggregate on
+  pull request #76 under the unevaluated expression text; it may instead display
+  the expression's `mutation evidence (label no-op)` branch, as it did for the
+  constant expression on pull request #73. Containment does not depend on which
+  non-required name GitHub chooses. The aggregate name must not be made static:
+  a skipped job named `mutation evidence` would recreate M5 by publishing the
+  protected context on a non-authorising event.
   Update the pins in `tests/test_doc_claims.py` and `tests/test_ci.py`. Prove
   it on the TR-0 pull request itself: after its checks are green, add one
   ordinary label and record that no new check run named exactly

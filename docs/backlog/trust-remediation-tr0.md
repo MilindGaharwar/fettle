@@ -1,7 +1,7 @@
 ---
 fettle-work-item: v2
 id: trust-remediation-tr0
-status: claimed
+status: done
 scope:
   - .github/workflows/mutation-pr.yml
   - tests/test_ci.py
@@ -27,10 +27,11 @@ no-op from the exact required `mutation evidence` check name.
 
 ## Resolution
 
-In progress. The executable harness covers all four hosts in plugin and
-installed-bridge launch modes. Official-source host findings and the probe that
-confirmed M5 are retained under
-`docs/completion/evidence/trust-remediation-tr0/`. Contract tests confirm the
-workflow gives ordinary label no-ops a distinct aggregate name while preserving
-`mutation evidence` for normal and authorizing-label runs. Resolution remains
-pending until the one-time live pull-request containment probe passes.
+Completed. The executable harness covers all four hosts in plugin and
+installed-bridge launch modes. Official-source host findings and the probes that
+confirmed and contained M5 are retained under
+`docs/completion/evidence/trust-remediation-tr0/`. Contract tests keep the exact
+`mutation evidence` name conditional and forbid a static protected name. The
+one-time pull request #76 probe confirmed that a non-authorising label event
+created no check named exactly `mutation evidence`; GitHub displayed the skipped
+aggregate under the unevaluated expression text.
