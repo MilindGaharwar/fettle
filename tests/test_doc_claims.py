@@ -98,6 +98,17 @@ def test_readme_single_install_claim_matches_pyproject():
         assert any(dep.split("=", 1)[0].split(">", 1)[0] == capability for dep in dependencies)
 
 
+def test_dispatcher_budget_clock_is_documented_truthfully():
+    config = _read("docs/CONFIG.md")
+    plan = _read("docs/trust-remediation-implementation-plan.md")
+
+    assert "event budget clock starts after" in config
+    assert "interpreter start-up" in config
+    assert "pre-clock operations are excluded" in plan
+    assert "425.215 ms p95" in plan
+    assert "This unloaded evidence does not verify E24 under load" in plan
+
+
 def test_current_documentation_version_matches_package():
     import tomllib
 

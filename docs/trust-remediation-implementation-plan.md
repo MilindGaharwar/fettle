@@ -881,6 +881,14 @@ before it is changed. Size: S each; L in total.
 Also assigned to TR-9 is E24: under load the default `PreToolUse` budget
 expires before the first check; a required check becomes a generic deadline
 block and non-required checks are skipped. Its priority is owner to decide.
+The current event clock starts only after policy load, policy-digest creation,
+and session-start persistence, so interpreter/process start-up and those
+pre-clock operations are excluded from the configured budget. Item G measured
+200 unloaded runs in each installed launch mode on Apple arm64 with CPython
+3.12.13: process start to first check was 362.209 ms median / 425.215 ms p95
+for plugin mode and 108.922 ms median / 121.438 ms p95 for bridge mode. All
+400 runs reached the first check with zero deadline blocks, skipped checks, or
+measurement errors. This unloaded evidence does not verify E24 under load.
 
 Also in TR-9: triage of the roughly 10,300 non-message mutation survivors in
 the trust-critical modules (`verify_gate` 125, `completion` 92, `assurance` 94,

@@ -70,6 +70,12 @@ PreToolUse = 250
 enabled = false
 ```
 
+The event budget clock starts after input normalization, project-root discovery,
+strict policy loading, policy-digest construction, and the session-start record.
+It covers check selection, check execution, aggregation, and response finalization;
+process and interpreter start-up plus those pre-clock operations are excluded.
+Per-check deadlines are capped by the remaining event budget.
+
 Repository-level disables do not suppress checks marked fail-closed. Only a
 governing floor may disable one. `fettle config --explain` reports ignored
 repository disables rather than silently accepting them.
