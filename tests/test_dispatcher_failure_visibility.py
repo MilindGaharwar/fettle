@@ -546,6 +546,49 @@ class TestDispatchLevelFailures:
         assert code == 2
         assert f"Required check '{name}' did not complete." in output["reason"]
 
+    @pytest.mark.parametrize(("name", "module", "event", "tool", "gate"), [
+        ("boundary_rules", "fettle.boundary_rules", "PostToolUse", "Write", "architecture_boundaries"),
+        ("worklog", "fettle.worklog", "Stop", "Write", "worklog"),
+        ("post_bash_doc_check", "fettle.post_bash_doc_check", "PostToolUse", "Bash", "docs"),
+    ])
+    @pytest.mark.parametrize(("mode", "expected"), [("enforce", 2), ("advisory", 0)])
+    def test_real_registry_uses_each_checks_enforcing_configuration(
+        self, tmp_path, monkeypatch, capsys, isolated_trace,
+        name, module, event, tool, gate, mode, expected,
+    ):
+        from fettle import dispatcher_registry
+
+        def import_check(imported):
+            def run(_ctx):
+                if imported == module:
+                    raise RuntimeError("injected configured-check fault")
+                return CheckResult.allow()
+
+            return SimpleNamespace(run_check=run)
+
+        monkeypatch.setattr(dispatcher_registry, "import_module", import_check)
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "gates": {gate: {"enabled": True, "mode": mode}},
+            "dispatcher": {"global_budget_ms": 1000},
+        })
+        payload = json.loads(_payload(event))
+        payload["tool_name"] = tool
+        payload["tool_input"]["file_path"] = str(tmp_path / "change.py")
+
+        code, output = _run_main(monkeypatch, capsys, json.dumps(payload))
+
+        assert code == expected
+        if expected:
+            assert f"Required check '{name}' failed closed." in output["reason"]
+
+    @pytest.mark.parametrize("name", ["runtime_output_guard", "provenance_gate"])
+    def test_registry_does_not_claim_nonexistent_enforcing_mode(self, name):
+        from fettle.dispatcher_registry import CHECKS
+
+        spec = next(item for item in CHECKS if item.name == name)
+
+        assert spec.policy_gates == ()
+
     @pytest.mark.parametrize(("name", "module", "tool"), [
         ("boundary_rules", "fettle.boundary_rules", "Write"),
         ("boundary_rules", "fettle.boundary_rules", "Edit"),

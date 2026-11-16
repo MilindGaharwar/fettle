@@ -73,13 +73,13 @@ def test_installed_bridge_registration_matches_claude_failure_contract(tmp_path)
     assert hooks["PostToolUse"][0]["matcher"] == "*"
 
 
-def test_enforce_capable_checks_declare_policy_owners():
+def test_checks_declare_only_real_enforcing_policy_owners():
     expected = {
         "worklog": ("worklog",),
         "post_bash_doc_check": ("docs",),
-        "boundary_rules": ("boundary",),
-        "provenance_gate": ("provenance",),
-        "runtime_output_guard": ("runtime_output",),
+        "boundary_rules": ("architecture_boundaries",),
+        "provenance_gate": (),
+        "runtime_output_guard": (),
     }
 
     assert {spec.name: spec.policy_gates for spec in CHECKS if spec.name in expected} == expected
