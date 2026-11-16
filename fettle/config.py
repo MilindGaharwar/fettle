@@ -334,6 +334,7 @@ DEFAULTS: dict[str, Any] = {
         "engine": "mutmut",
         "paths": ["src/"],
         "exclude": ["tests/", "migrations/"],
+        "advisory_exclude": [],
         "base": "origin/main",
         "timeout_s": 600,
         "full_timeout_s": 1800,

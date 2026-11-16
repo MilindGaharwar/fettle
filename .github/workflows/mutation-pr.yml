@@ -103,7 +103,7 @@ jobs:
           count = prepared["shard_count"]
           if prepared.get("status") != "completed" or not isinstance(count, int) or not 0 <= count <= 256:
               raise SystemExit(2)
-          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"merge_base":os.environ["MERGE_BASE"],"scope":"changed","shard_count":count}
+          identity = {"schema_version":"1","kind":"mutation_pr_advisory_identity","head_sha":os.environ["HEAD_SHA"],"base_sha":os.environ["BASE_SHA"],"merge_base":os.environ["MERGE_BASE"],"scope":"changed","shard_count":count,"advisory_exclude":prepared["advisory_exclude"]}
           Path("mutation-pr-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
           PY
           echo "matrix=$(python -c 'import json; print(json.dumps(json.load(open("prepare-changed.json"))["matrix"],separators=(",",":")))')" >> "$GITHUB_OUTPUT"
@@ -380,7 +380,7 @@ jobs:
               valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="changed" and identity.get("shard_count")==0)
           except (OSError, ValueError, TypeError):
               valid=False
-          json.dump({"status":"not_applicable" if valid else "unknown","message":"No mutation-relevant changed scope" if valid else "Changed-scope identity is malformed","revision":os.environ["HEAD_SHA"],"score":None,"passed":valid},open("mutation-report.json","w"),separators=(",",":"))
+          json.dump({"status":"not_applicable" if valid else "unknown","message":"No mutation-relevant changed scope" if valid else "Changed-scope identity is malformed","revision":os.environ["HEAD_SHA"],"score":None,"passed":valid,"advisory_exclude":identity.get("advisory_exclude",[]) if valid else []},open("mutation-report.json","w"),separators=(",",":"))
           PY
           else
             if ! python -c 'import json,os,sys; identity=json.load(open("mutation-pr-source/mutation-pr-identity.json")); valid=(identity.get("head_sha")==os.environ["HEAD_SHA"] and identity.get("base_sha")==os.environ["BASE_SHA"] and identity.get("merge_base")==os.environ["MERGE_BASE"] and identity.get("scope")=="changed" and identity.get("shard_count")==int(os.environ["SHARD_COUNT"])); sys.exit(0 if valid else 2)'; then
@@ -419,6 +419,9 @@ jobs:
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
           from pathlib import Path
+          aggregate = json.loads(Path("mutation-report.json").read_text(encoding="utf-8"))
+          exclusions = aggregate.get("advisory_exclude", [])
+          print("- Applied advisory exclusions: " + (", ".join(f"`{path}`" for path in exclusions) or "none"))
           path = Path("mutation-pr-source/advisory-reuse.json")
           if path.is_file():
               override = json.loads(path.read_text(encoding="utf-8")).get("override")

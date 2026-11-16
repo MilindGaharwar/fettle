@@ -16,7 +16,9 @@ drift and unsupported mutation shapes fail quickly with enough evidence to fix
 them.
 
 Current repository workflow: opening a pull request automatically runs the
-manifest-bound changed-scope advisory path. Its attempt-scoped aggregate reports
+manifest-bound configured changed-scope advisory path. The repository omits the
+mutation engine and staged preflight modules from PR-only scope and names those
+omissions in retained evidence and the job summary. Its attempt-scoped aggregate reports
 `aggregation_mode: "advisory"` and `qualification_eligible: false`; a validated
 zero scope dispatches no shards and reports `not_applicable`. This feedback never
 claims a full-corpus baseline or qualification.
@@ -39,7 +41,7 @@ claims a full-corpus baseline or qualification.
 | Develop | Runs `fettle mutation run --changed` or opens a PR | Progress followed by killed and surviving changes | Informed | Coverage mistaken for assertion quality |
 | Repair | Opens a survivor and runs its rerun command | File, line, mutation, tests, and expected next action | In control | Opaque mutant IDs |
 | Decide | Adds an assertion or records a temporary override | New survivor removed or explicitly waived | Accountable | Permanent unreviewed suppression |
-| Maintain | Reviews scheduled full evidence | Baseline, current score, delta, runtime, and debt | Oriented | Arbitrary threshold resets |
+| Maintain | Reviews deliberately dispatched full evidence | Baseline, current score, delta, runtime, and debt | Oriented | Arbitrary threshold resets |
 
 ## Primary Flow
 
@@ -64,8 +66,9 @@ seconds, excluding mutation execution time.
   no claim that tests passed.
 - Cleared empty: `completed` with zero new survivors and explicit scored-mutant
   counts; zero generated mutants remains `unknown`, not success.
-- Filtered empty: requested path has no changed implementation files;
-  `not_applicable` names the merge base and filters used.
+- Filtered empty: requested path has no changed implementation files after
+  `exclude` and PR-only `advisory_exclude` are applied; `not_applicable` names
+  the applied advisory exclusions in retained evidence.
 - Loading brief: terminal shows scope discovery and engine validation.
 - Loading long: periodic shard/module progress includes elapsed time and the
   current bounded deadline; CI exposes active workers.

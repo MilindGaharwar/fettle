@@ -58,6 +58,7 @@ enabled = true
 mode = "advisory"
 paths = ["fettle/"]
 exclude = ["tests/", "migrations/"]
+advisory_exclude = ["fettle/mutation_test.py", "fettle/staged_preflight.py"]
 base = "origin/main"
 timeout_s = 600
 full_timeout_s = 7200

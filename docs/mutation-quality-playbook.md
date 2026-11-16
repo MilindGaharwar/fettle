@@ -25,8 +25,8 @@ The standalone `.github/workflows/mutation-d4.yml` execute graph admits a run on
 - Retention installs the pinned mutation environment and invokes Fettle through `uv run --no-sync`; the CLI builds the evidence index from retained files, appends provider artifact IDs, re-digests it, and the job mirrors the index plus retained-file digests to `evidence/d4`. Any mirror or policy failure remains a non-pass (`d4-retain` and `tests/test_ci.py`).
 
 On every pull request, `.github/workflows/mutation-pr.yml` binds preparation to
-the exact head, base, and merge base. A mutation-relevant scope automatically
-dispatches the changed-scope shard matrix. Each shard consumes its digest-bound
+the exact head, base, and merge base. A mutation-relevant configured advisory
+scope automatically dispatches the changed-scope shard matrix. Each shard consumes its digest-bound
 manifest and publishes an attempt-scoped artifact; a failed job may receive one
 bounded failed-job rerun, but the aggregate must select exactly one compatible
 completed attempt for every shard. A retry timeout, missing attempt, or
@@ -35,17 +35,27 @@ pass.
 
 `fettle/mutation_test.py` aggregates this pull-request evidence with
 `aggregation_mode: "advisory"` and `qualification_eligible: false`. Advisory
-success therefore confirms complete, compatible changed-scope execution only.
+success therefore confirms complete, compatible configured advisory-scope
+execution only.
 It does not establish a full-corpus baseline, waive survivors, or qualify a
 ratchet. If preparation proves there is no mutation-relevant Python scope, the
 workflow dispatches no shards and publishes identity-bound `not_applicable`
 evidence with `passed: true`. Missing or malformed zero-scope identity remains
 non-pass.
 
-Advisory cost follows the configured partition contract: changes to engine files
-such as `fettle/mutation_test.py` or `fettle/staged_preflight.py` always cost the
-full matrix; non-engine source changes cost the shards that contain that source;
-documentation-only changes cost zero shards.
+`[mutation].advisory_exclude` affects only pull-request preparation. A changed
+file matching `exclude` or `advisory_exclude` does not make PR scope applicable,
+and every PR manifest is built from configured paths minus both lists. Retained
+identity, aggregate, and summary evidence names the applied PR-only exclusions.
+An empty key preserves the former behavior. Full-corpus preparation ignores the
+key.
+
+In this repository, decision D2 excludes `fettle/mutation_test.py` and
+`fettle/staged_preflight.py` from PR advisories. Engine-only changes therefore
+cost zero shards; mixed changes retain the stable configured topology for the
+remaining source. The weekly Monday 03:23 UTC schedule prepares full-corpus
+manifests and runs preflight, but does not run the mutation execution matrix;
+that matrix is restricted to deliberate `workflow_dispatch` modes.
 
 Protected `main` requires both `CI required` and `mutation evidence`. It also
 requires linear history, so approved changes land through a linear merge method;
@@ -88,6 +98,9 @@ polyglot adapters do not imply polyglot mutation support.
   terminal outcomes. Run authoritative calibrations sequentially.
 - Advisory pull-request aggregates are always qualification-ineligible, even
   when all changed-scope shards pass.
+- `.github/mutation-observed-ledger.json` remains keyed by the earlier shard
+  contents. Its projections are a known limitation after PR-only exclusions and
+  remain owned by finding M7 in TR-8; do not rebuild or reinterpret the ledger.
 - A failed staged-preflight run remains non-pass. Its successful shard reports may
   contribute to a separately identified recovery corpus only when immutable artifact
   hashes, candidate/runtime/dependency/policy identity, complete manifest topology,

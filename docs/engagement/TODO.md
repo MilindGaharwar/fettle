@@ -793,7 +793,10 @@ otherwise. Finding IDs refer to the plan's register.
       worker attribution, session-bound plans.
 - [ ] E8. TR-8 Pipeline and mutation decisions — advisory serialisation guard,
       fingerprint portability, admission accounting; owner decisions D1-D5 on
-      the mutation programme. Starts after D4 closes.
+      the mutation programme. D2 was taken 2026-11-15: PR advisories omit
+      `fettle/mutation_test.py` and `fettle/staged_preflight.py`, while deliberate
+      full-corpus preparation keeps both. The observed ledger's old shard-index
+      contents remain an M7 limitation. Starts after D4 closes.
 - [ ] E9. TR-9 Polish — all P3 items and survivor triage in trust-critical
       modules.
 
