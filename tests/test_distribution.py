@@ -31,7 +31,7 @@ def test_default_install_includes_every_python_runtime_capability():
         "pytest>=7.0",
         "pyyaml>=6.0",
         "ruff>=0.4.0",
-        "semgrep>=1.168",
+        "semgrep>=1.185",
     }
 
 
@@ -42,7 +42,7 @@ def test_capability_extras_remain_compatible():
     assert extras["mutation"] == ["mutmut==2.5.1"]
     assert extras["evals"] == ["pyyaml>=6.0"]
     assert extras["uat"] == ["playwright>=1.40"]
-    assert extras["semgrep"] == ["semgrep>=1.168"]
+    assert extras["semgrep"] == ["semgrep>=1.185"]
     assert extras["all"] == ["finefettle[dev]"]
 
 
