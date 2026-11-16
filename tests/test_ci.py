@@ -1910,29 +1910,19 @@ def test_pr_advisory_publishes_the_protected_check_context():
     ) in advisory
 
 
-@pytest.mark.parametrize(
-    ("action", "label", "expected"),
-    [
-        ("opened", "", "mutation evidence"),
-        ("labeled", "mutation-full-matrix-authorized", "mutation evidence"),
-        ("labeled", "documentation", "mutation evidence (label no-op)"),
-    ],
-)
-def test_pr_advisory_check_name_separates_authorized_runs_from_label_noops(
-    action, label, expected,
-):
+def test_pr_advisory_check_name_separates_authorized_runs_from_label_noops():
     parsed = yaml.safe_load(
         (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
     )
     aggregate = parsed["jobs"]["aggregate"]
-    authorized = action != "labeled" or label == "mutation-full-matrix-authorized"
-
-    assert aggregate["name"] == (
+    expression = (
         "${{ (github.event.action != 'labeled' || "
         "github.event.label.name == 'mutation-full-matrix-authorized') && "
         "'mutation evidence' || 'mutation evidence (label no-op)' }}"
     )
-    assert expected == ("mutation evidence" if authorized else "mutation evidence (label no-op)")
+
+    assert aggregate["name"] == expression
+    assert all(job.get("name") != "mutation evidence" for job in parsed["jobs"].values())
 
 
 def test_pr_mutation_workflow_executes_one_bounded_attempt_per_full_scope_shard():
