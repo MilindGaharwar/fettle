@@ -289,7 +289,6 @@ No extraction or new UAT enforcement is authorized by this plan.
 
 ## Program Constraint
 
-Until Assurance Integrity graduates, do not start unrelated feature programs.
-Maintenance and defects continue. Any exception must show that it reduces false
-assurance, improves evidence validity, or materially improves explanation of a
-trust decision.
+This constraint was satisfied when Assurance Integrity graduated on 2026-09-08.
+New feature programs still require their own explicit authorization. Maintenance
+and defects continue; planning does not imply implementation approval.

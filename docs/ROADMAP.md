@@ -20,6 +20,14 @@ mutation policy and narrow formal verification remain advisory or partial and
 subject to the graduation triggers below. See the
 [README](../README.md) for current capabilities and operational boundaries.
 
+Direction: reduce workslop across AI work by making readiness claims
+accountable to evidence. Code remains the first domain and the first proof;
+wider effectiveness is not yet established. The
+[sequencing decision of 2026-11-14](engagement/TODO.md#sequencing-decision-2026-11-14)
+puts trust remediation first, delivers work-item lifecycle integrity inside
+its trust-root package, then updates the disciplines and offers them as an
+opt-in pack, and only then runs the bounded first non-code milestone.
+
 ## Priorities
 
 | Status | Outcome | Graduation trigger |
@@ -39,6 +47,8 @@ subject to the graduation triggers below. See the
 | Evidence-gated | Graph-bound CI, strict claim footprints, and optional persistence | P33/P35/P41 prerequisites pass; exact merge-candidate evidence and claim concurrency are proven; persistence is added only after measured recomputation cost justifies it |
 | Report-only; parity evidence pending | Agentic UAT strengthening (P72-P77) | Artifact-bound scenarios, exploration, web capture, stateful restart probes, and independent judgment are implemented; the canonical ten-seed harness exists, but real human evidence and an agreed discovery threshold remain required before any enforcement or parity claim |
 | Research proposed; blocked | Evidence-guided handoff pilot | After Assurance Integrity CS-6 and separate approval, 20 accepted matched pairs show candidate-bound handoffs and preservation obligations improve verified completion or regression detection within frozen integrity and cost thresholds |
+| Proposed; after trust remediation TR-4 | Disciplines as an opt-in pack | A trimmed discipline set is installed by `fettle init` only on request, on every supported host, and a test proves that every command and gate a skill names exists; see the [inventory](discipline-inventory-2026-11-14.md) |
+| Proposed; after trust remediation TR-5 | [First non-code milestone: source tables to one XLSX](engagement/TODO.md#m-nc1-first-non-code-milestone-deferred) | A bounded workflow with frozen scope, authority and budget shows, on independently graded held-out tasks, whether advisory verification reduces false-ready outcomes; a null result completes the experiment |
 | Later | Native web, enterprise adapters, advisory framework packs, semantic delta, MCP, and broader LSP | Each surface meets measured demand, latency, precision, and canonical-finding parity |
 
 The authoritative activity sequence, dependencies, estimates, and demand gates

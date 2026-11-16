@@ -1,7 +1,7 @@
 # UX Spec: Evidence-Guided Handoff Pilot
 
-Status: proposed research contract; planning only; implementation and execution
-are blocked by Assurance Integrity CS-6 graduation and separate operator approval
+Status: proposed research contract; planning only; CS-6 prerequisite satisfied;
+implementation and execution require separate operator approval
 
 Related: [implementation and experiment plan](evidence-guided-handoffs-plan.md),
 [portable evidence contract](evidence-artifact-contract.md), and
