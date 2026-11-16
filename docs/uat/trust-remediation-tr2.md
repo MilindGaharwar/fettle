@@ -23,6 +23,11 @@ a malformed root policy instead of being locked out by that malformed file.
 | Load a missing, malformed, or tampered declared remote policy | Installed hook | Pass: outcome blocks with `fettle policy sync` guidance |
 | Change effective policy after session start | Stop hook and Assurance Record | Pass: Stop blocks and policy integrity is non-pass |
 | Resolve trace and gate state from different repositories | Hook checks | Pass: redirected state and repository root remain isolated |
+| Commit, amend, or switch branches after a code edit | Plugin and installed bridge | Pass: Stop compares code-changing commits with session-start `HEAD`; documentation-only commits allow |
+| Send advisory and blocking targets in either order | Plugin and installed bridge | Pass: every target runs, the block wins, and one advisory summary reports its target count |
+| Move a patch target into protected config | Plugin and installed bridge | Pass: the move destination is protected |
+| Send malformed native pre-tool input | Plugin and installed bridge | Pass: Claude and Gemini pre-tool names block; malformed non-pre-tool input remains a traced allow |
+| Attempt to delete redirected session state after a shell edit | Plugin and installed bridge | Pass: the governed delete blocks before execution; state remains and Stop blocks without verification |
 
 ## Automated evidence
 
@@ -49,6 +54,6 @@ not a hidden UAT pass.
 
 ## Decision
 
-FIX_FIRST pending the item-B clock-test repair and rebase. User acceptance
-behavior passes. The diagnostic mutation attempt timed out and is retained as
-non-required evidence under the HL-4 package method.
+PENDING final package gates on the rebased TR-2 candidate. The exercised user
+flows pass. The prior diagnostic mutation attempt timed out and remains retained
+as non-required evidence; a fresh bounded attempt is required before push.

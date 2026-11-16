@@ -7,6 +7,8 @@ scope:
   - tests/test_trust_remediation_tr2.py
   - tests/test_installed_hooks_e2e.py
   - tests/test_installed_artifact_contract.py
+  - tests/test_dispatcher_failure_visibility.py
+  - tests/test_doc_claims.py
   - tests/test_mutation_test.py
   - tests/test_config_protect.py
   - tests/test_config_schema.py
@@ -14,6 +16,10 @@ scope:
   - tests/test_policy_remote.py
   - tests/test_trace.py
   - docs/CONFIG.md
+  - docs/engagement/TODO.md
+  - docs/plan-index.md
+  - docs/trust-remediation-implementation-plan.md
+  - docs/uat/trust-remediation-tr1.md
   - docs/MULTI-AGENT.md
   - docs/behavior-map.md
   - docs/fettle.schema.json
@@ -21,6 +27,7 @@ scope:
   - docs/backlog/trust-remediation-tr2.md
   - docs/completion/trust-remediation-tr2.json
   - docs/completion/evidence/trust-remediation-tr2/
+  - docs/completion/evidence/trust-remediation-tr1/
 spec: trust-remediation-implementation-plan
 ---
 
