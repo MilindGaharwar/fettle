@@ -271,6 +271,44 @@ def test_registered_hook_detects_edit_after_journal_is_deleted(installed_hook_re
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_session_state_directory_deletion(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.config_protect]\nenabled = true\nmode = \"enforce\"\n"
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    session = "tr2-state-delete"
+    pre = _payload("claude_code", "pre_bash", root, command="printf safe")
+    pre["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), pre, root, env).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    delete = _payload("claude_code", "pre_bash", root, command=f"rm -rf {shlex.quote(str(state))}")
+    delete["session_id"] = session
+
+    result = _run(_event_command(mode, "PreToolUse"), delete, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Fettle policy modification blocked" in json.loads(result.stdout)["reason"]
+    assert state.is_dir()
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    stopped = _run(_event_command(mode, "Stop"), stop, root, env)
+    assert stopped.returncode == 2, stopped.stderr
+    assert "no verification run recorded this session" in json.loads(stopped.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 @pytest.mark.parametrize(
     ("change", "blocked"),
     (
