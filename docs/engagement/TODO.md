@@ -126,8 +126,9 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` blocked on a deci
       three commit-bound ~12 h runs were lost to offline-reproducible defects.
       No scope, pass-semantics, or qualification change.
 - [ ] P0-TR. Trust remediation, from the 2026-11-13 full audit
-      (docs/trust-remediation-implementation-plan.md). Next in line after D4
-      closes; nothing in this program starts while D4 runs are in flight.
+      (docs/trust-remediation-implementation-plan.md). Authorized by the owner
+      on 2026-11-14: local implementation may begin before D4 closes; nothing
+      from this program merges before the D4 close-out does.
       Packages run in the order listed under Phase E. Owner decisions recorded
       2026-11-13: hardening first; README claims are made true, not reduced;
       the trust root is provider-neutral; the implementing agent opens each
@@ -174,10 +175,16 @@ Plan: docs/trust-remediation-implementation-plan.md. Starts after D4 closes.
 Order is priority order; each package is one pull request unless the plan says
 otherwise. Finding IDs refer to the plan's register.
 
-- [ ] E0. TR-0 Baseline harness and confirmations — end-to-end tests that run
-      the hook command exactly as `fettle init` registers it, in both launch
-      modes; host failure-mode table; one-time confirmation of M5. No behaviour
-      change.
+- [x] E0. TR-0 Baseline harness and required-check containment — end-to-end
+      tests that run the hook command exactly as `fettle init` registers it,
+      in both launch modes; host failure-mode table; UX acceptance contract
+      (docs/trust-remediation.ux-spec.md); a label event can no longer publish
+      a skipped check under the required `mutation evidence` name (M5,
+      confirmed on pull request #73). No behaviour change in `fettle/`.
+      Harness and host table: local completion evidence recorded 2026-11-14.
+      Required-check containment confirmed on pull request #76 under the
+      reviewer-amended security criterion on 2026-11-16; review and merge remain
+      separate actions.
 - [ ] E1. TR-1 Shipped hook path (P0: E1, E21, T1, E3, E4, E5) — dispatcher
       records edits; one entry point per check; project-root policy
       resolution; tool taxonomy with multi-target events; isolated launch.

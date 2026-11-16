@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "revision": "trust-remediation-tr0-2026-11-14",
+  "scope_digest_version": 2,
+  "scope_digest": "72d2ab151d2802794e3121315172e97b577e88ca07af0f5a39640ce69c31e5c5",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "installed-hook-harness",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "The exact plugin and installed-bridge commands blocked protected edits, destructive commands, secret reads, malformed policy, and missing explicitly configured policy across the supported host payloads.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
+        "sha256": "a27e453913675e98991235dd24e2b2513b68d38d78730ff1e518ff01467068fb",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun the focused installed-hook, translator, and host-parity suites."
+    },
+    {
+      "id": "host-failure-mode-table",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Dated official-source findings record crash, timeout, and working-directory semantics where documented and preserve undetermined OpenCode and Gemini details as unknown.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/host-failure-modes.json",
+        "sha256": "148fd272bcce2b504247c285769920de6bbfd5e4f3cb7f542c0f47efa33cfb12",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Re-read each cited official host reference and preserve undocumented semantics as unknown."
+    },
+    {
+      "id": "m5-finding-confirmed",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Pull request #73 confirmed M5: an ordinary label event published a second exact mutation evidence check with conclusion skipped, which GitHub may satisfy as a required check. Whether a failed check then became mergeable was not tested.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-label-probe.json",
+        "sha256": "b1a7d8a1856ab37d165002f9d753c682e99b6e3d747c5cb5f02960d387c2335c",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Inspect the retained pull request #73 run and exact-check IDs without repeating that historical probe."
+    },
+    {
+      "id": "m5-containment-contract",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Contract tests confirm that no pull-request workflow job has the static mutation evidence name and that the aggregate expression yields the protected name only when the job is meant to run.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
+        "sha256": "dc95249584140ee6a73a625593a44e44e8ec1bdf9bfda1204969688e7730f01a",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun the focused workflow and documentation contract tests."
+    },
+    {
+      "id": "m5-live-containment-probe",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Under the reviewer-amended criterion confirmed by the owner on 2026-11-16, the one-time pull request #76 probe passed: the non-authorising label event created no check named exactly mutation evidence. Skipped aggregate check 133085482390 used the unevaluated expression text, no mutation evidence (label no-op) check appeared, and existing successful exact check 133054277459 remained the only protected context. Pull request #73 had instead created a second exact skipped context.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/m5-containment.json",
+        "sha256": "dc95249584140ee6a73a625593a44e44e8ec1bdf9bfda1204969688e7730f01a",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Inspect retained run 43802404049 and check IDs 133085482390 and 133054277459; compare pull request #73 run 43557646055. Do not repeat the consumed label action."
+    },
+    {
+      "id": "full-regression-and-quality-gates",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Ruff passed, the full suite reported 5127 passed and 23 skipped, and every origin/main pre-commit hook passed under isolated state.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
+        "sha256": "a27e453913675e98991235dd24e2b2513b68d38d78730ff1e518ff01467068fb",
+        "revision": "trust-remediation-tr0-2026-11-14"
+      },
+      "recovery": "Rerun Ruff, the unexcluded full suite, and origin/main pre-commit hooks under isolated XDG state."
+    }
+  ]
+}

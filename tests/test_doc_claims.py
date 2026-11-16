@@ -67,7 +67,11 @@ def test_readme_advisory_claim_matches_pr_workflow():
         "README mutation capability must state automatic PR advisory evidence"
     )
     assert "qualification-ineligible" in mutation_row
-    assert "name: ${{ 'mutation evidence' }}" in containment
+    assert (
+        "name: ${{ (github.event.action != 'labeled' || "
+        "github.event.label.name == 'mutation-full-matrix-authorized') && "
+        "'mutation evidence' || 'mutation evidence (label no-op)' }}"
+    ) in containment
     assert "pull_request:" in containment
     assert '"status":"unknown"' in containment
     assert '"passed":false' in containment

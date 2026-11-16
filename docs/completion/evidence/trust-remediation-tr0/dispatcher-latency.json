@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "observed_at": "2026-11-16",
+  "source": {
+    "workflow_run_id": 43792127785,
+    "job_id": 133052721811,
+    "job_name": "test (macos-latest, py3.12, semgrep 1.168.0)",
+    "head_sha": "e17d5ab553f5cb1f04b5fbd7e2dc08670d39eb52"
+  },
+  "failing_case": "tests/test_installed_hooks_e2e.py::test_registered_hook_commands_block_baseline_cases[pre_edit-tool_input0-Config modification blocked-codex-plugin]",
+  "expected_reason": "Config modification blocked",
+  "observed_reason": "Required check 'config_protect' could not run before the deadline. Run `fettle doctor` and retry.",
+  "result": "The hook exited with a block decision, so it failed closed, but the required check did not run and its specific enforcement reason was replaced by a generic deadline reason.",
+  "default_budget_ms": 250,
+  "definition": "fettle/dispatcher.py:81-85 (DEFAULT_EVENT_BUDGETS_MS['PreToolUse']); selected by fettle/dispatcher.py:88-96",
+  "suite_result": "1 failed, 5159 passed, 23 skipped in 760.04s",
+  "finding": "E24",
+  "package": "TR-9",
+  "priority": "owner to decide"
+}

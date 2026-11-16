@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr0",
+  "observed_at": "2026-11-14",
+  "policy_document_constraint": {
+    "path": "fettle/host-capabilities.json",
+    "status": "not_modified",
+    "reason": "The installed policy schema and loader reject fields beyond claim, candidate_contract, public_canary, live_evidence, and live_evidence_max_age_days. TR-0 permits no behavior change and does not own those runtime files, so the findings are retained here instead of changing policy interpretation."
+  },
+  "hosts": {
+    "claude-code": {
+      "source": "https://code.claude.com/docs/en/hooks.md",
+      "source_last_checked": "2026-11-14",
+      "working_directory": "Handlers run in Claude Code's current directory; if it no longer exists, documented fallback directories are tried.",
+      "timeout": "Command hooks default to 600 seconds; configured timeout is in seconds.",
+      "crash_or_nonzero": "Exit 2 blocks. Other failures continue unless onFailure is block.",
+      "powershell_input": {
+        "tool_name": "PowerShell",
+        "tool_input_field": "command"
+      },
+      "notebook_edit_input": {
+        "tool_name": "NotebookEdit",
+        "tool_input_fields": [
+          "notebook_path",
+          "new_source"
+        ]
+      }
+    },
+    "codex-cli": {
+      "source": "https://learn.chatgpt.com/docs/hooks.md",
+      "source_last_checked": "2026-11-14",
+      "working_directory": "Commands run with the session cwd.",
+      "timeout": "Most command hooks default to 600 seconds; configured timeout is in seconds.",
+      "crash_or_nonzero": "The documentation reports errors and timeouts as hook failures. PreToolUse error, timeout, or malformed output can let the tool run; explicit exit 2 or a documented denial blocks supported tool calls."
+    },
+    "gemini-cli": {
+      "source": "https://geminicli.com/docs/hooks/ and https://geminicli.com/docs/hooks/reference/",
+      "source_last_checked": "2026-11-14",
+      "working_directory": "Input includes cwd and the sanitized environment includes GEMINI_CWD; command process cwd semantics were not explicitly determined.",
+      "timeout": "Default 60000 milliseconds; configured timeout is in milliseconds.",
+      "crash_or_nonzero": "Exit 2 is a system block. Other nonzero exits are warnings and the interaction proceeds. Timeout-specific continuation behavior was not explicitly determined."
+    },
+    "opencode": {
+      "source": "https://opencode.ai/docs/build/plugins/migrate-v1/ and https://opencode.ai/docs/build/plugins/server/",
+      "source_last_checked": "2026-11-14",
+      "working_directory": "Plugin context exposes ctx.location.directory, but it is not the location of every observed session or event; per-event process cwd semantics were not determined.",
+      "timeout": "Unknown. The official plugin hook documentation reviewed does not specify a hook timeout contract.",
+      "crash_or_nonzero": "The official migration example throws from execute.before to reject a protected read. General crash handling and timeout behavior were not determined."
+    }
+  }
+}
