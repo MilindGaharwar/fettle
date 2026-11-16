@@ -4,8 +4,8 @@
   "revision": "trust-remediation-tr0-2026-11-14",
   "commands": [
     {
-      "command": "python -m pytest -q tests/test_installed_hooks_e2e.py tests/test_agents.py tests/test_host_event_parity.py",
-      "result": "111 passed in 10.34s",
+      "command": "python -m pytest -q tests/test_installed_hooks_e2e.py tests/test_agents.py tests/test_host_event_parity.py tests/test_doc_claims.py::test_readme_advisory_claim_matches_pr_workflow tests/test_ci.py::test_pr_advisory_publishes_the_protected_check_context tests/test_ci.py::test_pr_advisory_check_name_separates_authorized_runs_from_label_noops tests/test_ci.py::test_mutation_workflows_have_one_check_producer_per_event_route",
+      "result": "117 passed in 11.28s",
       "exit_code": 0
     },
     {
@@ -15,11 +15,11 @@
     },
     {
       "command": "python -m pytest -q",
-      "result": "5127 passed, 23 skipped in 620.13s",
+      "result": "5163 passed, 20 skipped in 623.02s",
       "exit_code": 0
     },
     {
-      "command": "PRE_COMMIT_ALLOW_NO_CONFIG=1 pre-commit run --config <origin-main-config> --all-files",
+      "command": "PRE_COMMIT_ALLOW_NO_CONFIG=1 pre-commit run --from-ref origin/main --to-ref HEAD",
       "result": "All six origin/main hooks passed",
       "exit_code": 0
     }

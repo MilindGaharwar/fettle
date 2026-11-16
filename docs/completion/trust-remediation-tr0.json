@@ -15,7 +15,7 @@
       "observed": "The exact plugin and installed-bridge commands blocked protected edits, destructive commands, secret reads, malformed policy, and missing explicitly configured policy across the supported host payloads.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
-        "sha256": "ed75deede504c8e6c8065c21417b35d7a8faf1655049f3c19840ec0af131c3c8",
+        "sha256": "a27e453913675e98991235dd24e2b2513b68d38d78730ff1e518ff01467068fb",
         "revision": "trust-remediation-tr0-2026-11-14"
       },
       "recovery": "Rerun the focused installed-hook, translator, and host-parity suites."
@@ -80,7 +80,7 @@
       "observed": "Ruff passed, the full suite reported 5127 passed and 23 skipped, and every origin/main pre-commit hook passed under isolated state.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr0/verification.json",
-        "sha256": "ed75deede504c8e6c8065c21417b35d7a8faf1655049f3c19840ec0af131c3c8",
+        "sha256": "a27e453913675e98991235dd24e2b2513b68d38d78730ff1e518ff01467068fb",
         "revision": "trust-remediation-tr0-2026-11-14"
       },
       "recovery": "Rerun Ruff, the unexcluded full suite, and origin/main pre-commit hooks under isolated XDG state."
