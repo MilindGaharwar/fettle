@@ -8,7 +8,8 @@ per verified change
 
 **Best score:** not measured
 
-**Status:** planning complete; execution blocked by CS-6 and separate approval
+**Status:** planning complete; CS-6 prerequisite satisfied; execution requires
+separate approval
 
 ---
 
@@ -20,7 +21,7 @@ per verified change
     evidence remains non-pass.
   - Constraint: The HoH paper motivates but does not establish local causality;
     the pilot requires matched real changes and retained evidence.
-  - **1** [SELECTED, BLOCKED]: Validate candidate-bound handoffs and preservation
+  - **1** [SELECTED, AWAITING AUTHORIZATION]: Validate candidate-bound handoffs and preservation
     obligations using existing canonical evidence.
     - Hypothesis: Explicit candidate, objective, acceptance, and preservation
       bindings will reduce regression escapes or improve verified completion

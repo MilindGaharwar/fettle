@@ -37,9 +37,9 @@ existing host creates plan -> Fettle validates planning handoff
 
 ## Assumptions
 
-1. Assurance Integrity CS-6 remains the only authorized feature program until it
-   graduates; this pilot cannot begin before 20 accepted real assessments and
-   explicit operator approval.
+1. Assurance Integrity CS-6 graduated on 2026-09-08 after 20 accepted real
+   assessments. This prerequisite is satisfied, but the pilot still requires
+   separate explicit operator approval.
 2. The canonical evidence kernel remains the sole content and occurrence identity
    vocabulary; the pilot may reference it but cannot define a competing envelope.
 3. Existing agent hosts own invocation, context construction, retries, and model
@@ -158,7 +158,7 @@ cost evidence yields `INCONCLUSIVE`, not adoption.
 
 ## Work Packages
 
-All packages below require separate authorization after CS-6. Completing this
+All packages below require separate authorization. Completing this
 plan does not authorize any package.
 
 ### WP-EH-0: Freeze Contract And Corpus
@@ -358,8 +358,8 @@ best-effort and stale.
 
 ## Authorization And Stop Conditions
 
-- Stop before WP-EH-0 implementation while CS-6 is incomplete or separate operator
-  authorization is absent.
+- Stop before WP-EH-0 implementation while separate operator authorization is
+  absent.
 - Stop the pilot on any candidate-binding false accept, evidence leakage,
   authority change while disabled, or inability to reconstruct a matched pair.
 - Keep all behavior advisory until WP-EH-5 records an explicit human decision.

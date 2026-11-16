@@ -1,6 +1,7 @@
 # Change Integrity Hypergraph Implementation Plan
 
-Status: APPROVED; P44 complete, P45-P51 remain gated by package acceptance
+Status: APPROVED; P44-P47 complete; P48 advisory implementation did not pass
+broader promotion; P49-P51 remain gated by package acceptance and dependencies
 
 Related documents:
 
@@ -88,11 +89,11 @@ only after their independent graduation evidence exists.
 | ID | Activity | Depends on | Estimate | State |
 |---|---|---|---:|---|
 | P44 | Define graph, provider, traversal, snapshot, and fixture contracts | P33 design contract | 3-5 days | Complete |
-| P45 | Build graph-independent committed and working source snapshots | P44 | 5-8 days | Proposed |
-| P46 | Assemble deterministic ephemeral graphs from native providers | P38, P44, P45 | 7-12 days | Proposed |
-| P47 | Add advisory graph status, build, impact, and obligation output | P46 | 5-8 days | Proposed |
-| P48 | Shadow semantic, topology, and verification consumers | P47 | 7-12 days | Proposed |
-| P49 | Bind CI obligations and attestations to immutable candidates | P33, P35, P41, P48 | 7-12 days | Proposed |
+| P45 | Build graph-independent committed and working source snapshots | P44 | 5-8 days | Complete |
+| P46 | Assemble deterministic ephemeral graphs from native providers | P38, P44, P45 | 7-12 days | Complete |
+| P47 | Add advisory graph status, build, impact, and obligation output | P46 | 5-8 days | Complete |
+| P48 | Shadow semantic, topology, and verification consumers | P47 | 7-12 days | Advisory implementation complete; broader promotion falsified |
+| P49 | Bind CI obligations and attestations to immutable candidates | P33, P35, P41 successor, P48 | 7-12 days | Deferred on P48 redesign/graduation and separate authorization; ledger dependency satisfied |
 | P50 | Add graph-expanded strict claim and integration checks | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add ephemeral-cache persistence | P46-P50 profiling | 5-10 days | Evidence-gated |
 
@@ -631,18 +632,20 @@ The program is complete only when:
 - Phase 1 plan: complete in this document.
 - Phase 3.5 UAT: adversarial BDD scenarios are defined in the UX specification;
   executable automation is required in each authorized package.
-- Implementation authorization: granted for P44; not granted for P45-P51.
+- Implementation history: P44-P47 are complete; P48 remains advisory after its
+  broader promotion failed; no P49-P51 implementation is authorized.
 
 ### Staged authorization decision (2026-08-23)
 
 Program direction approved with per-package authorization retained:
 
-- **P45 authorized** to start (sole dependency P44 is complete).
-- **P38 promoted** to next-up enabling work: its completion (deps P33, P35
-  both complete) unlocks P46 here and state-consistency P60 in the evolution
-  plan. P46 may start only after P38 closes.
-- **P46-P48, P50** approved in principle; each still requires its own package
-  proposal review plus current impact analysis at start time.
-- **P49 deferred**: requires P41 or an approved successor before durable
-  graph-bound attestations may be relied upon, and P48 must graduate first.
+- **P45-P47 complete**; their shipped contracts remain authoritative only within
+  their documented advisory boundaries.
+- **P38 complete** and no longer blocks graph or state-consistency work.
+- **P48 advisory implementation complete; broader promotion falsified**. Any
+  replacement experiment requires a new hypothesis and pre-frozen corpus.
+- **P50** remains proposed and depends on an authorized P49.
+- **P49 deferred**: `evidence_ledger.py` satisfies the durable commit-linked
+  substrate dependency. P48's broader promotion failed, so P49 requires a newly
+  approved consumer path or P48 graduation plus separate package authorization.
 - **P51** remains evidence-gated by construction; a no-go close is acceptable.

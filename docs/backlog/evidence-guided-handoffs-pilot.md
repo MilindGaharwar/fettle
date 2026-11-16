@@ -16,8 +16,9 @@ spec: evidence-guided-handoffs
 
 ## State
 
-Planning only. Runtime implementation and pilot execution are blocked until
-Assurance Integrity CS-6 graduates and the operator separately authorizes WP-EH-0.
+Planning only. Assurance Integrity CS-6 graduated on 2026-09-08. Runtime
+implementation and pilot execution remain blocked until the operator separately
+authorizes WP-EH-0.
 
 ## Acceptance Criteria
 

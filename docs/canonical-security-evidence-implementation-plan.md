@@ -1,6 +1,6 @@
 # Canonical Security Evidence Implementation Plan
 
-Status: CS-0-CS-5 authorized and implemented; CS-6 remains evidence- and approval-gated
+Status: CS-0-CS-6 complete; enforcement and v1.13.1 release authorized 2026-09-08
 
 UX contract: [canonical-security-evidence.ux-spec.md](canonical-security-evidence.ux-spec.md)
 

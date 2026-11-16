@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: p46-ephemeral-hypergraph
-status: open
+status: done
 scope:
   - fettle/hypergraph.py
   - fettle/graph_builder.py
