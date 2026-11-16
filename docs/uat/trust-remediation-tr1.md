@@ -2,6 +2,28 @@
 
 Date: 2026-11-14
 
+## Review correction — 2026-11-17
+
+Review of PR #80 found T-1 through T-5, fixed on the TR-2 pull-request branch:
+committed and branch-switched code is compared with session-start `HEAD`;
+multi-target checks evaluate every target and retain the most severe result;
+required-check keys match the enforcing configuration actually read; patch move
+destinations are protected; and malformed native pre-tool input is recognized
+across supported host vocabularies.
+
+For E11, the report previously covered required checks whose registry wiring
+was already correct and direct blocks from integrity checks. It did not cover
+exceptions in all five reviewed checks under each check's real configuration.
+The correction covers enforce/advisory exception routing for
+`boundary_rules`, `worklog`, and `post_bash_doc_check`, and records that
+`runtime_output_guard` and `provenance_gate` have no enforcing mode.
+
+For E6, the report previously covered truncated Claude `PreToolUse`, malformed
+journal lines, and deleted or emptied journal files. It did not cover non-object
+JSON naming `PreToolUse` or truncated Gemini `BeforeTool`. Those cases now block
+in both launch modes; malformed input naming no pre-tool event remains a traced
+allow.
+
 ## User flow
 
 A supported coding agent invokes the hook command installed by Fettle. The
