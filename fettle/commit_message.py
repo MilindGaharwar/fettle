@@ -7,13 +7,11 @@ commit format before the commit runs.
 Fail-open on all errors. Never crashes the session.
 """
 
-import json
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (clone mode)
-from fettle.config import load_config  # noqa: E402
 
 DEFAULT_TYPES = [
     "feat", "fix", "docs", "style", "refactor", "perf",
@@ -80,59 +78,9 @@ def _validate_message(msg: str, valid_types: list[str], max_subject: int) -> lis
 
 
 def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, EOFError):
-        sys.exit(0)
+    from fettle.hook_cli import run_main
 
-    tool_input = data.get("tool_input", {})
-    command = tool_input.get("command", "")
-    if not command:
-        sys.exit(0)
-
-    if not _is_commit_command(command):
-        sys.exit(0)
-
-    cwd = data.get("cwd", ".")
-    cfg = load_config(cwd)
-
-    gate_cfg = cfg.get("gates", {}).get("commit_message", {})
-    if not gate_cfg.get("enabled", True):
-        sys.exit(0)
-
-    mode = gate_cfg.get("mode", "advisory")
-    valid_types = gate_cfg.get("types", DEFAULT_TYPES)
-    max_subject = gate_cfg.get("max_subject_length", 72)
-
-    msg = _extract_message(command)
-    if not msg:
-        sys.exit(0)
-
-    issues = _validate_message(msg, valid_types, max_subject)
-    if not issues:
-        sys.exit(0)
-
-    feedback = "Commit message issues:\n" + "\n".join(f"- {i}" for i in issues)
-
-    if mode == "enforce":
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "additionalContext": feedback,
-            }
-        }
-        print(json.dumps(output))
-        sys.exit(2)
-
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": feedback,
-        }
-    }
-    print(json.dumps(output))
-    sys.exit(0)
+    run_main(run_check)
 
 
 def run_check(ctx):

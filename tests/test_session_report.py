@@ -65,6 +65,19 @@ def test_report_joins_edits_plan_and_stamps(tmp_path, monkeypatch):
     assert report["ci"]["ok"] is False
 
 
+def test_report_preserves_malformed_edit_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("FETTLE_STATE_DIR", str(tmp_path / "state"))
+    from fettle.config import state_dir
+
+    edits = state_dir("s-malformed") / "edits.jsonl"
+    edits.write_text('{"file":"a.py"}\nnot-json\n', encoding="utf-8")
+
+    report = compute_report(str(tmp_path), "s-malformed")
+
+    assert report["files_edited"] == []
+    assert report["edit_journal_status"] == "malformed"
+
+
 def test_write_and_load_reports_sanitized(tmp_path, monkeypatch):
     monkeypatch.setenv("FETTLE_STATE_DIR", str(tmp_path / "state"))
     path = write_report(str(tmp_path), "weird/../id")

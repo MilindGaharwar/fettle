@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "scope_digest_version": 2,
+  "scope_digest": "6ffa5f0c294a7777dd4705fafcfcab36699e7ad8ff3156f6b164ea29cf748337",
+  "status": "complete",
+  "uat_decision": "SHIP",
+  "criteria": [
+    {
+      "id": "installed-hook-path",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Both installed launch modes use the dispatcher, resolve repository policy, normalize edit aliases, fan out multiple targets, and block protected actions with recovery guidance.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr1/verification.json",
+        "sha256": "c6dc2fafae4acd52444cc6694de5ba9d1a798c37851de5c63caeeb57026d14b6",
+        "revision": "trust-remediation-tr1-2026-11-14"
+      },
+      "recovery": "Rerun the installed-path UAT suite in plugin and installed-bridge modes."
+    },
+    {
+      "id": "malformed-and-missing-evidence",
+      "kind": "error_path",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Malformed PreToolUse input, malformed edit journals, deleted journals after edits, and missing interpreters remain visible non-pass outcomes.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr1/error-paths.json",
+        "sha256": "5077b4886b3526f8f7e455850c8529c1373afa9ac23f4570828b34b4a053bff2",
+        "revision": "trust-remediation-tr1-2026-11-14"
+      },
+      "recovery": "Rerun malformed-input, journal deletion/malformation, and missing-interpreter scenarios."
+    },
+    {
+      "id": "canonical-check-entry-points",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Eleven check scripts expose thin public main wrappers over run_check; lsp_server.main remains the long-running server entry point and dispatcher-owned journaling has one producer.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr1/entry-points.json",
+        "sha256": "e6ba74391c5c40b6d9d09eb97d9354646887b8a4f617f33559c6c83f5115c7da",
+        "revision": "trust-remediation-tr1-2026-11-14"
+      },
+      "recovery": "Rerun entry-point structure, legacy compatibility, and dispatcher reader suites."
+    },
+    {
+      "id": "full-regression-and-quality",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Ruff passed; the full suite reported 5157 passed and 23 skipped; range pre-commit passed; and the full Fettle scan exited 0 with only three pre-existing legacy protocol-print warnings.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr1/quality.json",
+        "sha256": "faa324f750ce98c09a8babe9fd4159791388ca9761c89348867e27e30e43a753",
+        "revision": "trust-remediation-tr1-2026-11-14"
+      },
+      "recovery": "Rerun Ruff, the unexcluded full suite, range pre-commit, and fettle check --all under isolated XDG state."
+    },
+    {
+      "id": "bounded-narrow-mutation-replay",
+      "kind": "success",
+      "required": true,
+      "verdict": "confirmed",
+      "observed": "Preflight and replay completed for all three new modules in 3023.712 seconds. Outcomes were 114 killed and 144 survived, with zero timeout, suspicious, untested, or skipped; survivors remain explicit test-strength debt and are not called a mutation pass.",
+      "evidence": {
+        "path": "docs/completion/evidence/trust-remediation-tr1/mutation-summary.json",
+        "sha256": "4bfe8eebd82276d3f45b7fa1195463584348aa2da843028234488e6b6d63c97b",
+        "revision": "trust-remediation-tr1-2026-11-14"
+      },
+      "recovery": "Review retained survivors by canonical fingerprint and strengthen targeted tests without exclusions, skips, threshold changes, or mutation pragmas."
+    }
+  ]
+}

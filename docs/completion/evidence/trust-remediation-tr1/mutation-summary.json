@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "source_revision": "010742c470356400bf2d386891fde69d05f98917",
+  "budget_seconds": 3600,
+  "duration_seconds": 3023.712,
+  "engine": {
+    "mutmut": "2.5.1",
+    "whatthepatch": "1.0.7"
+  },
+  "initial_preflight": {
+    "status": "tool_error",
+    "reason": "Pinned optional whatthepatch dependency was absent; no mutants executed and no credit assigned."
+  },
+  "verdict": "completed_with_survivors",
+  "totals": {
+    "generated": 258,
+    "killed": 114,
+    "survived": 144,
+    "timeout": 0,
+    "suspicious": 0,
+    "untested": 0,
+    "skipped": 0
+  },
+  "modules": [
+    {
+      "file": "fettle/agents/tools.py",
+      "preflight": "completed",
+      "generated": 60,
+      "replay": "completed",
+      "killed": 27,
+      "survived": 33
+    },
+    {
+      "file": "fettle/edit_journal.py",
+      "preflight": "completed",
+      "generated": 134,
+      "replay": "completed",
+      "killed": 55,
+      "survived": 79
+    },
+    {
+      "file": "fettle/hook_cli.py",
+      "preflight": "completed",
+      "generated": 64,
+      "replay": "completed",
+      "killed": 32,
+      "survived": 32
+    }
+  ],
+  "interpretation": "The required narrow replay completed within budget. Survivors are retained and reported; this evidence is not a mutation pass."
+}

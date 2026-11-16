@@ -44,7 +44,7 @@ fi
 
 if ! _ok "$PYTHON"; then
     echo "fettle: no Python >= 3.11 found (tried FETTLE_PYTHON, python3, python3.11-3.13, uv). Set FETTLE_PYTHON." >&2
-    exit 0  # hooks must not hard-fail the session over environment issues
+    exit 1
 fi
 
 # Tool availability (ruff/semgrep) is reported by `fettle doctor` and the
@@ -52,4 +52,4 @@ fi
 # never trigger network installs — that was a per-invocation, unpinned
 # `uv tool install` before v1.0.1 (audit D6).
 
-exec "$PYTHON" "$SCRIPT_DIR/$TARGET" "$@"
+exec "$PYTHON" -P "$SCRIPT_DIR/$TARGET" "$@"

@@ -17,30 +17,19 @@ re-verify against a live Codex install when available.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from fettle.agents import claude_code
 from fettle.dispatcher_types import HookInput
 
-#: Codex-native tool ids -> canonical tool vocabulary (defensive; Codex's
-#: own hook fixtures use Claude-style names like "Bash" already).
-_TOOL_MAP = {
-    "shell": "Bash",
-    "local_shell": "Bash",
-    "apply_patch": "Edit",
-}
-
-_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
-
 
 def _normalize_tool_input(tool_name: str | None, tool_input: object) -> dict[str, Any]:
     normalized = dict(tool_input) if isinstance(tool_input, dict) else {}
-    if tool_name != "apply_patch" or not isinstance(normalized.get("command"), str):
-        return normalized
-    paths = set(_PATCH_FILE_RE.findall(normalized["command"]))
-    if len(paths) == 1:
-        normalized["file_path"] = paths.pop()
+    if tool_name == "apply_patch":
+        from fettle.agents.tools import targets
+        patch_targets = targets(normalized)
+        if len(patch_targets) == 1:
+            normalized["file_path"] = str(patch_targets[0])
     return normalized
 
 
@@ -57,7 +46,7 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
     if isinstance(tool_name, str):
         payload = {
             **payload,
-            "tool_name": _TOOL_MAP.get(tool_name, tool_name),
+            "tool_name": tool_name,
             "tool_input": _normalize_tool_input(tool_name, payload.get("tool_input")),
         }
     return claude_code.translate(payload, fallback_cwd)

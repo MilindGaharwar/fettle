@@ -211,10 +211,12 @@ fettle mutation status --report mutation-report.json --json
   without treating project-test outcomes as calibration evidence. Rejected
   details or fingerprint collisions fail closed.
 - **Changed runs** select source from an explicit merge base and are the normal
-  advisory feedback path.
-- **Full runs** are scheduled/manual held-out verification. They support
-  manifest-bound sharding and resumable fingerprint-keyed checkpoints, but an
-  incomplete ledger cannot produce a score.
+  advisory feedback path. Workflow callers may additionally apply
+  `advisory_exclude` to omit path prefixes from PR-only scope preparation.
+- **Full runs** are deliberate held-out verification. They support manifest-bound
+  sharding and resumable fingerprint-keyed checkpoints, but an incomplete ledger
+  cannot produce a score. This repository's weekly schedule prepares and
+  preflights full scope; it does not execute the mutation matrix.
 - **Baseline comparison** records survivor fingerprints from two independent,
   reproducible full reports on one revision. `new` and `existing` dispositions
   apply only to survivors; timeout, suspicious, skipped, and untested remain
@@ -228,8 +230,11 @@ automatically prepares and executes the mutation-relevant changed scope, retains
 attempt-scoped shard artifacts, and aggregates through `fettle/mutation_test.py`
 with `aggregation_mode: "advisory"` and `qualification_eligible: false`. A
 validated zero scope dispatches no shards and publishes `not_applicable`
-evidence. These workflow semantics do not change the local CLI contract above
-and do not establish full-corpus qualification.
+evidence. Its configured `advisory_exclude` omits `fettle/mutation_test.py` and
+`fettle/staged_preflight.py` from PR preparation and names them in retained
+evidence. Full-corpus preparation ignores this key. These workflow semantics do
+not change the local CLI contract above and do not establish full-corpus
+qualification.
 
 ```toml
 [mutation]
@@ -238,6 +243,7 @@ mode = "advisory"              # promote only after measured reviewer feedback
 engine = "mutmut"
 paths = ["src/"]
 exclude = ["tests/", "migrations/"]
+advisory_exclude = []            # PR advisory preparation only; path prefixes
 base = "origin/main"
 score_target = 80.0            # aspiration/policy target, not baseline history
 minimum_scored_mutants = 10

@@ -30,31 +30,25 @@ def _read_json(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _edited_files(session_id: str | None) -> list[str]:
+def _edit_evidence(session_id: str | None) -> tuple[list[str], str]:
     if not session_id:
-        return []
-    from fettle.config import state_dir
-    edits_path = state_dir(session_id) / "edits.jsonl"
-    if not edits_path.is_file():
-        return []
+        return [], "missing"
+    from fettle.edit_journal import entries
+    journal = entries(session_id)
+    if journal.malformed_lines:
+        return [], "malformed"
     files: list[str] = []
     seen: set[str] = set()
-    try:
-        for line in edits_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            f = entry.get("file") or entry.get("path") or ""
-            if f and f not in seen:
-                seen.add(f)
-                files.append(f)
-    except OSError:
-        return []
-    return files
+    for entry in journal.entries:
+        f = entry.get("file") or entry.get("path") or ""
+        if f and f not in seen:
+            seen.add(f)
+            files.append(f)
+    return files, "available" if journal.entries else "missing"
+
+
+def _edited_files(session_id: str | None) -> list[str]:
+    return _edit_evidence(session_id)[0]
 
 
 def _held_claims(cwd: str, session_id: str | None) -> list[str]:
@@ -77,7 +71,7 @@ def compute_report(cwd: str, session_id: str | None) -> dict:
     plan = active_plan(root, max_age_hours=24.0)
     verify = _read_json(root / ".fettle" / "verify.json")
     ci = _read_json(root / ".fettle" / "ci-status.json")
-    files = _edited_files(session_id)
+    files, edit_evidence = _edit_evidence(session_id)
     return {
         "schema": 1,
         "session_id": session_id or "",
@@ -86,6 +80,7 @@ def compute_report(cwd: str, session_id: str | None) -> dict:
         "repo": root.name,
         "files_edited": files[:_MAX_FILES],
         "files_edited_count": len(files),
+        "edit_journal_status": edit_evidence,
         "claims_held": _held_claims(cwd, session_id),
         "plan": ({"title": plan["title"], "done": plan["done"],
                   "total": plan["total"]} if plan else None),

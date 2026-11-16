@@ -96,6 +96,7 @@ class TestValidate:
         assert mutation["max_mutant_timeouts"] is None
         assert mutation["max_suspicious_mutants"] is None
         assert mutation["full_shards"] == 1
+        assert mutation["advisory_exclude"] == []
 
     @pytest.mark.parametrize("path", [
         ("gates", "coverage"),

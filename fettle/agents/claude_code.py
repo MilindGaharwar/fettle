@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fettle.dispatcher_types import HookInput
+from fettle.agents.tools import canonical_tool, targets
 
 #: Events the dispatcher routes. Anything else still normalizes (fail-open).
 KNOWN_EVENTS = frozenset({"PreToolUse", "PostToolUse", "Stop", "SubagentStart"})
@@ -42,9 +43,11 @@ def translate(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
 
     return HookInput(
         hook_event_name=str(payload.get("hook_event_name") or ""),
-        tool_name=tool_name,
+        tool_name=canonical_tool(tool_name),
         tool_input=tool_input,
         cwd=Path(cwd_raw),
         session_id=session_id,
         raw=payload,
+        invocation_cwd=Path(cwd_raw),
+        targets=targets(tool_input),
     )

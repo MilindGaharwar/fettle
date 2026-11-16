@@ -31,18 +31,14 @@ RECOVERY_COMMAND = "pytest --cov --cov-report=json"
 def _get_edited_py_files(edits_path: Path) -> dict[str, set[int]]:
     """Load edited .py files from edits.jsonl. Lines determined via git diff."""
     files: dict[str, str] = {}
-    try:
-        with open(edits_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                entry = json.loads(line)
-                fpath = str(entry.get("file", ""))
-                if fpath.endswith(".py") and os.path.isfile(fpath):
-                    files[fpath] = fpath
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    from fettle.edit_journal import read
+    journal = read(edits_path)
+    if journal.malformed_lines:
         return {}
+    for entry in journal.entries:
+        fpath = str(entry.get("file", ""))
+        if fpath.endswith(".py") and os.path.isfile(fpath):
+            files[fpath] = fpath
 
     result: dict[str, set[int]] = {}
     for fpath in files:
@@ -346,10 +342,16 @@ def run_check(ctx):
 
     # Staleness guard
     max_staleness = float(cfg.get("max_staleness_seconds", 0))
-    from fettle.config import state_dir
+    from fettle.edit_journal import entries, path
     session_id = ctx.session_id or "unknown"
-    edits_path = state_dir(session_id) / "edits.jsonl"
-    if not edits_path.is_file():
+    edits_path = path(session_id)
+    journal = entries(session_id)
+    if journal.malformed_lines:
+        return CheckResult.unknown(
+            "Coverage edit evidence is malformed; coverage cannot be established.",
+            action="Repair the session edit journal and rerun tests.",
+        )
+    if not journal.entries:
         return CheckResult.allow()
 
     try:

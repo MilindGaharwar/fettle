@@ -4,6 +4,7 @@
     "PreToolUse": [
       {
         "matcher": "*",
+        "onFailure": "block",
         "hooks": [
           {
             "type": "command",
@@ -15,7 +16,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Bash|Read",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

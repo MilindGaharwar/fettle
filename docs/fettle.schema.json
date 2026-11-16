@@ -1280,6 +1280,9 @@
             "migrations/"
           ]
         },
+        "advisory_exclude": {
+          "type": "array"
+        },
         "base": {
           "type": "string",
           "default": "origin/main"

@@ -92,8 +92,9 @@ def _is_implementation_file(path: str, cwd: str = "") -> bool:
     if classify_file(path) != "implementation":
         return False
     if cwd and os.path.isabs(path):
-        root = os.path.abspath(cwd)
-        if not os.path.abspath(path).startswith(root + os.sep):
+        root = os.path.realpath(cwd)
+        candidate = os.path.realpath(path)
+        if candidate != root and not candidate.startswith(root + os.sep):
             return False
     elif any(path.startswith(p) for p in EXEMPT_PATH_PREFIXES):
         return False
@@ -387,17 +388,9 @@ def _save_tracking(files: list[str]):
 def _load_edit_tracking() -> list[dict]:
     """Load per-file edit tracking JSONL (for test gate)."""
     _ensure_state()
-    entries = []
-    try:
-        if os.path.isfile(EDIT_TRACKING_FILE):
-            with open(EDIT_TRACKING_FILE) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        entries.append(json.loads(line))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    return entries
+    from fettle.edit_journal import read
+
+    return list(read(Path(EDIT_TRACKING_FILE)).entries)
 
 
 def _save_edit_tracking(entries: list[dict]):
@@ -457,7 +450,7 @@ def _bootstrap_already_warned(cwd: str) -> bool:
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 
-def main():
+def _script_main():
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError, EOFError):
@@ -564,6 +557,18 @@ def run_check(ctx):
     """
     from fettle.dispatcher_types import CheckResult
 
+    from fettle.edit_journal import entries
+
+    journal = entries(ctx.session_id)
+    if journal.malformed_lines and (
+        ctx.event == "Stop"
+        or ctx.tool_name == "Bash"
+    ):
+        return CheckResult.unknown(
+            "Test freshness evidence is malformed.",
+            action="Repair the session edit journal and rerun tests.",
+        )
+
     script_path = os.path.abspath(__file__)
     # Canonical payload: the raw agent payload may use any host's field
     # vocabulary — overwrite the fields this gate consumes with the
@@ -581,12 +586,14 @@ def run_check(ctx):
         payload["session_id"] = ctx.input.session_id
 
     try:
+        env = {**os.environ, "FETTLE_CHECK_SUBPROCESS": "1"}
         proc = subprocess.run(
             [sys.executable, script_path],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         # Silent allow() here disabled the Stage-0 failure-visibility trace
@@ -603,6 +610,8 @@ def run_check(ctx):
 
     if not proc.stdout.strip():
         if proc.returncode == 0:
+            if proc.stderr.strip():
+                return CheckResult.advisory(proc.stderr.strip())
             return CheckResult.allow()
         return CheckResult.tool_error(
             f"quality gate subprocess crashed (exit {proc.returncode}): "
@@ -636,8 +645,14 @@ def run_check(ctx):
     return CheckResult.allow()
 
 
+def main() -> None:
+    from fettle.hook_cli import run_main
+
+    run_main(run_check, advisory_to_stderr=True)
+
+
 if __name__ == "__main__":
     try:
-        main()
+        _script_main() if os.environ.get("FETTLE_CHECK_SUBPROCESS") == "1" else main()
     except (json.JSONDecodeError, OSError, ValueError):
         sys.exit(0)

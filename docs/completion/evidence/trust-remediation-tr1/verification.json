@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "implementation_revision": "010742c470356400bf2d386891fde69d05f98917",
+  "red": {
+    "source_revision": "3179e2ed142dcc1fb1fe465d7a3b45a84a6e13fd",
+    "installed_path_result": "13 failed, 40 passed",
+    "structural_result": "collection failed because find_project_root was absent",
+    "exit_code": 1
+  },
+  "commands": [
+    {
+      "command": "python -m pytest -q tests/test_installed_hooks_e2e.py tests/test_agents.py tests/test_host_event_parity.py tests/test_trust_remediation_tr1.py tests/test_bootstrap_gate.py",
+      "result": "145 passed in 24.93s",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m pytest -q",
+      "result": "5157 passed, 23 skipped in 592.60s",
+      "exit_code": 0
+    },
+    {
+      "command": "ruff check .",
+      "result": "All checks passed",
+      "exit_code": 0
+    },
+    {
+      "command": "pre-commit run --from-ref 3179e2e --to-ref HEAD",
+      "result": "All applicable hooks passed",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m fettle.cli check --all",
+      "result": "Exit 0; three pre-existing legacy protocol-print warnings",
+      "exit_code": 0
+    }
+  ],
+  "environment": {
+    "xdg_state_home": "isolated temporary directory",
+    "python": "project virtual environment",
+    "launch_modes": ["plugin", "installed bridge"]
+  },
+  "uat": {
+    "decision": "SHIP",
+    "report": "docs/uat/trust-remediation-tr1.md",
+    "axe": "not applicable: CLI and agent-hook surfaces have no browser page"
+  }
+}

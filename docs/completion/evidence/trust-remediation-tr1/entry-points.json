@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr1",
+  "revision": "trust-remediation-tr1-2026-11-14",
+  "expected_outcome": "Each hook check has one canonical behavior entry point.",
+  "observations": [
+    "Eleven public main functions are thin wrappers over run_check.",
+    "lsp_server.main remains the long-running server entry point.",
+    "The dispatcher is the sole edit-journal producer.",
+    "Entry-point compatibility reported 280 passed in 66.48 seconds."
+  ],
+  "result": "confirmed"
+}

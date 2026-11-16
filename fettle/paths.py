@@ -50,6 +50,21 @@ def find_repo_root(start: str | Path | None = None) -> Path | None:
     return None
 
 
+def find_project_root(start: str | Path) -> Path:
+    """Find the nearest Git root, then nearest policy root, or return *start*."""
+    origin = Path(start).expanduser().resolve()
+    current = origin if origin.is_dir() else origin.parent
+    policy_root: Path | None = None
+    while True:
+        if (current / ".git").exists():
+            return current
+        if policy_root is None and (current / ".fettle.toml").is_file():
+            policy_root = current
+        if current.parent == current:
+            return policy_root or origin
+        current = current.parent
+
+
 def resolve_path(path: str | Path, repo_root: Path | None = None) -> Path:
     """Resolve a path to absolute, expanding user and resolving symlinks."""
     p = Path(path).expanduser()

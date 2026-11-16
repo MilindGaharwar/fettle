@@ -134,11 +134,29 @@ Packages run in this order. Each is one pull request unless noted.
 TR-4 is independent and small; it may be pulled forward whenever the pipeline
 is idle.
 
-**Pipeline cost.** Until TR-8 changes it, every source-changing pull request
-re-dispatches most of the 256 mutation shards (measured: 253 for a two-file
-change) and only one matrix can run at a time. Plan for up to 17 hours per
-source-changing pull request. Tests-only and workflow-only changes measured
-zero shards.
+**Pipeline cost.** Owner decision D2, taken 2026-11-15, removes
+`fettle/mutation_test.py` and `fettle/staged_preflight.py` from per-pull-request
+advisory scope while retaining them in deliberate full-corpus preparation. Other
+source changes retain the configured stable topology and only one matrix can run
+at a time. Tests-only, workflow-only, and engine-only changes produce zero
+shards. The evidence tradeoff is explicit: pull requests provide no mutation
+evidence for those two engine files.
+
+Run `43575655878` measured the decision boundary from retained artifact
+`mutation-pr-advisory-43575655878-1`:
+
+| Scope | Engine-hours | Share | Mutants |
+|---|---:|---:|---:|
+| `fettle/mutation_test.py` | 147.9 | 49.4% | 8,467 |
+| `fettle/staged_preflight.py` | 62.3 | 20.8% | 5,180 |
+| Other 195 files | 89.0 | 29.8% | 41,393 |
+| Total | 299.1 | 100% | 55,040 |
+
+The Monday 03:23 UTC `mutation.yml` schedule prepares full-corpus manifests and
+runs preflight, but does not execute the full mutation matrix. Mutation execution
+requires a deliberate workflow dispatch. The unchanged observed ledger remains
+keyed by prior shard contents; correcting that known projection limitation stays
+with finding M7 in TR-8.
 
 **Definition of done for every package**
 
@@ -827,7 +845,7 @@ decisions. Starts after D4 closes.
 |---|---|---|---|
 | M4 | While one advisory matrix runs, every other pull request's admission gate fails, including zero-scope ones | `mutation-pr.yml:27-39`, `mutation_advisory_runs.py:24-39` | S, C |
 | M6 | Fingerprints differ between Python 3.12 and 3.13 or later | `mutation_test.py:4030-4037` | S |
-| M7 | Admission projection is keyed by shard index and the minute ceiling is not enforced | `mutation_test.py:3762-3922,5401-5430` | R, S |
+| M7 | Admission projection is keyed by shard index and the minute ceiling is not enforced; after D2, the unchanged observed ledger still describes the earlier shard contents | `mutation_test.py:3762-3922,5401-5430`, `.github/mutation-observed-ledger.json` | R, S |
 | M9 | Mutation runs tests in Fettle's own environment | `mutation_test.py:53-65` | U |
 | M12 | A weekly schedule launches 256 jobs | `mutation.yml:6,462-498` | U |
 | M15 | The release job holding signing permissions also runs tests and unhashed installs | `release.yml:89-106,182` | U |
@@ -841,7 +859,7 @@ Decisions to bring to the owner, each with measured options:
 | ID | Decision |
 |---|---|
 | D1 | Should the mutation check fail on weak tests in changed lines, once message-string mutants are filtered? Today `passed` ignores the score |
-| D2 | Should the mutation engine remain in its own mutation scope? It takes about 84% of ledger runtime |
+| D2 | **Decided 2026-11-15:** exclude `fettle/mutation_test.py` and `fettle/staged_preflight.py` from PR advisories only. Retain both in deliberate full-corpus preparation. Measured cost: 210.2 of 299.1 engine-hours (70.2%) and 13,647 of 55,040 mutants in run `43575655878` |
 | D3 | Keep or archive the incident-specific calibration and capacity machinery |
 | D4 | After three full runs: record the result, or propose a baseline and ratchet |
 | D5 | Partition stability: a small edit changes 194 of 256 shard manifests |

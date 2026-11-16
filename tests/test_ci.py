@@ -1925,6 +1925,14 @@ def test_pr_advisory_check_name_separates_authorized_runs_from_label_noops():
     assert all(job.get("name") != "mutation evidence" for job in parsed["jobs"].values())
 
 
+def test_pr_advisory_retains_and_summarizes_applied_exclusions():
+    workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
+
+    assert '"advisory_exclude":prepared["advisory_exclude"]' in workflow
+    assert "Applied advisory exclusions" in workflow
+    assert 'aggregate.get("advisory_exclude", [])' in workflow
+
+
 def test_pr_mutation_workflow_executes_one_bounded_attempt_per_full_scope_shard():
     workflow = (Path(PLUGIN_DIR) / ".github/workflows/mutation-pr.yml").read_text()
 
@@ -2393,7 +2401,7 @@ def test_pr_advisory_real_prepare_distinguishes_docs_and_one_source_file(tmp_pat
     assert docs.returncode == 0, docs.stderr
     assert json.loads(docs.stdout) == {
         "status": "completed", "passed": True, "shard_count": 0,
-        "matrix": {"shard": []}, "files": [],
+        "matrix": {"shard": []}, "files": [], "advisory_exclude": [],
     }
     assert not (repo / "docs-manifests").exists()
 

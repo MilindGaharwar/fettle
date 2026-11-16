@@ -58,6 +58,7 @@ enabled = true
 mode = "advisory"
 paths = ["fettle/"]
 exclude = ["tests/", "migrations/"]
+advisory_exclude = ["fettle/mutation_test.py", "fettle/staged_preflight.py"]
 base = "origin/main"
 timeout_s = 600
 full_timeout_s = 7200
@@ -85,6 +86,17 @@ full_shards = 256
 "fettle/agents/codex.py" = ["tests/test_agents.py"]
 "fettle/agents/gemini.py" = ["tests/test_agents.py"]
 "fettle/agents/opencode.py" = ["tests/test_agents.py"]
+"fettle/agents/tools.py" = ["tests/test_agents.py", "tests/test_trust_remediation_tr1.py"]
+"fettle/edit_journal.py" = [
+    "tests/test_installed_hooks_e2e.py",
+    "tests/test_session_report.py",
+    "tests/test_trust_remediation_tr1.py",
+]
+"fettle/hook_cli.py" = [
+    "tests/test_bootstrap_gate.py",
+    "tests/test_quality_gate.py",
+    "tests/test_trust_remediation_tr1.py",
+]
 "fettle/runners/_subprocess.py" = ["tests/test_runners.py"]
 "fettle/uat/__init__.py" = ["tests/test_uat_surfaces.py"]
 

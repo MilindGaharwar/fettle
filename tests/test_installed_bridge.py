@@ -157,7 +157,7 @@ def test_bridge_commands_quote_interpreter_path(tmp_path, monkeypatch):
 
     command = bridge.dispatcher_command()
 
-    assert shlex.split(command) == [str(executable), "-m", "fettle.dispatcher"]
+    assert shlex.split(command) == [str(executable), "-P", "-m", "fettle.dispatcher"]
 
 
 def test_bridge_command_preserves_virtualenv_interpreter_symlink(tmp_path, monkeypatch):
@@ -171,7 +171,7 @@ def test_bridge_command_preserves_virtualenv_interpreter_symlink(tmp_path, monke
 
     command = bridge.dispatcher_command()
 
-    assert command == f"{venv_python} -m fettle.dispatcher"
+    assert command == f"{venv_python} -P -m fettle.dispatcher"
 
 
 def test_shell_command_uses_windows_serializer(monkeypatch):
