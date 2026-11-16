@@ -103,3 +103,11 @@ formal qualification, mutation campaign, active skill installation, D4 run,
 main-branch merge or release is authorized or claimed. Per-program evidence and
 execution gates remain. Generic home-relative installation examples are retained;
 no private prompt/answer bodies or raw runtime logs are published.
+
+## Subsequent live qualification
+
+The [qualification follow-up](qualification-followup.md) records execution of all
+20 previously skipped VM/Docker cases at candidate `4030de0`: all passed.
+The historical skips above remain the actual results of the earlier suite.
+Repeated Semgrep probes passed, but the earlier intermittent timeout remains
+unexplained; no runtime fix or timeout relaxation was justified.
