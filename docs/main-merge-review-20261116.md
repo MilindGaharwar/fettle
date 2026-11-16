@@ -53,3 +53,22 @@ package requires >=1.185. The three pins now use 1.185.0, with a regression
 checking blocking matrix versions against the package floor. Main advisory and
 D4 workflows remain intact. A sandboxed local parser recheck failed on missing
 certificate trust access; its unchanged trusted rerun is retained separately.
+
+## Owner-released update — 17 November 2026
+
+Fetched and merged main `bf26796946fb76a911d231e1e998df093357e06a`, containing
+#78 and #80, without rebasing. Main's mutation advisory exclusions and trust
+remediation remain intact; the mutation engine, staged-preflight runtime and
+mutation workflows are unchanged relative to that main snapshot. Refreshed the
+[status-evidence table](reviews/2026-11-16/status-main-evidence.md) against it.
+
+The first full local suite reported 5,191 passed, 29 skipped and one failure in
+the strict mutation-owner mapping assertion. The incoming main already retains
+two canonical corpus tests in `tests/test_mutation_corpus.py`; the older audit
+branch duplicated them in `tests/test_staged_preflight.py`, adding an unintended
+cross-owner import. Both function ASTs were compared and found identical.
+Removed only those duplicate copies and their import; the canonical tests and
+ownership assertion remain unchanged. This is a test-layout reconciliation,
+not a relaxed gate. The corrected head requires fresh full-suite qualification;
+this record does not credit the failed run as a pass. No workflow was rerun to
+hide the failure, and no remote push had occurred when it was found.
