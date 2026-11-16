@@ -1,12 +1,17 @@
 # Fettle Evolution Implementation Plan
 
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
 > Navigation: per-program plans and current next-actions are indexed in
 > `docs/plan-index.md`. This document remains the canonical decision record.
 
-Status: APPROVED for completed activities; P33, P35, P44, and P52 complete;
-P34 and P43 partially implemented; P36-P42 and P45-P61 remain proposed,
-blocked, or evidence-gated; P62-P65 preserve the prioritized mutation-learning
-follow-through; P66-P71 prioritize first-class evidence-contract convergence
+Status: APPROVED for completed activities; P33, P35, P38, P41's durable-ledger
+successor, P44-P47, P52-P55, P56a, and P66-P69 are complete; P34 and P43 are partially
+implemented; P36-P37, P39-P40, P42, and later gated slices remain proposed, blocked, or
+evidence-gated; P62-P65 preserve the prioritized mutation-learning follow-through
 
 Scope: post-v1.8 evolution of Fettle from Python-first governance to a
 trustworthy, polyglot policy and evidence layer. This plan consolidates the
@@ -103,7 +108,7 @@ privileged, platform-specific security product.
 
 ## 4. Current Baseline And Authoritative Scope
 
-v1.10.0 is the shipped trust baseline. The activity IDs below are the execution
+v1.13.1 is the shipped trust baseline. The activity IDs below are the execution
 source of truth; release work packages later in this document provide design
 detail. Estimates include tests and documentation for one experienced engineer
 and are planning ranges, not commitments.
@@ -148,29 +153,29 @@ and are planning ranges, not commitments.
 | P35 | Establish seeded-defect and recorded-override contracts | next minor | P33 | 3–5 days | Complete |
 | P36 | Reconstruct red-before-green evidence in CI | next minor | P33, P35 | 4–7 days | Proposed |
 | P37 | Expand and version the Fettle behavioral benchmark | next minor | P4, P5, P33 | 5–8 days | Proposed |
-| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Authorized (enables P46, P60) |
+| P38 | Consolidate specification traceability and add drift evidence | following minor | P33, P35 | 4–7 days | Complete |
 | P39 | Operationalize static and supply-chain controls | following minor | P33, P35 | 4–7 days | Proposed |
 | P40 | Add invariant properties and flake detection selectively | following minor | P33, P37 | 4–7 days | Proposed |
-| P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Proposed |
+| P41 | Build commit-linked, tamper-evident governance evidence | later minor | P35, P38 | 5–10 days | Core acceptance complete via `evidence_ledger`; run manifest and advisory slices 4-6 remain separately gated |
 | P42 | Add deterministic Fettle event and check replay | later minor | P33, P37, P41 | 5–8 days | Proposed |
 | P43 | Model only proven high-risk concurrent state machines | unscheduled | P40, P42 | 5–10 days | In progress (2 of 5 models) |
 | P44 | Define hypergraph, provider, traversal, snapshot, and fixture contracts | unscheduled | P33 design contract | 3-5 days | Complete |
-| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Authorized (2026-08-23) |
-| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Approved in principle; start after P38 |
-| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Approved in principle |
-| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Approved in principle |
-| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41, P48 | 7-12 days | Deferred on P41 + P48 |
+| P45 | Build graph-independent committed and working source snapshots | unscheduled | P44 | 5-8 days | Complete |
+| P46 | Assemble deterministic ephemeral graphs from native providers | unscheduled | P38, P44, P45 | 7-12 days | Complete |
+| P47 | Add advisory graph status, impact, and obligation output | unscheduled | P46 | 5-8 days | Complete |
+| P48 | Shadow semantic, topology, and verification consumers | unscheduled | P47 | 7-12 days | Advisory implementation complete; broader promotion falsified |
+| P49 | Bind CI obligations and attestations to immutable candidates | unscheduled | P33, P35, P41 successor, P48 | 7-12 days | Deferred on P48 redesign/graduation and separate authorization; durable-ledger dependency satisfied |
 | P50 | Add graph-expanded strict claim and integration checks | unscheduled | P49 | 7-12 days | Proposed |
 | P51 | Evaluate and, only if admitted, add graph-cache persistence | unscheduled | P46-P50 profiling | 5-10 days | Evidence-gated |
 | P52 | Enforce authorship separation: test-writer ≠ code-writer | next minor | P13, P14 | 2–3 days | Graduated |
 | P53 | Freeze state-consistency contract, adapter, evidence, and result schemas | next minor | P33 | 3-5 days | Complete |
 | P54 | Add state-consistency discovery, lint, list, and init template | next minor | P53 | 3-5 days | Complete |
 | P55 | Build bounded API/CLI state-consistency execution kernel | following minor | P54 | 5-8 days | Complete |
-| P56 | Add comparators and immediate/eventual/snapshot/monotonic evaluation | following minor | P55 | 4-6 days | Proposed |
+| P56 | Add comparators and immediate/eventual/snapshot/monotonic evaluation | following minor | P55 | 4-6 days | P56a exact/normalized immediate/eventual complete; snapshot/monotonic follow-up remains proposed |
 | P57 | Add cross-view web/UAT state-consistency adapter | later minor | P55, P56 | 5-8 days | Proposed |
 | P58 | Add optional deterministic and property-based state sequences | later minor | P55, P56 | 5-8 days | Evidence-gated |
 | P59 | Add advisory duplicate-state and invalidation heuristics | unscheduled | P53, measured corpus | 5-8 days | Evidence-gated |
-| P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | Blocked on P35 -> P38 |
+| P60 | Bind consistency evidence to specs, reports, and changed-scope CI | unscheduled | P35, P38, P56 | 5-8 days | P35/P38 satisfied; applicable P56 scope and separate P60 authorization required |
 | P61 | Pilot state-consistency contracts and decide per-surface graduation | after P57-P60 as applicable | P55-P60 evidence | 30 qualifying runs | Evidence-gated |
 | P62 | Complete authoritative mutation calibration and baseline | immediate, P0 | P34 implemented preflight slice | 2 full runs plus replay | Complete |
 | P63 | Institutionalize mutation learning and user guidance | next minor, P1 | P34 | 3-5 days | Complete |
@@ -188,8 +193,9 @@ The critical path to trustworthy polyglot verification is P0 → P1 → P3 → P
 run alongside the web proving ground after their dependencies close. Work
 marked demand- or evidence-gated is not scheduled until its trigger is met.
 
-P44-P51 form the change-integrity hypergraph program. P44's immutable contract
-and adversarial-fixture layer is complete; P45-P51 remain gated. The program's
+P44-P51 form the change-integrity hypergraph program. P44-P47 are complete; P48's
+advisory implementation did not pass broader promotion, and P49-P51 remain gated.
+The program's
 authoritative architecture, UX/UAT contract, staged implementation details,
 migration gates, and persistence admission criteria are maintained in:
 
@@ -199,8 +205,9 @@ migration gates, and persistence admission criteria are maintained in:
 
 The program begins with an ephemeral graph and cannot authorize blocking graph
 decisions until P33 closes false-clean result paths. P35 is required for
-overrides, and P41 or an approved successor is required for durable graph-bound
-attestations. Existing semantic, topology, claim, and verification behavior
+overrides. `fettle/evidence_ledger.py` is the approved P41 successor for durable
+commit-linked evidence; this does not deliver P41's separately gated run-manifest
+or advisory budget slices. Existing semantic, topology, claim, and verification behavior
 remains authoritative until each consumer passes its own shadow graduation.
 P51 may close with a no-go decision; SQLite is not an assumed deliverable.
 
@@ -223,8 +230,8 @@ ownership, mutation, canonical-read, observer, comparator, and consistency-model
 contracts before any application execution. P55-P56 add bounded API/CLI
 execution and deterministic evaluation. Browser journeys, stateful sequences,
 and static heuristics remain separately gated because their flake, dependency,
-and false-positive risks differ. P60 cannot begin until P35's override contract
-and P38's traceability contract graduate; P61 may approve only the surfaces and
+and false-positive risks differ. P35's override and P38's traceability prerequisites are recorded complete;
+P60 still requires separate package authorization; P61 may approve only the surfaces and
 contract classes that meet their own evidence thresholds. Detailed UX, BDD,
 security, package sequencing, and graduation criteria are maintained in:
 
@@ -1127,6 +1134,12 @@ Acceptance:
 
 #### P41: Commit-Linked Governance Evidence
 
+Current status: core acceptance is complete through the approved
+`fettle/evidence_ledger.py` successor: hash chaining, commit/artifact anchoring,
+bounded redaction, rotation checkpoints, and explicit coverage are implemented
+and tested. Slice 1's general run manifest and advisory slices 4-6 are not part of
+that completion and require separate consumer need and authorization.
+
 Goal: evolve mutable local traces into queryable evidence with tamper detection
 without creating a hosted control plane.
 
@@ -1168,6 +1181,10 @@ Acceptance:
 - Secrets and raw prompts are not persisted by default.
 
 #### P42: Deterministic Event And Check Replay
+
+Current status: proposed and not authorized. Existing mutation/UAT uses of the
+word replay are domain-specific and do not implement this event/check replay
+contract.
 
 Goal: reproduce Fettle decisions without claiming deterministic reproduction of
 external models or arbitrary hosts.
@@ -2510,17 +2527,20 @@ Current dispositions:
   scenarios remain required before implementation.
 - Feature manifest: not applicable; this repository does not maintain one.
 - Implementation authorization: approved for P0–P5.
-- P33–P43 status: P33 and P35 are complete; P34 has one accepted full retained
-  CI run but awaits measured reproducibility and actionability evidence; P43 has
-  two of five planned models but has not met its
-  completion contract; P36–P42 remain proposed or evidence-gated.
+- P33–P43 status: P33, P35, P38, and P41's durable-ledger acceptance are
+  complete; P34 remains operationally evidence-gated; P43 has two of five planned
+  models but has not met its completion contract. P36-P37, P39-P40, P42, P41's
+  undelivered run-manifest/advisory slices, and remaining gated work are not
+  complete.
   UX/BDD additions are recorded in `docs/polyglot-governance.ux-spec.md`.
-- P44–P51 status: P44 is complete. Architecture, UX/BDD, and implementation
-  contracts are recorded in the change-integrity document set; P45–P51 are not
-  authorized until their package proposal review is explicitly accepted.
+- P44–P51 status: P44-P47 are complete. P48 is advisory and its broader promotion
+  was falsified; P49-P51 require their remaining dependencies and separate
+  package authorization. Architecture, UX/BDD, and implementation contracts are
+  recorded in the change-integrity document set.
 - P52 status: graduated 2026-08-23 with retained TLA+, adversarial path,
   topology, and evidenced two-role flow coverage described above.
 - P53–P61 status: state-consistency UX/UAT and implementation contracts are
-  recorded in the state-consistency document set. P53 is proposed as the next
-  contract-only package; P54–P61 are not authorized, and P60 remains blocked on
-  P35 and P38.
+  recorded in the state-consistency document set. P53-P55 and the bounded P56a
+  evaluator are complete; snapshot/monotonic evaluation remains proposed.
+  P57-P61 retain separate package or evidence gates. P60 no longer waits for
+  P35/P38, but is not authorized by this status correction.

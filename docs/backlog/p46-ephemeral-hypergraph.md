@@ -1,7 +1,7 @@
 ---
 fettle-work-item: true
 id: p46-ephemeral-hypergraph
-status: open
+status: done
 scope:
   - fettle/hypergraph.py
   - fettle/graph_builder.py
@@ -12,6 +12,11 @@ spec: change-integrity-implementation-plan
 ---
 
 # P46 — Deterministic ephemeral hypergraph and native providers
+
+> Metadata reconciled 2026-11-16 with the existing Resolution and recorded P46
+> delivery. The contradictory historical record is retained unchanged at
+> `461e73b:docs/backlog/p46-ephemeral-hypergraph.md` (and its introducing commit
+> `27b957c`). This correction does not implement WLI validation or migrate schemas.
 
 Authorized-in-principle 2026-08-23; dependencies P38, P44, P45 all complete.
 Plan: `docs/change-integrity-implementation-plan.md` §5.P46.

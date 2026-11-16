@@ -1,6 +1,11 @@
 # Canonical Security Evidence Implementation Plan
 
-Status: CS-0-CS-5 authorized and implemented; CS-6 remains evidence- and approval-gated
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
+Status: CS-0-CS-6 complete; enforcement and v1.13.1 release authorized 2026-09-08
 
 UX contract: [canonical-security-evidence.ux-spec.md](canonical-security-evidence.ux-spec.md)
 
@@ -30,8 +35,8 @@ weakening Assurance Integrity's fail-closed boundary.
   `.fettle/security-review.evidence.json`; invalidate stale authority before a
   new attempt.
 - Add all six documented production criteria only after the producer passes its
-  technical gates. Enforcement still waits for 20 real shadow assessments and
-  explicit operator approval.
+  technical gates. The historical enforcement gate required 20 real shadow
+  assessments and explicit operator approval, recorded as satisfied in the plan index.
 
 ## Alternatives
 

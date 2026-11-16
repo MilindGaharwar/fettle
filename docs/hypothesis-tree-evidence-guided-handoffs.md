@@ -1,5 +1,10 @@
 # Hypothesis Tree: Evidence-Guided Handoffs
 
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
 **Objective:** improve independently verified agent changes without making Fettle
 an orchestrator
 
@@ -8,7 +13,8 @@ per verified change
 
 **Best score:** not measured
 
-**Status:** planning complete; execution blocked by CS-6 and separate approval
+**Status:** planning complete; CS-6 prerequisite satisfied; execution requires
+separate approval
 
 ---
 
@@ -20,7 +26,7 @@ per verified change
     evidence remains non-pass.
   - Constraint: The HoH paper motivates but does not establish local causality;
     the pilot requires matched real changes and retained evidence.
-  - **1** [SELECTED, BLOCKED]: Validate candidate-bound handoffs and preservation
+  - **1** [SELECTED, AWAITING AUTHORIZATION]: Validate candidate-bound handoffs and preservation
     obligations using existing canonical evidence.
     - Hypothesis: Explicit candidate, objective, acceptance, and preservation
       bindings will reduce regression escapes or improve verified completion

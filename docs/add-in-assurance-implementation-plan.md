@@ -1,11 +1,16 @@
 # Add-in Assurance Pilot Implementation Plan
 
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
 Status: PROPOSED; planning only; implementation is not authorized
 
 UX contract: [add-in-assurance.ux-spec.md](add-in-assurance.ux-spec.md)
 
-Depends on: Assurance Integrity CS-6 graduation and a separate explicit operator
-authorization for this plan
+Depends on: separate explicit operator authorization for this plan. Assurance
+Integrity CS-6 graduated on 2026-09-08 and no longer blocks the pilot.
 
 ## 1. Objective
 
@@ -34,12 +39,11 @@ without weakening the existing Assurance decision.
 
 No implementation work begins until all of the following are true:
 
-1. CS-6 has 20 accepted real shadow assessments.
-2. Every CS-6 difference is classified and resolved.
-3. The operator has explicitly approved Assurance Integrity enforcement or has
-   explicitly authorized this plan as a documented exception to the standing
-   single-program rule in `docs/plan-index.md`.
-4. The operator separately gives explicit approval to implement this plan.
+1. CS-6 has 20 accepted real shadow assessments. Satisfied 2026-09-08.
+2. Every CS-6 difference is classified and resolved. Satisfied 2026-09-08.
+3. The operator has explicitly approved Assurance Integrity enforcement.
+   Satisfied 2026-09-08.
+4. The operator separately gives explicit approval to implement this plan. Open.
 
 Planning approval is not implementation approval. Repository status remains
 `PROPOSED` until the fourth condition is recorded.
@@ -589,7 +593,7 @@ legacy authority compatibility.
 
 Stop immediately if:
 
-- CS-6 or explicit implementation authorization is absent;
+- explicit implementation authorization is absent;
 - the design requires dynamic discovery, a new daemon, network access, repository
   writes, or Fettle-owned sandboxing;
 - the add-in can alter an Assurance dimension or policy result;
