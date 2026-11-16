@@ -31,6 +31,16 @@ Memory, model confidence, advisory graph output, and external indexes cannot
 grant authority. Missing or invalid evidence is a canonical non-pass for every
 consequential consumer.
 
+Evidence descriptions should name their scope, assumptions and limits. A content
+digest establishes identity, not truth or permission. The existing
+`canonical_evidence` references bind producer artifacts; mutation qualification
+eligibility belongs to the mutation producer's own contract. Capacity-validation
+plans also carry `billing_authority: false`; that flag denies billing authority
+for those diagnostics, rather than defining a universal evidence field. Do not infer a
+universal schema field or acceptance authority from a planning analogy. The
+[deferred vacuous-test proposal](backlog/vacuous-test-rule-pack.md) records a
+prior-art lead; its external source claims require verification before adoption.
+
 ## Representation Inventory
 
 | Surface | Current representation and owner | Schema / identity | Persistence and retention | Current authority | P66 target |
