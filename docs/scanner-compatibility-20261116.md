@@ -2,7 +2,7 @@
 
 Semgrep 1.185.0 successfully parses the unchanged Python match/case vendor source that 1.168.0 rejected. Require at least 1.185 in both dependency selectors. A full 420-file scan exceeded the old 120-second wall-clock budget; Semgrep now has 600 seconds while Ruff retains 120. Timeout and parser errors remain TOOL_ERROR; no rule, exclusion or per-rule limit changes.
 
-Book validation: full pilot 3,307 findings (2,831 Ruff, 476 Semgrep), exactly matching the prior baseline; OneDrive 6,678 (5,723 Ruff, 955 now-visible Semgrep), no scanner execution errors. Findings remain violations. Regression tests exercise structural pattern matching and verify that both scanner timeouts still fail. Unrelated audit, mutation and UAT changes are excluded from this repair.
+Private-corpus validation: full pilot 3,307 findings (2,831 Ruff, 476 Semgrep), exactly matching the prior baseline; a second private corpus 6,678 (5,723 Ruff, 955 now-visible Semgrep), no scanner execution errors. Findings remain violations. Regression tests exercise structural pattern matching and verify that both scanner timeouts still fail. Unrelated audit, mutation and UAT changes are excluded from this repair.
 
 The first pre-push suite failed because `test_capture_identity_ignores_capture_time` read malformed JSON in the user's existing private runtime trace. The identical test also failed on the unchanged parent revision. All 19 assurance-baseline tests pass with `XDG_STATE_HOME` set to a separate temporary test-state directory. Preserve the original trace; do not rewrite it, skip the test or relax parsing. The push hook is rerun with that isolated state and the full suite enabled.
 

@@ -10,7 +10,7 @@ The state-consistency companion plan receives a narrow dependency/scope correcti
 
 The original dirty checkout remains untouched: 54 inventoried files, their modes,
 the complete Git index and porcelain status are compared before and after work.
-All 117 protected Book Brain packet/answer files also match the retained hashes.
+All 117 protected a private external project packet/answer files also match the retained hashes.
 Preparation uses an isolated checkout of the verified remote, with explicit
 file lists for each commit. Private histories and runtime files never enter the
 staged lists. The original staged audit histories stay local and unchanged.

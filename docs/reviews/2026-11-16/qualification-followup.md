@@ -51,7 +51,7 @@ they do not mean seeded defective products passed acceptance.
 
 ## Preservation and limits
 
-Original dirty Fettle files, modes and staging are preserved. Protected Book Brain
+Original dirty Fettle files, modes and staging are preserved. Protected a private external project
 packet/answer histories remain local and unchanged. No raw prompts, private
 histories, runtime receipts or machine-specific logs are committed. Live tests
 use disposable products and their existing ownership-scoped resource cleanup.

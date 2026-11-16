@@ -1,6 +1,6 @@
 # Scanner repair: six-check follow-up
 
-16 November 2026. Scoped follow-up to the scanner repair on `fix/book-scanner-compatibility-20261116`. The original checkout, its staged work and private histories are preserved. No rule suppression, sandbox permission change or production evidence refresh is included.
+16 November 2026. Scoped follow-up to the scanner repair on scanner compatibility repair `0555a8b`. The original checkout, its staged work and private histories are preserved. No rule suppression, sandbox permission change or production evidence refresh is included.
 
 ## Root causes and fixes
 
