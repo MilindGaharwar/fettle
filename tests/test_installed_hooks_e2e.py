@@ -271,6 +271,80 @@ def test_registered_hook_detects_edit_after_journal_is_deleted(installed_hook_re
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("change", "blocked"),
+    (
+        ("commit-code", True),
+        ("commit-docs", False),
+        ("amend-code", True),
+        ("switch-code-branch", True),
+    ),
+)
+def test_registered_hook_compares_committed_code_with_session_start(
+    installed_hook_repo, mode, change, blocked,
+):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    (root / "README.md").write_text("# Base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    base_branch = subprocess.run(
+        ["git", "-C", str(root), "branch", "--show-current"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if change == "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "switch", "-qc", "changed-code"], check=True)
+        target.write_text("value = 2\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "app.py"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+             "commit", "-qm", "branch code"],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(root), "switch", "-q", base_branch], check=True)
+
+    session = f"tr1-{change}"
+    shell = _payload("claude_code", "pre_bash", root, command="printf safe")
+    shell["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), shell, root, env).returncode == 0
+
+    if change == "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "switch", "-q", "changed-code"], check=True)
+    elif change == "commit-docs":
+        (root / "README.md").write_text("# Updated\n", encoding="utf-8")
+        paths = ["README.md"]
+    else:
+        target.write_text("value = 3\n", encoding="utf-8")
+        paths = ["app.py"]
+    if change != "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "add", *paths], check=True)
+        command = [
+            "git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "-qm", change,
+        ]
+        if change == "amend-code":
+            command.extend(["--amend", "--no-edit"])
+        subprocess.run(command, check=True)
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == (2 if blocked else 0), result.stderr
+    if blocked:
+        assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_uses_project_policy_from_subdirectory(installed_hook_repo, mode):
     root, env = installed_hook_repo
     subdir = root / "nested"

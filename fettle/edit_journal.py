@@ -105,14 +105,53 @@ def _code_state(root: Path) -> str:
     return hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()
 
 
+def _head_revision(root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode:
+        return None
+    revision = result.stdout.strip()
+    return revision or None
+
+
+def _commits_change_code(root: Path, start_revision: object) -> bool:
+    if not isinstance(start_revision, str) or not start_revision:
+        return True
+    current_revision = _head_revision(root)
+    if current_revision is None:
+        return True
+    if current_revision == start_revision:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", start_revision, current_revision, "--"],
+            cwd=root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    if result.returncode:
+        return True
+    return any(
+        classify_file(relative) in {"implementation", "test"}
+        for relative in result.stdout.splitlines()
+        if relative
+    )
+
+
 def record_session_start(session_id: str | None, root: Path, policy_digest: str) -> None:
     destination = config.state_dir(session_id or "unknown") / "session-start.json"
     if destination.exists():
         return
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "root": str(root.resolve()),
         "source_state": _code_state(root),
+        "head_revision": _head_revision(root),
         "policy_digest": policy_digest,
     }
     temporary = destination.with_suffix(".tmp")
@@ -137,4 +176,6 @@ def needs_verification(session_id: str | None, root: Path) -> bool:
         start = json.loads(start_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return _code_state(root) not in {"unknown", hashlib.sha256(b"[]").hexdigest()}
-    return start.get("source_state") != _code_state(root)
+    if start.get("source_state") != _code_state(root):
+        return True
+    return _commits_change_code(root, start.get("head_revision"))
