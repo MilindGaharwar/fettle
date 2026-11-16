@@ -120,6 +120,32 @@ def _is_policy_repair(hook_input, root: Path) -> bool:
     return target.resolve(strict=False) == (root / ".fettle.toml").resolve(strict=False)
 
 
+def _most_severe_target_result(check_name: str, results: list[CheckResult]) -> CheckResult:
+    """Collapse one check's target fan-out without hiding later results."""
+    precedence = {Decision.ALLOW: 0, Decision.ADVISORY: 1, Decision.BLOCK: 2}
+    winner = max(results, key=lambda item: precedence[item.decision], default=CheckResult.allow())
+    advisories = [item for item in results if item.decision == Decision.ADVISORY]
+    if not advisories:
+        return winner
+
+    count = len(advisories)
+    noun = "target" if count == 1 else "targets"
+    details = "\n".join(
+        dict.fromkeys(item.message.strip() for item in advisories if item.message)
+    )
+    summary = f"{check_name}: {count} {noun} had advisories"
+    if details:
+        summary += f"\n{details}"
+    if winner.decision == Decision.ADVISORY:
+        winner.message = summary
+    else:
+        output = dict(winner.hook_specific_output)
+        existing = output.get("additionalContext")
+        output["additionalContext"] = f"{summary}\n\n{existing}" if existing else summary
+        winner.replace(hook_specific_output=output)
+    return winner
+
+
 def main() -> int:
     if os.environ.get("FETTLE_DISABLE_DISPATCHER") == "1":
         print(_empty_output())
@@ -276,7 +302,7 @@ def main() -> int:
                     replace(ctx, input=replace(hook_input, targets=(target,)))
                     for target in hook_input.targets
                 ]
-            result = CheckResult.allow()
+            target_results = []
             for target_ctx in target_contexts:
                 result = spec.run(target_ctx)
                 if result is None:
@@ -284,9 +310,8 @@ def main() -> int:
                         CheckResult.unknown("Required check returned no result", action="retry")
                         if spec.requires_execution_for(target_ctx) else CheckResult.allow()
                     )
-                if result.decision != Decision.ALLOW:
-                    ctx = target_ctx
-                    break
+                target_results.append(result)
+            result = _most_severe_target_result(spec.name, target_results)
         except Exception as exc:  # noqa: BLE001 — isolate check failures
             if spec.requires_execution_for(ctx):
                 logger.error("fettle: security check %s failed closed", spec.name)

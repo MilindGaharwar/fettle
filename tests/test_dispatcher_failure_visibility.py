@@ -72,6 +72,47 @@ def _run_main(monkeypatch, capsys, stdin_text: str) -> tuple[int, dict]:
 
 
 class TestCheckCrashVisibility:
+    @pytest.mark.parametrize("targets", [("a.py", "b.py"), ("b.py", "a.py")])
+    def test_multi_target_check_uses_most_severe_result(
+        self, tmp_path, monkeypatch, capsys, isolated_trace, targets,
+    ):
+        seen = []
+
+        def run(ctx):
+            name = ctx.target_path.name
+            seen.append(name)
+            if name == "a.py":
+                return CheckResult.advisory("a needs attention")
+            return CheckResult.block("b must be fixed")
+
+        spec = CheckSpec(
+            name="fanout_check",
+            run=run,
+            events=frozenset({"PostToolUse"}),
+            tools=frozenset({"Edit"}),
+        )
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "dispatcher": {"global_budget_ms": 1000},
+            "gates": {},
+        })
+        payload = json.dumps({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"edits": [{"file_path": target} for target in targets]},
+            "cwd": str(tmp_path),
+            "session_id": "fanout-test",
+        })
+
+        code, output = _run_main(monkeypatch, capsys, payload)
+
+        assert code == 2
+        assert seen == list(targets)
+        assert "b must be fixed" in output["reason"]
+        context = output["hookSpecificOutput"]["additionalContext"]
+        assert context.count("fanout_check: 1 target had advisories") == 1
+        assert "a needs attention" in context
+
     def test_security_check_crash_blocks_without_exception_detail(
         self, monkeypatch, capsys, caplog, isolated_trace
     ):

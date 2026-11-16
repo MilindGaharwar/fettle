@@ -345,6 +345,46 @@ def test_registered_hook_compares_committed_code_with_session_start(
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize("targets", [("advisory.ts", "blocking.ts"), ("blocking.ts", "advisory.ts")])
+def test_registered_hook_adapter_fanout_uses_most_severe_result(
+    installed_hook_repo, mode, targets,
+):
+    root, env = installed_hook_repo
+    env["npm_config_loglevel"] = "silent"
+    (root / ".fettle.toml").write_text(
+        "[dispatcher]\nglobal_budget_ms = 5000\n"
+        "[gates.lint]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    (root / "package.json").write_text(
+        json.dumps({"scripts": {"lint": "python3 lint.py"}}), encoding="utf-8",
+    )
+    (root / "lint.py").write_text(
+        "import json, sys\n"
+        "target = sys.argv[-1]\n"
+        "severity = 2 if target.endswith('blocking.ts') else 1\n"
+        "print(json.dumps([{'filePath': target, 'messages': "
+        "[{'severity': severity, 'line': 1, 'column': 1, "
+        "'ruleId': 'synthetic', 'message': 'synthetic lint finding'}]}]))\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    for target in targets:
+        (root / target).write_text("const value = 1;\n", encoding="utf-8")
+    payload = _payload("claude_code", "post_write", root)
+    payload["tool_name"] = "Edit"
+    payload["tool_input"] = {"edits": [{"file_path": target} for target in targets]}
+
+    result = _run(_event_command(mode, "PostToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    output = json.loads(result.stdout)
+    assert "synthetic lint finding" in output["reason"]
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert context.count("adapter_check: 1 target had advisories") == 1
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_uses_project_policy_from_subdirectory(installed_hook_repo, mode):
     root, env = installed_hook_repo
     subdir = root / "nested"
