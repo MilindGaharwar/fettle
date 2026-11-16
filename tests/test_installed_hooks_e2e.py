@@ -470,18 +470,40 @@ def test_registered_hook_ignores_repository_local_fettle_package(installed_hook_
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
-def test_registered_hook_blocks_malformed_pretool_input(installed_hook_repo, mode):
+@pytest.mark.parametrize(
+    "payload",
+    (
+        '["PreToolUse"]',
+        '{"hook_event_name":"BeforeTool",',
+        '{"hook_event_name":"PreToolUse",',
+    ),
+)
+def test_registered_hook_blocks_malformed_pretool_input(installed_hook_repo, mode, payload):
     root, env = installed_hook_repo
 
     result = _run_raw(
         _event_command(mode, "PreToolUse"),
-        '{"hook_event_name":"PreToolUse",',
+        payload,
         root,
         env,
     )
 
     assert result.returncode == 2, result.stderr
     assert "Malformed PreToolUse input" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_malformed_non_pretool_input(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+
+    result = _run_raw(
+        _event_command(mode, "PreToolUse"),
+        '{"hook_event_name":"AfterTool",',
+        root,
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))

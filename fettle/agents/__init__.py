@@ -60,4 +60,12 @@ def normalize(payload: dict[str, Any], fallback_cwd: str) -> HookInput:
     return claude_code.translate(payload, fallback_cwd)
 
 
-__all__ = ["AgentKind", "detect_agent", "normalize"]
+def raw_names_pretool_event(raw: str) -> bool:
+    """Whether malformed raw input names any supported host's pre-tool event."""
+    names = {"PreToolUse"}
+    names.update(name for name, event in gemini._EVENT_MAP.items() if event == "PreToolUse")
+    names.update(name for name, event in opencode._EVENT_MAP.items() if event == "PreToolUse")
+    return any(f'"{name}"' in raw for name in names)
+
+
+__all__ = ["AgentKind", "detect_agent", "normalize", "raw_names_pretool_event"]

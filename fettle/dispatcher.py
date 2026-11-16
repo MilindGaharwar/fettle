@@ -155,11 +155,12 @@ def main() -> int:
         raw_stdin = sys.stdin.read()
         payload = json.loads(raw_stdin or "{}")
         if not isinstance(payload, dict):
-            payload = {}
+            raise TypeError("hook input must be a JSON object")
     except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
         logger.error("fettle: stdin parse failed: %s", exc, exc_info=True)
         _trace_dispatch_failure("input_error", f"{type(exc).__name__}: {exc}")
-        if '"PreToolUse"' in raw_stdin:
+        from fettle.agents import raw_names_pretool_event
+        if raw_names_pretool_event(raw_stdin):
             failure = Aggregator(total_budget_ms=0, hook_event_name="PreToolUse")
             failure.add_result(
                 "dispatcher",
