@@ -1,7 +1,7 @@
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -141,11 +141,18 @@ def test_json_parser_rejects_duplicate_keys():
         validate_report(value)
 
 
-def test_module_cli_validates_reports(tmp_path):
+@pytest.mark.parametrize("age_days,expected_code", [(0, 0), (365, 1)])
+def test_module_cli_validates_reports(tmp_path, age_days, expected_code):
     candidate = tmp_path / "candidate.json"
     public = tmp_path / "public.json"
-    candidate.write_text(json.dumps(_report()))
-    public.write_text(json.dumps(_report("public")))
+    # CLI uses the real clock; fixed August fixtures expire as the suite ages.
+    observed_at = (datetime.now(UTC) - timedelta(days=age_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for path, stage in ((candidate, "candidate"), (public, "public")):
+        report = _report(stage)
+        for host in report["hosts"].values():
+            if host["live_evidence"]["state"] == "pass":
+                host["live_evidence"]["observed_at"] = observed_at
+        path.write_text(json.dumps(report))
 
     result = subprocess.run(
         [sys.executable, "-m", "fettle.installed_artifact_contract", str(candidate), str(public)],
@@ -154,5 +161,8 @@ def test_module_cli_validates_reports(tmp_path):
         text=True,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "installed artifact evidence passed"
+    assert result.returncode == expected_code, result.stdout + result.stderr
+    if expected_code == 0:
+        assert result.stdout.strip() == "installed artifact evidence passed"
+    else:
+        assert "live evidence is stale" in result.stdout

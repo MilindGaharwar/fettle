@@ -1636,6 +1636,32 @@ class TestReadOnlyController:
         path.write_text(json.dumps(contract))
         return root, path, _file_digest(path), load_config(str(root), strict=True)
 
+    @pytest.fixture
+    def native_python(self, capture_fixture):
+        import shutil
+        from fettle.uat import controller
+
+        root, _, _, _ = capture_fixture
+        # A home-managed interpreter may start but cannot read its stdlib under
+        # this policy. Qualify the runtime before testing forbidden operations.
+        candidates = [sys.executable, shutil.which(
+            "python3", path="/opt/homebrew/bin:/usr/local/bin:/usr/bin",
+        )]
+        failures = []
+        for executable in dict.fromkeys(path for path in candidates if path):
+            executable = str(Path(executable).resolve())
+            action = {"scenario_id": "runtime-probe", "timeout_s": 2,
+                      "argv": [executable, "-I", "-c", "print('runtime-ready')"]}
+            observed = controller._execute(
+                str(root), action, controller._profile(str(root), {}, [action]),
+            )
+            if (observed["exit_code"] == 0 and not observed["error"]
+                    and observed["stdout"] == "runtime-ready\n" and not observed["stderr"]):
+                return executable
+            failures.append(f"{executable}: exit {observed['exit_code']}; {observed['error'] or observed['stderr']}")
+        pytest.fail("No Python runtime can start under the unchanged read-only sandbox: "
+                    + "; ".join(failures))
+
     def test_real_observation_and_wrong_output(self, capture_fixture):
         import json
         from fettle.uat import controller
@@ -1785,14 +1811,14 @@ class TestReadOnlyController:
         "import os; os.fork()",
         "import socket; socket.socket().connect(('127.0.0.1', 9))",
     ])
-    def test_native_denial_is_nonpass_without_crashing_python(self, capture_fixture, code):
+    def test_native_denial_is_nonpass_without_crashing_python(self, capture_fixture, native_python, code):
         import json
         from fettle.uat import controller
         from fettle.uat.session import _digest, _file_digest
 
         root, path, approval, config = capture_fixture
         contract = json.loads(path.read_text())
-        contract["actions"][0]["argv"] = [str(Path(sys.executable).resolve()), "-I", "-c", code]
+        contract["actions"][0]["argv"] = [native_python, "-I", "-c", code]
         contract["actions"][0]["timeout_s"] = 1
         path.write_text(json.dumps(contract))
         captured = controller.capture(str(root), config, str(path), _file_digest(path))
@@ -1828,14 +1854,14 @@ class TestReadOnlyController:
         ("import time; time.sleep(5)", "timed out"),
         ("print('x' * 100000)", "limit"),
     ])
-    def test_native_execution_bounds_are_nonpass(self, capture_fixture, code, reason):
+    def test_native_execution_bounds_are_nonpass(self, capture_fixture, native_python, code, reason):
         import json
         from fettle.uat import controller
         from fettle.uat.session import _file_digest
 
         root, path, approval, config = capture_fixture
         contract = json.loads(path.read_text())
-        contract["actions"][0]["argv"] = [str(Path(sys.executable).resolve()), "-I", "-c", code]
+        contract["actions"][0]["argv"] = [native_python, "-I", "-c", code]
         contract["actions"][0]["timeout_s"] = 1
         path.write_text(json.dumps(contract))
         captured = controller.capture(str(root), config, str(path), _file_digest(path))
