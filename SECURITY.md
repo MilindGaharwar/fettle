@@ -27,6 +27,12 @@ sandbox. Shell mediation, policy capsules, worktrees, and agent hooks are
 defense-in-depth controls; use least-privilege credentials, isolated runners,
 repository protections, and independent CI for hard boundaries.
 
+An agent running as the same operating-system user can remove Fettle's session
+state through a command the hooks do not recognize and then commit its changes.
+The local TR-2 hooks do not detect that combination. Independent verification
+planned for TR-5 is the control that addresses it; until then, use independent
+CI or a reviewer as the acceptance authority.
+
 Fettle's strict runtime secret boundary can block protected file reads,
 environment dumps, and recognized nested shell reads before execution on Claude
 Code, Codex CLI, Gemini CLI, and OpenCode. Scanner failures on this boundary fail

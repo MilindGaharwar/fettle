@@ -272,6 +272,13 @@ def cmd_config(args: argparse.Namespace) -> None:
     elif args.explain:
         from fettle.policy_layers import _print_explain, discover_directory_layers
         _print_explain(layers)
+        if config.policy_ignored:
+            print("\nignored weakening attempts:")
+            for item in config.policy_ignored:
+                key = item.get("key", "unknown")
+                layer = item.get("layer", "policy floor")
+                reason = item.get("floor", "a policy floor kept the stricter value")
+                print(f"  {key} ({layer}): {reason}")
         dir_layers = discover_directory_layers(project_root)
         if dir_layers:
             print("\npath-scoped layers (apply to files under their directory only):")

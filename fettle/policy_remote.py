@@ -140,7 +140,9 @@ def fetch_and_cache(extends: dict[str, str], timeout: float = FETCH_TIMEOUT_S) -
     return policy
 
 
-def resolve_cached_policy(raw_cfg: dict[str, Any]) -> dict[str, Any] | None:
+def resolve_cached_policy(
+    raw_cfg: dict[str, Any], *, strict: bool = False,
+) -> dict[str, Any] | None:
     """Hook-path resolution: parse [extends] and return the CACHED policy only.
 
     Never touches the network. Malformed declarations warn (fail-open);
@@ -149,11 +151,18 @@ def resolve_cached_policy(raw_cfg: dict[str, Any]) -> dict[str, Any] | None:
     try:
         extends = parse_extends(raw_cfg)
     except PolicyError as exc:
+        if strict:
+            raise PolicyError(f"{exc}. Run: fettle policy sync") from exc
         print(f"fettle: {exc} — org policy skipped", file=sys.stderr)
         return None
     if extends is None:
         return None
     policy = load_cached(extends)
+    if policy is None and strict:
+        raise PolicyError(
+            "Org policy is declared but not available locally or failed verification. "
+            "Run: fettle policy sync"
+        )
     if policy is not None:
         policy.pop("extends", None)  # no transitive extends — one hop by design
     return policy

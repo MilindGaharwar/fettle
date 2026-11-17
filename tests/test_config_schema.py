@@ -83,6 +83,18 @@ class TestValidate:
         assert errors == [] and warnings == []
         assert "assurance.release" in OPEN_DICT_PATHS
 
+    def test_dispatcher_table_is_valid_config(self) -> None:
+        errors, warnings = validate_config({
+            "dispatcher": {
+                "disabled_checks": ["quality_gate"],
+                "checks": {"quality_gate": {"enabled": False}},
+                "global_budget_ms": 500,
+                "event_budgets_ms": {"PreToolUse": 250},
+            },
+        })
+
+        assert errors == [] and warnings == []
+
     def test_unknown_mode_value_errors(self) -> None:
         # WP4: lint has a declared mode enum, so a bogus mode is an error now
         errors, _ = validate_config({"gates": {"lint": {"mode": "yolo"}}})

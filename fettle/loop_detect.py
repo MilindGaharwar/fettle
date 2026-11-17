@@ -122,10 +122,9 @@ def run_check(ctx):
     window = gate_cfg.get("window", 7)
     session_id = ctx.session_id or "unknown"
 
-    state_dir = os.environ.get(
-        "FETTLE_LOOP_STATE_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state", "sessions"),
-    )
+    from fettle.config import state_dir as session_state_dir
+
+    state_dir = os.environ.get("FETTLE_LOOP_STATE_DIR", str(session_state_dir(session_id)))
 
     state_path = _get_state_path(state_dir, session_id)
     call_hash = _hash_call(tool_name, tool_input)

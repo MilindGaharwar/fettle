@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from copy import deepcopy
@@ -105,6 +106,22 @@ def _run_raw(command: str, payload: str, root: Path, env: dict[str, str]) -> sub
         command, cwd=root, env=env, input=payload, text=True,
         capture_output=True, shell=True, timeout=15,
     )
+
+
+def _start_hook_session(
+    mode: str, root: Path, env: dict[str, str], session: str,
+) -> subprocess.CompletedProcess[str]:
+    payload = _payload("claude_code", "pre_bash", root, command="printf safe")
+    payload["session_id"] = session
+    return _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+
+def _stop_hook_session(
+    mode: str, root: Path, env: dict[str, str], session: str,
+) -> subprocess.CompletedProcess[str]:
+    payload = _payload("claude_code", "stop", root)
+    payload["session_id"] = session
+    return _run(_event_command(mode, "Stop"), payload, root, env)
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
@@ -271,6 +288,260 @@ def test_registered_hook_detects_edit_after_journal_is_deleted(installed_hook_re
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_session_state_directory_deletion(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.config_protect]\nenabled = true\nmode = \"enforce\"\n"
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    session = "tr2-state-delete"
+    pre = _payload("claude_code", "pre_bash", root, command="printf safe")
+    pre["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), pre, root, env).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    delete = _payload("claude_code", "pre_bash", root, command=f"rm -rf {shlex.quote(str(state))}")
+    delete["session_id"] = session
+
+    result = _run(_event_command(mode, "PreToolUse"), delete, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Fettle policy modification blocked" in json.loads(result.stdout)["reason"]
+    assert state.is_dir()
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    stopped = _run(_event_command(mode, "Stop"), stop, root, env)
+    assert stopped.returncode == 2, stopped.stderr
+    assert "no verification run recorded this session" in json.loads(stopped.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_stop_does_not_recreate_deleted_session_start(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr2-missing-session-start"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    shutil.rmtree(state)
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+    assert not (state / "session-start.json").exists()
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_clean_stop_as_first_session_event(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr2-clean-first-stop"
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy integrity evidence is unavailable" in json.loads(result.stdout)["systemMessage"]
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    assert not (state / "session-start.json").exists()
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize("repository", (False, True), ids=("not-a-repository", "no-commits"))
+def test_registered_hook_allows_unchanged_session_without_git_history(
+    installed_hook_repo, mode, repository,
+):
+    fixture_root, env = installed_hook_repo
+    root = fixture_root.parent / ("empty-repository" if repository else "plain-directory")
+    root.mkdir()
+    if repository:
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    session = f"tr2-no-history-{repository}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "no verification run recorded this session" not in result.stdout
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("change", "blocked"),
+    (
+        ("commit-code", True),
+        ("commit-docs", False),
+        ("amend-code", True),
+        ("switch-code-branch", True),
+    ),
+)
+def test_registered_hook_compares_committed_code_with_session_start(
+    installed_hook_repo, mode, change, blocked,
+):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        "[gates.verify]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    (root / "README.md").write_text("# Base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    base_branch = subprocess.run(
+        ["git", "-C", str(root), "branch", "--show-current"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if change == "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "switch", "-qc", "changed-code"], check=True)
+        target.write_text("value = 2\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "app.py"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+             "commit", "-qm", "branch code"],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(root), "switch", "-q", base_branch], check=True)
+
+    session = f"tr1-{change}"
+    shell = _payload("claude_code", "pre_bash", root, command="printf safe")
+    shell["session_id"] = session
+    assert _run(_event_command(mode, "PreToolUse"), shell, root, env).returncode == 0
+
+    if change == "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "switch", "-q", "changed-code"], check=True)
+    elif change == "commit-docs":
+        (root / "README.md").write_text("# Updated\n", encoding="utf-8")
+        paths = ["README.md"]
+    else:
+        target.write_text("value = 3\n", encoding="utf-8")
+        paths = ["app.py"]
+    if change != "switch-code-branch":
+        subprocess.run(["git", "-C", str(root), "add", *paths], check=True)
+        command = [
+            "git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "-qm", change,
+        ]
+        if change == "amend-code":
+            command.extend(["--amend", "--no-edit"])
+        subprocess.run(command, check=True)
+
+    stop = _payload("claude_code", "stop", root)
+    stop["session_id"] = session
+    result = _run(_event_command(mode, "Stop"), stop, root, env)
+
+    assert result.returncode == (2 if blocked else 0), result.stderr
+    if blocked:
+        reason = json.loads(result.stdout)["reason"]
+        assert "no verification run recorded this session" in reason
+        assert "source snapshot or HEAD changed during this session" in reason
+        assert "0 code file(s) edited this session" not in reason
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize("targets", [("advisory.ts", "blocking.ts"), ("blocking.ts", "advisory.ts")])
+def test_registered_hook_adapter_fanout_uses_most_severe_result(
+    installed_hook_repo, mode, targets,
+):
+    root, env = installed_hook_repo
+    env["npm_config_loglevel"] = "silent"
+    (root / ".fettle.toml").write_text(
+        "[dispatcher]\nglobal_budget_ms = 5000\n"
+        "[gates.lint]\nenabled = true\nmode = \"enforce\"\n",
+        encoding="utf-8",
+    )
+    (root / "package.json").write_text(
+        json.dumps({"scripts": {"lint": "python3 lint.py"}}), encoding="utf-8",
+    )
+    (root / "lint.py").write_text(
+        "import json, sys\n"
+        "target = sys.argv[-1]\n"
+        "severity = 2 if target.endswith('blocking.ts') else 1\n"
+        "print(json.dumps([{'filePath': target, 'messages': "
+        "[{'severity': severity, 'line': 1, 'column': 1, "
+        "'ruleId': 'synthetic', 'message': 'synthetic lint finding'}]}]))\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    for target in targets:
+        (root / target).write_text("const value = 1;\n", encoding="utf-8")
+    payload = _payload("claude_code", "post_write", root)
+    payload["tool_name"] = "Edit"
+    payload["tool_input"] = {"edits": [{"file_path": target} for target in targets]}
+
+    result = _run(_event_command(mode, "PostToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    output = json.loads(result.stdout)
+    assert "synthetic lint finding" in output["reason"]
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert context.count("adapter_check: 1 target had advisories") == 1
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_patch_move_to_protected_config(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / "safe.txt").write_text("safe\n", encoding="utf-8")
+    payload = _payload(
+        "claude_code",
+        "pre_edit",
+        root,
+        command=(
+            "*** Begin Patch\n"
+            "*** Update File: safe.txt\n"
+            "*** Move to: ruff.toml\n"
+            "@@\n-safe\n+unsafe\n"
+            "*** End Patch"
+        ),
+    )
+    payload["tool_name"] = "apply_patch"
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Config modification blocked" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_uses_project_policy_from_subdirectory(installed_hook_repo, mode):
     root, env = installed_hook_repo
     subdir = root / "nested"
@@ -332,18 +603,40 @@ def test_registered_hook_ignores_repository_local_fettle_package(installed_hook_
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
-def test_registered_hook_blocks_malformed_pretool_input(installed_hook_repo, mode):
+@pytest.mark.parametrize(
+    "payload",
+    (
+        '["PreToolUse"]',
+        '{"hook_event_name":"BeforeTool",',
+        '{"hook_event_name":"PreToolUse",',
+    ),
+)
+def test_registered_hook_blocks_malformed_pretool_input(installed_hook_repo, mode, payload):
     root, env = installed_hook_repo
 
     result = _run_raw(
         _event_command(mode, "PreToolUse"),
-        '{"hook_event_name":"PreToolUse",',
+        payload,
         root,
         env,
     )
 
     assert result.returncode == 2, result.stderr
     assert "Malformed PreToolUse input" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_malformed_non_pretool_input(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+
+    result = _run_raw(
+        _event_command(mode, "PreToolUse"),
+        '{"hook_event_name":"AfterTool",',
+        root,
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
@@ -364,3 +657,208 @@ def test_registered_hook_treats_malformed_journal_as_unknown(installed_hook_repo
 
     assert result.returncode == 2, result.stderr
     assert "evidence is malformed" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_uses_session_start_enforcement_for_policy_change(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-start-enforce"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    (root / ".fettle.toml").write_text("", encoding="utf-8")
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert "policy changed during this session" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_unchanged_advisory_policy(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-advisory-unchanged"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy changed during this session" not in result.stdout
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_when_advisory_policy_changes(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-advisory-changed"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    (root / ".fettle.toml").write_text(
+        '[dispatcher]\nglobal_budget_ms = 4999\n'
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy changed during this session" in json.loads(result.stdout)["systemMessage"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("case_name", "tool_input", "protected_name"),
+    (
+        ("pre_edit", {"file_path": ".fettle.toml"}, ".fettle.toml"),
+        ("pre_edit", {"file_path": ".fettle/new-evidence.json"}, "new-evidence.json"),
+        ("pre_edit", {"file_path": ".claude/settings.local.json"}, "settings.local.json"),
+        ("pre_bash", {"command": "rm .fettle.toml"}, ".fettle.toml"),
+        ("pre_bash", {"command": "printf x > .codex/hooks.json"}, "hooks.json"),
+    ),
+)
+def test_registered_hook_blocks_control_plane_writes(
+    installed_hook_repo, mode, case_name, tool_input, protected_name,
+):
+    root, env = installed_hook_repo
+    payload = _payload("claude_code", case_name, root, **tool_input)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    reason = json.loads(result.stdout)["reason"]
+    assert "Fettle policy modification blocked:" in reason
+    assert protected_name in reason
+    assert "Disable:" not in reason
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    "command",
+    (
+        'python3 -c "open(\'.fettle.toml\',\'w\').write(\'\')"',
+        "git checkout HEAD~1 -- .fettle.toml",
+        "bash -c 'echo > .fettle.toml'",
+        "mkdir -p sub && cd sub && rm ../.fettle.toml",
+        "perl -pi -e 's/enforce/advisory/' .fettle.toml",
+        "dd if=/dev/null of=.fettle.toml",
+        "ln -sf /dev/null .fettle.toml",
+        "rm -rf $XDG_STATE_HOME/fettle",
+        "rm -rf ~/.local/state/fettle",
+        "find {state_root} -delete",
+    ),
+)
+def test_registered_hook_blocks_commands_referencing_control_plane(
+    installed_hook_repo, mode, command,
+):
+    root, env = installed_hook_repo
+    command = command.format(state_root=shlex.quote(str(Path(env["XDG_STATE_HOME"]) / "fettle")))
+    payload = _payload("claude_code", "pre_bash", root, command=command)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Fettle policy modification blocked:" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    "command",
+    (
+        "cat .fettle.toml",
+        "git diff .fettle.toml",
+        "git add .fettle.toml && git commit -m x",
+        "fettle config --explain",
+        "grep -r foo . > out.txt",
+        "rm build.log",
+        "ls .fettle",
+    ),
+)
+def test_registered_hook_allows_safe_commands_with_or_without_control_plane_reference(
+    installed_hook_repo, mode, command,
+):
+    root, env = installed_hook_repo
+    payload = _payload("claude_code", "pre_bash", root, command=command)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_on_shell_control_plane_reference(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    payload = _payload(
+        "claude_code", "pre_bash", root,
+        command='python3 -c "open(\'.fettle.toml\', \'w\').write(\'\')"',
+    )
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "Fettle policy modification blocked:" in output["additionalContext"]
+    assert output.get("permissionDecision") != "deny"
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_agent_repair_of_broken_root_policy(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text("[gates.config_protect\n")
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert (
+        "fix `.fettle.toml` in your editor, then run `fettle doctor`"
+        in json.loads(result.stdout)["reason"]
+    )
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_policy_edit_when_remote_policy_is_unavailable(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    env["FETTLE_POLICY_CACHE_DIR"] = str(root / "missing-policy-cache")
+    (root / ".fettle.toml").write_text(
+        '[extends]\nurl = "https://example.com/org.toml"\nsha256 = "'
+        + "0" * 64 + '"\n',
+        encoding="utf-8",
+    )
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "fettle policy sync" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_on_control_plane_write(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+    )
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "Fettle policy modification blocked:" in output["additionalContext"]
+    assert output.get("permissionDecision") != "deny"

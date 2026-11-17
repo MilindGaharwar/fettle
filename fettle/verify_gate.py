@@ -878,8 +878,13 @@ def run_check(ctx: HookContext) -> CheckResult:
     if not problem:
         return CheckResult.allow()
 
+    change = (
+        f"{len(edited)} code file(s) edited this session"
+        if edited
+        else "the source snapshot or HEAD changed during this session"
+    )
     msg = (
-        f"Verify gate: {len(edited)} code file(s) edited this session but the "
+        f"Verify gate: {change} but the "
         f"test suite is not verified green — {problem}\n"
         f"Run: fettle verify"
     )

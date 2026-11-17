@@ -21,6 +21,19 @@ def test_log_decision_creates_file(tmp_path, monkeypatch):
     assert entry["status"] == "pass"
 
 
+def test_log_decision_records_repository_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    root = tmp_path / "project"
+    root.mkdir()
+
+    log_decision(hook="Stop", status="pass", root=str(root))
+
+    trace_path = tmp_path / "fettle" / "trace.jsonl"
+    entry = json.loads(trace_path.read_text().strip())
+    assert entry["root"] == str(root.resolve())
+    assert entry["repo"] == "project"
+
+
 def test_get_recent_decisions(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     for i in range(5):

@@ -109,6 +109,32 @@ def _empty_output(event_name: str = "") -> str:
     )
 
 
+def _most_severe_target_result(check_name: str, results: list[CheckResult]) -> CheckResult:
+    """Collapse one check's target fan-out without hiding later results."""
+    precedence = {Decision.ALLOW: 0, Decision.ADVISORY: 1, Decision.BLOCK: 2}
+    winner = max(results, key=lambda item: precedence[item.decision], default=CheckResult.allow())
+    advisories = [item for item in results if item.decision == Decision.ADVISORY]
+    if not advisories:
+        return winner
+
+    count = len(advisories)
+    noun = "target" if count == 1 else "targets"
+    details = "\n".join(
+        dict.fromkeys(item.message.strip() for item in advisories if item.message)
+    )
+    summary = f"{check_name}: {count} {noun} had advisories"
+    if details:
+        summary += f"\n{details}"
+    if winner.decision == Decision.ADVISORY:
+        winner.message = summary
+    else:
+        output = dict(winner.hook_specific_output)
+        existing = output.get("additionalContext")
+        output["additionalContext"] = f"{summary}\n\n{existing}" if existing else summary
+        winner.replace(hook_specific_output=output)
+    return winner
+
+
 def main() -> int:
     if os.environ.get("FETTLE_DISABLE_DISPATCHER") == "1":
         print(_empty_output())
@@ -118,11 +144,12 @@ def main() -> int:
         raw_stdin = sys.stdin.read()
         payload = json.loads(raw_stdin or "{}")
         if not isinstance(payload, dict):
-            payload = {}
+            raise TypeError("hook input must be a JSON object")
     except Exception as exc:  # noqa: BLE001 — fail-open by design, but never silently
         logger.error("fettle: stdin parse failed: %s", exc, exc_info=True)
         _trace_dispatch_failure("input_error", f"{type(exc).__name__}: {exc}")
-        if '"PreToolUse"' in raw_stdin:
+        from fettle.agents import raw_names_pretool_event
+        if raw_names_pretool_event(raw_stdin):
             failure = Aggregator(total_budget_ms=0, hook_event_name="PreToolUse")
             failure.add_result(
                 "dispatcher",
@@ -165,7 +192,15 @@ def main() -> int:
         policy_digest = hashlib.sha256(
             json.dumps(config, sort_keys=True, separators=(",", ":"), default=str).encode()
         ).hexdigest()
-        record_session_start(session_id, cwd, policy_digest)
+        config_protect = config.get("gates", {}).get("config_protect", {})
+        if hook_input.hook_event_name != "Stop":
+            record_session_start(
+                session_id,
+                cwd,
+                policy_digest,
+                config_protect_enabled=bool(config_protect.get("enabled", False)),
+                config_protect_mode=str(config_protect.get("mode", "advisory")),
+            )
         if hook_input.hook_event_name == "PostToolUse" and hook_input.tool_name in {"Write", "Edit"}:
             for target in hook_input.targets:
                 record(session_id, target if target.is_absolute() else invocation_cwd / target, hook_input.tool_name)
@@ -197,8 +232,10 @@ def main() -> int:
         )
         failure = Aggregator(total_budget_ms=0, hook_event_name=hook_input.hook_event_name)
         failure.add_result("dispatcher", CheckResult.block(
-            "Policy configuration could not be loaded; required checks are unknown. "
-            "Run `fettle doctor` and retry."
+            "Org policy is declared but not available locally. Run: fettle policy sync"
+             if "policy sync" in str(exc)
+             else "Policy configuration could not be loaded; fix `.fettle.toml` in your "
+                  "editor, then run `fettle doctor`."
         ), 0)
         output, exit_code = failure.finish()
         print(json.dumps(output, separators=(",", ":")))
@@ -251,7 +288,7 @@ def main() -> int:
                     replace(ctx, input=replace(hook_input, targets=(target,)))
                     for target in hook_input.targets
                 ]
-            result = CheckResult.allow()
+            target_results = []
             for target_ctx in target_contexts:
                 result = spec.run(target_ctx)
                 if result is None:
@@ -259,9 +296,8 @@ def main() -> int:
                         CheckResult.unknown("Required check returned no result", action="retry")
                         if spec.requires_execution_for(target_ctx) else CheckResult.allow()
                     )
-                if result.decision != Decision.ALLOW:
-                    ctx = target_ctx
-                    break
+                target_results.append(result)
+            result = _most_severe_target_result(spec.name, target_results)
         except Exception as exc:  # noqa: BLE001 — isolate check failures
             if spec.requires_execution_for(ctx):
                 logger.error("fettle: security check %s failed closed", spec.name)
@@ -313,6 +349,7 @@ def main() -> int:
                         duration_ms=elapsed_ms,
                         session_id=session_id,
                         role=str(ctx.config.get("role", "")),
+                        root=str(ctx.cwd),
                     )
 
         # WP-D: Log overruns for observability — and trace them, so chronic
@@ -329,6 +366,7 @@ def main() -> int:
                                "budget_ms": spec.budget_ms or 0,
                                "actual_ms": elapsed_ms}],
                     session_id=session_id,
+                    root=str(ctx.cwd),
                 )
 
         if aggregator.has_block:

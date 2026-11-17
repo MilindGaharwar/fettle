@@ -26,9 +26,14 @@ test repository before relying on stricter delegation and evidence gates. A
 gate should move to `enforce` only after its tools, recovery path, and signal
 quality are known in your environment.
 
-## Policy source precedence
+## Policy source precedence and floors
 
-Later sources win (the capsule may only tighten):
+Fettle first composes defaults, org/team packs, central policy, repository and
+path-scoped configuration, and the emergency environment override. For ordinary
+settings, later local sources keep the established precedence. Enforcement
+settings from the organisation pack, team pack, digest-pinned central policy,
+and policy capsule are **floors**: a later source may tighten them, but cannot
+weaken them.
 
 | # | Source | Location |
 |---|--------|----------|
@@ -44,8 +49,39 @@ Later sources win (the capsule may only tighten):
 Directory overrides apply only to per-file gates (the resolver walks the
 edited file's ancestors); commands that resolve without a file get root
 scope. Org/team packs may set `_name = "acme"` for provenance display.
-Inspect the result with `fettle config --print-effective` (exactly what
-gates load) and `fettle config --explain` (which layer set each key).
+The floor applies to gate `enabled` and `mode`, documented directed numeric
+thresholds, role restrictions, dispatcher disable controls, and named Assurance
+Record release policies. A repository may narrow accepted release states, but
+cannot widen them. Other keys retain normal override behavior. Inspect the
+result with `fettle config --print-effective` (exactly what gates load) and
+`fettle config --explain` (which layer won and any ignored weakening attempt).
+
+### Dispatcher controls
+
+```toml
+[dispatcher]
+disabled_checks = ["optional_check"]
+global_budget_ms = 500
+
+[dispatcher.event_budgets_ms]
+PreToolUse = 250
+
+[dispatcher.checks.optional_check]
+enabled = false
+```
+
+The event budget clock starts after input normalization, project-root discovery,
+strict policy loading, policy-digest construction, and the session-start record.
+It covers check selection, check execution, aggregation, and response finalization;
+process and interpreter start-up plus those pre-clock operations are excluded.
+Per-check deadlines are capped by the remaining event budget.
+
+Repository-level disables do not suppress checks marked fail-closed. Only a
+governing floor may disable one. `fettle config --explain` reports ignored
+repository disables rather than silently accepting them.
+
+The `[trust]` namespace is reserved for future trust-root policy. It is not a
+supported configuration table yet; unknown-key validation still warns on it.
 
 ## Inspect the runtime pipeline
 
@@ -139,9 +175,10 @@ sha256 = "9f2c…"   # content digest — the pin is mandatory
   `fettle policy sync` fetches (HTTPS only, 1 MiB cap); `fettle policy
   status` shows pin + cache state; `fettle doctor` warns when a configured
   policy isn't synced.
-- **Offline operation**: hooks never fetch policy. If no valid cached policy is
-  available, local behavior and warnings depend on the calling surface; verify
-  required central policy with `fettle policy status` in CI.
+- **Offline operation**: hooks never fetch policy. If a repository declares
+  central policy and no valid cache is available, the hook blocks with
+  `fettle policy sync`; missing, malformed, or tampered policy is not treated as
+  local authorization.
 - One hop only: an org policy cannot itself contain `[extends]`.
 
 ## Telemetry (`[telemetry]`, WP-148)
@@ -411,6 +448,8 @@ trace_dir = ".fettle" # per-project findings/metrics log (gitignore it)
 | `FETTLE_TRACE_DIR` | Override the trace directory |
 | `FETTLE_LEAN_MAX_RUNTIME_MS` | Override the lean-sniffer wall-clock budget (default 200 ms; test harnesses pin a high value for determinism) |
 | `FETTLE_LEAN_STATE_DIR` | Override the lean-review session state directory |
+| `FETTLE_LOOP_STATE_DIR` | Override loop-detection session state; otherwise it uses the redirected Fettle state directory |
+| `FETTLE_SCOPE_STATE_DIR` | Override scope-creep session state; otherwise it uses the redirected Fettle state directory |
 | `MCP_ALLOWLIST_PATH` | Override the MCP trust-gate allowlist path (default `~/.config/fettle/mcp-allowlist.json`). Inert when policy sets `[gates.mcp_trust].allowlist_path`. |
 
 ## Automation recipes (WP-163)
@@ -442,6 +481,21 @@ moves it from advisory to enforce.
 - **Per-session state** (edit tracking, plan-gate counters, browser-test marker)
   lives under `$XDG_STATE_HOME/fettle/<session_id>/` — concurrent agent
   sessions never see each other's state.
+- **Protected control plane** includes root and ancestor `.fettle.toml` files,
+  `.fettle-ignore`, `.fettle/`, redirected session state, and supported host
+  hook settings. File-tool paths are resolved before comparison. A shell command
+  that references the control plane is allowed only when every command carrying
+  the reference is read-only: `cat`, `head`, `tail`, `less`, `grep`, `rg`, `wc`,
+  `ls`, `stat`, `diff`, `cmp`, `shasum`, `sha256sum`, `fettle`, or `git` with
+  `status`, `diff`, `log`, `show`, `blame`, `ls-files`, `add`, or `commit`.
+  Redirection cannot write to the control plane. This command-text analysis
+  cannot see a path computed or obfuscated inside another program; it is mistake
+  prevention, not an operating-system sandbox. The session policy-integrity
+  check is the backstop for a policy change that this analysis does not see.
+  However, an agent running as the same operating-system user can evade these
+  hooks if an unrecognized command removes Fettle's session state and the agent
+  then commits its code changes. TR-2 does not detect that combination; the
+  independent verification planned for TR-5 addresses it.
 - **Per-project trace** (`.fettle/trace.jsonl`, override with
   `FETTLE_TRACE_DIR`) records detailed findings, hook metrics, and gate
   errors for the current repository.

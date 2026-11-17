@@ -16,7 +16,9 @@ _CANONICAL = {
     "read": "Read", "read_file": "Read",
     "grep": "Search", "glob": "Search", "search": "Search",
 }
-_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_PATCH_FILE_RE = re.compile(
+    r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE,
+)
 
 
 def canonical_tool(name: str | None) -> str | None:

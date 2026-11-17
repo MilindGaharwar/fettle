@@ -230,7 +230,7 @@ def _is_plumbing(path: str) -> bool:
 
 
 def merge_for_child(
-    capsule_policy: dict, local: dict
+    capsule_policy: dict, local: dict, *, keep_unclassified_local: bool = False,
 ) -> tuple[dict, list[dict]]:
     """Child effective policy = capsule policy, monotonically stricter.
 
@@ -258,6 +258,29 @@ def merge_for_child(
             cap_v = cap.get(key)
             loc_v = loc.get(key)
             if not in_cap:
+                if path == "dispatcher" and isinstance(loc_v, dict):
+                    cleaned = copy.deepcopy(loc_v)
+                    disabled = cleaned.pop("disabled_checks", None)
+                    if disabled:
+                        note("dispatcher.disabled_checks", [], disabled)
+                    checks = cleaned.get("checks")
+                    if isinstance(checks, dict):
+                        for check_name, check_cfg in checks.items():
+                            if isinstance(check_cfg, dict) and check_cfg.get("enabled") is False:
+                                check_cfg["enabled"] = True
+                                note(f"dispatcher.checks.{check_name}.enabled", True, False)
+                    out[key] = cleaned
+                    continue
+                if path == "dispatcher.disabled_checks":
+                    out[key] = []
+                    if loc_v:
+                        note(path, [], loc_v)
+                    continue
+                if path.startswith("dispatcher.checks.") and path.endswith(".enabled") \
+                        and loc_v is False:
+                    out[key] = True
+                    note(path, True, loc_v)
+                    continue
                 out[key] = copy.deepcopy(loc_v)  # capsule silent → local
                 continue
             if not in_loc:
@@ -293,6 +316,22 @@ def merge_for_child(
                 if stricter != loc_v:
                     note(path, cap_v, loc_v)
                 continue
+            if path.startswith("assurance.release.") \
+                    and isinstance(cap_v, str) and isinstance(loc_v, str):
+                cap_states = [item.strip() for item in cap_v.split("|") if item.strip()]
+                loc_states = [item.strip() for item in loc_v.split("|") if item.strip()]
+                narrowed = [item for item in loc_states if item in cap_states]
+                out[key] = "|".join(narrowed) if narrowed else cap_v
+                if out[key] != loc_v:
+                    note(path, cap_v, loc_v)
+                continue
+            if path == "dispatcher.disabled_checks" or (
+                path.startswith("dispatcher.checks.") and path.endswith(".enabled")
+            ):
+                out[key] = copy.deepcopy(cap_v)
+                if out[key] != loc_v:
+                    note(path, cap_v, loc_v)
+                continue
             # Role key: higher rank = more restricted; child cannot widen.
             if path == "role" and isinstance(cap_v, str) and isinstance(loc_v, str):
                 cap_rank = _ROLE_RANK.get(cap_v, 0)
@@ -302,6 +341,9 @@ def merge_for_child(
                 else:
                     out[key] = cap_v  # capsule (stricter) wins
                     note(path, cap_v, loc_v)
+                continue
+            if keep_unclassified_local:
+                out[key] = copy.deepcopy(loc_v)
                 continue
             # Default: capsule wins (covers loosening lists per D-A2).
             out[key] = copy.deepcopy(cap_v)

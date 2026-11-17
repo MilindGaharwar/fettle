@@ -36,8 +36,9 @@ jobs:
       - name: Download tla2tools.jar
         run: |
           curl -fsSL -o specs/tla/tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-          echo "dbcc75552f21978a4846688b8e23be1a6b6c0b3fcee35d78fec2df167958ec94  specs/tla/tla2tools.jar" | sha256sum --check
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          # Computed from the upstream v1.7.4 asset on 2026-11-17.
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  specs/tla/tla2tools.jar" | sha256sum --check
 
       - name: Run TLA+ model checker
         run: ./specs/tla/run-all.sh

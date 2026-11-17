@@ -26,6 +26,7 @@ v1 entries (no `schema`/`repo` keys) remain readable forever.
 import json
 import hashlib
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -205,6 +206,7 @@ def log_decision(
     duration_ms: float = 0.0,
     session_id: str = "",
     role: str = "",
+    root: str = "",
 ) -> bool:
     """Log a hook decision to the trace file.
 
@@ -221,7 +223,8 @@ def log_decision(
         "status": status,
         "tool": tool,
         "file": file,
-        "repo": _repo_name(file),
+        "repo": Path(root).name if root else _repo_name(file),
+        "root": str(Path(root).resolve()) if root else "",
         "findings": [_bounded_finding(f) for f in (findings or [])[:_MAX_FINDINGS]],
         "evidence": [_bounded_evidence(e) for e in (evidence or [])[:_MAX_EVIDENCE]],
         "overrides": [_bounded_override(o) for o in (overrides or [])[:_MAX_OVERRIDES]],

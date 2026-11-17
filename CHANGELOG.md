@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require Semgrep 1.185 or later and limit full-project Semgrep scans to 600
+  seconds.
 - Add `[mutation].advisory_exclude` for PR-only mutation scope exclusions while preserving deliberate full-corpus generation.
 - Return cleanly after writing D4 corpus identities and other non-status mutation CLI outputs.
 - Retry transient D4 artifact uploads three times with exact-current-run partial-upload recovery and fail-closed final verification.

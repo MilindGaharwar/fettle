@@ -53,7 +53,6 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="runtime_output_guard",
-        policy_gates=("runtime_output",),
         run=_lazy("fettle.runtime_output_guard"),
         events=frozenset({"PostToolUse"}),
         tools=None,
@@ -76,7 +75,7 @@ CHECKS: tuple[CheckSpec, ...] = (
         policy_gates=("config_protect",),
         run=_lazy("fettle.config_protect"),
         events=frozenset({"PreToolUse"}),
-        tools=frozenset({"Write", "Edit"}),
+        tools=frozenset({"Bash", "Write", "Edit"}),
         order=10,
         budget_ms=50,
     ),
@@ -284,7 +283,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — architecture boundary rules
     CheckSpec(
         name="boundary_rules",
-        policy_gates=("boundary",),
+        policy_gates=("architecture_boundaries",),
         run=_lazy("fettle.boundary_rules"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write", "Edit"}),
@@ -295,7 +294,6 @@ CHECKS: tuple[CheckSpec, ...] = (
     # PostToolUse — provenance (new files only)
     CheckSpec(
         name="provenance_gate",
-        policy_gates=("provenance",),
         run=_lazy("fettle.provenance_gate"),
         events=frozenset({"PostToolUse"}),
         tools=frozenset({"Write"}),
@@ -311,6 +309,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         tools=None,
         order=52,
         budget_ms=100,
+    ),
+    CheckSpec(
+        name="policy_integrity",
+        run=_lazy("fettle.policy_integrity"),
+        events=frozenset({"Stop"}),
+        tools=None,
+        order=51,
+        budget_ms=50,
+        protected_from_repo_disable=True,
     ),
     # PostToolUse(Bash) — record `git push` for the CI gate (Stage 8)
     CheckSpec(

@@ -457,10 +457,9 @@ def run_check(ctx):
         with contextlib.suppress(SyntaxError):
             tree = ast.parse(content)
 
-    state_dir = os.environ.get(
-        "FETTLE_LEAN_STATE_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".state"),
-    )
+    from fettle.config import state_dir as session_state_dir
+
+    state_dir = os.environ.get("FETTLE_LEAN_STATE_DIR", str(session_state_dir(session_id).parent))
 
     candidates: list[dict] = []
 

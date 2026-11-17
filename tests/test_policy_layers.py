@@ -85,7 +85,7 @@ def test_team_layer_discovered(tmp_path):
 
 
 def test_precedence_org_team_repo(tmp_path):
-    """Same key set at every level: repo > team > org > defaults."""
+    """Org and team packs floor a weaker repository value."""
     packs = _packs_dir(tmp_path)
     (packs / "org.toml").write_text('[gates.lint]\nmode = "enforce"\n')
     (packs / "team.toml").write_text('[gates.lint]\nmode = "soft"\n')
@@ -93,10 +93,23 @@ def test_precedence_org_team_repo(tmp_path):
     (project / ".fettle.toml").write_text('[gates.lint]\nmode = "advisory"\n')
 
     cfg, layers = resolve_with_provenance(str(project))
-    assert cfg["gates"]["lint"]["mode"] == "advisory"
+    assert cfg["gates"]["lint"]["mode"] == "soft"
     chain = explain_config(layers, "gates.lint.mode")
-    assert [c["layer"] for c in chain] == ["defaults", "org:org", "team:team", "repo"]
-    assert chain[-1]["value"] == "advisory"
+    assert [c["layer"] for c in chain] == [
+        "defaults", "org:org", "team:team", "repo", "org:org:floor", "team:team:floor",
+    ]
+    assert chain[-1]["value"] == "soft"
+
+
+def test_non_floor_org_value_remains_a_repository_default(tmp_path):
+    packs = _packs_dir(tmp_path)
+    (packs / "org.toml").write_text('[paths]\ntrace_dir = "org-trace"\n')
+    project = _project(tmp_path)
+    (project / ".fettle.toml").write_text('[paths]\ntrace_dir = "repo-trace"\n')
+
+    cfg = load_config(str(project))
+
+    assert cfg["paths"]["trace_dir"] == "repo-trace"
 
 
 def test_org_plus_repo_merge_disjoint_keys(tmp_path):
@@ -127,12 +140,14 @@ def test_remote_layer_between_team_and_repo(tmp_path, monkeypatch):
     import fettle.policy_remote as pr
     monkeypatch.setattr(
         pr, "resolve_cached_policy",
-        lambda raw: {"gates": {"lint": {"mode": "soft"}, "plan": {"enabled": True}}},
+        lambda raw, **_kwargs: {
+            "gates": {"lint": {"mode": "soft"}, "plan": {"enabled": True}}
+        },
     )
 
     cfg, layers = resolve_with_provenance(str(project))
     names = [lyr.name for lyr in layers]
-    assert names == ["defaults", "team:team", "remote", "repo"]
+    assert names == ["defaults", "team:team", "remote", "repo", "team:team:floor", "remote:floor"]
     remote = layers[names.index("remote")]
     assert remote.source == "https://example.com/policy.toml"
     # remote overrides team; repo's disjoint key still applies

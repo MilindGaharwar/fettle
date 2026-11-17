@@ -324,12 +324,17 @@ Code treats as non-blocking.
   the session-start record (D-1). A change without a recorded approval blocks
   in enforce mode and is advisory otherwise. The Assurance Record's
   `policy_integrity` dimension reports this instead of a constant PASS.
-- **Recovery.** A policy load error no longer blocks the edit that repairs the
-  policy file: when the only target of an `Edit` or `Write` is a policy file
-  that currently fails to load, the event is allowed with an advisory.
-- **Honest limit.** These measures stop mistakes and leave evidence. Against a
-  hostile agent the authority is the verifier, which loads policy from the base
-  ref (D-7).
+- **Recovery correction (review, 2026-11-17).** Policy repair is owner-only.
+  When local policy is unreadable or invalid, every agent event blocks with
+  "fix `.fettle.toml` in your editor, then run `fettle doctor`"; unavailable remote
+  policy keeps the `fettle policy sync` recovery action. The prior repair
+  exception was removed because it could also authorize an agent to delete an
+  unavailable `[extends]` declaration before session-start evidence existed.
+- **Honest limit.** An agent running as the same operating-system user can remove
+  Fettle's session state through a command the shell analysis does not recognize
+  and then commit its changes. TR-2 does not detect that combination and must not
+  be described as preventing it. Independent verification in TR-5, loading
+  policy from the base ref (D-7), is the control that addresses it.
 
 ### D-6 Test evidence
 
@@ -630,7 +635,7 @@ P2). Size: L. Design: D-5.
 |---|---|---|
 | E2 | `.fettle.toml`, session state and host settings are unprotected; `disabled_checks` disables fail-closed checks | R |
 | E12 | Config protection misses new files, symlinks, case variants and relative paths; its block message explains how to disable it | S |
-| E15 | A corrupt policy file blocks the edit that would repair it | S |
+| E15 | A corrupt policy file blocks agent edits; the owner repairs it outside the session | S |
 | E17 | Loop, scope and lean state are written under the install directory; the trace is global across repositories | S |
 | E18 | `[dispatcher]` keys are honoured but absent from the schema | S |
 | V6 | The repository layer overrides organisation release policy | S, C |
@@ -881,6 +886,14 @@ before it is changed. Size: S each; L in total.
 Also assigned to TR-9 is E24: under load the default `PreToolUse` budget
 expires before the first check; a required check becomes a generic deadline
 block and non-required checks are skipped. Its priority is owner to decide.
+The current event clock starts only after policy load, policy-digest creation,
+and session-start persistence, so interpreter/process start-up and those
+pre-clock operations are excluded from the configured budget. Item G measured
+200 unloaded runs in each installed launch mode on Apple arm64 with CPython
+3.12.13: process start to first check was 362.209 ms median / 425.215 ms p95
+for plugin mode and 108.922 ms median / 121.438 ms p95 for bridge mode. All
+400 runs reached the first check with zero deadline blocks, skipped checks, or
+measurement errors. This unloaded evidence does not verify E24 under load.
 
 Also in TR-9: triage of the roughly 10,300 non-message mutation survivors in
 the trust-critical modules (`verify_gate` 125, `completion` 92, `assurance` 94,

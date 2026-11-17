@@ -72,6 +72,47 @@ def _run_main(monkeypatch, capsys, stdin_text: str) -> tuple[int, dict]:
 
 
 class TestCheckCrashVisibility:
+    @pytest.mark.parametrize("targets", [("a.py", "b.py"), ("b.py", "a.py")])
+    def test_multi_target_check_uses_most_severe_result(
+        self, tmp_path, monkeypatch, capsys, isolated_trace, targets,
+    ):
+        seen = []
+
+        def run(ctx):
+            name = ctx.target_path.name
+            seen.append(name)
+            if name == "a.py":
+                return CheckResult.advisory("a needs attention")
+            return CheckResult.block("b must be fixed")
+
+        spec = CheckSpec(
+            name="fanout_check",
+            run=run,
+            events=frozenset({"PostToolUse"}),
+            tools=frozenset({"Edit"}),
+        )
+        monkeypatch.setattr(dispatcher_mod, "select_checks", lambda ctx: [spec])
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "dispatcher": {"global_budget_ms": 1000},
+            "gates": {},
+        })
+        payload = json.dumps({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"edits": [{"file_path": target} for target in targets]},
+            "cwd": str(tmp_path),
+            "session_id": "fanout-test",
+        })
+
+        code, output = _run_main(monkeypatch, capsys, payload)
+
+        assert code == 2
+        assert seen == list(targets)
+        assert "b must be fixed" in output["reason"]
+        context = output["hookSpecificOutput"]["additionalContext"]
+        assert context.count("fanout_check: 1 target had advisories") == 1
+        assert "a needs attention" in context
+
     def test_security_check_crash_blocks_without_exception_detail(
         self, monkeypatch, capsys, caplog, isolated_trace
     ):
@@ -504,6 +545,49 @@ class TestDispatchLevelFailures:
 
         assert code == 2
         assert f"Required check '{name}' did not complete." in output["reason"]
+
+    @pytest.mark.parametrize(("name", "module", "event", "tool", "gate"), [
+        ("boundary_rules", "fettle.boundary_rules", "PostToolUse", "Write", "architecture_boundaries"),
+        ("worklog", "fettle.worklog", "Stop", "Write", "worklog"),
+        ("post_bash_doc_check", "fettle.post_bash_doc_check", "PostToolUse", "Bash", "docs"),
+    ])
+    @pytest.mark.parametrize(("mode", "expected"), [("enforce", 2), ("advisory", 0)])
+    def test_real_registry_uses_each_checks_enforcing_configuration(
+        self, tmp_path, monkeypatch, capsys, isolated_trace,
+        name, module, event, tool, gate, mode, expected,
+    ):
+        from fettle import dispatcher_registry
+
+        def import_check(imported):
+            def run(_ctx):
+                if imported == module:
+                    raise RuntimeError("injected configured-check fault")
+                return CheckResult.allow()
+
+            return SimpleNamespace(run_check=run)
+
+        monkeypatch.setattr(dispatcher_registry, "import_module", import_check)
+        monkeypatch.setattr(dispatcher_mod, "load_config", lambda cwd, **kwargs: {
+            "gates": {gate: {"enabled": True, "mode": mode}},
+            "dispatcher": {"global_budget_ms": 1000},
+        })
+        payload = json.loads(_payload(event))
+        payload["tool_name"] = tool
+        payload["tool_input"]["file_path"] = str(tmp_path / "change.py")
+
+        code, output = _run_main(monkeypatch, capsys, json.dumps(payload))
+
+        assert code == expected
+        if expected:
+            assert f"Required check '{name}' failed closed." in output["reason"]
+
+    @pytest.mark.parametrize("name", ["runtime_output_guard", "provenance_gate"])
+    def test_registry_does_not_claim_nonexistent_enforcing_mode(self, name):
+        from fettle.dispatcher_registry import CHECKS
+
+        spec = next(item for item in CHECKS if item.name == name)
+
+        assert spec.policy_gates == ()
 
     @pytest.mark.parametrize(("name", "module", "tool"), [
         ("boundary_rules", "fettle.boundary_rules", "Write"),

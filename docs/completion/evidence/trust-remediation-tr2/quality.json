@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr2",
+  "revision": "trust-remediation-tr2-2026-11-17",
+  "expected_outcome": "TR-2 passes lint, installed UAT, range pre-commit, repository scan, and the unexcluded full suite after rebasing onto repaired main.",
+  "observations": [
+    "Pinned Ruff 0.15.20 reported all checks passed for fettle and tests.",
+    "The final targeted TR-2 and review-follow-up suite reported 522 passed in 90.55 seconds.",
+    "The exact-history unexcluded full suite reported 5323 passed and 20 skipped in 710.05 seconds with the repository virtual environment first on PATH.",
+    "The earlier full-suite attempt is retained as a non-pass: 39 tests lacked the nested `python` launcher because PATH omitted `.venv/bin`, and one bridge case passed immediately in isolated reproduction.",
+    "The range pre-commit command from origin/main to HEAD passed on the committed candidate.",
+    "Installed plugin and bridge UAT reported 147 passed in 87.34 seconds.",
+    "The repository Fettle scan exited successfully with the same three inherited warning-only debug-print findings."
+  ],
+  "result": "confirmed"
+}

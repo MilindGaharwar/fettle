@@ -270,6 +270,11 @@ any incident, improvement or milestone complete.
       policy or skill promotion, remote run, model call or new spending follows
       from this entry. It adds no AH01-AH07 criterion and does not change M-NC1's
       position as the first new domain workflow.
+      Owner decision 2026-11-17: after TR-5 and TR-6, add an automatic
+      session-end friction summary from the existing audit log. Flag only a
+      failed command followed by a different successful command and the same
+      error recurring across sessions. Each recurring item becomes a work item
+      or is dismissed with a recorded reason.
       Apply the planned [Experience Discipline vNext UX contract](../experience-discipline-vnext.ux-spec.md):
       justified L3 routing, actual actors, derived transitions/recovery, scoped
       claim states, shared blocking gates and IL-UX-01 through IL-UX-12 owner/evidence
@@ -769,15 +774,17 @@ otherwise. Finding IDs refer to the plan's register.
       confirmed on pull request #73). No behaviour change in `fettle/`.
       Harness and host table: local completion evidence recorded 2026-11-14.
       Required-check containment confirmed on pull request #76 under the
-      reviewer-amended security criterion on 2026-11-16; review and merge remain
-      separate actions.
-- [ ] E1. TR-1 Shipped hook path (P0: E1, E21, T1, E3, E4, E5) — dispatcher
+      reviewer-amended security criterion; TR-0 merged on 2026-11-16.
+- [x] E1. TR-1 Shipped hook path (P0: E1, E21, T1, E3, E4, E5) — dispatcher
       records edits; one entry point per check; project-root policy
       resolution; tool taxonomy with multi-target events; isolated launch.
+      PR #80 merged as tree-equivalent squash `bf26796` on 2026-11-17;
+      review corrections T-1 through T-5 are carried by TR-2.
 - [ ] E2. TR-2 Control plane and policy floors (P0: E2) — protect Fettle's own
       config, state and hook wiring; fail-closed checks cannot be disabled from
       the repository layer; organisation, remote and capsule policy become
-      floors; remote policy fails closed.
+      floors; remote policy fails closed. Findings R-1 through R-6 from review
+      on 2026-11-17 are fixed on PR #81; the reworked package is not merged.
 - [ ] E3. TR-3 Truthful verification (P0: V2, V3a) — gates read the validated
       artifact, never the stamp's `ok`; test counts recorded and zero executed
       tests is a non-pass; CI evidence bound to the assessed commit.
@@ -798,7 +805,15 @@ otherwise. Finding IDs refer to the plan's register.
       full-corpus preparation keeps both. The observed ledger's old shard-index
       contents remain an M7 limitation. Starts after D4 closes.
 - [ ] E9. TR-9 Polish — all P3 items and survivor triage in trust-critical
-      modules.
+      modules. Owner decision 2026-11-16: replace `kgraph` references in
+      planning documents and agent instructions with advisory
+      `fettle graph impact`.
+- [ ] After TR-9: contextual impact (P48). Owner decision 2026-11-16: begin
+      with read-only analysis of misses in
+      `docs/contextual-impact-corpus/evaluation.json`, improve the weak areas,
+      then re-test on a fresh, pre-frozen corpus. Baseline held-out required-
+      impact recall is 78.05% against the required 100%. A new hypothesis and
+      plan are required before implementation, as the existing plan states.
 
 ## Standing rules
 - No Claude/model-name attribution anywhere in Fettle docs or repo.

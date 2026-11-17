@@ -19,11 +19,17 @@ import copy
 import os
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {
+    "dispatcher": {
+        "disabled_checks": [],
+        "checks": {},
+        "global_budget_ms": 0,
+        "event_budgets_ms": {},
+    },
     "gates": {
         "lint": {"enabled": True, "mode": "advisory"},  # ruff + semgrep per edit
         "cross_file": {"enabled": True},  # Stop-hook import/contract checks
@@ -430,6 +436,22 @@ class PolicyLayer:
     name: str    # "defaults", "org:acme", "team:platform", "remote", "repo", "dir:src/api", "env:FETTLE_GATE_MODE", "capsule"
     source: str  # file path, env var name, or "built-in"
     config: dict
+    ignored: list[dict] = field(default_factory=list)
+
+
+class ResolvedConfig(dict):
+    """Effective configuration with non-serialised policy diagnostics."""
+
+    policy_ignored: list[dict]
+    floor_disabled_checks: frozenset[str]
+
+    def __init__(
+        self, *args, policy_ignored: list[dict] | None = None,
+        floor_disabled_checks: frozenset[str] = frozenset(), **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.policy_ignored = policy_ignored or []
+        self.floor_disabled_checks = floor_disabled_checks
 
 
 _DIR_NOISE = ("node_modules", "__pycache__", ".venv")
@@ -510,6 +532,7 @@ def resolve_with_provenance(
     """
     root = Path(cwd or os.getcwd())
     layers = [PolicyLayer("defaults", "built-in", copy.deepcopy(DEFAULTS))]
+    floor_layers: list[PolicyLayer] = []
 
     # Org / team packs ($XDG_CONFIG_HOME/fettle/{org,team}.toml).
     packs_dir = _xdg_config_home() / "fettle"
@@ -518,7 +541,9 @@ def resolve_with_provenance(
         data = _load_toml_layer(pack_path, strict=strict)
         if data is not None:
             name = data.pop("_name", kind)
-            layers.append(PolicyLayer(f"{kind}:{name}", str(pack_path), data))
+            layer = PolicyLayer(f"{kind}:{name}", str(pack_path), data)
+            layers.append(layer)
+            floor_layers.append(layer)
 
     # Repo config (.fettle.toml at root, or $FETTLE_CONFIG).
     configured_path = os.environ.get("FETTLE_CONFIG", "").strip()
@@ -533,11 +558,13 @@ def resolve_with_provenance(
     # is keyed off the repo's [extends] and merges UNDER it, over team.
     if repo_data and repo_data.get("extends"):
         from fettle.policy_remote import resolve_cached_policy
-        remote_cfg = resolve_cached_policy(repo_data)
+        remote_cfg = resolve_cached_policy(repo_data, strict=strict)
         if remote_cfg:
             ext = repo_data.get("extends")
             url = ext.get("url", "") if isinstance(ext, dict) else ""
-            layers.append(PolicyLayer("remote", url or "[extends] cache", remote_cfg))
+            remote_layer = PolicyLayer("remote", url or "[extends] cache", remote_cfg)
+            layers.append(remote_layer)
+            floor_layers.append(remote_layer)
     if repo_data is not None:
         layers.append(PolicyLayer("repo", str(config_path), repo_data))
 
@@ -565,18 +592,62 @@ def resolve_with_provenance(
         if diff:
             layers.append(PolicyLayer("env:FETTLE_GATE_MODE", f"FETTLE_GATE_MODE={mode}", diff))
 
+    from fettle.policy_capsule import merge_for_child
+    ignored: list[dict] = []
+    floor_disabled: set[str] = set()
+    for layer in floor_layers:
+        floor_config = layer.config
+        dispatcher = layer.config.get("dispatcher", {})
+        if isinstance(dispatcher, dict):
+            listed = dispatcher.get("disabled_checks", [])
+            if isinstance(listed, list):
+                floor_disabled.update(item for item in listed if isinstance(item, str))
+            checks = dispatcher.get("checks", {})
+            if isinstance(checks, dict):
+                floor_disabled.update(
+                    name for name, value in checks.items()
+                    if isinstance(value, dict) and value.get("enabled") is False
+                )
+        merged, layer.ignored = merge_for_child(
+            floor_config, cfg, keep_unclassified_local=True
+        )
+        floor_effect = _dict_diff(cfg, merged)
+        cfg = merged
+        ignored.extend({**item, "layer": layer.name} for item in layer.ignored)
+        if floor_effect or layer.ignored:
+            layers.append(PolicyLayer(
+                f"{layer.name}:floor", layer.source, floor_effect, layer.ignored
+            ))
+
     # Stage A (A3): delegated policy capsule — a verified capsule handed
     # down by a parent session merges OVER everything local, monotonically
     # stricter (children may only tighten). Applied after env handling so
     # kill-switch env vars cannot weaken delegated policy (design 12, D-A3).
-    from fettle.policy_capsule import ENV_VAR as CAPSULE_ENV, apply_env_capsule
+    from fettle.policy_capsule import ENV_VAR as CAPSULE_ENV, apply_env_capsule, last_ignored
     before = cfg
     cfg = apply_env_capsule(cfg)
     diff = _dict_diff(before, cfg)
     if diff:
-        layers.append(PolicyLayer("capsule", CAPSULE_ENV, diff))
+        capsule_layer = PolicyLayer("capsule", CAPSULE_ENV, diff, last_ignored())
+        layers.append(capsule_layer)
+        ignored.extend({**item, "layer": "capsule"} for item in capsule_layer.ignored)
 
-    return cfg, layers
+    repo_dispatcher = repo_data.get("dispatcher", {}) if isinstance(repo_data, dict) else {}
+    disabled = repo_dispatcher.get("disabled_checks", []) if isinstance(repo_dispatcher, dict) else []
+    if disabled:
+        ignored.append({"key": "dispatcher.disabled_checks", "local": disabled,
+                        "floor": "fail-closed checks cannot be disabled by repository policy",
+                        "layer": "repo"})
+    checks = repo_dispatcher.get("checks", {}) if isinstance(repo_dispatcher, dict) else {}
+    if isinstance(checks, dict):
+        for name, value in checks.items():
+            if isinstance(value, dict) and value.get("enabled") is False:
+                ignored.append({"key": f"dispatcher.checks.{name}.enabled", "local": False,
+                                "floor": "fail-closed checks cannot be disabled by repository policy",
+                                "layer": "repo"})
+    return ResolvedConfig(
+        cfg, policy_ignored=ignored, floor_disabled_checks=frozenset(floor_disabled)
+    ), layers
 
 
 def load_config(
@@ -605,6 +676,15 @@ def state_dir(session_id: str) -> Path:
     path = Path(base) / safe_session
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def state_root() -> Path:
+    """Configured state root without creating it."""
+    base = os.environ.get("FETTLE_STATE_DIR")
+    if not base:
+        xdg = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        base = os.path.join(xdg, "fettle")
+    return Path(base)
 
 
 def trace_path(cfg: dict[str, Any], cwd: str) -> Path:
