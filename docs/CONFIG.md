@@ -492,6 +492,10 @@ moves it from advisory to enforce.
   cannot see a path computed or obfuscated inside another program; it is mistake
   prevention, not an operating-system sandbox. The session policy-integrity
   check is the backstop for a policy change that this analysis does not see.
+  However, an agent running as the same operating-system user can evade these
+  hooks if an unrecognized command removes Fettle's session state and the agent
+  then commits its code changes. TR-2 does not detect that combination; the
+  independent verification planned for TR-5 addresses it.
 - **Per-project trace** (`.fettle/trace.jsonl`, override with
   `FETTLE_TRACE_DIR`) records detailed findings, hook metrics, and gate
   errors for the current repository.

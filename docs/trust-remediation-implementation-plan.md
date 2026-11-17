@@ -330,9 +330,11 @@ Code treats as non-blocking.
   policy keeps the `fettle policy sync` recovery action. The prior repair
   exception was removed because it could also authorize an agent to delete an
   unavailable `[extends]` declaration before session-start evidence existed.
-- **Honest limit.** These measures stop mistakes and leave evidence. Against a
-  hostile agent the authority is the verifier, which loads policy from the base
-  ref (D-7).
+- **Honest limit.** An agent running as the same operating-system user can remove
+  Fettle's session state through a command the shell analysis does not recognize
+  and then commit its changes. TR-2 does not detect that combination and must not
+  be described as preventing it. Independent verification in TR-5, loading
+  policy from the base ref (D-7), is the control that addresses it.
 
 ### D-6 Test evidence
 
