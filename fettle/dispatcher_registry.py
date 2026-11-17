@@ -312,7 +312,6 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         name="policy_integrity",
-        policy_gates=("config_protect",),
         run=_lazy("fettle.policy_integrity"),
         events=frozenset({"Stop"}),
         tools=None,

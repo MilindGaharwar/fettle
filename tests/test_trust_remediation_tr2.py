@@ -185,12 +185,43 @@ def test_policy_change_during_session_blocks_in_enforce_mode(
     original_digest = __import__("hashlib").sha256(
         __import__("json").dumps(original, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    record_session_start("tr2-policy", root, original_digest)
+    record_session_start(
+        "tr2-policy", root, original_digest,
+        config_protect_enabled=True, config_protect_mode="enforce",
+    )
     changed = {**original, "gates": {**original["gates"], "lint": {
         **original["gates"]["lint"], "mode": "enforce",
-    }}}
+    }, "config_protect": {"enabled": False, "mode": "advisory"}}}
     context = HookContext(
         HookInput("Stop", None, {}, root, "tr2-policy", {}), changed, root, 0.0, 999999999.0,
+    )
+
+    result = run_policy_integrity(context)
+
+    assert result.decision.value == "block"
+    assert "policy changed during this session" in result.message
+
+
+def test_policy_change_blocks_when_current_policy_enforces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+    original = load_config(str(root))
+    original_digest = __import__("hashlib").sha256(
+        __import__("json").dumps(original, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    record_session_start(
+        "tr2-current-enforce", root, original_digest,
+        config_protect_enabled=True, config_protect_mode="advisory",
+    )
+    changed = {**original, "gates": {**original["gates"], "config_protect": {
+        "enabled": True, "mode": "enforce",
+    }}}
+    context = HookContext(
+        HookInput("Stop", None, {}, root, "tr2-current-enforce", {}),
+        changed, root, 0.0, 999999999.0,
     )
 
     result = run_policy_integrity(context)
@@ -206,12 +237,29 @@ def test_policy_change_makes_assurance_integrity_non_pass(
     root = tmp_path / "project"
     root.mkdir()
     __import__("subprocess").run(["git", "init", "-q", str(root)], check=True)
-    record_session_start("tr2-assurance", root, "0" * 64)
+    record_session_start(
+        "tr2-assurance", root, "0" * 64,
+        config_protect_enabled=True, config_protect_mode="enforce",
+    )
 
     dimension = build_assurance_record(str(root))["record"]["dimensions"]["policy_integrity"]
 
     assert dimension["status"] == "FAIL"
     assert "changed during the session" in dimension["reason"]
+
+
+def test_missing_session_policy_evidence_makes_assurance_integrity_non_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+    __import__("subprocess").run(["git", "init", "-q", str(root)], check=True)
+
+    dimension = build_assurance_record(str(root))["record"]["dimensions"]["policy_integrity"]
+
+    assert dimension["status"] == "UNKNOWN"
+    assert "no session-start policy evidence" in dimension["reason"]
 
 
 def test_control_plane_detection_resolves_symlink(tmp_path: Path) -> None:

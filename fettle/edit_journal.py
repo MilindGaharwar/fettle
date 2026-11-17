@@ -143,16 +143,25 @@ def _commits_change_code(root: Path, start_revision: object) -> bool:
     )
 
 
-def record_session_start(session_id: str | None, root: Path, policy_digest: str) -> None:
+def record_session_start(
+    session_id: str | None,
+    root: Path,
+    policy_digest: str,
+    *,
+    config_protect_enabled: bool = False,
+    config_protect_mode: str = "advisory",
+) -> None:
     destination = config.state_dir(session_id or "unknown") / "session-start.json"
     if destination.exists():
         return
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "root": str(root.resolve()),
         "source_state": _code_state(root),
         "head_revision": _head_revision(root),
         "policy_digest": policy_digest,
+        "config_protect_enabled": config_protect_enabled,
+        "config_protect_mode": config_protect_mode,
     }
     temporary = destination.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")

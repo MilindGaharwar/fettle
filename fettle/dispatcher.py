@@ -203,7 +203,14 @@ def main() -> int:
         policy_digest = hashlib.sha256(
             json.dumps(config, sort_keys=True, separators=(",", ":"), default=str).encode()
         ).hexdigest()
-        record_session_start(session_id, cwd, policy_digest)
+        config_protect = config.get("gates", {}).get("config_protect", {})
+        record_session_start(
+            session_id,
+            cwd,
+            policy_digest,
+            config_protect_enabled=bool(config_protect.get("enabled", False)),
+            config_protect_mode=str(config_protect.get("mode", "advisory")),
+        )
         if hook_input.hook_event_name == "PostToolUse" and hook_input.tool_name in {"Write", "Edit"}:
             for target in hook_input.targets:
                 record(session_id, target if target.is_absolute() else invocation_cwd / target, hook_input.tool_name)

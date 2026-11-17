@@ -107,6 +107,22 @@ def _run_raw(command: str, payload: str, root: Path, env: dict[str, str]) -> sub
     )
 
 
+def _start_hook_session(
+    mode: str, root: Path, env: dict[str, str], session: str,
+) -> subprocess.CompletedProcess[str]:
+    payload = _payload("claude_code", "pre_bash", root, command="printf safe")
+    payload["session_id"] = session
+    return _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+
+def _stop_hook_session(
+    mode: str, root: Path, env: dict[str, str], session: str,
+) -> subprocess.CompletedProcess[str]:
+    payload = _payload("claude_code", "stop", root)
+    payload["session_id"] = session
+    return _run(_event_command(mode, "Stop"), payload, root, env)
+
+
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize(
@@ -562,6 +578,62 @@ def test_registered_hook_treats_malformed_journal_as_unknown(installed_hook_repo
 
     assert result.returncode == 2, result.stderr
     assert "evidence is malformed" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_uses_session_start_enforcement_for_policy_change(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-start-enforce"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    (root / ".fettle.toml").write_text("", encoding="utf-8")
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert "policy changed during this session" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_unchanged_advisory_policy(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-advisory-unchanged"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy changed during this session" not in result.stdout
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_when_advisory_policy_changes(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    session = "tr2-policy-advisory-changed"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    (root / ".fettle.toml").write_text(
+        '[dispatcher]\nglobal_budget_ms = 4999\n'
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy changed during this session" in json.loads(result.stdout)["systemMessage"]
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
