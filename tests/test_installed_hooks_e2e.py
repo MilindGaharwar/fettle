@@ -471,7 +471,10 @@ def test_registered_hook_compares_committed_code_with_session_start(
 
     assert result.returncode == (2 if blocked else 0), result.stderr
     if blocked:
-        assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+        reason = json.loads(result.stdout)["reason"]
+        assert "no verification run recorded this session" in reason
+        assert "source snapshot or HEAD changed during this session" in reason
+        assert "0 code file(s) edited this session" not in reason
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
