@@ -270,6 +270,11 @@ any incident, improvement or milestone complete.
       policy or skill promotion, remote run, model call or new spending follows
       from this entry. It adds no AH01-AH07 criterion and does not change M-NC1's
       position as the first new domain workflow.
+      Owner decision 2026-11-17: after TR-5 and TR-6, add an automatic
+      session-end friction summary from the existing audit log. Flag only a
+      failed command followed by a different successful command and the same
+      error recurring across sessions. Each recurring item becomes a work item
+      or is dismissed with a recorded reason.
       Apply the planned [Experience Discipline vNext UX contract](../experience-discipline-vnext.ux-spec.md):
       justified L3 routing, actual actors, derived transitions/recovery, scoped
       claim states, shared blocking gates and IL-UX-01 through IL-UX-12 owner/evidence
@@ -778,8 +783,8 @@ otherwise. Finding IDs refer to the plan's register.
 - [ ] E2. TR-2 Control plane and policy floors (P0: E2) — protect Fettle's own
       config, state and hook wiring; fail-closed checks cannot be disabled from
       the repository layer; organisation, remote and capsule policy become
-      floors; remote policy fails closed. Implementation and review follow-ups
-      are in progress; not merged.
+      floors; remote policy fails closed. Findings R-1 through R-6 from review
+      on 2026-11-17 are fixed on PR #81; the reworked package is not merged.
 - [ ] E3. TR-3 Truthful verification (P0: V2, V3a) — gates read the validated
       artifact, never the stamp's `ok`; test counts recorded and zero executed
       tests is a non-pass; CI evidence bound to the assessed commit.
