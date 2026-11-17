@@ -54,6 +54,7 @@ not a hidden UAT pass.
 
 ## Decision
 
-PENDING final package gates on the rebased TR-2 candidate. The exercised user
-flows pass. The prior diagnostic mutation attempt timed out and remains retained
-as non-required evidence; a fresh bounded attempt is required before push.
+SHIP. The final installed-path UAT reported 110 passed in both launch modes,
+and all required package gates passed. The fresh bounded mutation preflight
+timed out after 7,200 seconds and is retained as a truthful non-result; no
+narrow replay was authorized and no mutation credit is claimed.

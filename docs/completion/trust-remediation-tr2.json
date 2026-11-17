@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "milestone": "trust-remediation-tr2",
-  "revision": "trust-remediation-tr2-2026-11-15",
+  "revision": "trust-remediation-tr2-2026-11-17",
   "scope_digest_version": 2,
-  "scope_digest": "8004660ba4c4d669469d00f815108db14f98609bc565c63ba0f7b43bbf586651",
+  "scope_digest": "fe794a91b36ef1322cefb2855ff604b6685fdae15fc4bfcd67391781a0f76b69",
   "status": "complete",
   "uat_decision": "SHIP",
   "criteria": [
@@ -15,8 +15,8 @@
       "observed": "Both installed launch modes protect policy, evidence, redirected state, and host settings; preserve modeled enforcement floors; allow malformed-policy repair; report ignored weakening attempts; and fail closed for unavailable declared remote policy.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/verification.json",
-        "sha256": "f1fa174e25b32d9e00a2dfc5e6548fcb6a7f8290b18728865dbc8f0ca667c5ab",
-        "revision": "trust-remediation-tr2-2026-11-15"
+        "sha256": "7d8d321fdb0490b7e6c73bc7b70cbbbcfb9b4006102ed1d56efbfcac1e86d3d8",
+        "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the installed plugin and bridge UAT scenarios under isolated XDG state."
     },
@@ -25,11 +25,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "On rebased head 2f2a83c, Ruff passed, the targeted suite reported 235 passed, and the unexcluded full suite reported 5193 passed and 20 skipped. Current-head range pre-commit passed. A Semgrep timeout made the first Fettle scan non-pass; one diagnostic retry completed with only the three documented inherited warning-only findings.",
+      "observed": "Pinned Ruff passed, the targeted suite reported 470 passed, the affected T-3 regression set reported 9 passed, and the exact-history unexcluded full suite reported 5261 passed and 20 skipped. Installed-path UAT reported 110 passed, and the Fettle scan exited 0 with three inherited warning-only findings.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "f3d15a5682238b57358a54e03bc23514e6d82040978308a15f8890ba8edf7d06",
-        "revision": "trust-remediation-tr2-2026-11-15"
+        "sha256": "be080a96f65143d72f3eef7635e42a30979813fad0313c84d9eff0b4742dd09d",
+        "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
     },
@@ -38,11 +38,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on rebased committed candidate 2f2a83c.",
+      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on the rebased committed candidate.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "f3d15a5682238b57358a54e03bc23514e6d82040978308a15f8890ba8edf7d06",
-        "revision": "trust-remediation-tr2-2026-11-15"
+        "sha256": "be080a96f65143d72f3eef7635e42a30979813fad0313c84d9eff0b4742dd09d",
+        "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the same range gate after the sequential merge gate permits the final rebase."
     },
@@ -51,11 +51,11 @@
       "kind": "success",
       "required": false,
       "verdict": "timeout",
-      "observed": "The configured mutmut preflight reached its 7200-second terminal timeout. Cleanup left no source residue, but no successful preflight existed to authorize the required replay, so the replay was not started.",
+      "observed": "The fresh final-candidate mutmut preflight reached its configured 7200-second terminal timeout and exited 2. No successful preflight existed to authorize narrow replay, so replay was not started and no mutation credit is claimed.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/mutation-summary.json",
-        "sha256": "3c55c570a997ac886a65ed6ae69a1ac3d8750dc674a1778071c6333a6ed66955",
-        "revision": "trust-remediation-tr2-2026-11-15"
+        "sha256": "11bd7d4802cce75e9d8287abf7de1e84466117ac417d0ebb602cd934678903ee",
+        "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "No package-completion recovery is required. The pull request advisory run is the mutation evidence that counts."
     }

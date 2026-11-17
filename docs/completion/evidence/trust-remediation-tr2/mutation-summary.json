@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "milestone": "trust-remediation-tr2",
-  "revision": "trust-remediation-tr2-2026-11-15",
-  "diagnostic_outcome": "Make one changed-range attempt capped at 3600 seconds per file and 7200 seconds total; a non-result is retained but does not block package completion.",
+  "revision": "trust-remediation-tr2-2026-11-17",
+  "diagnostic_outcome": "Make one fresh bounded attempt for the final changed range, capped by the configured 600 seconds per file and 7200 seconds total; retain a non-result truthfully and authorize no replay unless preflight passes.",
   "engine_version": "2.5.1",
   "authoritative_preflight": {
     "status": "tool_error",
@@ -10,12 +10,14 @@
     "deadline_exhausted": true,
     "timeout_seconds": 7200,
     "artifact_sha256": "21b7a282faeb982d257e70337baa53832c1899775b46da0607df6c0d31057f6e",
-    "artifact_location": "$TMPDIR/phase-hl/hl3/tr2-mutation-preflight-race-fixed.json"
+    "artifact_location": "$TMPDIR/phase-hl/hl10/tr2-final-mutation-preflight.json",
+    "terminal_output_sha256": "de9fb0b1baade76fab8ed5cc78a88d766dbaa8c8d415e5bef87801bc46e7af66",
+    "terminal_output_location": "$TMPDIR/phase-hl/hl10/tr2-final-mutation-preflight.txt"
   },
   "narrow_replay": {
     "status": "not_authorized",
     "reason": "The required preflight did not complete successfully."
   },
   "result": "timeout",
-  "interpretation": "The diagnostic attempt did not finish. No replay was authorized, no mutation credit is claimed, and HL-4 classifies this criterion as non-required."
+  "interpretation": "The fresh final-candidate preflight reached its configured terminal deadline and exited 2. No replay was authorized, no mutation credit is claimed, and this package criterion is non-required."
 }

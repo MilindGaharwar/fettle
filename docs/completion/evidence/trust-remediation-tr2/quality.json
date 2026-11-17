@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "milestone": "trust-remediation-tr2",
-  "revision": "trust-remediation-tr2-2026-11-15",
+  "revision": "trust-remediation-tr2-2026-11-17",
   "expected_outcome": "TR-2 passes lint, installed UAT, range pre-commit, repository scan, and the unexcluded full suite after rebasing onto repaired main.",
   "observations": [
-    "The secured TR-2 suite reported 5191 passed and 20 skipped in 637.49 seconds, with exactly one failure: tests/test_installed_artifact_contract.py::test_module_cli_validates_reports inherited from main.",
-    "Ruff reported all checks passed.",
-    "Installed plugin and bridge UAT reported 86 passed in 27.41 seconds.",
-    "fettle check --all exited successfully with the same three legacy protocol-print warnings retained from TR-1.",
-    "pre-commit run --from-ref origin/main --to-ref HEAD passed on committed candidate 928bbaf.",
-    "After rebasing to head 2f2a83c, the targeted suite reported 235 passed and the unexcluded full suite reported 5193 passed and 20 skipped.",
-    "The current-head range pre-commit passed. The first current-head fettle check ended non-pass on a Semgrep timeout in unchanged fettle/mutation_test.py; one diagnostic retry completed with only the three documented inherited warning-only debug-print findings."
+    "Pinned Ruff 0.15.20 reported all checks passed for fettle and tests.",
+    "The final targeted TR-2 and review-follow-up suite reported 470 passed in 71.51 seconds.",
+    "The affected T-3 regression set reported 9 passed after its stale TR-1 fixture was corrected and folded into the T-3 commit.",
+    "The exact-history unexcluded full suite reported 5261 passed and 20 skipped.",
+    "The range pre-commit command from origin/main to HEAD passed on the committed candidate.",
+    "Installed plugin and bridge UAT reported 110 passed in 54.97 seconds.",
+    "The repository Fettle scan exited successfully with the same three inherited warning-only debug-print findings."
   ],
   "result": "confirmed"
 }
