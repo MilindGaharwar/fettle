@@ -1,6 +1,6 @@
 # UAT Report: TR-2 Control Plane and Policy Floors
 
-Date: 2026-11-15
+Date: 2026-11-17 (updated after pull-request review)
 
 ## User flow
 
@@ -30,6 +30,12 @@ policy outside the agent session; agent events remain blocked until it loads.
 | Attempt to delete redirected session state after a shell edit | Plugin and installed bridge | Pass: the governed delete blocks before execution; state remains and Stop blocks without verification |
 | Remove session-start evidence after changing code, then Stop | Plugin and installed bridge | Pass: Stop does not recreate evidence and blocks for missing verification |
 | Stop as the first event in a clean tree | Plugin and installed bridge | Pass: Stop allows with a policy-integrity advisory and creates no session-start record |
+| Stop unchanged without Git history | Plugin and installed bridge | Pass: non-repository and unborn-repository sessions allow |
+| Verification triggered by snapshot or `HEAD` change | Plugin and installed bridge | Pass: message names that cause instead of claiming zero edits |
+
+Findings R-1 through R-6 were reproduced in review on 2026-11-17 and fixed in
+this rework. The red and green outputs are retained under
+`$TMPDIR/phase-hl/hl11/r1/` through `$TMPDIR/phase-hl/hl11/r6/`.
 
 ## Automated evidence
 
@@ -56,7 +62,6 @@ not a hidden UAT pass.
 
 ## Decision
 
-SHIP. The final installed-path UAT reported 110 passed in both launch modes,
-and all required package gates passed. The fresh bounded mutation preflight
-timed out after 7,200 seconds and is retained as a truthful non-result; no
-narrow replay was authorized and no mutation credit is claimed.
+PENDING FINAL GATES. The corrected installed scenarios pass in both launch
+modes. Final full-suite, range, scan, completion, and bounded mutation evidence
+is recorded only after it is rerun on the complete reworked candidate.

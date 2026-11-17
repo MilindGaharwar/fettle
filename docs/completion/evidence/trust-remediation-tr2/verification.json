@@ -10,7 +10,9 @@
     "Policy changes after session start block Stop and make Assurance Record policy integrity fail.",
     "Review follow-ups prove committed-code detection, complete multi-target fan-out, truthful required-check wiring, protected patch move destinations, and malformed native pre-tool handling.",
     "Stop does not create session-start evidence: after session state was removed and code changed, both launch modes blocked for missing verification; a first Stop in a clean tree allowed with unknown policy integrity.",
-    "The final installed-path UAT run reported 110 passed in 54.97 seconds."
+    "Review findings R-1 through R-6 were reproduced on 2026-11-17 and corrected with retained red and green evidence under $TMPDIR/phase-hl/hl11/r1 through r6.",
+    "Commands that reference the control plane allow only the documented read-only command set; computed or obfuscated paths inside another program remain outside shell-text detection.",
+    "Sessions that start and stop without a resolvable commit allow when unchanged, and snapshot- or HEAD-triggered verification names that cause truthfully."
   ],
   "result": "confirmed"
 }
