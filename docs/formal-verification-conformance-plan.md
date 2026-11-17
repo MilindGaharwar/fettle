@@ -1,5 +1,17 @@
 # Formal Verification Conformance And Assurance Implementation Plan
 
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/formal.md).
+
 Status: PROPOSED, 2026-10-11; planning only. No implementation, model change,
 solver installation, live evaluation, mutation campaign, CI change, enforcement,
 commit, or release is authorized by this document.
@@ -203,13 +215,13 @@ unresolved specification or oracle disagreement.
 
 Estimate: 1-2 days. Contract/review only; no production change.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Reconcile model, configuration, docs, implementation, tests, and CI | Property-to-owner matrix and verified source locations | Every modeled action is mapped or explicitly excluded; live constants replace stale prose |
-| Freeze the admitted input domain and abstraction | Model/Python value mapping and allowed transitions | Independent reviewer resolves all mismatches, including aliases, plumbing, and lineage assumptions |
-| Audit vacuity, reductions, deadlock settings, and wording | Reviewed assumption and claim register | No unsupported small-model, liveness, cryptographic, or whole-source claim remains in the proposed contract |
-| Freeze baseline and evaluation protocol | Dev fault cases, sealed holdout, resource limits, retention, reviewer ownership | Expected outcomes are recorded before implementation; baseline uses current code and exact candidate |
-| Confirm experience and capability inventory | Accepted UX/UI/BDD contracts and planned capability entry | Existing CLI/Assurance owners agreed; public capability documentation remains truthful about non-delivery |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Reconcile model, configuration, docs, implementation, tests, and CI | AUDIT | Property-to-owner matrix and verified source locations | Every modeled action is mapped or explicitly excluded; live constants replace stale prose |
+| 2 | Freeze the admitted input domain and abstraction | SPECIFY | Model/Python value mapping and allowed transitions | Independent reviewer resolves all mismatches, including aliases, plumbing, and lineage assumptions |
+| 3 | Audit vacuity, reductions, deadlock settings, and wording | REVIEW | Reviewed assumption and claim register | No unsupported small-model, liveness, cryptographic, or whole-source claim remains in the proposed contract |
+| 4 | Freeze baseline and evaluation protocol | SPECIFY | Dev fault cases, sealed holdout, resource limits, retention, reviewer ownership | Expected outcomes are recorded before implementation; baseline uses current code and exact candidate |
+| 5 | Confirm experience and capability inventory | REVIEW | Accepted UX/UI/BDD contracts and planned capability entry | Existing CLI/Assurance owners agreed; public capability documentation remains truthful about non-delivery |
 
 Exit: accepted scope, mapping, corpus, budgets, and reviewers. Unresolved semantic
 questions block WP-FM-1. Proposed starting budgets: conformance tests <=60 seconds,
@@ -220,12 +232,15 @@ freeze achievable limits here before evaluation; no timeout may count as success
 
 Estimate: 1-2 days. Fixtures and tests; separately authorized.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Enumerate the canonical mode relation independently | Nine mode-pair expectations plus domain-boundary fixtures | Expected ranks are not imported from `_rank`, `_MODE_RANK`, or `merge_for_child` |
-| Specify reachable delegation sequences and plumbing exceptions | Named action traces, expected observations, and applicability | Positive witnesses exercise antecedents and exceptions; empty state spaces fail |
-| Freeze implementation faults and model faults separately | Disposable fault patches with expected detector and stable identity | Weaker-local-wins, wrong rank, plumbing propagation, removed guard, and vacuous invariant cases are distinguished |
-| Retain the unchanged baseline | Exact test/model selection and results | Each seed names whether existing tests already detect it; no invented improvement claim |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Enumerate the canonical mode relation independently | TDD | Nine mode-pair expectations plus domain-boundary fixtures | Expected ranks are not imported from `_rank`, `_MODE_RANK`, or `merge_for_child` |
+| 2 | Specify reachable delegation sequences and plumbing exceptions | SPECIFY | Named action traces, expected observations, and applicability | Positive witnesses exercise antecedents and exceptions; empty state spaces fail |
+| 3 | Freeze implementation faults and model faults separately | SPECIFY | Disposable fault patches with expected detector and stable identity | Weaker-local-wins, wrong rank, plumbing propagation, removed guard, and vacuous invariant cases are distinguished |
+| 4 | Retain the unchanged baseline | VERIFY | Exact test/model selection and results | Each seed names whether existing tests already detect it; no invented improvement claim |
+| 5 | Exercise the actual selected producer and consumer together | INTEGRATION | Existing owning tests and the approved package fixtures | Actual output reaches the owning parser and decision; positive and negative controls are observed |
+| 6 | Retain rejection of weaker-local-wins and wrong rank | REGRESSION | Existing owning tests and the approved package fixtures | Every named negative remains non-pass; positive controls prove the detector executes |
+| 7 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_policy_capsule.py tests/test_capsule_guard.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for weaker-local-wins and wrong rank. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 Exit: independent oracles and a reviewed development/held-out corpus. The holdout
 owner does not expose expected outcomes to implementation tuning. Existing tests
@@ -235,12 +250,13 @@ may already kill seeds; incremental value must be measured, not presumed.
 
 Estimate: 2-4 days. Tests first; production defects require explicit scoped repair.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Extend existing capsule tests with finite-domain assertions | Exhaustive checks for the nine admitted pairs and plumbing boundary | Seeded in-scope faults fail while the unmodified implementation passes |
-| Add a focused Hypothesis state machine using the reviewed map | Repeated merge/delegation tests with shrinking and reproducible settings | Real Python operations are invoked; selected actions and postconditions are observed |
-| Replay named model/implementation divergences | Small, deterministic regression cases in existing owning tests | A failing trace reproduces without a live agent, network, or remote service |
-| Audit the bridge itself | Tests for missing mapping, excluded inputs, zero actions, and oracle disagreement | No omitted action, skipped case, or copied implementation logic can manufacture conformance |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Extend existing capsule tests with finite-domain assertions | TDD | Exhaustive checks for the nine admitted pairs and plumbing boundary | Seeded in-scope faults fail while the unmodified implementation passes |
+| 2 | Add a focused Hypothesis state machine using the reviewed map | INTEGRATION | Repeated merge/delegation tests with shrinking and reproducible settings | Real Python operations are invoked; selected actions and postconditions are observed |
+| 3 | Replay named model/implementation divergences | REGRESSION | Small, deterministic regression cases in existing owning tests | A failing trace reproduces without a live agent, network, or remote service |
+| 4 | Audit the bridge itself | REVIEW | Tests for missing mapping, excluded inputs, zero actions, and oracle disagreement | No omitted action, skipped case, or copied implementation logic can manufacture conformance |
+| 5 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_policy_capsule.py tests/test_capsule_guard.py tests/test_tla_sync.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for missing mapping, zero actions and implementation divergence. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 Reuse local test helpers. Confirm Hypothesis availability; add it only to the
 appropriate test dependency group if needed, never to the runtime surface by
@@ -255,12 +271,14 @@ distinct from a passed implementation claim.
 
 Estimate: 2-3 days. Adapter/runner and strict consumer-contract implementation.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Add a TLC producer through existing integration/evidence ownership | Versioned domain report and canonical envelope | Recorded successful, violating, interrupted, malformed, unsupported, and missing-tool outputs have exact expected states |
-| Bind model and conformance evidence to their complete identities | Strict explicit source/policy/scope/tool/oracle bindings | Copied, altered, stale, partial, and mismatched artifacts are rejected |
-| Retain success logs and counterexamples atomically | Bounded, redacted, digested evidence with explicit retention | Partial writes and unavailable referenced evidence cannot satisfy the claim |
-| Pin tool execution and resource behavior | Consistent local/CI JAR verification and isolated execution | Wrong checksum, unsafe paths, runaway output, process interruption, and missing executable fail visibly |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Add a TLC producer through existing integration/evidence ownership | TDD | Versioned domain report and canonical envelope | Recorded successful, violating, interrupted, malformed, unsupported, and missing-tool outputs have exact expected states |
+| 2 | Bind model and conformance evidence to their complete identities | INTEGRATION | Strict explicit source/policy/scope/tool/oracle bindings | Copied, altered, stale, partial, and mismatched artifacts are rejected |
+| 3 | Retain success logs and counterexamples atomically | BUILD | Bounded, redacted, digested evidence with explicit retention | Partial writes and unavailable referenced evidence cannot satisfy the claim |
+| 4 | Pin tool execution and resource behavior | BUILD | Consistent local/CI JAR verification and isolated execution | Wrong checksum, unsafe paths, runaway output, process interruption, and missing executable fail visibly |
+| 5 | Retain rejection of wrong checksum, interrupted output and mismatched artifacts | REGRESSION | Existing owning tests and the approved package fixtures | Every named negative remains non-pass; positive controls prove the detector executes |
+| 6 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_integration_base.py tests/test_integrations.py tests/test_evidence.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for wrong checksum, interrupted output and mismatched artifacts. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 Keep the existing envelope schema and adapter API compatible. If the generic
 adapter cannot express a required state without loss, propose the smallest
@@ -273,12 +291,14 @@ environment. No release gate or trust-class promotion is enabled.
 
 Estimate: 1-2 days. Existing CLI/hook/Assurance surfaces; no new top-level command.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Correct mapped-file and model terminology | Scoped wording in hook, model docs, and capability descriptions | No source-file proof claim follows merely from its presence in `VERIFIED_FILES` |
-| Use content identity for evidence applicability | Changed dependency/model/config/oracle invalidation | Same-mtime edits reject old evidence; touching a file alone does not prove semantic drift |
-| Expose observations through explain/report and optional Assurance input | Human/JSON agreement, scope, exclusions, recovery, evidence references | UX scenarios pass; missing optional evidence is visible without silently introducing a required criterion |
-| Add conformance and evidence retention to the TLA workflow | Pinned, bounded CI steps and complete relevant path selection | Workflow tests cover model, source, mapping, tests, adapter, dependency, and workflow changes |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Correct mapped-file and model terminology | REVIEW | Scoped wording in hook, model docs, and capability descriptions | No source-file proof claim follows merely from its presence in `VERIFIED_FILES` |
+| 2 | Use content identity for evidence applicability | TDD | Changed dependency/model/config/oracle invalidation | Same-mtime edits reject old evidence; touching a file alone does not prove semantic drift |
+| 3 | Expose observations through explain/report and optional Assurance input | INTEGRATION | Human/JSON agreement, scope, exclusions, recovery, evidence references | UX scenarios pass; missing optional evidence is visible without silently introducing a required criterion |
+| 4 | Add conformance and evidence retention to the TLA workflow | BUILD | Pinned, bounded CI steps and complete relevant path selection | Workflow tests cover model, source, mapping, tests, adapter, dependency, and workflow changes |
+| 5 | Retain rejection of same-mtime stale evidence and text/JSON disagreement | REGRESSION | Existing owning tests and the approved package fixtures | Every named negative remains non-pass; positive controls prove the detector executes |
+| 6 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_integrations.py tests/test_doc_claims.py tests/test_evidence.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for same-mtime stale evidence and text/JSON disagreement. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 The existing TLC CI job keeps its current authority; new claim aggregation starts
 advisory. Do not run TLC or symbolic execution inside edit/Stop hooks. Hook work
@@ -292,13 +312,17 @@ enforcement or P43 completion. Update the behavior map only for delivered change
 
 Estimate: 1-2 days plus an approved observation window. Separately authorized.
 
-| Task | Deliverable | Verification |
-|---|---|---|
-| Evaluate the frozen holdout after development is closed | Independent model, implementation, evidence, and UX result matrix | Every required fault is detected; zero false eligible/ready results on the frozen negative corpus |
-| Repeat in independent executions | Three complete retained clean-profile runs, including one fresh environment | Exact compatible identities, no terminal-outcome sharing, no skipped obligations, and frozen runtime budgets met |
-| Measure incremental value and maintenance cost | Baseline/candidate detection, runtime, review effort, and repair effort | A documented blind spot is closed without increasing unsupported claims or exceeding accepted cost |
-| Review claim-specific eligibility | Explicit GO, NO_GO, or BLOCKED with criterion evidence | Missing, stale, contradictory, timed-out, or unavailable required evidence is non-pass |
-| Apply any approved promotion through existing policy | Opt-in named criterion, compatibility tests, and tested rollback | Operator authorizes exact policy/candidate; disabling a producer never bypasses a required criterion |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Evaluate the frozen holdout after development is closed | VERIFY | Independent model, implementation, evidence, and UX result matrix | Every required fault is detected; zero false eligible/ready results on the frozen negative corpus |
+| 2 | Repeat in independent executions | VERIFY | Three complete retained clean-profile runs, including one fresh environment | Exact compatible identities, no terminal-outcome sharing, no skipped obligations, and frozen runtime budgets met |
+| 3 | Measure incremental value and maintenance cost | REVIEW | Baseline/candidate detection, runtime, review effort, and repair effort | A documented blind spot is closed without increasing unsupported claims or exceeding accepted cost |
+| 4 | Review claim-specific eligibility | REVIEW | Explicit GO, NO_GO, or BLOCKED with criterion evidence | Missing, stale, contradictory, timed-out, or unavailable required evidence is non-pass |
+| 5 | Apply any approved promotion through existing policy | FIX | Opt-in named criterion, compatibility tests, and tested rollback | Operator authorizes exact policy/candidate; disabling a producer never bypasses a required criterion |
+| 6 | Write failing tests before the authorized policy/consumer change | TDD | Existing owning tests and the approved package fixtures | The named negative cases fail for the intended reason before repair |
+| 7 | Exercise the actual selected producer and consumer together | INTEGRATION | Existing owning tests and the approved package fixtures | Actual output reaches the owning parser and decision; positive and negative controls are observed |
+| 8 | Retain rejection of unauthorized promotion and rollback bypass | REGRESSION | Existing owning tests and the approved package fixtures | Every named negative remains non-pass; positive controls prove the detector executes |
+| 9 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_policy_layers.py tests/test_assurance_integrity.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for unauthorized promotion and rollback bypass. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 Follow the mutation playbook: fixtures -> preflight -> narrow replay -> separately
 authorized held-out full verification where required. Do not make full mutation
@@ -346,13 +370,13 @@ the approved inventory to have current, applicable evidence whose authorized
 evaluator establishes its expected outcome. The claim is relative to that
 inventory and evaluator, not proof that the user's unstated needs were met.
 
-| Activity | Deliverable | Acceptance and disconfirming check |
-|---|---|---|
-| Reconcile accepted WLI schema and actual completion/Assurance consumers | Criterion-to-owner matrix covering `completion.py`, `evidence.py`, `assurance.py`, and the selected existing producer | Every accept/reject path and compatibility boundary mapped; unresolved authority or schema questions block FM-8 |
-| Freeze one criterion family and independently controlled obligation inventory | Versioned contract defining criterion identity, required/applicable status, expected outcome, producer/evaluator identity, source/policy/scope and evidence meaning | Candidate-produced text cannot omit a required obligation, change its expected outcome, or declare itself authoritative |
-| Select an existing machine-checkable success observation | Positive fixture with nonempty executed obligations and an accepted producer/domain parser | Valid bytes plus a declared `confirmed` verdict are insufficient without the agreed semantic observation; unsupported families remain visibly outside the new claim |
-| Specify a bounded lifecycle table | Initial, pending, observed, invalidated, rejected and accepted transitions; legal recovery and terminal outcomes | Safety: no accept without all admitted required obligations; bounded progress under declared scheduler/tool limits: terminal result or explicit unresolved outcome, never forced success |
-| Freeze independently adjudicated fault fixtures | Missing/subset inventory, optional-only inventory for a required claim, stale revision, wrong producer/scope, forged success, skipped case, conflicting evidence, timeout and cancellation cases | Every negative has an expected non-pass reason and a positive witness; conflicting evidence cannot be resolved by choosing the favorable record |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Reconcile accepted WLI schema and actual completion/Assurance consumers | AUDIT | Criterion-to-owner matrix covering `completion.py`, `evidence.py`, `assurance.py`, and the selected existing producer | Every accept/reject path and compatibility boundary mapped; unresolved authority or schema questions block FM-8 |
+| 2 | Freeze one criterion family and independently controlled obligation inventory | SPECIFY | Versioned contract defining criterion identity, required/applicable status, expected outcome, producer/evaluator identity, source/policy/scope and evidence meaning | Candidate-produced text cannot omit a required obligation, change its expected outcome, or declare itself authoritative |
+| 3 | Select an existing machine-checkable success observation | SPECIFY | Positive fixture with nonempty executed obligations and an accepted producer/domain parser | Valid bytes plus a declared `confirmed` verdict are insufficient without the agreed semantic observation; unsupported families remain visibly outside the new claim |
+| 4 | Specify a bounded lifecycle table | SPECIFY | Initial, pending, observed, invalidated, rejected and accepted transitions; legal recovery and terminal outcomes | Safety: no accept without all admitted required obligations; bounded progress under declared scheduler/tool limits: terminal result or explicit unresolved outcome, never forced success |
+| 5 | Freeze independently adjudicated fault fixtures | SPECIFY | Missing/subset inventory, optional-only inventory for a required claim, stale revision, wrong producer/scope, forged success, skipped case, conflicting evidence, timeout and cancellation cases | Every negative has an expected non-pass reason and a positive witness; conflicting evidence cannot be resolved by choosing the favorable record |
 
 Keep expected rejection/timeout-handling criteria distinct from required success:
 an observed failure may satisfy a specifically authorized negative-test criterion,
@@ -372,13 +396,14 @@ Estimate: 3-5 engineering days. Requires accepted FM-7 and separate implementati
 approval. Owners: the same WLI/domain maintainers; existing Assurance owner
 reviews consumption and authority. No new general evaluator service.
 
-| Activity | Owning surface | Verification |
-|---|---|---|
-| Add failing fixtures for the accepted relation | Existing `tests/test_completion.py`, `tests/test_completion_gate.py` and selected producer tests | Show the precise uncovered behavior against the frozen baseline; count defects already caught rather than claiming new detection |
-| Connect the opted-in criterion to its existing authorized domain evaluator | `fettle/completion.py` and the approved consumer path identified at FM-7 | No arbitrary command/callback imported from a manifest; no success default for absent, unsupported, partial or malformed semantic output |
-| Exercise actual operations against the finite lifecycle table | Existing completion tests with independently defined action/expectation data | Each admitted transition executes; source/evidence invalidation followed by reevaluation cannot reuse prior acceptance; positive recovery succeeds |
-| Preserve compatibility and independence | Existing WLI parser, completion gate, canonical evidence and Assurance tests | Legacy records keep their declared assurance level; advisory results cannot bypass or silently add required criteria; no live corpus reconciliation before its existing gates |
-| Retain scoped observations and recovery | Existing canonical payload/retention and completion inspection paths | Wrong-source, unknown, rejected and successful cases have matching human/JSON meanings and safe evidence references |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Add failing fixtures for the accepted relation | TDD | Existing `tests/test_completion.py`, `tests/test_completion_gate.py` and selected producer tests | Show the precise uncovered behavior against the frozen baseline; count defects already caught rather than claiming new detection |
+| 2 | Connect the opted-in criterion to its existing authorized domain evaluator | BUILD | `fettle/completion.py` and the approved consumer path identified at FM-7 | No arbitrary command/callback imported from a manifest; no success default for absent, unsupported, partial or malformed semantic output |
+| 3 | Exercise actual operations against the finite lifecycle table | INTEGRATION | Existing completion tests with independently defined action/expectation data | Each admitted transition executes; source/evidence invalidation followed by reevaluation cannot reuse prior acceptance; positive recovery succeeds |
+| 4 | Preserve compatibility and independence | REGRESSION | Existing WLI parser, completion gate, canonical evidence and Assurance tests | Legacy records keep their declared assurance level; advisory results cannot bypass or silently add required criteria; no live corpus reconciliation before its existing gates |
+| 5 | Retain scoped observations and recovery | VERIFY | Existing canonical payload/retention and completion inspection paths | Wrong-source, unknown, rejected and successful cases have matching human/JSON meanings and safe evidence references |
+| 6 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_completion.py tests/test_completion_gate.py tests/test_evidence_contract.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for forged confirmation and missing required observations. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification Observe pending to rejected or accepted transitions and invalidation; missing evidence never permits acceptance. |
 
 A fake producer can have a valid digest: test producer admission and domain
 semantics separately from artifact identity. Review actor/input ownership and
@@ -395,13 +420,14 @@ Owners: canonical evidence and Assurance maintainers. Start with the admitted
 FM-8 family and one existing policy aggregate, not every producer or language.
 Proposed claim: `assurance.conservative_aggregation.v1`.
 
-| Activity | Deliverable | Verification |
-|---|---|---|
-| Define concrete meaning and abstract uncertainty | Reviewed interpretation from admitted observations to possible criterion outcomes, with separate validity, completeness, applicability and authority constraints | Explain why each abstract state conservatively represents its concrete cases; an executable reducer alone is not evidence of semantic soundness |
-| Define an information order and aggregation relation | Independent finite-domain reference tables; distinguish uncertainty union from conjunction across required obligations | Do not sort PASS/UNKNOWN/ERROR into a single numeric confidence score; conflicting observations and empty/impossible interpretations cannot imply success |
-| Exercise the real aggregate | Extend `tests/test_evidence.py`, `tests/test_evidence_contract.py`, `tests/test_assurance_integrity.py` and `tests/test_assurance_adversary.py` where owned | Exhaust the frozen single-observation states and bounded multi-observation combinations; check required/optional, applicability, duplicates, ordering and conflicts |
-| Check conservative weakening and invalidation | Paired fixtures holding policy, scope, inventory and authority fixed | Removing required evidence or widening its possible outcomes cannot turn a non-eligible claim eligible; new contradiction or a new candidate may revoke an old decision |
-| Repair only demonstrated in-scope divergence | Small changes to the actual `evidence.py`/`assurance.py` owner if required, or tests only if the implementation already satisfies the relation | Compare frozen Assurance baseline and required historical corpus; no unsupported producer becomes eligible and no default required gate changes |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Define concrete meaning and abstract uncertainty | SPECIFY | Reviewed interpretation from admitted observations to possible criterion outcomes, with separate validity, completeness, applicability and authority constraints | Explain why each abstract state conservatively represents its concrete cases; an executable reducer alone is not evidence of semantic soundness |
+| 2 | Define an information order and aggregation relation | SPECIFY | Independent finite-domain reference tables; distinguish uncertainty union from conjunction across required obligations | Do not sort PASS/UNKNOWN/ERROR into a single numeric confidence score; conflicting observations and empty/impossible interpretations cannot imply success |
+| 3 | Exercise the real aggregate | INTEGRATION | Extend `tests/test_evidence.py`, `tests/test_evidence_contract.py`, `tests/test_assurance_integrity.py` and `tests/test_assurance_adversary.py` where owned | Exhaust the frozen single-observation states and bounded multi-observation combinations; check required/optional, applicability, duplicates, ordering and conflicts |
+| 4 | Check conservative weakening and invalidation | REGRESSION | Paired fixtures holding policy, scope, inventory and authority fixed | Removing required evidence or widening its possible outcomes cannot turn a non-eligible claim eligible; new contradiction or a new candidate may revoke an old decision; absent required observations remain unknown and non-eligible, never a fabricated pass |
+| 5 | Repair only demonstrated in-scope divergence | TDD | Small changes to the actual `evidence.py`/`assurance.py` owner if required, or tests only if the implementation already satisfies the relation | Compare frozen Assurance baseline and required historical corpus; no unsupported producer becomes eligible and no default required gate changes |
+| 6 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_evidence.py tests/test_evidence_contract.py tests/test_assurance_integrity.py tests/test_assurance_adversary.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for removed required evidence and contradictory observations. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 This is not a total ordering of lifecycle states or a promise that decisions only
 improve over time. Unknown is not a fabricated pass or an empty set of behaviors.
@@ -417,13 +443,14 @@ Estimate: 3-5 engineering days. Requires FM-9 acceptance and separate approval.
 Owners: Assurance/evidence consumers, policy maintainer and independent security
 reviewer. Proposed claim: `assurance.annotation_noninterference.v1`.
 
-| Activity | Deliverable | Verification |
-|---|---|---|
-| Classify inputs at the admitted decision boundary | Inventory of operator-approved policy, authorized evaluator observations, untrusted annotations and controlled approvals | Treat a producer-supplied `trust_class`, signature or digest as data, not authority; classify by actual origin and approved consumption |
-| Freeze a two-execution property | Same trusted inputs and admitted observations, different untrusted annotation values, equal normalized authoritative decision | Compare eligibility, required obligations, selected checks and effective policy; exclude only diagnostic prose/occurrence IDs, never safety-relevant differences |
-| Exercise explicit and control-dependent flows | Paired tests in existing assurance adversary/integrity, completion and capsule tests only where those paths are actually called | Prose such as a claimed approval cannot skip a check, alter requirement selection, relax policy or grant a pass; malformed/forged artifacts remain a separate rejection corpus |
-| Preserve meaningful sensitivity | Positive controls that change an authorized observation or approved policy | Legitimate relevant changes can alter decisions; a reducer that ignores all input cannot pass the non-interference suite vacuously |
-| Test controlled endorsement and disclosure | Explicit approval-boundary cases with actor/scope/candidate binding, retained reason and revocation behavior | Untrusted input cannot approve itself; no implicit endorsement from rewrapping or signing; replay logs do not disclose secrets or execute annotation content |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Classify inputs at the admitted decision boundary | AUDIT | Inventory of operator-approved policy, authorized evaluator observations, untrusted annotations and controlled approvals | Treat a producer-supplied `trust_class`, signature or digest as data, not authority; classify by actual origin and approved consumption |
+| 2 | Freeze a two-execution property | SPECIFY | Same trusted inputs and admitted observations, different untrusted annotation values, equal normalized authoritative decision | Compare eligibility, required obligations, selected checks and effective policy; exclude only diagnostic prose/occurrence IDs, never safety-relevant differences |
+| 3 | Exercise explicit and control-dependent flows | TDD | Paired tests in existing assurance adversary/integrity, completion and capsule tests only where those paths are actually called | Prose such as a claimed approval cannot skip a check, alter requirement selection, relax policy or grant a pass; malformed/forged artifacts remain a separate rejection corpus |
+| 4 | Preserve meaningful sensitivity | INTEGRATION | Positive controls that change an authorized observation or approved policy | Legitimate relevant changes can alter decisions; a reducer that ignores all input cannot pass the non-interference suite vacuously |
+| 5 | Test controlled endorsement and disclosure | REGRESSION | Explicit approval-boundary cases with actor/scope/candidate binding, retained reason and revocation behavior | Untrusted input cannot approve itself; no implicit endorsement from rewrapping or signing; replay logs do not disclose secrets or execute annotation content |
+| 6 | Run bounded local execution after implementation | LIVE | Existing owning tests and the approved package fixtures | Run `uv run pytest tests/test_assurance_adversary.py tests/test_assurance_integrity.py tests/test_completion.py -q`; observe real selected operations, candidate invalidation and explicit non-pass for untrusted approval annotations and forged endorsement. Freeze any added profile command at FM-0/FM-7; a local probe is not live-provider qualification |
 
 When annotations live inside a digested artifact, vary them in separately valid
 fixtures under the approved producer contract and hold the semantic observation
@@ -445,13 +472,13 @@ Requires accepted FM-8 through FM-10 evidence and explicit qualification approva
 Owners: independent reviewer and operator, with each consumer maintainer signing
 off only its own boundary. No automatic inheritance of the capsule claim's GO.
 
-| Activity | Retained evidence | Acceptance |
-|---|---|---|
-| Run the sealed fault corpus once development is frozen | Per-claim baseline/candidate matrix, exact test selection, versions, inputs, skips, terminal states and logs | Zero false eligible results on required negative fixtures; every frozen positive control succeeds; zero missing or skipped required obligations |
-| Check implementation and oracle sensitivity independently | Distinct development and held-out implementation faults with stable identities | Every required in-scope seed is detected; do not count a model-only failure as an implementation detection or tune against the holdout |
-| Check replay and cost | Three independently retained compatible clean-profile runs, including a fresh environment; runtime, reviewer effort and recovery cost | Meet limits frozen before execution; no shared terminal outcomes or omitted attempts; equivalent tests alone do not establish real concurrency safety |
-| Perform recipient UAT and compatibility review | BDD-FM-8 through BDD-FM-13 and existing FM scenarios as applicable; required WLI/Assurance/code regressions | Recipient distinguishes integrity, semantic sufficiency, unknown and acceptance; text/JSON agree; false non-eligible decisions are independently adjudicated |
-| Decide each named claim and rollback | GO, NO_GO or BLOCKED with criterion-level reasons; existing policy admission and tested rollback if approved | No pooled score hides a failed claim; rollback removes optional capability without bypassing an explicitly required criterion; no default enforcement or P43 completion |
+| # | Task | Method | Deliverable / owner | Verify by |
+|---|---|---|---|---|
+| 1 | Run the sealed fault corpus once development is frozen | VERIFY | Per-claim baseline/candidate matrix, exact test selection, versions, inputs, skips, terminal states and logs | Zero false eligible results on required negative fixtures; every frozen positive control succeeds; zero missing or skipped required obligations |
+| 2 | Check implementation and oracle sensitivity independently | VERIFY | Distinct development and held-out implementation faults with stable identities | Every required in-scope seed is detected; do not count a model-only failure as an implementation detection or tune against the holdout |
+| 3 | Check replay and cost | VERIFY | Three independently retained compatible clean-profile runs, including a fresh environment; runtime, reviewer effort and recovery cost | Meet limits frozen before execution; no shared terminal outcomes or omitted attempts; equivalent tests alone do not establish real concurrency safety |
+| 4 | Perform recipient UAT and compatibility review | REVIEW | BDD-FM-8 through BDD-FM-13 and existing FM scenarios as applicable; required WLI/Assurance/code regressions | Recipient distinguishes integrity, semantic sufficiency, unknown and acceptance; text/JSON agree; false non-eligible decisions are independently adjudicated |
+| 5 | Decide each named claim and rollback | REVIEW | GO, NO_GO or BLOCKED with criterion-level reasons; existing policy admission and tested rollback if approved | No pooled score hides a failed claim; rollback removes optional capability without bypassing an explicitly required criterion; no default enforcement or P43 completion |
 
 Treat these as conformance/assurance checks for declared finite domains, not
 machine-checked unbounded refinement proofs. A newly admitted required criterion

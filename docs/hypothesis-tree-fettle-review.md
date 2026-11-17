@@ -1,5 +1,13 @@
 # Hypothesis Tree: Plain-English Software Quality Review
 
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/review.md).
+
 **Objective:** enable a non-engineer to judge one software change's intended
 behavior, implemented logic, evidence, risks, and readiness without treating an
 AI explanation as proof

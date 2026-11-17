@@ -804,3 +804,10 @@ otherwise. Finding IDs refer to the plan's register.
 - No Claude/model-name attribution anywhere in Fettle docs or repo.
 - Every increment: tests + work note + independently reviewable.
 - Fettle self-check before declaring any coding work complete.
+
+## November 16 integration review
+
+The [integration review](../main-merge-review-20261116.md) records reconciliation
+of the audit branch with current main. The November 14 sequencing decision and
+trust-remediation ownership remain authoritative; historical audit-branch review
+records do not supersede them.

@@ -1,5 +1,13 @@
 # UI Spec: Formal Evidence In Existing CLI Surfaces
 
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/formal.md).
+
 Status: PROPOSED, 2026-10-11; presentation contract only. No dashboard, new command
 namespace, visual theme, or runtime interface is authorized.
 

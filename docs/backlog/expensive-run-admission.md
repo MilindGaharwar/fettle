@@ -13,6 +13,18 @@ spec: mutation-quality-playbook
 
 # Expensive-run admission: gate job and digest-bound result reuse
 
+> Reconciliation — 2026-11-16. The packages below preserve the October proposal,
+> not a new implementation order or a claim that these mechanisms are absent.
+> Current owners are `fettle/staged_preflight.py`, `fettle/mutation_test.py`,
+> `.github/workflows/mutation.yml` and their tests; see the
+> [behavior map](../behavior-map.md). Staged admission, source-handoff validation,
+> continuation and budget accounting already exist. Before execution, compare
+> each proposed criterion with those owners and retained artifacts, select only
+> demonstrated gaps, and obtain bounded authorization. A generic cross-head
+> cache key or a fixed 256-shard topology must not replace their full identity,
+> accounting and qualification contracts. Historical run claims below were not
+> independently revalidated in this documentation publication.
+
 Recorded 2026-10-25 after three consecutive commit-bound mutation advisory runs
 (~12 h each) were lost in three days to defects that were each reproducible
 offline in minutes: a shard 2 s over a deadline projected from local timings

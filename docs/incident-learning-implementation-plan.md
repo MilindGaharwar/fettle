@@ -1,5 +1,17 @@
 # Incident Learning And Improvement Roster Implementation Plan
 
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Publication review — 2026-11-16, based on `461e73b`.
+> This is proposed work or retained research provenance, not implementation approval.
+> Dated observations and validation reports below describe their original candidates.
+> The current [audit record](completion/audit-hardening.json) records bounded acceptance;
+> mutation qualification remains `CLOSED_NON_PASS`. Rebind execution dependencies
+> and evidence before any separately authorized implementation.
+> See the [review record](reviews/2026-11-16/incident.md).
+
 Status: PROPOSED IMPLEMENTATION; documentation and high-priority scheduling
 authorized on 2026-10-12. No runtime implementation, evidence ingestion, model
 call, remote job, commit, push, release, or policy promotion is authorized here.

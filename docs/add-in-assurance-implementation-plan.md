@@ -1,5 +1,14 @@
 # Add-in Assurance Pilot Implementation Plan
 
+> Integration precedence — current main’s November 14 sequencing decision and
+> trust-remediation ownership govern execution. Earlier scheduling and review
+> observations below remain historical. This merge grants no feature approval.
+
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
 Status: PROPOSED; planning only; implementation is not authorized
 
 UX contract: [add-in-assurance.ux-spec.md](add-in-assurance.ux-spec.md)

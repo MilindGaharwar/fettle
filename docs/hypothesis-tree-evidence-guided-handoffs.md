@@ -1,5 +1,10 @@
 # Hypothesis Tree: Evidence-Guided Handoffs
 
+> Status reconciliation — 2026-11-16. This aligns planning prose with the
+> retained [plan index](plan-index.md), [changelog](../CHANGELOG.md) and completion
+> records; it is not a fresh qualification run or approval of pending packages.
+> See [review and evidence limits](reviews/2026-11-16/status.md).
+
 **Objective:** improve independently verified agent changes without making Fettle
 an orchestrator
 

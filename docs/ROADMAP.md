@@ -110,3 +110,8 @@ P43 can graduate.
 - Hooks improve the session; CI remains an independent assurance boundary.
 - Fettle may validate cross-role handoffs, but supported hosts remain responsible
   for scheduling and executing agents.
+
+## November 16 integration review
+
+See the [integration review](main-merge-review-20261116.md). The November 14
+sequencing decision and trust-remediation ownership remain authoritative.
