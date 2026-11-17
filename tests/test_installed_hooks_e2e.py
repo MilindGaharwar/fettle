@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from copy import deepcopy
@@ -322,6 +323,57 @@ def test_registered_hook_blocks_session_state_directory_deletion(installed_hook_
     stopped = _run(_event_command(mode, "Stop"), stop, root, env)
     assert stopped.returncode == 2, stopped.stderr
     assert "no verification run recorded this session" in json.loads(stopped.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_stop_does_not_recreate_deleted_session_start(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr2-missing-session-start"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    shutil.rmtree(state)
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert "no verification run recorded this session" in json.loads(result.stdout)["reason"]
+    assert not (state / "session-start.json").exists()
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_allows_clean_stop_as_first_session_event(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr2-clean-first-stop"
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "policy integrity evidence is unavailable" in json.loads(result.stdout)["systemMessage"]
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    assert not (state / "session-start.json").exists()
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))

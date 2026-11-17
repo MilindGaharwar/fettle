@@ -12,10 +12,10 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "Both installed launch modes protect policy, evidence, redirected state, and host settings; preserve modeled enforcement floors; allow malformed-policy repair; report ignored weakening attempts; and fail closed for unavailable declared remote policy.",
+      "observed": "Both installed launch modes protect policy, evidence, redirected state, and host settings; preserve modeled enforcement floors; reserve malformed-policy repair for the owner; report ignored weakening attempts; and fail closed for unavailable declared remote policy.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/verification.json",
-        "sha256": "7d8d321fdb0490b7e6c73bc7b70cbbbcfb9b4006102ed1d56efbfcac1e86d3d8",
+        "sha256": "3f5a168b6260c36cebe0398afbf80ca4ab24cb7b63f24a1244c54fbcd34c04a9",
         "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the installed plugin and bridge UAT scenarios under isolated XDG state."

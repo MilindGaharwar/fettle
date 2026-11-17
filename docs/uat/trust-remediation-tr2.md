@@ -7,8 +7,8 @@ Date: 2026-11-15
 A coding agent invokes an installed Fettle hook. Fettle resolves repository and
 governing policy, protects policy and session control files from in-session
 writes, preserves stricter enforcement floors, and reports ignored weakening
-attempts through `fettle config --explain`. A repository owner can still repair
-a malformed root policy instead of being locked out by that malformed file.
+attempts through `fettle config --explain`. A repository owner repairs malformed
+policy outside the agent session; agent events remain blocked until it loads.
 
 ## Scenarios tested
 
@@ -17,7 +17,7 @@ a malformed root policy instead of being locked out by that malformed file.
 | Edit or create Fettle policy, evidence, redirected state, or host hook settings | Plugin and installed bridge | Pass: enforce mode blocks with recovery guidance |
 | Attempt a recognized shell write to the control plane | Plugin and installed bridge | Pass: target is detected and blocked |
 | Use advisory protection | Plugin and installed bridge | Pass: warning is visible without a deny decision |
-| Repair a malformed root `.fettle.toml` | Plugin and installed bridge | Pass: the policy file itself remains repairable |
+| Attempt agent repair of malformed or remotely incomplete policy | Plugin and installed bridge | Pass: the edit blocks with owner recovery guidance |
 | Disable a protected check in repository policy | Resolver and installed hook | Pass: the check still runs and `config --explain` reports the ignored attempt |
 | Weaken an organisation, remote, or capsule floor | Resolver and installed hook | Pass: the stricter modeled enforcement value wins |
 | Load a missing, malformed, or tampered declared remote policy | Installed hook | Pass: outcome blocks with `fettle policy sync` guidance |
@@ -28,6 +28,8 @@ a malformed root policy instead of being locked out by that malformed file.
 | Move a patch target into protected config | Plugin and installed bridge | Pass: the move destination is protected |
 | Send malformed native pre-tool input | Plugin and installed bridge | Pass: Claude and Gemini pre-tool names block; malformed non-pre-tool input remains a traced allow |
 | Attempt to delete redirected session state after a shell edit | Plugin and installed bridge | Pass: the governed delete blocks before execution; state remains and Stop blocks without verification |
+| Remove session-start evidence after changing code, then Stop | Plugin and installed bridge | Pass: Stop does not recreate evidence and blocks for missing verification |
+| Stop as the first event in a clean tree | Plugin and installed bridge | Pass: Stop allows with a policy-integrity advisory and creates no session-start record |
 
 ## Automated evidence
 

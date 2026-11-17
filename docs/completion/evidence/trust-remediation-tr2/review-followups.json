@@ -9,7 +9,7 @@
     "T-3: 8 focused cases passed; boundary_rules, worklog, and post_bash_doc_check fail closed only under their real enforcing configuration, while runtime_output_guard and provenance_gate no longer claim nonexistent enforcing modes.",
     "T-4: 2 focused cases passed; patch move destinations reached config protection in both launch modes.",
     "T-5: 8 focused cases passed; non-object Claude vocabulary and truncated Claude/Gemini pre-tool input blocked in both modes, while malformed non-pre-tool input remained allowed.",
-    "T-6: 2 focused cases passed; a governed shell deletion of redirected session state was blocked before execution in both launch modes, state remained present, and Stop blocked for missing verification.",
+    "T-6 corrected after review: Stop never creates session-start evidence. In both launch modes, removing the session state after changing code caused Stop to block for missing verification; a first Stop in a clean tree allowed with unknown policy integrity and created no session-start record.",
     "T-7: the executable documentation claim passed; the clock boundary and unloaded item-G startup measurements are documented without claiming under-load verification."
   ],
   "result": "confirmed"
