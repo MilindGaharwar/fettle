@@ -377,6 +377,30 @@ def test_registered_hook_allows_clean_stop_as_first_session_event(installed_hook
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize("repository", (False, True), ids=("not-a-repository", "no-commits"))
+def test_registered_hook_allows_unchanged_session_without_git_history(
+    installed_hook_repo, mode, repository,
+):
+    fixture_root, env = installed_hook_repo
+    root = fixture_root.parent / ("empty-repository" if repository else "plain-directory")
+    root.mkdir()
+    if repository:
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    session = f"tr2-no-history-{repository}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "no verification run recorded this session" not in result.stdout
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 @pytest.mark.parametrize(
     ("change", "blocked"),
     (

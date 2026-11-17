@@ -120,10 +120,11 @@ def _head_revision(root: Path) -> str | None:
 
 
 def _commits_change_code(root: Path, start_revision: object) -> bool:
-    if not isinstance(start_revision, str) or not start_revision:
-        return True
     current_revision = _head_revision(root)
-    if current_revision is None:
+    start_resolved = isinstance(start_revision, str) and bool(start_revision)
+    if not start_resolved and current_revision is None:
+        return False
+    if not start_resolved or current_revision is None:
         return True
     if current_revision == start_revision:
         return False
