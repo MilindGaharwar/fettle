@@ -42,7 +42,14 @@ CONTROL_PLANE_PATHS = frozenset({
     ".opencode/plugins/fettle.ts",
     ".opencode/plugin/fettle.ts",
 })
-_SHELL_WRITERS = frozenset({"rm", "mv", "cp", "truncate", "chmod", "tee"})
+_SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "&"})
+_READ_ONLY_COMMANDS = frozenset({
+    "cat", "head", "tail", "less", "grep", "rg", "wc", "ls", "stat", "diff", "cmp",
+    "shasum", "sha256sum", "fettle",
+})
+_ALLOWED_GIT_SUBCOMMANDS = frozenset({
+    "status", "diff", "log", "show", "blame", "ls-files", "add", "commit",
+})
 
 PYPROJECT_TOOL_SECTIONS = re.compile(
     r"\[tool\.(ruff|mypy|pyright|pylint|isort|black|flake8)\b"
@@ -95,31 +102,105 @@ def _control_plane_name(path: Path, root: Path) -> str | None:
     return path.name
 
 
-def _shell_write_targets(command: str, root: Path) -> list[Path]:
+def _shell_tokens(command: str) -> list[str]:
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;<>")
         lexer.whitespace_split = True
-        tokens = list(lexer)
+        return list(lexer)
     except ValueError:
         return []
-    targets: list[str] = []
-    for index, token in enumerate(tokens):
-        if token in {">", ">>"} and index + 1 < len(tokens):
-            targets.append(tokens[index + 1])
-        command_name = Path(token).name
-        if command_name in _SHELL_WRITERS:
-            for value in tokens[index + 1:]:
-                if value in {";", "&&", "||", "|", "&"}:
-                    break
-                if not value.startswith("-"):
-                    targets.append(value)
-        if command_name == "sed" and "-i" in tokens[index + 1:]:
-            for value in tokens[index + 1:]:
-                if value in {";", "&&", "||", "|", "&"}:
-                    break
-                if not value.startswith("-") and not value.startswith("s/"):
-                    targets.append(value)
-    return [Path(value) if Path(value).is_absolute() else root / value for value in targets]
+
+
+def _simple_commands(tokens: list[str]) -> list[list[str]]:
+    commands: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in _SHELL_SEPARATORS:
+            if current:
+                commands.append(current)
+                current = []
+        else:
+            current.append(token)
+    if current:
+        commands.append(current)
+    return commands
+
+
+def _argument_path(value: str, cwd: Path) -> Path:
+    candidate = value.split("=", 1)[1] if "=" in value else value
+    expanded = os.path.expanduser(os.path.expandvars(candidate))
+    path = Path(expanded)
+    return path if path.is_absolute() else cwd / path
+
+
+def _raw_control_plane_name(command: str) -> str | None:
+    from fettle.config import state_root
+
+    folded = command.casefold()
+    for name in sorted(CONTROL_PLANE_PATHS, key=len, reverse=True):
+        if name.casefold() in folded:
+            return Path(name).name
+    state_spellings = {
+        str(state_root()),
+        "$XDG_STATE_HOME/fettle",
+        "${XDG_STATE_HOME}/fettle",
+        "~/.local/state/fettle",
+    }
+    if any(spelling.casefold() in folded for spelling in state_spellings):
+        return "fettle state"
+    if re.search(r"(?:^|[\s/])\.fettle(?:[/\s]|$)", command, flags=re.IGNORECASE):
+        return ".fettle"
+    return None
+
+
+def _referenced_control_plane(command: list[str], cwd: Path) -> str | None:
+    raw_name = _raw_control_plane_name(" ".join(command))
+    if raw_name:
+        return raw_name
+    for token in command:
+        if token.startswith("-") and "=" not in token:
+            continue
+        name = _control_plane_name(_argument_path(token, cwd), cwd)
+        if name:
+            return name
+    return None
+
+
+def _command_is_allowed(command: list[str]) -> bool:
+    executable_index = next(
+        (index for index, token in enumerate(command) if "=" not in token or token.startswith("/")),
+        None,
+    )
+    if executable_index is None:
+        return False
+    executable = Path(command[executable_index]).name
+    if executable in _READ_ONLY_COMMANDS:
+        return True
+    if executable != "git":
+        return False
+    subcommand = next(
+        (token for token in command[executable_index + 1:] if not token.startswith("-")),
+        "",
+    )
+    return subcommand in _ALLOWED_GIT_SUBCOMMANDS
+
+
+def _write_redirects_to_control_plane(command: list[str], cwd: Path) -> bool:
+    for index, token in enumerate(command[:-1]):
+        if ">" in token and _control_plane_name(_argument_path(command[index + 1], cwd), cwd):
+            return True
+    return False
+
+
+def _unsafe_shell_reference(command: str, invocation_cwd: Path) -> str | None:
+    cwd = invocation_cwd
+    for simple in _simple_commands(_shell_tokens(command)):
+        name = _referenced_control_plane(simple, cwd)
+        if name and (_write_redirects_to_control_plane(simple, cwd) or not _command_is_allowed(simple)):
+            return name
+        if len(simple) >= 2 and Path(simple[0]).name == "cd":
+            cwd = _argument_path(simple[1], cwd)
+    return None
 
 
 def _policy_result(name: str, mode: str):
@@ -169,7 +250,12 @@ def run_check(ctx):
     if ctx.target_path is not None:
         targets.append(ctx.target_path)
     if ctx.tool_name == "Bash":
-        targets.extend(_shell_write_targets(str(ctx.tool_input.get("command", "")), ctx.cwd))
+        protected_name = _unsafe_shell_reference(
+            str(ctx.tool_input.get("command", "")),
+            ctx.input.invocation_cwd or ctx.cwd,
+        )
+        if protected_name:
+            return _policy_result(protected_name, mode)
     if not targets:
         return CheckResult.allow()
     for target in targets:

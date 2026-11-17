@@ -17,7 +17,7 @@ from fettle.loop_detect import run_check as run_loop_check
 from fettle.edit_journal import record_session_start
 from fettle.policy_integrity import run_check as run_policy_integrity
 from fettle.cli import cmd_config
-from fettle.config_protect import _control_plane_name
+from fettle.config_protect import _control_plane_name, _unsafe_shell_reference
 from fettle.assurance import build_assurance_record
 
 
@@ -283,6 +283,26 @@ def test_control_plane_probe_does_not_create_state_directory(
 
     assert _control_plane_name(root / "README.md", root) is None
     assert not state.exists()
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    (
+        ("cat .fettle.toml", None),
+        ("cat README.md > .fettle.toml", ".fettle.toml"),
+        ("mkdir -p sub && cd sub && rm ../.fettle.toml", ".fettle.toml"),
+        ("rm -rf $XDG_STATE_HOME/fettle", "fettle state"),
+        ("git add .fettle.toml && git commit -m x", None),
+    ),
+)
+def test_shell_control_plane_reference_classification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, expected: str | None,
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+
+    assert _unsafe_shell_reference(command, root) == expected
 
 
 def test_config_explain_reports_ignored_repository_disable(

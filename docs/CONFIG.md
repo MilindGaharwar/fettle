@@ -483,10 +483,15 @@ moves it from advisory to enforce.
   sessions never see each other's state.
 - **Protected control plane** includes root and ancestor `.fettle.toml` files,
   `.fettle-ignore`, `.fettle/`, redirected session state, and supported host
-  hook settings. File-tool paths are resolved before comparison. Common shell
-  writes (`>`, `tee`, `sed -i`, `rm`, `mv`, `cp`, `truncate`, `chmod`) are
-  detected on a best-effort basis; this is evidence and mistake prevention, not
-  an operating-system sandbox.
+  hook settings. File-tool paths are resolved before comparison. A shell command
+  that references the control plane is allowed only when every command carrying
+  the reference is read-only: `cat`, `head`, `tail`, `less`, `grep`, `rg`, `wc`,
+  `ls`, `stat`, `diff`, `cmp`, `shasum`, `sha256sum`, `fettle`, or `git` with
+  `status`, `diff`, `log`, `show`, `blame`, `ls-files`, `add`, or `commit`.
+  Redirection cannot write to the control plane. This command-text analysis
+  cannot see a path computed or obfuscated inside another program; it is mistake
+  prevention, not an operating-system sandbox. The session policy-integrity
+  check is the backstop for a policy change that this analysis does not see.
 - **Per-project trace** (`.fettle/trace.jsonl`, override with
   `FETTLE_TRACE_DIR`) records detailed findings, hook metrics, and gate
   errors for the current repository.

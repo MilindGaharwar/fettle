@@ -663,6 +663,79 @@ def test_registered_hook_blocks_control_plane_writes(
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    "command",
+    (
+        'python3 -c "open(\'.fettle.toml\',\'w\').write(\'\')"',
+        "git checkout HEAD~1 -- .fettle.toml",
+        "bash -c 'echo > .fettle.toml'",
+        "mkdir -p sub && cd sub && rm ../.fettle.toml",
+        "perl -pi -e 's/enforce/advisory/' .fettle.toml",
+        "dd if=/dev/null of=.fettle.toml",
+        "ln -sf /dev/null .fettle.toml",
+        "rm -rf $XDG_STATE_HOME/fettle",
+        "rm -rf ~/.local/state/fettle",
+        "find {state_root} -delete",
+    ),
+)
+def test_registered_hook_blocks_commands_referencing_control_plane(
+    installed_hook_repo, mode, command,
+):
+    root, env = installed_hook_repo
+    command = command.format(state_root=shlex.quote(str(Path(env["XDG_STATE_HOME"]) / "fettle")))
+    payload = _payload("claude_code", "pre_bash", root, command=command)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "Fettle policy modification blocked:" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    "command",
+    (
+        "cat .fettle.toml",
+        "git diff .fettle.toml",
+        "git add .fettle.toml && git commit -m x",
+        "fettle config --explain",
+        "grep -r foo . > out.txt",
+        "rm build.log",
+        "ls .fettle",
+    ),
+)
+def test_registered_hook_allows_safe_commands_with_or_without_control_plane_reference(
+    installed_hook_repo, mode, command,
+):
+    root, env = installed_hook_repo
+    payload = _payload("claude_code", "pre_bash", root, command=command)
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_advises_on_shell_control_plane_reference(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.config_protect]\nenabled = true\nmode = "advisory"\n',
+        encoding="utf-8",
+    )
+    payload = _payload(
+        "claude_code", "pre_bash", root,
+        command='python3 -c "open(\'.fettle.toml\', \'w\').write(\'\')"',
+    )
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "Fettle policy modification blocked:" in output["additionalContext"]
+    assert output.get("permissionDecision") != "deny"
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_hook_allows_repair_of_broken_root_policy(installed_hook_repo, mode):
     root, env = installed_hook_repo
     (root / ".fettle.toml").write_text("[gates.config_protect\n")
