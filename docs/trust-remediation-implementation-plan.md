@@ -324,9 +324,12 @@ Code treats as non-blocking.
   the session-start record (D-1). A change without a recorded approval blocks
   in enforce mode and is advisory otherwise. The Assurance Record's
   `policy_integrity` dimension reports this instead of a constant PASS.
-- **Recovery.** A policy load error no longer blocks the edit that repairs the
-  policy file: when the only target of an `Edit` or `Write` is a policy file
-  that currently fails to load, the event is allowed with an advisory.
+- **Recovery correction (review, 2026-11-17).** Policy repair is owner-only.
+  When local policy is unreadable or invalid, every agent event blocks with
+  "fix `.fettle.toml` in your editor, then run `fettle doctor`"; unavailable remote
+  policy keeps the `fettle policy sync` recovery action. The prior repair
+  exception was removed because it could also authorize an agent to delete an
+  unavailable `[extends]` declaration before session-start evidence existed.
 - **Honest limit.** These measures stop mistakes and leave evidence. Against a
   hostile agent the authority is the verifier, which loads policy from the base
   ref (D-7).
@@ -630,7 +633,7 @@ P2). Size: L. Design: D-5.
 |---|---|---|
 | E2 | `.fettle.toml`, session state and host settings are unprotected; `disabled_checks` disables fail-closed checks | R |
 | E12 | Config protection misses new files, symlinks, case variants and relative paths; its block message explains how to disable it | S |
-| E15 | A corrupt policy file blocks the edit that would repair it | S |
+| E15 | A corrupt policy file blocks agent edits; the owner repairs it outside the session | S |
 | E17 | Loop, scope and lean state are written under the install directory; the trace is global across repositories | S |
 | E18 | `[dispatcher]` keys are honoured but absent from the schema | S |
 | V6 | The repository layer overrides organisation release policy | S, C |

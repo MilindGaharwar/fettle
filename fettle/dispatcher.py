@@ -109,17 +109,6 @@ def _empty_output(event_name: str = "") -> str:
     )
 
 
-def _is_policy_repair(hook_input, root: Path) -> bool:
-    if hook_input.hook_event_name != "PreToolUse" or hook_input.tool_name not in {"Write", "Edit"}:
-        return False
-    if len(hook_input.targets) != 1:
-        return False
-    target = hook_input.targets[0]
-    if not target.is_absolute():
-        target = (hook_input.invocation_cwd or root) / target
-    return target.resolve(strict=False) == (root / ".fettle.toml").resolve(strict=False)
-
-
 def _most_severe_target_result(check_name: str, results: list[CheckResult]) -> CheckResult:
     """Collapse one check's target fan-out without hiding later results."""
     precedence = {Decision.ALLOW: 0, Decision.ADVISORY: 1, Decision.BLOCK: 2}
@@ -241,23 +230,11 @@ def main() -> int:
             "config_error", f"{type(exc).__name__}: {exc}", session_id
         )
         failure = Aggregator(total_budget_ms=0, hook_event_name=hook_input.hook_event_name)
-        if _is_policy_repair(hook_input, cwd):
-            failure.add_result(
-                "dispatcher",
-                CheckResult.advisory(
-                    "Fettle policy is invalid; allowing this policy-file repair only. "
-                    "Run `fettle doctor` after the repair."
-                ),
-                0,
-            )
-            output, exit_code = failure.finish()
-            print(json.dumps(output, separators=(",", ":")))
-            return exit_code
         failure.add_result("dispatcher", CheckResult.block(
             "Org policy is declared but not available locally. Run: fettle policy sync"
              if "policy sync" in str(exc)
-             else "Policy configuration could not be loaded; required checks are unknown. "
-                  "Run `fettle doctor` and retry."
+             else "Policy configuration could not be loaded; fix `.fettle.toml` in your "
+                  "editor, then run `fettle doctor`."
         ), 0)
         output, exit_code = failure.finish()
         print(json.dumps(output, separators=(",", ":")))

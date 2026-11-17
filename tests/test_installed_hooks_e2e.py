@@ -736,15 +736,37 @@ def test_registered_hook_advises_on_shell_control_plane_reference(installed_hook
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
-def test_registered_hook_allows_repair_of_broken_root_policy(installed_hook_repo, mode):
+def test_registered_hook_blocks_agent_repair_of_broken_root_policy(installed_hook_repo, mode):
     root, env = installed_hook_repo
     (root / ".fettle.toml").write_text("[gates.config_protect\n")
     payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
 
     result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
 
-    assert result.returncode == 0, result.stderr
-    assert "repair" in json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert result.returncode == 2, result.stderr
+    assert (
+        "fix `.fettle.toml` in your editor, then run `fettle doctor`"
+        in json.loads(result.stdout)["reason"]
+    )
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_hook_blocks_policy_edit_when_remote_policy_is_unavailable(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    env["FETTLE_POLICY_CACHE_DIR"] = str(root / "missing-policy-cache")
+    (root / ".fettle.toml").write_text(
+        '[extends]\nurl = "https://example.com/org.toml"\nsha256 = "'
+        + "0" * 64 + '"\n',
+        encoding="utf-8",
+    )
+    payload = _payload("claude_code", "pre_edit", root, file_path=".fettle.toml")
+
+    result = _run(_event_command(mode, "PreToolUse"), payload, root, env)
+
+    assert result.returncode == 2, result.stderr
+    assert "fettle policy sync" in json.loads(result.stdout)["reason"]
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))

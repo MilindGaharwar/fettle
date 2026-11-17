@@ -182,12 +182,15 @@ action.
   shown
 - And the Assurance Record's policy integrity dimension is not PASS
 
-### Scenario: A broken policy file can be repaired (TR-2)
+### Scenario: A broken policy file is repaired by the owner (TR-2)
 
 - Given the repository policy file cannot be loaded
-- When the agent edits only that file
-- Then the edit is allowed with an advisory, and every other event stays
-  blocked until the policy loads
+- When the agent attempts to edit that file
+- Then the edit is blocked with "fix `.fettle.toml` in your editor, then run
+  `fettle doctor`", and every event stays blocked until the owner repairs the
+  file outside the agent session
+- And unavailable remote policy instead keeps the existing recovery action
+  `fettle policy sync`
 
 ### Scenario: An edited stamp cannot pass (TR-3)
 
