@@ -4,15 +4,15 @@
   "revision": "trust-remediation-tr2-2026-11-17",
   "scope_digest_version": 2,
   "scope_digest": "fe794a91b36ef1322cefb2855ff604b6685fdae15fc4bfcd67391781a0f76b69",
-  "status": "in_progress",
-  "uat_decision": "FIX_FIRST",
+  "status": "complete",
+  "uat_decision": "SHIP",
   "criteria": [
     {
       "id": "installed-control-plane-and-policy-floors",
       "kind": "success",
       "required": true,
-      "verdict": "unobserved",
-      "observed": "Findings R-1 through R-6 were reproduced on 2026-11-17 and corrected in both installed launch modes; final complete-candidate gates are pending.",
+      "verdict": "confirmed",
+      "observed": "Findings R-1 through R-6 are corrected and the final installed plugin and bridge UAT reported 147 passed.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/verification.json",
         "sha256": "1abb523bb734e152c20e05aae785965f132e2e43b2417409af484fc4b9b1c7f4",
@@ -24,11 +24,11 @@
       "id": "full-regression-and-quality",
       "kind": "success",
       "required": true,
-      "verdict": "unobserved",
-      "observed": "Final complete-candidate quality gates are pending.",
+      "verdict": "confirmed",
+      "observed": "Pinned Ruff passed; the targeted suite reported 522 passed; the unexcluded full suite reported 5323 passed and 20 skipped; and the Fettle scan exited 0 with three inherited warnings.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "be080a96f65143d72f3eef7635e42a30979813fad0313c84d9eff0b4742dd09d",
+        "sha256": "8e683ac19c852d6a017d99788364108985aaf7a9073eb141e2389873198a17aa",
         "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
@@ -37,11 +37,11 @@
       "id": "candidate-range-precommit",
       "kind": "success",
       "required": true,
-      "verdict": "unobserved",
-      "observed": "Final complete-candidate range pre-commit is pending.",
+      "verdict": "confirmed",
+      "observed": "The committed origin/main-to-HEAD pre-commit range passed every applicable hook.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/quality.json",
-        "sha256": "be080a96f65143d72f3eef7635e42a30979813fad0313c84d9eff0b4742dd09d",
+        "sha256": "8e683ac19c852d6a017d99788364108985aaf7a9073eb141e2389873198a17aa",
         "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "Rerun the same range gate after the sequential merge gate permits the final rebase."
@@ -50,11 +50,11 @@
       "id": "bounded-narrow-mutation-replay",
       "kind": "success",
       "required": false,
-      "verdict": "unobserved",
-      "observed": "One bounded complete-candidate mutation diagnostic remains pending.",
+      "verdict": "timeout",
+      "observed": "The one bounded changed-scope diagnostic reached its configured 600-second deadline and exited 2 as a tool error; no replay or mutation credit is claimed.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr2/mutation-summary.json",
-        "sha256": "11bd7d4802cce75e9d8287abf7de1e84466117ac417d0ebb602cd934678903ee",
+        "sha256": "750b7968f9064252ac97e0c49e1d433fffbac941641c8369d66bc93ef651aa15",
         "revision": "trust-remediation-tr2-2026-11-17"
       },
       "recovery": "No package-completion recovery is required. The pull request advisory run is the mutation evidence that counts."

@@ -2,22 +2,24 @@
   "schema_version": 1,
   "milestone": "trust-remediation-tr2",
   "revision": "trust-remediation-tr2-2026-11-17",
-  "diagnostic_outcome": "Make one fresh bounded attempt for the final changed range, capped by the configured 600 seconds per file and 7200 seconds total; retain a non-result truthfully and authorize no replay unless preflight passes.",
+  "diagnostic_outcome": "One fresh changed-scope diagnostic ran on the final local candidate with the configured 600-second cap. It timed out as a tool error; no replay or mutation credit is authorized.",
   "engine_version": "2.5.1",
-  "authoritative_preflight": {
+  "bounded_changed_scope": {
     "status": "tool_error",
     "passed": false,
     "deadline_exhausted": true,
-    "timeout_seconds": 7200,
-    "artifact_sha256": "21b7a282faeb982d257e70337baa53832c1899775b46da0607df6c0d31057f6e",
-    "artifact_location": "$TMPDIR/phase-hl/hl10/tr2-final-mutation-preflight.json",
-    "terminal_output_sha256": "de9fb0b1baade76fab8ed5cc78a88d766dbaa8c8d415e5bef87801bc46e7af66",
-    "terminal_output_location": "$TMPDIR/phase-hl/hl10/tr2-final-mutation-preflight.txt"
+    "timeout_seconds": 600,
+    "revision": "96c70f01d87ac629b1a8145742a3d772f1fb28c2",
+    "merge_base": "6e464752120c163e3e57fcdf9d6685360d8d6cac",
+    "artifact_sha256": "a1370c719bcc2c169ac87930b4209a768c3801e5e0069f3f6be050169f95976b",
+    "artifact_location": "$TMPDIR/phase-hl/hl11/final/mutation-changed.json",
+    "terminal_output_sha256": "ec927dfc1160316582a0189a8e97b071d651c07d068c164422240ddc452dde53",
+    "terminal_output_location": "$TMPDIR/phase-hl/hl11/final/mutation-changed.txt"
   },
   "narrow_replay": {
     "status": "not_authorized",
-    "reason": "The required preflight did not complete successfully."
+    "reason": "The one authorized bounded diagnostic timed out; the playbook forbids treating the timeout as mutation-quality evidence or entering a replay loop."
   },
   "result": "timeout",
-  "interpretation": "The fresh final-candidate preflight reached its configured terminal deadline and exited 2. No replay was authorized, no mutation credit is claimed, and this package criterion is non-required."
+  "interpretation": "The final-candidate changed-scope diagnostic reached its configured 600-second deadline and exited 2. No replay was authorized, no mutation credit is claimed, and this package criterion is non-required. Pull-request mutation evidence remains a remote post-push gate."
 }

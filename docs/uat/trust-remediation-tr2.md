@@ -39,10 +39,10 @@ this rework. The red and green outputs are retained under
 
 ## Automated evidence
 
-- Installed-path acceptance: 86 passed in 27.41 seconds.
-- Full regression on the secured TR-2 commit: 5,191 passed, 20 skipped, with
-  the one known `test_module_cli_validates_reports` wall-clock failure inherited
-  from `main`.
+- Installed-path acceptance: 147 passed in 87.34 seconds.
+- Targeted TR-2 and review-follow-up regression: 522 passed in 90.55 seconds.
+- Full regression on the reworked candidate: 5,323 passed, 20 skipped in
+  710.05 seconds.
 - Ruff: clean.
 - Fettle scan: successful with the same three legacy protocol-print warnings
   already present in TR-1.
@@ -62,6 +62,8 @@ not a hidden UAT pass.
 
 ## Decision
 
-PENDING FINAL GATES. The corrected installed scenarios pass in both launch
-modes. Final full-suite, range, scan, completion, and bounded mutation evidence
-is recorded only after it is rerun on the complete reworked candidate.
+SHIP LOCALLY. The corrected installed scenarios pass in both launch modes, and
+all required local criteria are confirmed. The one bounded mutation diagnostic
+timed out after 600 seconds as a tool error; it is retained as a non-pass, no
+mutation credit is claimed, and remote pull-request mutation evidence remains
+required after push.

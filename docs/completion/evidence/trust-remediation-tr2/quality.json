@@ -5,11 +5,11 @@
   "expected_outcome": "TR-2 passes lint, installed UAT, range pre-commit, repository scan, and the unexcluded full suite after rebasing onto repaired main.",
   "observations": [
     "Pinned Ruff 0.15.20 reported all checks passed for fettle and tests.",
-    "The final targeted TR-2 and review-follow-up suite reported 470 passed in 71.51 seconds.",
-    "The affected T-3 regression set reported 9 passed after its stale TR-1 fixture was corrected and folded into the T-3 commit.",
-    "The exact-history unexcluded full suite reported 5261 passed and 20 skipped.",
+    "The final targeted TR-2 and review-follow-up suite reported 522 passed in 90.55 seconds.",
+    "The exact-history unexcluded full suite reported 5323 passed and 20 skipped in 710.05 seconds with the repository virtual environment first on PATH.",
+    "The earlier full-suite attempt is retained as a non-pass: 39 tests lacked the nested `python` launcher because PATH omitted `.venv/bin`, and one bridge case passed immediately in isolated reproduction.",
     "The range pre-commit command from origin/main to HEAD passed on the committed candidate.",
-    "Installed plugin and bridge UAT reported 110 passed in 54.97 seconds.",
+    "Installed plugin and bridge UAT reported 147 passed in 87.34 seconds.",
     "The repository Fettle scan exited successfully with the same three inherited warning-only debug-print findings."
   ],
   "result": "confirmed"
