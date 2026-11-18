@@ -12,6 +12,7 @@ Read-only. Offline: the CI verdict comes from the cached stamp
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -24,12 +25,16 @@ def _read_json(path: Path) -> dict | None:
 
 
 def compute_brief(root: Path, days: int = 7) -> dict:
+    from fettle.ci_gate import validate_canonical_evidence as validate_ci
+    from fettle.config import load_config
+    from fettle.evidence import ResultState, Validity
     from fettle.report import compute_effectiveness
     from fettle.rules_cmd import list_rules
     from fettle.session_plan import active_plan
     from fettle.session_report import load_reports
     from fettle.topology_apply import load_manifest, topology_status
     from fettle.work_items import load_claims
+    from fettle.verify_gate import validate_canonical_evidence as validate_verify
 
     root = Path(root)
 
@@ -58,6 +63,33 @@ def compute_brief(root: Path, days: int = 7) -> dict:
 
     ci = _read_json(root / ".fettle" / "ci-status.json")
     verify = _read_json(root / ".fettle" / "verify.json")
+    config = load_config(str(root))
+
+    def evidence_state(stamp: dict | None, validator) -> dict | None:
+        if stamp is None:
+            return None
+        result = validator(str(root), config, stamp)
+        if result.validity != Validity.VALID:
+            return {"ok": False, "state": "stale", "reason": result.validity.value}
+        return {
+            "ok": result.result_state == ResultState.PASS,
+            "state": result.result_state.value,
+            "reason": "",
+        }
+
+    ci_state = evidence_state(ci, validate_ci)
+    verify_state = evidence_state(verify, validate_verify)
+    if ci and ci_state and ci_state.get("ok"):
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+                text=True, timeout=5,
+            )
+            revision = head.stdout.strip() if head.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            revision = ""
+        if not revision or ci.get("sha") != revision:
+            ci_state = {"ok": False, "state": "stale", "reason": "wrong_source"}
 
     rules = list_rules(root)
     proposals = [r["id"] for r in rules if r.get("stage") == "proposed"]
@@ -72,9 +104,9 @@ def compute_brief(root: Path, days: int = 7) -> dict:
                   "total": plan["total"]} if plan else None),
         "claims": {item: c.get("session_id", "") for item, c in claims.items()},
         "topology": topology,
-        "ci": ({"ok": bool(ci.get("ok")), "sha": ci.get("sha", ""),
-                "overall": ci.get("overall", "")} if ci else None),
-        "verify": ({"ok": bool(verify.get("ok"))} if verify else None),
+        "ci": ({**ci_state, "sha": ci.get("sha", ""),
+                "overall": ci.get("overall", "")} if ci and ci_state else None),
+        "verify": verify_state,
         "open_proposals": proposals,
         "top_friction": top_friction,
         "completion_reports": [{
@@ -105,10 +137,11 @@ def render_brief(data: dict) -> str:
             lines.append(f"            {w['item']:<24} blocks {w['blocks']:>2}"
                          f"/{w['decisions']:<4}{flag}")
     ci = data["ci"]
-    lines.append(f"  ci        {ci['overall'] or ('green' if ci['ok'] else 'red')} "
-                 f"@ {ci['sha'][:12]}" if ci else "  ci        no cached verdict")
+    ci_label = (ci["overall"] if ci["ok"] else ci.get("state", "red")) if ci else ""
+    lines.append(f"  ci        {ci_label} "
+                  f"@ {ci['sha'][:12]}" if ci else "  ci        no cached verdict")
     verify = data["verify"]
-    lines.append(f"  verify    {'green' if verify['ok'] else 'red'}"
+    lines.append(f"  verify    {'green' if verify['ok'] else verify.get('state', 'red')}"
                  if verify else "  verify    no stamp")
     lines.append(f"  proposals {len(data['open_proposals'])} awaiting review"
                  + (f": {', '.join(data['open_proposals'][:3])}"

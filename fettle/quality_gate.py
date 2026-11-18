@@ -16,6 +16,7 @@ Exit 0 = allow/warn. Exit 2 = BLOCK.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -40,29 +41,8 @@ TRACKING_FILE = ""
 EDIT_TRACKING_FILE = ""
 BOOTSTRAP_WARNED_MARKER = ""
 
-# From post_bash_test_detect.py — comprehensive test pattern detection
-TEST_PATTERNS = [
-    r"\bpytest\b",
-    r"\bpython3?\s+-[cm]\b",
-    r"\bcargo\s+test\b",
-    r"\bnpm\s+test\b",
-    r"\bpnpm\s+test\b",
-    r"\bnpx\s+(jest|vitest|mocha)\b",
-    r"\bvitest\b",
-    r"\bgo\s+test\b",
-    r"\bpy_compile\.compile\b",
-    r"\bimport\s+unittest\b",
-    r"\bassert\s+",
-    r"\bprint\(['\"]PASS",
-    r"\bprint\(['\"]ALL PASS",
-    r"\bplaywright\s+test\b",
-    r"\bscreenshot\b",
-    r"page\.\w+",
-]
-
 BROWSER_TEST_MARKER = ""  # set by _init_state()
 FRONTEND_EXTENSIONS = {".tsx", ".ts", ".jsx", ".js", ".css"}
-_TEST_RE = re.compile("|".join(TEST_PATTERNS), re.IGNORECASE)
 
 ALLOWED_HEX: set[str] = set()  # repo-specific brand palette; configurable via .fettle.toml in v0.3.0 (WP-7)
 
@@ -333,27 +313,32 @@ def scan_stop_untested(data: dict) -> list[str]:
     return findings
 
 
-def stamp_tests(command: str):
-    """Record test runs — marks ALL tracked files as tested (from post_bash_test_detect.py)."""
-    if not _TEST_RE.search(command):
+def record_browser_test(command: str) -> None:
+    """Retain the legacy browser-use marker without inferring test success."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
         return
-    _ensure_state()
-
-    # Detect browser testing (Playwright with screenshots)
-    if "playwright" in command or "screenshot" in command or "chromium.launch" in command:
+    if any(
+        Path(arg).name == "playwright" and argv[index + 1:index + 2] == ["test"]
+        for index, arg in enumerate(argv)
+    ):
+        _ensure_state()
         Path(BROWSER_TEST_MARKER).touch()
 
-    entries = _load_edit_tracking()
-    if not entries:
-        return
 
+def record_verified_tests(session_id: str | None) -> None:
+    """Mark session edits tested only after canonical verification passes."""
+    if not session_id:
+        return
+    _init_state(session_id)
+    entries = _load_edit_tracking()
     changed = False
     for entry in entries:
         if not entry.get("tested", False):
             entry["tested"] = True
             entry["tested_ts"] = time.time()
             changed = True
-
     if changed:
         _save_edit_tracking(entries)
 
@@ -514,7 +499,7 @@ def _script_main():
     # ─── Bash: test stamping + commit warning ────────────────────────────
     elif tool_name == "Bash":
         command = tool_input.get("command", "")
-        stamp_tests(command)
+        record_browser_test(command)
         if gates["tests"]["enabled"]:
             warning_findings.extend(scan_tests_before_commit(command))
 

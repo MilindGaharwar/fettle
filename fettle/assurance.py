@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import tomllib
@@ -272,9 +273,30 @@ def _independence_dimension(root: Path) -> dict:
     testers = authors["test"]
     evidence = []
     if implementers or testers:
-        evidence.append({"path": "trace:authorship_gate", "digest": "sha256:" + canonical_digest([
-            entry for entry in trace if entry.get("hook") == "authorship_gate"
-        ])})
+        projected = []
+        for entry in trace:
+            if entry.get("hook") != "authorship_gate":
+                continue
+            projected.append({
+                key: (
+                    int(value) if key == "ts" and isinstance(value, (int, float))
+                    and math.isfinite(value) else (
+                        format(value, ".17g") if isinstance(value, float)
+                        and math.isfinite(value) else (
+                            "non-finite" if isinstance(value, float) else value
+                        )
+                    )
+                )
+                for key, value in entry.items()
+                if key in {
+                    "schema", "ts", "hook", "status", "file", "session_id", "role",
+                    "parent_session_id", "capsule_digest",
+                }
+            })
+        evidence.append({
+            "path": "trace:authorship_gate",
+            "digest": "sha256:" + canonical_digest(projected),
+        })
     if verify is not None:
         evidence.append({"path": ".fettle/verify.json", "digest": _digest_of(verify_path)})
 
@@ -404,6 +426,12 @@ def _ci_dimension(root: Path, config: dict) -> dict:
                 reason=f"canonical CI evidence is {result.validity.value}; "
                        f"run {result.recovery_action}",
             )
+        assessed_revision = _git_head(root) or ""
+        if str(ci.get("sha") or "") != assessed_revision:
+            return _dimension(
+                "UNKNOWN", evidence,
+                reason="canonical CI evidence is for another commit; run fettle ci wait",
+            )
         evidence.append({"path": ".fettle/ci-evidence.json",
                          "digest": _digest_of(root / ".fettle" / "ci-evidence.json")})
         if result.result_state == ResultState.PASS:
@@ -414,8 +442,33 @@ def _ci_dimension(root: Path, config: dict) -> dict:
         return _dimension("UNKNOWN", evidence,
                           reason=f"canonical CI result is {result.result_state.value}; "
                                  f"run {result.recovery_action}")
+    from fettle.config import state_root
+
+    pushed = False
+    for pushes in state_root().glob("*/pushes.jsonl"):
+        try:
+            for line in pushes.read_text(encoding="utf-8").splitlines():
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("sha")
+                    and entry.get("repository") == str(root.resolve())
+                ):
+                    pushed = True
+                    break
+            if pushed:
+                break
+        except OSError:
+            continue
+    if pushed:
+        return _dimension(
+            "UNKNOWN", [], reason="pushed commit has no retained CI status; run fettle ci wait",
+        )
     return _dimension("NOT_APPLICABLE", [],
-                      reason="no retained CI status (bind with fettle ci wait)")
+                      reason="no retained CI status and no retained push")
 
 
 def _authorization_dimension(root: Path) -> dict:

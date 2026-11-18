@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-18",
+  "expected_outcome": "TR-3 passes targeted tests, Ruff, committed-range pre-commit, repository scan, and the unexcluded full suite after rebasing onto repaired main.",
+  "observations": [
+    "The current post-Fable focused suite reported 402 passed in 183.77 seconds.",
+    "Current changed-file Ruff and diff checks passed.",
+    "Main CI run 44196365266 completed successfully for exact merged predecessor c9196056d4a1c60bd39d0898f882edce66d62a9f.",
+    "The current unexcluded full suite reported 5379 passed and 20 skipped in 723.28 seconds.",
+    "CI-pinned Ruff 0.15.20 passed across fettle and tests on committed candidate 3465432fe10291f55e10be17d0cd408057aef67d.",
+    "Committed-range pre-commit passed from origin/main to final evidence candidate f21b4c7b3faca14f55574c7650958e1f9fa5f256.",
+    "fettle check --all completed with only three inherited warning-level debug-print findings in fettle/post_edit.py and fettle/quality_gate.py.",
+    "Strict completion validation remains to run after this final evidence update.",
+    "The worktree contains no mutation-tooling or mutation-configuration change."
+  ],
+  "result": "confirmed"
+}

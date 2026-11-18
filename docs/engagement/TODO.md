@@ -780,11 +780,12 @@ otherwise. Finding IDs refer to the plan's register.
       resolution; tool taxonomy with multi-target events; isolated launch.
       PR #80 merged as tree-equivalent squash `bf26796` on 2026-11-17;
       review corrections T-1 through T-5 are carried by TR-2.
-- [ ] E2. TR-2 Control plane and policy floors (P0: E2) — protect Fettle's own
+- [x] E2. TR-2 Control plane and policy floors (P0: E2) — protect Fettle's own
       config, state and hook wiring; fail-closed checks cannot be disabled from
       the repository layer; organisation, remote and capsule policy become
       floors; remote policy fails closed. Findings R-1 through R-6 from review
-      on 2026-11-17 are fixed on PR #81; the reworked package is not merged.
+      on 2026-11-17 were fixed on PR #81, which merged as tree-equivalent
+      squash `c919605` on 2026-11-17.
 - [ ] E3. TR-3 Truthful verification (P0: V2, V3a) — gates read the validated
       artifact, never the stamp's `ok`; test counts recorded and zero executed
       tests is a non-pass; CI evidence bound to the assessed commit.
@@ -795,7 +796,12 @@ otherwise. Finding IDs refer to the plan's register.
       from the base ref, assurance levels A0-A3, signed overrides, completion
       manifests and ledger checkpoints. Four rollout steps.
 - [ ] E6. TR-6 Guards — secret boundary model, destructive guard, spawn gate,
-      MCP gate, role separation, output guard.
+      MCP gate, role separation, output guard. The 2026-11-18 TR-2 review also
+      found these shell-analysis bypasses, which are not blocked before they
+      run: `rm .fettle.t*`, a protected-path producer piped to `xargs`,
+      `find -name '.fettle*' -delete`, `git checkout <rev> -- .`, and
+      `git diff --output=<control file>`. A resulting effective-policy change
+      is still reported at Stop; TR-6 owns prevention before execution.
 - [ ] E7. TR-7 Coordination — worktree scanning, claim ownership and scope,
       worker attribution, session-bound plans.
 - [ ] E8. TR-8 Pipeline and mutation decisions — advisory serialisation guard,

@@ -743,7 +743,7 @@
             },
             "scope": {
               "type": "string",
-              "default": "impacted"
+              "default": "full"
             },
             "timeout_s": {
               "type": "integer",

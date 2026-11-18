@@ -35,6 +35,13 @@ def _project(tmp_path: Path, test_command: str) -> Path:
     return tmp_path
 
 
+def _passing_project(tmp_path: Path) -> Path:
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_pass.py").write_text("def test_pass():\n    assert True\n")
+    return _project(tmp_path, f"{sys.executable} -m pytest tests")
+
+
 def _cfg(**tests) -> dict:
     base = {"enabled": True, "mode": "advisory", "scope": "impacted",
             "timeout_s": 30, "parallel": False}
@@ -107,7 +114,7 @@ class TestImpactedMapping:
 
 class TestRunVerify:
     def test_green_run_writes_ok_stamp(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         stamp = run_verify(str(repo), _cfg())
         assert stamp["ok"] and stamp["exit_code"] == 0
         assert stamp["evidence_id"].startswith("ev-")
@@ -115,7 +122,7 @@ class TestRunVerify:
         assert on_disk["ok"] is True
 
     def test_green_run_writes_bound_canonical_sidecar_and_reference(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
 
         stamp = run_verify(str(repo), _cfg(), session_id="sess-1")
         artifact = parse_artifact((repo / EVIDENCE_RELPATH).read_bytes())
@@ -128,10 +135,10 @@ class TestRunVerify:
         assert artifact.policy_digest == stamp["canonical_evidence"]["expected"]["policy_digest"]
         assert artifact.scope_digest == stamp["canonical_evidence"]["expected"]["scope_digest"]
         assert artifact.observation_id
-        assert set(artifact.payload) == {"exit_code", "scope"}
+        assert set(artifact.payload) == {"argv", "exit_code", "scope", "tests"}
 
     def test_canonical_sidecar_write_failure_cannot_leave_green_run(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
 
         with patch(
             "fettle.verify_gate._write_bytes_atomic",
@@ -145,7 +152,7 @@ class TestRunVerify:
         assert not (repo / EVIDENCE_RELPATH).exists()
 
     def test_stamp_write_failure_cannot_make_new_sidecar_authoritative(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         src = repo / "src.py"
         src.write_text("x = 1\n")
         state = repo / "state" / "sess-g"
@@ -170,7 +177,7 @@ class TestRunVerify:
         with patch("fettle.config.state_dir", return_value=state):
             result = run_check(_gate_ctx(repo, _cfg()))
         assert result.decision == Decision.ADVISORY
-        assert "duplicate_id" in result.message
+        assert "wrong_scope" in result.message
 
     def test_red_run_records_failure_tail(self, tmp_path):
         repo = _project(
@@ -547,7 +554,7 @@ class TestRunVerify:
         assert result.validity.value == "wrong_scope"
 
     def test_full_flag_ignores_scoping(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         stamp = run_verify(str(repo), _cfg(), full=True)
         assert stamp["scope"] == "full"
 
@@ -569,7 +576,10 @@ class TestRunVerify:
         _write_edits(state, [str(py_file), str(web_file)])
 
         completed = subprocess.CompletedProcess([], 0, "", "")
+        counts = {"collected": 1, "executed": 1, "passed": 1,
+                  "failed": 0, "errors": 0, "skipped": 0}
         with (patch("fettle.config.state_dir", return_value=state),
+              patch("fettle.verify_gate.read_junit_counts", return_value=counts),
               patch("fettle.verify_gate.subprocess.run", return_value=completed) as invoke):
             stamp = run_verify(str(tmp_path), _cfg(), session_id="sess-mixed")
 
@@ -865,7 +875,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
         sidecar = repo / EVIDENCE_RELPATH
@@ -885,7 +895,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
 
@@ -900,7 +910,7 @@ class TestStopGate:
         src.write_text("x = 1\n")
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         with patch("fettle.config.state_dir", return_value=state):
             run_verify(str(repo), _cfg(), session_id="sess-g")
         stamp_path = repo / STAMP_RELPATH
@@ -920,8 +930,14 @@ class TestStopGate:
         subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
         src = tmp_path / "src.py"
         src.write_text("x = 1\n")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_pass.py").write_text("def test_pass():\n    assert True\n")
+        (tmp_path / ".gitignore").write_text(
+            ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\nstate/\n"
+        )
         (tmp_path / ".fettle.toml").write_text(
-            f'[profile]\ntest_command = "{sys.executable} -c pass"\n'
+            f'[profile]\ntest_command = "{sys.executable} -m pytest tests"\n'
         )
         subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
@@ -1041,7 +1057,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "impacted",
             "impacted": ["tests/test_widget.py"],
         }, _cfg())
         from fettle.test_discovery import TestConfig
@@ -1093,7 +1110,7 @@ class TestStopGate:
             "ok": True, "session_id": "sess-g", "scope": "workspace",
             "exit_code": 0,
             "workspaces": [{
-                "path": "api", "ok": True, "scope": "impacted",
+                "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_widget.py"],
             }],
         }, _cfg(mode="enforce"))
@@ -1125,9 +1142,10 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(source) for source in edited])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
-                "path": "api", "ok": True, "scope": "impacted",
+                "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_alpha.py"],
             }],
         }, _cfg(mode="enforce"))
@@ -1159,9 +1177,10 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(source) for source in edited])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
-                "path": "api", "ok": True, "scope": "impacted",
+                "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_alpha.py", "tests/test_beta.py"],
             }],
         }, _cfg())
@@ -1200,13 +1219,15 @@ class TestStopGate:
             records.append({
                 "path": name,
                 "ok": True,
+                "result_state": "pass",
                 "scope": "full" if name == "a-full" else "impacted",
                 "impacted": [],
             })
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1241,6 +1262,7 @@ class TestStopGate:
             records.append({
                 "path": name,
                 "ok": True,
+                "result_state": "pass",
                 "scope": "full" if name == "a-full" else "impacted",
                 "impacted": (
                     [] if name == "a-full" else ["tests/test_widget.py"]
@@ -1249,7 +1271,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg())
 
@@ -1282,13 +1305,14 @@ class TestStopGate:
                 test_command="pytest tests/", test_roots=["tests"],
             ))
             records.append({
-                "path": name, "ok": True, "scope": "impacted",
+                "path": name, "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_widget.py"] if name == "a-covered" else [],
             })
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1323,13 +1347,14 @@ class TestStopGate:
                 test_command="pytest tests/", test_roots=["tests"],
             ))
             records.append({
-                "path": name, "ok": True, "scope": "impacted",
+                "path": name, "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_widget.py"] if name == "a-covered" else [],
             })
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1353,7 +1378,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(deleted), str(live)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "impacted",
             "impacted": ["tests/test_widget.py"],
         }, _cfg())
 
@@ -1378,9 +1404,10 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(deleted), str(live)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
-                "path": "api", "ok": True, "scope": "impacted",
+                "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_widget.py"],
             }],
         }, _cfg())
@@ -1413,7 +1440,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "head_sha": _head_sha(str(tmp_path)),
             "dirty_digest": _dirty_digest(str(tmp_path)),
         }, _cfg())
@@ -1434,7 +1462,8 @@ class TestStopGate:
         state = repo / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])
         _write_stamp(str(repo), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "head_sha": _head_sha(str(repo)),
             "dirty_digest": _dirty_digest(str(repo)),
         }, _cfg(mode="enforce"))
@@ -1466,7 +1495,7 @@ class TestStopGate:
         stamp.parent.mkdir(parents=True)
         stamp.write_text(json.dumps({
             "ok": True, "session_id": "sess-g", "scope": "full",
-            "workspaces": [{"path": "api", "ok": True, "scope": "full"}],
+            "workspaces": [{"path": "api", "ok": True, "result_state": "pass", "scope": "full"}],
         }))
         with patch("fettle.config.state_dir", return_value=state):
             result = run_check(_gate_ctx(tmp_path, _cfg()))
@@ -1486,10 +1515,11 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "workspaces": [
-                {"path": "api", "ok": True, "scope": "full"},
-                {"path": "web", "ok": True, "scope": "full"},
+                {"path": "api", "ok": True, "result_state": "pass", "scope": "full"},
+                {"path": "web", "ok": True, "result_state": "pass", "scope": "full"},
             ],
         }, _cfg())
         with patch("fettle.config.state_dir", return_value=state):
@@ -1504,7 +1534,7 @@ class TestRegistryAndCLI:
         assert spec.budget_ms <= 100  # reads a stamp; never runs tests
 
     def test_cli_verify_green_exit_0(self, tmp_path):
-        repo = _project(tmp_path, f"{sys.executable} -c pass")
+        repo = _passing_project(tmp_path)
         r = subprocess.run([*CLI, "verify"], cwd=repo,
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stderr

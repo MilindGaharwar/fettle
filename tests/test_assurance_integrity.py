@@ -65,6 +65,7 @@ def _write_verify_evidence(root, *, ok=True):
 
     stamp = {
         "ok": ok, "session_id": "verify-1", "head_sha": _git_head(root),
+        "result_state": "pass" if ok else "violation",
         "exit_code": 0 if ok else 1, "command": "pytest -q",
         "error": "tests failed" if not ok else "", "scope": "full", "impacted": [],
     }

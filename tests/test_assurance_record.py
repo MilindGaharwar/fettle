@@ -38,6 +38,7 @@ def _write_verify_result(root, *, ok, error=""):
 
     stamp = {
         "ok": ok, "session_id": "s-1", "head_sha": _commit_head(root),
+        "result_state": "pass" if ok else "violation",
         "exit_code": 0 if ok else 1, "command": "pytest -q", "error": error,
         "scope": "full", "impacted": [],
     }
@@ -486,6 +487,81 @@ def test_ci_dimension_fails_on_red_status(tmp_path):
 
     assert ci["status"] == "FAIL"
     assert "violation" in ci["reason"]
+
+
+def test_ci_dimension_is_unknown_when_a_push_has_no_retained_status(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path)
+    head = _commit_head(root)
+    state = tmp_path / "state"
+    pushes = state / "fettle" / "assurance-session" / "pushes.jsonl"
+    pushes.parent.mkdir(parents=True)
+    pushes.write_text(json.dumps({
+        "sha": head, "ts": 1.0, "repository": str(root.resolve()),
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+    ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
+
+    assert ci["status"] == "UNKNOWN"
+    assert "pushed commit has no retained CI status" in ci["reason"]
+
+
+def test_ci_dimension_ignores_push_from_another_repository(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    root = _init_repo(target)
+    state = tmp_path / "state"
+    pushes = state / "fettle" / "other-session" / "pushes.jsonl"
+    pushes.parent.mkdir(parents=True)
+    pushes.write_text(json.dumps({
+        "sha": "a" * 40, "ts": 1.0, "repository": str(tmp_path / "other"),
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+    ci = build_assurance_record(str(root))["record"]["dimensions"]["ci"]
+
+    assert ci["status"] == "NOT_APPLICABLE"
+
+
+def test_real_trace_timestamp_does_not_break_assurance(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    trace = state / "fettle" / "trace.jsonl"
+    trace.parent.mkdir(parents=True)
+    trace.write_text(json.dumps({
+        "schema": 2,
+        "ts": 1794714000.125,
+        "hook": "authorship_gate",
+        "status": "pass",
+        "file": str(root / "app.py"),
+        "session_id": "impl",
+        "role": "implementer",
+    }) + "\n", encoding="utf-8")
+
+    result = build_assurance_record(str(root))
+
+    assert result["status"] == "completed"
+    evidence = result["record"]["dimensions"]["independence"]["evidence"]
+    assert evidence[0]["path"] == "trace:authorship_gate"
+
+
+def test_non_finite_trace_values_do_not_break_assurance(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    trace = state / "fettle" / "trace.jsonl"
+    trace.parent.mkdir(parents=True)
+    trace.write_text(
+        '{"schema":2.5,"ts":NaN,"hook":"authorship_gate","status":"pass",'
+        f'"file":{json.dumps(str(root / "app.py"))},"session_id":"impl",'
+        '"role":"implementer"}\n',
+        encoding="utf-8",
+    )
+
+    result = build_assurance_record(str(root))
+
+    assert result["status"] == "completed"
 
 
 def test_authorization_dimension_verifies_explicit_capsule(tmp_path, monkeypatch):

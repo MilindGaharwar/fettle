@@ -18,6 +18,10 @@ def test_create_baseline(tmp_path):
     baseline = create_baseline(findings, tmp_path)
     assert baseline["fettle_version"] == __version__
     assert baseline["findings_count"] == 2
+    assert baseline["fingerprints"] == [
+        "ruff:app.py:10:F401",
+        "semgrep:db.py:5:sql-fstring",
+    ]
     assert (tmp_path / ".fettle-baseline.json").exists()
 
 

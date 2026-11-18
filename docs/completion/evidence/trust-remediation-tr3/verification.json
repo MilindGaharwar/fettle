@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-18",
+  "expected_outcome": "Verification and CI consumers derive outcomes from current canonical evidence and prove that tests executed.",
+  "observations": [
+    "Regressions cover edited verification and CI stamps, forged session IDs, attacker-controlled downgrade text, zero executed tests, exit-zero failing JUnit, stale report reuse, unavailable counts, stale CI and brief state, non-finite trace values, policy command precedence, and workspace aggregation.",
+    "The post-Fable focused TR-3 suite reported 402 passed in 183.77 seconds.",
+    "Direct Fable installed-path cases reported 8 passed and the broader installed adversarial matrix reported 22 passed, each parameterized over plugin and bridge launch modes.",
+    "Counted pytest evidence binds collected, executed, passed, failed, errors, skipped, and portable argv in the canonical artifact.",
+    "A zero-count custom command remains UNKNOWN during the compatibility window; an all-skipped pytest run is a violation.",
+    "Effective policy owns the test command, full is the default verification scope, and explicit impacted scope remains partial.",
+    "Assurance and brief use canonical validators; all-skipped CI, edited ok fields, stale source, cross-repository pushes, local commits after push, and pushed commits without retained status remain non-pass."
+  ],
+  "result": "confirmed"
+}

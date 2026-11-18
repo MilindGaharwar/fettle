@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "milestone": "trust-remediation-tr3",
+  "revision": "trust-remediation-tr3-2026-11-18",
+  "expected_outcome": "Users receive truthful, actionable CLI and installed-hook outcomes for passing, skipped, uncounted, tampered, and stale verification evidence.",
+  "observations": [
+    "Manual CLI UAT confirmed a one-test project is green with executed=1.",
+    "Manual CLI UAT confirmed an all-skipped project exits non-zero with executed=0 and a no-tests-executed message.",
+    "Manual CLI UAT confirmed a successful custom command without JUnit exits non-zero as UNKNOWN with report guidance.",
+    "The installed plugin and bridge Stop commands rejected edited ok, forged session, downgrade-text, failing-report, deletion, stale-source, zero-selection, collection-failure, and stale-CI attacks.",
+    "All 20 Fable hypotheses and their outcomes are retained in docs/uat/trust-remediation-tr3.md; reproduced in-scope defects were fixed with regression coverage.",
+    "Manual fettle brief UAT reported stale rather than green after source changed.",
+    "Current-candidate manual CLI UAT passed on 2026-11-18; transcript: $TMPDIR/phase-hl/hl12/tr3-manual-uat-current.txt.",
+    "The package changes CLI and agent-hook text only, so browser, viewport, visual, and axe-core checks are not applicable."
+  ],
+  "result": "confirmed"
+}

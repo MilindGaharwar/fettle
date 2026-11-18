@@ -1,5 +1,6 @@
 """Tests for fettle.brief — orchestrator poll endpoint."""
 
+import subprocess
 from unittest.mock import patch
 
 from fettle.brief import compute_brief, render_brief
@@ -32,6 +33,69 @@ class TestComputeBrief:
              patch("fettle.report.compute_effectiveness", return_value={"error": "no data"}):
             result = compute_brief(tmp_path)
         assert result["plan"]["title"] == "my plan"
+
+    def test_stale_verify_stamp_is_not_reported_green(self, tmp_path, monkeypatch):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
+        source = tmp_path / "app.py"
+        source.write_text("value = 1\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+        from fettle.config import load_config
+        from fettle.verify_gate import _capture_pre_run_state, _write_stamp
+        stamp = {
+            "ok": True, "exit_code": 0, "result_state": "pass",
+            "command": "pytest", "scope": "full", "impacted": [],
+        }
+        _capture_pre_run_state(str(tmp_path), stamp)
+        _write_stamp(str(tmp_path), stamp, load_config(str(tmp_path)))
+        source.write_text("value = 2\n")
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        with patch("fettle.session_plan.active_plan", return_value=None), \
+             patch("fettle.work_items.load_claims", return_value={}), \
+             patch("fettle.topology_apply.load_manifest", return_value=None), \
+             patch("fettle.rules_cmd.list_rules", return_value=[]), \
+             patch("fettle.session_report.load_reports", return_value=[]), \
+             patch("fettle.report.compute_effectiveness", return_value={}):
+            result = compute_brief(tmp_path)
+
+        assert result["verify"]["state"] == "stale"
+        assert result["verify"]["ok"] is False
+
+    def test_ci_for_previous_commit_is_not_reported_green(self, tmp_path, monkeypatch):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "test@fettle.invalid"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
+        source = tmp_path / "app.py"
+        source.write_text("value = 1\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+        from fettle.ci_gate import _write_stamp
+        from fettle.config import load_config
+        previous = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        _write_stamp(str(tmp_path), {
+            "ok": True, "sha": previous, "overall": "success", "runs": [],
+            "error": "", "reproduce": "", "ts": 1.0,
+        }, load_config(str(tmp_path)))
+        source.write_text("value = 2\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-qm", "next"], cwd=tmp_path, check=True)
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+        with patch("fettle.session_plan.active_plan", return_value=None), \
+             patch("fettle.work_items.load_claims", return_value={}), \
+             patch("fettle.topology_apply.load_manifest", return_value=None), \
+             patch("fettle.rules_cmd.list_rules", return_value=[]), \
+             patch("fettle.session_report.load_reports", return_value=[]), \
+             patch("fettle.report.compute_effectiveness", return_value={}):
+            result = compute_brief(tmp_path)
+
+        assert result["ci"]["ok"] is False
+        assert result["ci"]["state"] == "stale"
 
 
 class TestRenderBrief:

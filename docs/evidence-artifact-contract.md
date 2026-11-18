@@ -196,6 +196,17 @@ after timeout or launch failure. Drift makes the verification non-green with
 immutable execution: a file changed and restored to identical bytes and status
 during the command is not detected.
 
+The hashed `fettle.verify` payload contains `argv`, `tests`, `exit_code`, and
+`scope`. `argv` is a portable projection of the executed argument vector:
+repository paths are relative, the external executable is represented by its
+basename, and the generated pytest report is `.fettle/verify-junit.xml`.
+`tests` is either `null` or the JUnit-derived integer counts `collected`,
+`executed`, `passed`, `failed`, `errors`, and `skipped`, where
+`executed = collected - skipped`. Exit zero with no executed tests is a
+violation. Exit zero with unavailable counts is UNKNOWN and remains advisory
+during the compatibility window. Consumers require the canonical artifact's
+PASS result; mutable stamp fields such as `ok` are diagnostic only.
+
 ## P69 Producer Payloads And Operations
 
 | Kind | Payload and stronger guarantee | Invalidation and recovery | Rollback |

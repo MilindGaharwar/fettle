@@ -54,8 +54,9 @@ action.
 - Error recoverable: unreadable hook input or an unreadable edit record is
   "unknown", blocks where a required gate depends on it, and names
   `fettle doctor`.
-- Error fatal: an unloadable policy blocks every event except an edit whose
-  only target is that policy file.
+- Error fatal: an unloadable policy blocks every event, including an edit whose
+  target is that policy file. The repository owner repairs it outside the agent
+  session.
 - Offline: every decision in TR-1 to TR-4 is local; remote policy that is
   declared but not cached blocks with `fettle policy sync`.
 - Stale: a verification stamp for a different source snapshot, session or
