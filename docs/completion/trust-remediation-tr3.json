@@ -41,7 +41,7 @@
       "observed": "Focused and full tests, CI-pinned Ruff, diff checks, committed-range pre-commit, and Fettle scan pass; the scan retains only three inherited warning-level findings.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "bdf60d9be1544b79c03204f5b7c1705128d66301d389123f0e2d81b597ea344a",
+        "sha256": "3f8f3ff657e21718567a4de7decb593b2b6a7f42d7e9d9a66ea5e2757680b5eb",
         "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
@@ -51,10 +51,10 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "pre-commit run --from-ref origin/main --to-ref 3465432fe10291f55e10be17d0cd408057aef67d passed on the committed candidate range.",
+      "observed": "pre-commit run --from-ref origin/main --to-ref f21b4c7b3faca14f55574c7650958e1f9fa5f256 passed on the final evidence candidate range.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "bdf60d9be1544b79c03204f5b7c1705128d66301d389123f0e2d81b597ea344a",
+        "sha256": "3f8f3ff657e21718567a4de7decb593b2b6a7f42d7e9d9a66ea5e2757680b5eb",
         "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Rerun the same committed-range gate after the sequential merge gate permits the final rebase."
