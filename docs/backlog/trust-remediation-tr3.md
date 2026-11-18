@@ -9,10 +9,12 @@ scope:
   - tests/test_verify_gate.py
   - tests/test_ci_gate.py
   - tests/test_assurance_record.py
+  - tests/test_assurance_integrity.py
   - tests/test_brief.py
   - tests/test_baseline.py
   - docs/behavior-map.md
   - docs/evidence-artifact-contract.md
+  - docs/fettle.schema.json
   - docs/uat/trust-remediation-tr3.md
   - docs/backlog/trust-remediation-tr3.md
   - docs/completion/trust-remediation-tr3.json

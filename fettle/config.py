@@ -200,7 +200,7 @@ DEFAULTS: dict[str, Any] = {
         "verify": {
             "enabled": False,
             "mode": "advisory",
-            "scope": "impacted",
+            "scope": "full",
             "timeout_s": 120,
             "parallel": False,
         },

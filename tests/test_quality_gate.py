@@ -281,3 +281,31 @@ def test_tracking_helpers_bind_state_lazily(monkeypatch, tmp_path):
     qg.record_browser_test("npx playwright test")  # pre-fix: Path("").touch() crash
     assert (tmp_path / "browser-tested.timestamp").is_file()
     assert qg._load_edit_tracking() == []
+
+
+def test_unrelated_playwright_or_screenshot_text_does_not_mark_browser_test(
+    monkeypatch, tmp_path,
+):
+    import fettle.quality_gate as qg
+
+    monkeypatch.setattr(qg, "BROWSER_TEST_MARKER", "")
+    monkeypatch.setattr(qg, "state_dir", lambda session_id: tmp_path)
+
+    qg.record_browser_test("pip install playwright")
+    qg.record_browser_test("ls screenshots/")
+
+    assert not (tmp_path / "browser-tested.timestamp").exists()
+
+
+def test_verified_tests_marks_session_edits(monkeypatch, tmp_path):
+    import fettle.quality_gate as qg
+
+    monkeypatch.setattr(qg, "state_dir", lambda session_id: tmp_path / session_id)
+    session = "verified"
+    qg._init_state(session)
+    (tmp_path / session).mkdir()
+    qg._save_edit_tracking([{"file": "app.py", "tested": False}])
+
+    qg.record_verified_tests(session)
+
+    assert qg._load_edit_tracking()[0]["tested"] is True

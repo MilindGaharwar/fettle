@@ -538,6 +538,25 @@ class TestStopGate:
         assert result.decision.value == "advisory"
         assert "different commit" in result.message
 
+    def test_commit_after_push_requires_a_new_push(self, tmp_path: Path) -> None:
+        repo = _git_repo(tmp_path)
+        state = tmp_path / "state"
+        state.mkdir()
+        pushed = ci_gate._head_sha(str(repo))
+        config = _cfg(mode="enforce")
+        with patch.object(ci_gate, "_query_runs", return_value=([_run("CI")], "")):
+            stamp = ci_gate.run_ci_status(str(repo), config)
+        _record(state, pushed, ts=stamp["ts"] - 1)
+        (repo / "later.py").write_text("value = 2\n")
+        subprocess.run(["git", "add", "later.py"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "later"], cwd=repo, check=True)
+
+        with patch("fettle.config.state_dir", return_value=state):
+            result = ci_gate.run_check(_ctx(repo, config))
+
+        assert result.decision.value == "block"
+        assert "current commit differs from the last pushed commit" in result.message
+
     def test_stamp_older_than_push_is_stale(self, tmp_path: Path) -> None:
         state = tmp_path / "state"
         state.mkdir()

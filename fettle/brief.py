@@ -12,6 +12,7 @@ Read-only. Offline: the CI verdict comes from the cached stamp
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -78,6 +79,17 @@ def compute_brief(root: Path, days: int = 7) -> dict:
 
     ci_state = evidence_state(ci, validate_ci)
     verify_state = evidence_state(verify, validate_verify)
+    if ci and ci_state and ci_state.get("ok"):
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+                text=True, timeout=5,
+            )
+            revision = head.stdout.strip() if head.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            revision = ""
+        if not revision or ci.get("sha") != revision:
+            ci_state = {"ok": False, "state": "stale", "reason": "wrong_source"}
 
     rules = list_rules(root)
     proposals = [r["id"] for r in rules if r.get("stage") == "proposed"]

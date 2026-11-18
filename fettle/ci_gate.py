@@ -577,7 +577,12 @@ def record_push(ctx: HookContext) -> CheckResult:
     path = _pushes_path(ctx.session_id or "unknown")
     if path is None:
         return CheckResult.allow()
-    entry = {"sha": sha, "ts": time.time(), "command": command[:200]}
+    entry = {
+        "sha": sha,
+        "ts": time.time(),
+        "command": command[:200],
+        "repository": str(ctx.cwd.resolve()),
+    }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a") as fh:
@@ -626,7 +631,8 @@ def run_check(ctx: HookContext) -> CheckResult:
             raise ValueError
     except (TypeError, ValueError):
         push_ts = None
-        problem = "last push timestamp is invalid"
+        if not problem:
+            problem = "last push timestamp is invalid"
     if problem:
         pass
     elif not stamp_path.is_file():
@@ -674,6 +680,13 @@ def run_check(ctx: HookContext) -> CheckResult:
                     problem += f":\n{detail}"
                 if repro:
                     problem += f"\nReproduce locally: {repro}"
+
+    if not problem:
+        current_head = _head_sha(str(ctx.cwd))
+        if not current_head:
+            problem = "current commit could not be resolved"
+        elif current_head != push.get("sha"):
+            problem = "current commit differs from the last pushed commit"
 
     if not problem:
         return CheckResult.allow()

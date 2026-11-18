@@ -1,6 +1,6 @@
 # UAT Report: TR-3 Truthful Verification
 
-Date: 2026-11-15
+Date: 2026-11-18
 
 ## User flow
 
@@ -56,6 +56,39 @@ non-pass outcomes with a recovery command.
 | CI Stop gate | Reject edited `ok` after canonical CI failure | `tests/test_ci_gate.py` | Pass |
 | Assurance/brief | Reject stale, missing, or malformed authority | `tests/test_assurance_record.py`, `tests/test_brief.py` | Pass |
 
+## Fable adversarial outcomes
+
+Every hypothesis was exercised through the installed plugin and bridge commands.
+Shared non-hook consumers were also covered by their owning focused tests.
+
+| # | Hypothesis | Outcome |
+|---:|---|---|
+| 1 | Attacker-controlled UNKNOWN text downgrades missing canonical evidence | Reproduced; fixed. Both modes block on missing canonical evidence. |
+| 2 | Rewriting mutable `session_id` reuses another session's evidence | Reproduced; fixed by canonical scope binding. Both modes block `wrong_scope`. |
+| 3 | Workspace without a command aggregates to PASS | Reproduced; fixed as `TOOL_ERROR`; both modes consume the same installed Stop path. |
+| 4 | Exit-zero command with failing JUnit passes | Reproduced; fixed. Both modes block the canonical violation. |
+| 5 | Zero-count/wrapped pytest is advisory | Reproduced only as the documented D-6 compatibility limit: missing counts are UNKNOWN and advisory; zero counted execution is a violation. |
+| 6 | Mutable/stale CI revision or a local commit after push passes | Stamp edits and stale SHA did not reproduce; canonical source binding rejects them. Commit-after-push reproduced and was fixed by current-HEAD binding. |
+| 7 | Full default never takes effect | Reproduced; fixed in resolved defaults. Both modes record `scope = full` without an explicit key. |
+| 8 | Non-finite trace values crash Assurance | Reproduced at the canonical digest boundary; fixed by finite normalization/non-finite sentinel. |
+| 9 | Missing `result_state` infers PASS from `ok` | Reproduced; fixed. Missing state now mints `TOOL_ERROR`, never PASS. |
+| 10 | One successful workflow masks skipped workflows | Did not reproduce as all-skipped: all-skipped is red. Mixed success/skipped remains intentionally green because at least one workflow succeeded; required-check identity is not available from this API. |
+| 11 | Portable argv loses absolute interpreter/report paths or quoted arguments crash | Path projection is deliberate portability, not authority loss; argv is now retained before rendering, so quoted arguments do not reparse or crash. |
+| 12 | Unrelated `playwright`/`screenshots` text sets browser marker | Reproduced; fixed. Only a parsed `playwright test` invocation marks browser use. |
+| 13 | Brief shows CI for a previous commit as green | Reproduced; fixed by current-HEAD comparison; malformed/missing canonical evidence remains stale. |
+| 14 | Effective `profile.test_command` override changes behavior without framework re-derivation | Reproduced; intended policy precedence retained, and framework is now re-derived for scope selection. Workspace policy remains owned by workspace discovery. |
+| 15 | Push in another repository makes Assurance CI UNKNOWN | Reproduced; fixed by recording and matching repository identity. |
+| 16 | Genuine verification never marks edits tested | Reproduced; fixed. Only canonical PASS marks the session journal tested. |
+| 17 | Workspace UNKNOWN blocks despite compatibility window | Reproduced; fixed. Workspace UNKNOWN reaches the same advisory rule as root verification. |
+| 18 | CI messages and override scope changed | Reproduced as an intentional fail-closed change: missing canonical evidence blocks and only canonical violations are override-eligible. Documented as covered behavior. |
+| 19 | Report path deletion and false pytest detection change behavior | Reproduced; fixed without deletion by report-generation identity. `tox -e pytest` is no longer rewritten. |
+| 20 | Independence digest omits arbitrary trace fields and sub-second time | Did not reproduce as an authorization bypass. The digest intentionally projects decision fields; timestamps are normalized to stable seconds. This is listed as not covered rather than full-trace integrity. |
+
+Installed evidence: `8 passed` for the direct Fable cases and `22 passed` for the
+broader tampering/deletion/zero-selection/CI matrix, each parameterized over both
+launch modes. The complete focused TR-3 suite reported `402 passed` after the
+final boundary additions.
+
 ## Accessibility and visual applicability
 
 This package changes CLI and agent-hook text only. It adds no browser page,
@@ -78,8 +111,10 @@ Messages were exercised through both installed launch modes.
 ## Severity assessment
 
 No unresolved P0, P1, P2, or P3 defect is known in the exercised TR-3 flow.
+The D-6 uncounted-command advisory window, same-user forgery without signatures,
+required-workflow identity, and full-trace integrity remain explicit limits.
 
 ## Decision
 
-FIX_FIRST until the full regression suite, completion evidence, and required
-predecessor merge/rebase gates are complete.
+Automated and manual UAT pass for the current candidate. Final SHIP remains
+blocked until committed-candidate quality, completion, and pre-push gates pass.

@@ -11,8 +11,17 @@ from fettle.evidence import ResultState
 
 def invokes_pytest(argv: list[str]) -> bool:
     """Return whether an argument vector invokes pytest."""
-    return any(Path(arg).name in {"pytest", "py.test"} for arg in argv) or any(
+    if not argv:
+        return False
+    if Path(argv[0]).name in {"pytest", "py.test"}:
+        return True
+    if any(
         argv[index:index + 2] == ["-m", "pytest"] for index in range(len(argv) - 1)
+    ):
+        return True
+    return any(
+        argv[index:index + 2] in (["run", "pytest"], ["run", "py.test"])
+        for index in range(len(argv) - 1)
     )
 
 
@@ -67,6 +76,17 @@ def read_junit_counts(path: Path | None) -> dict[str, int] | None:
     }
 
 
+def report_identity(path: Path | None) -> tuple[int, int] | None:
+    """Identify one report generation without reading or deleting user data."""
+    if path is None:
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
 def portable_argv(argv: list[str], *, cwd: str) -> list[str]:
     """Project an executed argv into portable, non-escaping evidence."""
     root = Path(cwd).resolve()
@@ -98,6 +118,11 @@ def classify_test_result(
             ResultState.UNKNOWN,
             "the test command exited 0 but no test count is available. "
             "Set [gates.verify] report to a JUnit XML path.",
+        )
+    if counts["failed"] or counts["errors"]:
+        return (
+            ResultState.VIOLATION,
+            f"test report records {counts['failed']} failure(s) and {counts['errors']} error(s)",
         )
     if counts["executed"] == 0:
         return (

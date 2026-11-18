@@ -1,17 +1,15 @@
 {
   "schema_version": 1,
   "milestone": "trust-remediation-tr3",
-  "revision": "trust-remediation-tr3-2026-11-15",
+  "revision": "trust-remediation-tr3-2026-11-18",
   "expected_outcome": "TR-3 passes targeted tests, Ruff, committed-range pre-commit, repository scan, and the unexcluded full suite after rebasing onto repaired main.",
   "observations": [
-    "The final targeted suite reported 298 passed in 85.62 seconds.",
-    "The final full suite reported 5204 passed and 20 skipped in 628.67 seconds, with exactly one failure: tests/test_installed_artifact_contract.py::test_module_cli_validates_reports, inherited from main and owned by PR #75.",
-    "Ruff reported all checks passed.",
-    "pre-commit run --from-ref origin/main --to-ref HEAD passed on the committed candidate range.",
-    "fettle check --all completed with the same three pre-existing warning-only debug-print findings in fettle/post_edit.py and fettle/quality_gate.py.",
-    "The worktree contained no mutation-tooling or mutation-configuration change.",
-    "After rebasing to head bec1ade, the first full run had one installed-hook deadline failure; that exact scenario passed in isolation, and the unexcluded rerun reported 5206 passed and 20 skipped without a code edit.",
-    "The current-head range pre-commit and Fettle scan passed; the scan retained only the three documented inherited warning-only debug-print findings."
+    "The current post-Fable focused suite reported 402 passed in 183.77 seconds.",
+    "Current changed-file Ruff and diff checks passed.",
+    "Main CI run 44196365266 completed successfully for exact merged predecessor c9196056d4a1c60bd39d0898f882edce66d62a9f.",
+    "The current unexcluded full suite reported 5379 passed and 20 skipped in 723.28 seconds.",
+    "Committed-range pre-commit, repository scan, strict completion validation, and bounded mutation diagnostic are not yet refreshed for a committed candidate; they remain non-pass prerequisites.",
+    "The worktree contains no mutation-tooling or mutation-configuration change."
   ],
   "result": "confirmed"
 }

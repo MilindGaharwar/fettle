@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
   "milestone": "trust-remediation-tr3",
-  "revision": "trust-remediation-tr3-2026-11-15",
+  "revision": "trust-remediation-tr3-2026-11-18",
   "scope_digest_version": 2,
   "scope_digest": "e196b8aaf115e3c9319d7b2d429ad2052e30e3a502ea7e9f4d3e188a6e5b8845",
-  "status": "complete",
-  "uat_decision": "SHIP",
+  "status": "in_progress",
+  "uat_decision": "FIX_FIRST",
   "criteria": [
     {
       "id": "canonical-counted-verification",
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "Canonical evidence owns verification and CI outcomes, pytest execution is counted, zero execution is red, unavailable counts are UNKNOWN, effective policy owns the command, and workspace results use the same classification.",
+      "observed": "Canonical evidence owns verification and CI outcomes; the post-Fable focused suite reports 402 passed, including both installed launch modes.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/verification.json",
-        "sha256": "dc121583346a0925eda065bc3cbfda3642d8b1abe087d949b665a3efc4005280",
-        "revision": "trust-remediation-tr3-2026-11-15"
+        "sha256": "4add5988bd0af99b9f55adad47b3d8a78f2038051e734ea5be54057aab688a33",
+        "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Rerun the focused TR-3, verify, CI, assurance, brief, quality, baseline, and installed-hook suites under isolated XDG state."
     },
@@ -25,11 +25,11 @@
       "kind": "success",
       "required": true,
       "verdict": "confirmed",
-      "observed": "Manual CLI flows passed for counted success, all-skipped failure, unavailable-count UNKNOWN, stale brief state, and edited-stamp rejection through both installed launch modes.",
+      "observed": "Automated installed-path attacks pass in both modes, all 20 Fable outcomes are retained, and current-candidate manual CLI UAT passes counted, skipped, uncounted, and stale-status flows.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/uat.json",
-        "sha256": "4daf875c7c9ce2c5b946b9eb3d160260c5a6b62827b5e645f78e8555728498ae",
-        "revision": "trust-remediation-tr3-2026-11-15"
+        "sha256": "844c1f93e3b3e17380c49b37ec29308fe3f246d1cd879ca570c2ce798c39939c",
+        "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Repeat the manual protocol in docs/uat/trust-remediation-tr3.md and retain the transcript under the phase evidence directory."
     },
@@ -37,12 +37,12 @@
       "id": "full-regression-and-quality",
       "kind": "success",
       "required": true,
-      "verdict": "confirmed",
-      "observed": "On rebased head bec1ade, targeted tests and Ruff passed. The first full run had one installed-hook deadline failure; the exact scenario passed in isolation, and the unexcluded rerun reported 5206 passed and 20 skipped without a code edit. Current-head range pre-commit and Fettle scan passed with only the three documented inherited warning-only findings.",
+      "verdict": "indeterminate",
+      "observed": "Focused tests, Ruff, diff checks, and the unexcluded full suite pass. Committed-range pre-commit, Fettle scan, and strict completion validation remain to run.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "6800070e814d7c87a478812fdbec88a236056b53578f3bed6583686fdcfd27df",
-        "revision": "trust-remediation-tr3-2026-11-15"
+        "sha256": "9f30db407bf28225b8ec95e0b8bf23f84a9d30d5d2fcf69ec21a3717b5a7c29b",
+        "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Rerun the same isolated gates after the sequential merge gate permits the final rebase."
     },
@@ -50,12 +50,12 @@
       "id": "candidate-range-precommit",
       "kind": "success",
       "required": true,
-      "verdict": "confirmed",
-      "observed": "pre-commit run --from-ref origin/main --to-ref HEAD passed on rebased committed candidate bec1ade.",
+      "verdict": "indeterminate",
+      "observed": "The candidate has current uncommitted changes; committed-range pre-commit evidence cannot yet be refreshed.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/quality.json",
-        "sha256": "6800070e814d7c87a478812fdbec88a236056b53578f3bed6583686fdcfd27df",
-        "revision": "trust-remediation-tr3-2026-11-15"
+        "sha256": "9f30db407bf28225b8ec95e0b8bf23f84a9d30d5d2fcf69ec21a3717b5a7c29b",
+        "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "Rerun the same committed-range gate after the sequential merge gate permits the final rebase."
     },
@@ -64,11 +64,11 @@
       "kind": "success",
       "required": false,
       "verdict": "indeterminate",
-      "observed": "The bounded diagnostic preflight terminated with exit 2 and UNKNOWN because fettle/test_evidence.py has no mutation mapping. No replay was authorized, no mutation credit is claimed, and mutation configuration remains out of scope.",
+      "observed": "Prior mutation diagnostics are stale for the current candidate. No mutation credit is claimed and mutation configuration remains out of scope.",
       "evidence": {
         "path": "docs/completion/evidence/trust-remediation-tr3/mutation-summary.json",
-        "sha256": "764a86c7e0e647244fae60d0566f338dccf0a1b0277a9e535b255655b5651021",
-        "revision": "trust-remediation-tr3-2026-11-15"
+        "sha256": "96e23b03e865cc8826b1321dccaca03dc4b6b9dbbacc453f12808f1c8055d191",
+        "revision": "trust-remediation-tr3-2026-11-18"
       },
       "recovery": "No TR-3 completion recovery is required. Authoritative pull-request advisory evidence is evaluated only after the sequential merge gate permits a push."
     }

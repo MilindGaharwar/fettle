@@ -16,6 +16,7 @@ Exit 0 = allow/warn. Exit 2 = BLOCK.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -314,9 +315,32 @@ def scan_stop_untested(data: dict) -> list[str]:
 
 def record_browser_test(command: str) -> None:
     """Retain the legacy browser-use marker without inferring test success."""
-    if "playwright" in command or "screenshot" in command or "chromium.launch" in command:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return
+    if any(
+        Path(arg).name == "playwright" and argv[index + 1:index + 2] == ["test"]
+        for index, arg in enumerate(argv)
+    ):
         _ensure_state()
         Path(BROWSER_TEST_MARKER).touch()
+
+
+def record_verified_tests(session_id: str | None) -> None:
+    """Mark session edits tested only after canonical verification passes."""
+    if not session_id:
+        return
+    _init_state(session_id)
+    entries = _load_edit_tracking()
+    changed = False
+    for entry in entries:
+        if not entry.get("tested", False):
+            entry["tested"] = True
+            entry["tested_ts"] = time.time()
+            changed = True
+    if changed:
+        _save_edit_tracking(entries)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

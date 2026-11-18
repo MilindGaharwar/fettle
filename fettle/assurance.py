@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import tomllib
@@ -277,7 +278,15 @@ def _independence_dimension(root: Path) -> dict:
             if entry.get("hook") != "authorship_gate":
                 continue
             projected.append({
-                key: int(value) if key == "ts" and isinstance(value, (int, float)) else value
+                key: (
+                    int(value) if key == "ts" and isinstance(value, (int, float))
+                    and math.isfinite(value) else (
+                        format(value, ".17g") if isinstance(value, float)
+                        and math.isfinite(value) else (
+                            "non-finite" if isinstance(value, float) else value
+                        )
+                    )
+                )
                 for key, value in entry.items()
                 if key in {
                     "schema", "ts", "hook", "status", "file", "session_id", "role",
@@ -438,12 +447,22 @@ def _ci_dimension(root: Path, config: dict) -> dict:
     pushed = False
     for pushes in state_root().glob("*/pushes.jsonl"):
         try:
-            if any(line.strip() for line in pushes.read_text(encoding="utf-8").splitlines()):
-                pushed = True
+            for line in pushes.read_text(encoding="utf-8").splitlines():
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("sha")
+                    and entry.get("repository") == str(root.resolve())
+                ):
+                    pushed = True
+                    break
+            if pushed:
                 break
         except OSError:
-            pushed = True
-            break
+            continue
     if pushed:
         return _dimension(
             "UNKNOWN", [], reason="pushed commit has no retained CI status; run fettle ci wait",

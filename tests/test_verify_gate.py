@@ -177,7 +177,7 @@ class TestRunVerify:
         with patch("fettle.config.state_dir", return_value=state):
             result = run_check(_gate_ctx(repo, _cfg()))
         assert result.decision == Decision.ADVISORY
-        assert "duplicate_id" in result.message
+        assert "wrong_scope" in result.message
 
     def test_red_run_records_failure_tail(self, tmp_path):
         repo = _project(
@@ -1057,7 +1057,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(src)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "impacted",
             "impacted": ["tests/test_widget.py"],
         }, _cfg())
         from fettle.test_discovery import TestConfig
@@ -1141,7 +1142,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(source) for source in edited])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
                 "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_alpha.py"],
@@ -1175,7 +1177,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(source) for source in edited])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
                 "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_alpha.py", "tests/test_beta.py"],
@@ -1223,7 +1226,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1267,7 +1271,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg())
 
@@ -1306,7 +1311,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1347,7 +1353,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, edited)
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": records,
         }, _cfg(mode="enforce"))
 
@@ -1371,7 +1378,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(deleted), str(live)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "impacted",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "impacted",
             "impacted": ["tests/test_widget.py"],
         }, _cfg())
 
@@ -1396,7 +1404,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(deleted), str(live)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "workspace",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "workspace",
             "workspaces": [{
                 "path": "api", "ok": True, "result_state": "pass", "scope": "impacted",
                 "impacted": ["tests/test_widget.py"],
@@ -1431,7 +1440,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "head_sha": _head_sha(str(tmp_path)),
             "dirty_digest": _dirty_digest(str(tmp_path)),
         }, _cfg())
@@ -1452,7 +1462,8 @@ class TestStopGate:
         state = repo / "state" / "sess-g"
         edits = _write_edits(state, [str(src)])
         _write_stamp(str(repo), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "head_sha": _head_sha(str(repo)),
             "dirty_digest": _dirty_digest(str(repo)),
         }, _cfg(mode="enforce"))
@@ -1504,7 +1515,8 @@ class TestStopGate:
         state = tmp_path / "state" / "sess-g"
         _write_edits(state, [str(tmp_path / "api" / "app.py"), str(tmp_path / "web" / "app.ts")])
         _write_stamp(str(tmp_path), {
-            "ok": True, "exit_code": 0, "session_id": "sess-g", "scope": "full",
+            "ok": True, "result_state": "pass", "exit_code": 0,
+            "session_id": "sess-g", "scope": "full",
             "workspaces": [
                 {"path": "api", "ok": True, "result_state": "pass", "scope": "full"},
                 {"path": "web", "ok": True, "result_state": "pass", "scope": "full"},

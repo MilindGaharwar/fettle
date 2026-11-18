@@ -51,9 +51,11 @@ from fettle.profile import detect_profile
 from fettle.test_discovery import discover_test_config
 from fettle.test_evidence import (
     classify_test_result,
+    invokes_pytest,
     portable_argv,
     prepare_test_command,
     read_junit_counts,
+    report_identity,
 )
 from fettle.test_runner_opts import build_pytest_args, record_failures
 from fettle.trace import build_evidence, log_evidenced_decision
@@ -194,6 +196,11 @@ def run_verify(
     effective_command = config.get("profile", {}).get("test_command", "")
     if isinstance(effective_command, str) and effective_command:
         tc.command = effective_command
+        try:
+            effective_argv = shlex.split(effective_command)
+        except ValueError:
+            effective_argv = []
+        tc.framework = "pytest" if invokes_pytest(effective_argv) else "custom"
     stamp: dict = {
         "ok": False, "command": "", "exit_code": -1, "duration_s": 0.0,
         "scope": "full", "impacted": [], "error": "", "ts": time.time(),
@@ -217,6 +224,7 @@ def run_verify(
     argv, report_path = prepare_test_command(
         tc.command, cwd=cwd, report=str(gate_cfg.get("report", "")),
     )
+    previous_report = report_identity(report_path)
     scope = "full"
     impacted: list[str] = []
     if not full and scope_cfg == "impacted" and tc.framework == "pytest":
@@ -244,6 +252,7 @@ def run_verify(
             )
 
     stamp["command"] = " ".join(argv)
+    stamp["argv"] = argv
     stamp["scope"] = scope
     stamp["impacted"] = impacted
 
@@ -253,7 +262,10 @@ def run_verify(
             argv, cwd=cwd, capture_output=True, text=True, timeout=timeout_s,
         )
         stamp["exit_code"] = proc.returncode
-        stamp["tests"] = read_junit_counts(report_path)
+        stamp["tests"] = (
+            read_junit_counts(report_path)
+            if previous_report is None or report_identity(report_path) != previous_report else None
+        )
         stamp["result_state"], classification_error = classify_test_result(
             proc.returncode, stamp["tests"],
         )
@@ -275,6 +287,9 @@ def run_verify(
     _capture_post_run_state(cwd, stamp)
     stamp["ts"] = time.time()
     _write_stamp(cwd, stamp, config)
+    if stamp.get("result_state") == ResultState.PASS:
+        from fettle.quality_gate import record_verified_tests
+        record_verified_tests(session_id)
     return stamp
 
 
@@ -329,12 +344,15 @@ def _run_workspace_verification(
         _capture_pre_run_state(str(workspace_root), record)
         if not workspace.test_command:
             record["error"] = "no test command discovered for workspace"
+            record["tests"] = None
+            record["result_state"] = ResultState.TOOL_ERROR
             _capture_post_run_state(str(workspace_root), record)
             records.append(record)
             continue
         argv, report_path = prepare_test_command(
             workspace.test_command, cwd=str(workspace_root),
         )
+        previous_report = report_identity(report_path)
         if impacted and workspace.language == "python":
             workspace_files = [str(Path(cwd) / file_path) for file_path in edited]
             mapping = _impact_mapping(
@@ -368,6 +386,7 @@ def _run_workspace_verification(
                     parallel=parallel,
                 )
                 record["command"] = shlex.join(argv)
+        record["argv"] = argv
         start = time.monotonic()
         try:
             proc = subprocess.run(
@@ -375,7 +394,10 @@ def _run_workspace_verification(
                 capture_output=True, text=True, timeout=timeout_s,
             )
             record["exit_code"] = proc.returncode
-            record["tests"] = read_junit_counts(report_path)
+            record["tests"] = (
+                read_junit_counts(report_path)
+                if previous_report is None or report_identity(report_path) != previous_report else None
+            )
             record["result_state"], classification_error = classify_test_result(
                 proc.returncode, record["tests"],
             )
@@ -448,6 +470,9 @@ def _run_workspace_verification(
             stamp["error"], str(root_state.get("error") or ""),
         )))
     _write_stamp(cwd, stamp, config or {})
+    if stamp.get("result_state") == ResultState.PASS:
+        from fettle.quality_gate import record_verified_tests
+        record_verified_tests(session_id)
     return stamp
 
 
@@ -598,6 +623,7 @@ def _capture_post_run_state(cwd: str, target: dict) -> None:
 
 def _scope_projection(stamp: dict) -> dict:
     projection: dict = {
+        "session_id": str(stamp.get("session_id") or ""),
         "scope": str(stamp.get("scope") or ""),
         "impacted": sorted(str(path) for path in stamp.get("impacted") or []),
         "scope_reason": str(stamp.get("scope_reason") or ""),
@@ -637,10 +663,6 @@ def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtif
         result_state = "tool_error"
     elif stamp.get("result_state") in set(ResultState):
         result_state = str(stamp["result_state"])
-    elif stamp.get("ok"):
-        result_state = "pass"
-    elif isinstance(exit_code, int) and exit_code >= 0:
-        result_state = "violation"
     else:
         result_state = "tool_error"
     return EvidenceArtifact.create(
@@ -666,8 +688,14 @@ def _verification_artifact(cwd: str, stamp: dict, config: dict) -> EvidenceArtif
             "exit_code": exit_code if isinstance(exit_code, int) else -1,
             "scope": str(stamp.get("scope") or ""),
             "tests": stamp.get("tests"),
-            "argv": portable_argv(
-                shlex.split(str(stamp.get("command") or "")), cwd=cwd,
+            "argv": (
+                [
+                    portable_argv(list(record.get("argv") or []), cwd=cwd)
+                    for record in stamp.get("workspaces", []) if isinstance(record, dict)
+                ]
+                if stamp.get("workspaces") else portable_argv(
+                    list(stamp.get("argv") or []), cwd=cwd,
+                )
             ),
         },
     )
@@ -832,6 +860,7 @@ def run_check(ctx: HookContext) -> CheckResult:
 
     stamp_path = ctx.cwd / STAMP_RELPATH
     problem = ""
+    advisory_unknown = False
     if not stamp_path.is_file():
         problem = "no verification run recorded this session"
     else:
@@ -854,7 +883,8 @@ def run_check(ctx: HookContext) -> CheckResult:
             verified = {
                 str(record.get("path"))
                 for record in stamp.get("workspaces", [])
-                if isinstance(record, dict) and record.get("result_state") == ResultState.PASS
+                if isinstance(record, dict)
+                and record.get("result_state") in {ResultState.PASS, ResultState.UNKNOWN}
             }
             missing = sorted(needed - verified)
             if missing:
@@ -930,6 +960,7 @@ def run_check(ctx: HookContext) -> CheckResult:
                     problem = f"canonical verification evidence is {evidence_result.validity.value}"
                 elif evidence_result.result_state != ResultState.PASS:
                     problem = f"last verification evidence is {evidence_result.result_state.value}"
+                    advisory_unknown = evidence_result.result_state == ResultState.UNKNOWN
 
     if not problem:
         return CheckResult.allow()
@@ -948,6 +979,6 @@ def run_check(ctx: HookContext) -> CheckResult:
         "hookEventName": ctx.input.hook_event_name,
         "additionalContext": msg,
     }
-    if "last verification evidence is unknown" not in problem and cfg.get("mode", "advisory") == "enforce":
+    if not advisory_unknown and cfg.get("mode", "advisory") == "enforce":
         return CheckResult.block(msg, hook_specific_output=hso)
     return CheckResult.advisory(msg, hook_specific_output=hso)

@@ -8,12 +8,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from fettle import bridge
+from fettle import ci_gate
 
 
 ROOT = Path(__file__).parents[1]
@@ -122,6 +124,16 @@ def _stop_hook_session(
     payload = _payload("claude_code", "stop", root)
     payload["session_id"] = session
     return _run(_event_command(mode, "Stop"), payload, root, env)
+
+
+def _run_verify(
+    root: Path, env: dict[str, str], session: str,
+) -> subprocess.CompletedProcess[str]:
+    verify_env = {**env, "CLAUDE_SESSION_ID": session}
+    return subprocess.run(
+        [sys.executable, "-m", "fettle.cli", "verify"], cwd=root, env=verify_env,
+        capture_output=True, text=True, timeout=30,
+    )
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
@@ -256,8 +268,11 @@ def test_registered_hook_records_edit_and_stop_requires_verify(installed_hook_re
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
 def test_registered_stop_rejects_edited_ok_on_failed_verification(installed_hook_repo, mode):
     root, env = installed_hook_repo
+    (root / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8",
+    )
     (root / ".fettle.toml").write_text(
-        "[profile]\ntest_command = \"python -c 'raise SystemExit(1)'\"\n"
+        f"[profile]\ntest_command = \"{sys.executable} -c 'raise SystemExit(1)'\"\n"
         "[gates.verify]\nenabled = true\nmode = \"enforce\"\nscope = \"full\"\n",
         encoding="utf-8",
     )
@@ -274,14 +289,10 @@ def test_registered_stop_rejects_edited_ok_on_failed_verification(installed_hook
     post = _payload("claude_code", "post_write", root, file_path=str(target))
     post["session_id"] = session
     assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
-    verify = subprocess.run(
-        [sys.executable, "-m", "fettle.cli", "verify"], cwd=root, env=env,
-        capture_output=True, text=True, timeout=30,
-    )
+    verify = _run_verify(root, env, session)
     assert verify.returncode == 1
     stamp_path = root / ".fettle" / "verify.json"
     stamp = json.loads(stamp_path.read_text())
-    stamp["session_id"] = session
     stamp["ok"] = True
     stamp_path.write_text(json.dumps(stamp))
 
@@ -291,6 +302,318 @@ def test_registered_stop_rejects_edited_ok_on_failed_verification(installed_hook
 
     assert result.returncode == 2, result.stderr
     assert "last verification evidence is violation" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("attack", "expected"),
+    (
+        ("unknown-text", "canonical verification evidence is missing"),
+        ("session-rewrite", "wrong_scope"),
+    ),
+)
+def test_registered_stop_rejects_fable_stamp_forgery(
+    installed_hook_repo, mode, attack, expected,
+):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8",
+    )
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} -m pytest tests"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text("def test_app(): assert True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = f"tr3-fable-{attack}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    post = _payload("claude_code", "post_write", root, file_path=str(target))
+    post["session_id"] = session
+    assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
+    verify_session = "other-session" if attack == "session-rewrite" else session
+    verify = _run_verify(root, env, verify_session)
+    assert verify.returncode == 0, verify.stderr
+    stamp_path = root / ".fettle" / "verify.json"
+    stamp = json.loads(stamp_path.read_text())
+    if attack == "unknown-text":
+        stamp.pop("canonical_evidence", None)
+        stamp["error"] = "last verification evidence is unknown"
+    else:
+        stamp["session_id"] = session
+    stamp_path.write_text(json.dumps(stamp))
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert expected in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_stop_rejects_exit_zero_failing_junit(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(".fettle/\nresult.xml\n", encoding="utf-8")
+    writer = root / "write_report.py"
+    writer.write_text(
+        "from pathlib import Path\n"
+        "Path('result.xml').write_text("
+        "'<testsuite tests=\"1\" failures=\"1\" errors=\"0\" skipped=\"0\"/>')\n",
+        encoding="utf-8",
+    )
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} {writer.name}"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\nreport = "result.xml"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr3-fable-failing-report"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+
+    verify = _run_verify(root, env, session)
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert verify.returncode == 1
+    assert result.returncode == 2, result.stderr
+    assert "last verification evidence is violation" in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_verify_defaults_to_full_scope(installed_hook_repo, mode):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8",
+    )
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} -m pytest tests"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text("def test_app(): assert True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = f"tr3-default-full-{mode}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+
+    verify = _run_verify(root, env, session)
+    stamp = json.loads((root / ".fettle" / "verify.json").read_text())
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert verify.returncode == 0, verify.stderr
+    assert stamp["scope"] == "full"
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("attack", "expected"),
+    (
+        ("delete-stamp", "no verification run recorded"),
+        ("delete-artifact", "canonical verification evidence is missing"),
+        ("change-policy", "policy changed during this session"),
+        ("change-source", "code was edited after the last verification run"),
+        ("change-revision", "code was edited after the last verification run"),
+    ),
+)
+def test_registered_stop_rejects_stale_deleted_or_wrong_identity_verification(
+    installed_hook_repo, mode, attack, expected,
+):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8",
+    )
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} -m pytest tests"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\nscope = "full"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text("def test_app(): assert True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"],
+        check=True,
+    )
+    session = f"tr3-{attack}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    post = _payload("claude_code", "post_write", root, file_path=str(target))
+    post["session_id"] = session
+    assert _run(_event_command(mode, "PostToolUse"), post, root, env).returncode == 0
+    verify = _run_verify(root, env, session)
+    assert verify.returncode == 0, verify.stderr
+    stamp_path = root / ".fettle" / "verify.json"
+    if attack == "delete-stamp":
+        stamp_path.unlink()
+    elif attack == "delete-artifact":
+        (root / ".fettle" / "verify-evidence.json").unlink()
+    elif attack == "change-policy":
+        config = root / ".fettle.toml"
+        config.write_text(config.read_text() + "timeout_s = 31\n", encoding="utf-8")
+    elif attack == "change-source":
+        target.write_text("value = 3\n", encoding="utf-8")
+    else:
+        subprocess.run(["git", "-C", str(root), "add", "app.py"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+             "commit", "-qm", "post-verification code"],
+            check=True,
+        )
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert expected in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    (
+        ("-m pytest -k no_such_test tests", "last verification evidence is violation"),
+        ("-m pytest missing-tests", "last verification evidence is violation"),
+    ),
+)
+def test_registered_stop_rejects_zero_selection_and_collection_failure(
+    installed_hook_repo, mode, arguments, expected,
+):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(
+        ".fettle/\n.pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8",
+    )
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} {arguments}"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\nscope = "full"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text("def test_app(): assert True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr3-zero-or-collection"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    verify = _run_verify(root, env, session)
+    assert verify.returncode == 1
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert expected in json.loads(result.stdout)["reason"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+def test_registered_stop_reports_but_does_not_block_uncounted_success(
+    installed_hook_repo, mode,
+):
+    root, env = installed_hook_repo
+    (root / ".gitignore").write_text(".fettle/\n", encoding="utf-8")
+    (root / ".fettle.toml").write_text(
+        f'[profile]\ntest_command = "{sys.executable} -c pass"\n'
+        '[gates.verify]\nenabled = true\nmode = "enforce"\nscope = "full"\n',
+        encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    session = "tr3-uncounted-success"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    target.write_text("value = 2\n", encoding="utf-8")
+    verify = _run_verify(root, env, session)
+    assert verify.returncode == 1
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 0, result.stderr
+    assert "last verification evidence is unknown" in json.loads(result.stdout)["systemMessage"]
+
+
+@pytest.mark.parametrize("mode", ("plugin", "bridge"))
+@pytest.mark.parametrize(
+    ("attack", "expected"),
+    (
+        ("edited-green", "canonical CI evidence is missing"),
+        ("stale-sha", "different commit"),
+    ),
+)
+def test_registered_stop_rejects_hand_edited_or_stale_ci_record(
+    installed_hook_repo, mode, attack, expected,
+):
+    root, env = installed_hook_repo
+    (root / ".fettle.toml").write_text(
+        '[gates.ci]\nenabled = true\nmode = "enforce"\n', encoding="utf-8",
+    )
+    target = root / "app.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "commit", "-qm", "base"], check=True,
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    session = f"tr3-ci-{attack}"
+    assert _start_hook_session(mode, root, env, session).returncode == 0
+    state = Path(env["XDG_STATE_HOME"]) / "fettle" / session
+    state.mkdir(parents=True, exist_ok=True)
+    pushed_at = time.time() - 10
+    (state / ci_gate.PUSHES_FILENAME).write_text(
+        json.dumps({"sha": sha, "ts": pushed_at, "command": "git push"}) + "\n",
+        encoding="utf-8",
+    )
+    stamp_path = root / ci_gate.STAMP_RELPATH
+    stamp_path.parent.mkdir(parents=True, exist_ok=True)
+    stamp_path.write_text(json.dumps({
+        "ok": True,
+        "sha": "b" * 40 if attack == "stale-sha" else sha,
+        "overall": "success",
+        "runs": [],
+        "error": "",
+        "reproduce": "",
+        "ts": time.time(),
+    }), encoding="utf-8")
+
+    result = _stop_hook_session(mode, root, env, session)
+
+    assert result.returncode == 2, result.stderr
+    assert expected in json.loads(result.stdout)["reason"]
 
 
 @pytest.mark.parametrize("mode", ("plugin", "bridge"))
